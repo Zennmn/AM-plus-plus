@@ -33,12 +33,14 @@ internal class FutureLyricBlurFeature : FeatureHook {
         }
 
         val vectorResolution = context.symbols.resolve(AppleMusicSymbols.LyricsLineVector)
+        val sessionResolution = context.symbols.resolve(AppleMusicSymbols.LyricsSessionProcessor)
         val callbackResolution = context.symbols.resolve(AppleMusicSymbols.LyricsHighlightCallback)
         val viewModelResolution = context.symbols.resolve(AppleMusicSymbols.LyricsViewModel)
         val targets = LyricBlurTargets(
             recyclerViewClass = recyclerClass,
             lyricsFragmentClass = fragmentClass,
             lyricsLineVectorClass = vectorResolution.valueOrNull(),
+            sessionProcessor = sessionResolution.valueOrNull(),
             highlightCallback = callbackResolution.valueOrNull(),
             lyricsViewModelClass = viewModelResolution.valueOrNull(),
         )
@@ -52,7 +54,12 @@ internal class FutureLyricBlurFeature : FeatureHook {
         }
 
         OpenSourceLyricBlurPort().install(targets)
-        val optionalFailures = listOf(vectorResolution, callbackResolution, viewModelResolution)
+        val optionalFailures = listOf(
+            vectorResolution,
+            sessionResolution,
+            callbackResolution,
+            viewModelResolution,
+        )
             .filterNot { it is TargetResolution.Found<*> }
         context.report(
             key,

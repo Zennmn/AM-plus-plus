@@ -1,5 +1,6 @@
 package dev.amenhancer.module.hook
 
+import com.apple.android.music.ttml.javanative.model.SongInfo
 import dev.amenhancer.module.ModuleConstants
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -45,6 +46,25 @@ class TargetSymbolsTest {
         assertTrue(resolution is TargetResolution.Found)
         assertEquals(SymbolMatch.VERSION_PROFILE, (resolution as TargetResolution.Found).match)
         assertEquals("call", resolution.value.name)
+        assertEquals(0, source.classNameReads)
+    }
+
+    @Test
+    fun `650 profile resolves the lyric session processor without scanning dex`() {
+        val processorName = "com.apple.android.music.ttml.SongInfoTimeProcessor"
+        val source = FakeTargetClassSource(
+            classes = mapOf(processorName to ProfileSessionProcessor::class.java),
+        )
+        val resolver = IndexedTargetSymbolResolver(
+            build = TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.0", 1580L),
+            source = source,
+        )
+
+        val resolution = resolver.resolve(AppleMusicSymbols.LyricsSessionProcessor)
+
+        assertTrue(resolution is TargetResolution.Found)
+        assertEquals(SymbolMatch.VERSION_PROFILE, (resolution as TargetResolution.Found).match)
+        assertEquals("processEvents", resolution.value.name)
         assertEquals(0, source.classNameReads)
     }
 
@@ -201,6 +221,18 @@ private class ProfileVector
 private class ProfileCallback {
     @Suppress("UNUSED_PARAMETER")
     fun call(time: Long, lines: ProfileVector, position: Long) = Unit
+}
+private class ProfileSessionProcessor {
+    @Suppress("UNUSED_PARAMETER")
+    fun processEvents(
+        songInfo: SongInfo.SongInfoPtr,
+        position: Long,
+        line: Any,
+        word: Any,
+        backgroundWord: Any,
+        transliterationWord: Any,
+        transliterationBackgroundWord: Any,
+    ): Long = 0L
 }
 private class FirstFixture
 private class SecondFixture

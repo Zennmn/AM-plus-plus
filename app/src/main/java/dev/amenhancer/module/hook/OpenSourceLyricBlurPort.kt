@@ -24,7 +24,7 @@ internal class OpenSourceLyricBlurPort {
         private const val MAX_RECYCLER_DISCOVERY_ATTEMPTS = 10
     }
 
-    private val highlightedLineIds = mutableSetOf<Int>()
+    private val highlightSession = LyricHighlightSession()
     private val blurRenderer = LyricBlurRenderer()
 
     private var getAdapterPositionFromView: Method? = null
@@ -52,9 +52,31 @@ internal class OpenSourceLyricBlurPort {
     fun install(targets: LyricBlurTargets) {
         Log.i(TAG, "install with shared target symbols")
         initReflectionCache(targets.recyclerViewClass)
+        hookSessionProcessor(targets.sessionProcessor)
         hookHighlightCallback(targets.highlightCallback, targets.lyricsLineVectorClass)
         hookLyricsFragment(targets.lyricsFragmentClass)
         hookViewModel(targets.lyricsViewModelClass)
+    }
+
+    private fun hookSessionProcessor(method: Method?) {
+        if (method == null) {
+            Log.w(TAG, "Lyric session processor symbol was unavailable")
+            return
+        }
+        try {
+            ModernXposedRuntime.hookMethod(method, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    val songInfo = param.args.firstOrNull() ?: return
+                    if (highlightSession.enter(songInfo)) {
+                        Log.i(TAG, "Lyric session changed")
+                        scheduleBlurUpdate()
+                    }
+                }
+            })
+            Log.i(TAG, "Lyric session hook installed on ${method.name}")
+        } catch (t: Throwable) {
+            Log.e(TAG, "Lyric session hook failed", t)
+        }
     }
 
     private fun initReflectionCache(rvClass: Class<*>) {
@@ -108,14 +130,7 @@ internal class OpenSourceLyricBlurPort {
                             } catch (_: Exception) {
                             }
                         }
-                        synchronized(highlightedLineIds) {
-                            val resolved = BidirectionalBlurPolicy.resolveHighlights(
-                                current = highlightedLineIds,
-                                incoming = newIds,
-                            )
-                            highlightedLineIds.clear()
-                            highlightedLineIds.addAll(resolved)
-                        }
+                        highlightSession.update(newIds)
                         scheduleBlurUpdate()
                     } catch (t: Throwable) {
                         Log.e(TAG, "Highlight hook error", t)
@@ -223,9 +238,7 @@ internal class OpenSourceLyricBlurPort {
                             val lineId = param.args[0] as Int
                             val isBg = param.args[3] as Boolean
                             if (!isBg && lineId > 0) {
-                                synchronized(highlightedLineIds) {
-                                    highlightedLineIds.add(lineId)
-                                }
+                                highlightSession.add(lineId)
                                 scheduleBlurUpdate()
                             }
                         }
@@ -241,10 +254,7 @@ internal class OpenSourceLyricBlurPort {
                             val lineId = param.args[0] as Int
                             if (lineId < 0) return
                             if (!highlightHookInstalled) {
-                                synchronized(highlightedLineIds) {
-                                    highlightedLineIds.clear()
-                                    highlightedLineIds.add(lineId)
-                                }
+                                highlightSession.replace(lineId)
                                 scheduleBlurUpdate()
                             }
                         }
@@ -375,7 +385,7 @@ internal class OpenSourceLyricBlurPort {
             val adapterPos = getAdapterPosition(child)
             visibleRows += child to adapterPos
         }
-        val activeIds = synchronized(highlightedLineIds) { highlightedLineIds.toSet() }
+        val activeIds = highlightSession.snapshot()
         val effectiveIds = BidirectionalBlurPolicy.resolveDisplayHighlights(
             active = activeIds,
             visiblePositions = visibleRows.map { (_, position) -> position },
@@ -419,6 +429,7 @@ internal data class LyricBlurTargets(
     val recyclerViewClass: Class<*>,
     val lyricsFragmentClass: Class<*>,
     val lyricsLineVectorClass: Class<*>?,
+    val sessionProcessor: Method?,
     val highlightCallback: Method?,
     val lyricsViewModelClass: Class<*>?,
 )

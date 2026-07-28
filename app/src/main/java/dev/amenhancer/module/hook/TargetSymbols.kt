@@ -175,6 +175,7 @@ internal enum class TargetSymbolId {
     LYRICS_FRAGMENT,
     LYRICS_CHROME,
     LYRICS_LINE_VECTOR,
+    LYRICS_EVENT_PROCESSOR,
     LYRICS_HIGHLIGHT_CALLBACK_OWNER,
     LYRICS_VIEW_MODEL,
     STACKED_NAVIGATION_MENU,
@@ -191,6 +192,8 @@ private object AppleMusicProfiles {
             TargetSymbolId.LYRICS_CHROME to "com.apple.android.music.player.fragment.e",
             TargetSymbolId.LYRICS_LINE_VECTOR to
                 "com.apple.android.music.ttml.javanative.model.LyricsLineVector",
+            TargetSymbolId.LYRICS_EVENT_PROCESSOR to
+                "com.apple.android.music.ttml.SongInfoTimeProcessor",
             TargetSymbolId.LYRICS_HIGHLIGHT_CALLBACK_OWNER to
                 "com.apple.android.music.ttml.SongInfoTimeProcessor\$processEvents\$lineEventCallback\$1",
             TargetSymbolId.LYRICS_VIEW_MODEL to
@@ -263,6 +266,13 @@ internal object AppleMusicSymbols {
         stableName = "com.apple.android.music.ttml.javanative.model.LyricsLineVector",
         fallbackName = { it.endsWith(".ttml.javanative.model.LyricsLineVector") },
         contract = { true },
+    )
+
+    val LyricsSessionProcessor = methodSymbol(
+        id = "lyrics-session-processor",
+        profileOwner = TargetSymbolId.LYRICS_EVENT_PROCESSOR,
+        fallbackOwner = { it.endsWith(".ttml.SongInfoTimeProcessor") },
+        contract = ::isLyricsSessionProcessor,
     )
 
     val LyricsHighlightCallback = TargetSymbolKey(
@@ -391,6 +401,16 @@ private fun isLyricsHighlightCallback(method: Method, vectorClass: Class<*>): Bo
                 vectorClass.isAssignableFrom(method.parameterTypes[1])
             ) &&
         method.parameterTypes[2] == Long::class.javaPrimitiveType
+
+private fun isLyricsSessionProcessor(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "processEvents" &&
+        method.returnType == Long::class.javaPrimitiveType &&
+        method.parameterTypes.size == 7 &&
+        method.parameterTypes[0].name.endsWith(
+            ".ttml.javanative.model.SongInfo\$SongInfoPtr",
+        ) &&
+        method.parameterTypes[1] == Long::class.javaPrimitiveType
 
 private fun methodIdentity(method: Method): String = buildString {
     append(method.declaringClass.name).append('#').append(method.name).append('(')

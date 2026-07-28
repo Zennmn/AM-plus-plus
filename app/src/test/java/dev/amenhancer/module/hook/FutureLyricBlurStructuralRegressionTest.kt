@@ -82,6 +82,7 @@ class FutureLyricBlurStructuralRegressionTest {
     @Test
     fun `lyric port consumes shared target symbols instead of rescanning the base apk`() {
         assertTrue(portSource.contains("fun install(targets: LyricBlurTargets)"))
+        assertTrue(portSource.contains("targets.sessionProcessor"))
         assertTrue(portSource.contains("targets.highlightCallback"))
         assertFalse(portSource.contains("DexFile("))
         assertFalse(portSource.contains("sourceDir"))
