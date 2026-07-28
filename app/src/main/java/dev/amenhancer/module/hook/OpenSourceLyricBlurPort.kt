@@ -21,6 +21,7 @@ internal class OpenSourceLyricBlurPort {
     companion object {
         private const val TAG = "AMLyricBlur"
         private const val SCROLL_RESTORE_DELAY_MS = 1_000L
+        private const val MAX_RECYCLER_DISCOVERY_ATTEMPTS = 10
     }
 
     private val highlightedLineIds = mutableSetOf<Int>()
@@ -32,6 +33,7 @@ internal class OpenSourceLyricBlurPort {
     private var lyricsRootView: View? = null
     private var lyricsFragmentOwner: Any? = null
     private var recyclerDiscoveryRunnable: Runnable? = null
+    private var recyclerDiscoveryAttempts = 0
     private var observedScrollView: View? = null
     private var scrollChangedListener: ViewTreeObserver.OnScrollChangedListener? = null
     private var isUserScrolling = false
@@ -164,6 +166,7 @@ internal class OpenSourceLyricBlurPort {
         lyricsFragmentOwner?.let(::releaseLyricsView)
         lyricsFragmentOwner = owner
         lyricsRootView = root
+        recyclerDiscoveryAttempts = 0
         scheduleRecyclerViewDiscovery(root, delayMs = 500L)
     }
 
@@ -173,6 +176,7 @@ internal class OpenSourceLyricBlurPort {
             scrollHandler.removeCallbacks(discovery)
         }
         recyclerDiscoveryRunnable = null
+        recyclerDiscoveryAttempts = 0
         scrollHandler.removeCallbacks(restoreBlurRunnable)
         if (blurFrameScheduled) {
             Choreographer.getInstance().removeFrameCallback(blurFrameCallback)
@@ -187,6 +191,13 @@ internal class OpenSourceLyricBlurPort {
     }
 
     private fun scheduleRecyclerViewDiscovery(root: View, delayMs: Long) {
+        if (root !== lyricsRootView) return
+        if (recyclerDiscoveryAttempts >= MAX_RECYCLER_DISCOVERY_ATTEMPTS) {
+            recyclerDiscoveryRunnable = null
+            Log.w(TAG, "RV discovery stopped after $recyclerDiscoveryAttempts attempts")
+            return
+        }
+        recyclerDiscoveryAttempts += 1
         recyclerDiscoveryRunnable?.let(scrollHandler::removeCallbacks)
         val discovery = Runnable {
             recyclerDiscoveryRunnable = null
@@ -251,6 +262,7 @@ internal class OpenSourceLyricBlurPort {
             val rv = findRVInHierarchy(view)
             if (rv != null) {
                 recyclerView = rv
+                recyclerDiscoveryAttempts = 0
                 Log.i(TAG, "RV FOUND")
                 attachScrollListener(rv)
             } else {

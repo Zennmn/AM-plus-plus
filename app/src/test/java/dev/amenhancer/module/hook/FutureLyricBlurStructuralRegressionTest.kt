@@ -67,6 +67,19 @@ class FutureLyricBlurStructuralRegressionTest {
     }
 
     @Test
+    fun `recycler discovery stops after a bounded number of attempts`() {
+        assertTrue(portSource.contains("MAX_RECYCLER_DISCOVERY_ATTEMPTS = 10"))
+        assertTrue(
+            portSource.contains(
+                "if (recyclerDiscoveryAttempts >= MAX_RECYCLER_DISCOVERY_ATTEMPTS)",
+            ),
+        )
+        assertTrue(portSource.contains("recyclerDiscoveryAttempts += 1"))
+        assertTrue(portSource.contains("recyclerDiscoveryAttempts = 0"))
+        assertTrue(portSource.contains("RV discovery stopped after"))
+    }
+
+    @Test
     fun `lyric port consumes shared target symbols instead of rescanning the base apk`() {
         assertTrue(portSource.contains("fun install(targets: LyricBlurTargets)"))
         assertTrue(portSource.contains("targets.highlightCallback"))
