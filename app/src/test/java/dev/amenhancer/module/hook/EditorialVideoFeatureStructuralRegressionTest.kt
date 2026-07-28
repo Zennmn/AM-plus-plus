@@ -37,16 +37,16 @@ class EditorialVideoFeatureStructuralRegressionTest {
 
     @Test
     fun `matches only the modified apk editorial video url selector contract`() {
-        val locator = source("dev/amenhancer/module/hook/TargetSymbolLocator.kt")
+        val symbols = source("dev/amenhancer/module/hook/TargetSymbols.kt")
         val feature = source("dev/amenhancer/module/hook/EditorialVideoFeature.kt")
 
-        assertTrue(locator.contains("com.apple.android.music.player.c1"))
-        assertTrue(locator.contains("com.apple.android.music.model.Song"))
-        assertTrue(locator.contains("Float::class.javaPrimitiveType"))
-        assertTrue(locator.contains("EditorialVideo\\\$Flavor"))
-        assertTrue(locator.contains("parameterTypes[2].isArray"))
-        assertTrue(locator.contains("method.returnType == String::class.java"))
-        assertTrue(feature.contains("editorialVideoUrlSelector()"))
+        assertTrue(symbols.contains("com.apple.android.music.player.c1"))
+        assertTrue(symbols.contains("com.apple.android.music.model.Song"))
+        assertTrue(symbols.contains("Float::class.javaPrimitiveType"))
+        assertTrue(symbols.contains("EditorialVideo\\\$Flavor"))
+        assertTrue(symbols.contains("method.parameterTypes[2].isArray"))
+        assertTrue(symbols.contains("method.returnType == String::class.java"))
+        assertTrue(feature.contains("AppleMusicSymbols.EditorialVideoUrlSelector"))
         assertFalse(feature.contains("TextureView"))
     }
 

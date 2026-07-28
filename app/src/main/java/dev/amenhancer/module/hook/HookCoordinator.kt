@@ -15,9 +15,12 @@ internal object HookCoordinator {
     fun install(application: Application, classLoader: ClassLoader, config: TargetConfigClient) {
         if (!installed.compareAndSet(false, true)) return
 
-        val targetVersion = targetVersion(application)
-        val locator = TargetSymbolLocator(application, classLoader)
-        val context = HookContext(application, classLoader, config, locator, targetVersion)
+        val targetBuild = targetBuild(application)
+        val symbols = IndexedTargetSymbolResolver(
+            build = targetBuild,
+            source = ApkTargetClassSource(application, classLoader),
+        )
+        val context = HookContext(application, classLoader, config, symbols, targetBuild.displayName)
 
         listOf(
             DualPaneFeature(),
@@ -38,22 +41,26 @@ internal object HookCoordinator {
         }
     }
 
-    private fun targetVersion(context: Context): String = runCatching {
+    private fun targetBuild(context: Context): TargetBuild = runCatching {
         val packageInfo = context.packageManager.getPackageInfo(ModuleConstants.TARGET_PACKAGE, 0)
         val versionCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
             packageInfo.longVersionCode
         } else {
             @Suppress("DEPRECATION") packageInfo.versionCode.toLong()
         }
-        "${packageInfo.versionName.orEmpty()} ($versionCode)"
-    }.getOrDefault("unknown")
+        TargetBuild(
+            packageName = ModuleConstants.TARGET_PACKAGE,
+            versionName = packageInfo.versionName.orEmpty(),
+            versionCode = versionCode,
+        )
+    }.getOrDefault(TargetBuild.UNKNOWN)
 }
 
 internal data class HookContext(
     val application: Application,
     val classLoader: ClassLoader,
     val config: TargetConfigClient,
-    val locator: TargetSymbolLocator,
+    val symbols: TargetSymbolResolver,
     val targetVersion: String,
 ) {
     fun report(feature: String, state: FeatureState, message: String) {
@@ -64,4 +71,10 @@ internal data class HookContext(
 private fun Throwable.shortMessage(): String = buildString {
     append(javaClass.simpleName)
     message?.takeIf(String::isNotBlank)?.let { append(": ").append(it.take(180)) }
+}
+
+internal interface FeatureHook {
+    val key: String
+    fun isEnabled(context: HookContext): Boolean
+    fun install(context: HookContext)
 }

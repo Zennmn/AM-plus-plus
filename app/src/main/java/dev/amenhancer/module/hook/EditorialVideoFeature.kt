@@ -17,9 +17,10 @@ internal class EditorialVideoFeature : FeatureHook {
         context.config.settings().disableEditorialVideoOnTablet
 
     override fun install(context: HookContext) {
-        val selector = context.locator.editorialVideoUrlSelector()
+        val resolution = context.symbols.resolve(AppleMusicSymbols.EditorialVideoUrlSelector)
+        val selector = resolution.valueOrNull()
             ?: run {
-                context.report(key, FeatureState.DEGRADED, "Editorial Video URL selector was not found")
+                context.report(key, FeatureState.DEGRADED, resolution.summary)
                 return
             }
 
@@ -32,7 +33,8 @@ internal class EditorialVideoFeature : FeatureHook {
         context.report(
             key,
             FeatureState.ACTIVE,
-            "Installed tablet-landscape Editorial Video URL suppression on ${selector.declaringClass.name}.${selector.name}",
+            "Installed tablet-landscape Editorial Video URL suppression on " +
+                "${selector.declaringClass.name}.${selector.name}; ${resolution.summary}",
         )
     }
 }

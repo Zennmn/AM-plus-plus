@@ -79,8 +79,9 @@ class DualPaneStructuralRegressionTest {
 
     @Test
     fun `feeds the direct Material menu the modified first-measure height`() {
-        assertTrue(source.contains("installStackedBottomNavigationMenuMeasureHook(controller.classLoader)"))
-        assertTrue(source.contains("\"Hd.b\""))
+        assertTrue(source.contains("AppleMusicSymbols.StackedNavigationMenu"))
+        assertTrue(source.contains("navigationMenuResolution.valueOrNull()"))
+        assertFalse(source.contains("\"Hd.b\""))
         assertTrue(source.contains("method.name == \"onMeasure\""))
         assertTrue(source.contains("View.MeasureSpec.makeMeasureSpec("))
         assertTrue(source.contains("View.MeasureSpec.EXACTLY"))

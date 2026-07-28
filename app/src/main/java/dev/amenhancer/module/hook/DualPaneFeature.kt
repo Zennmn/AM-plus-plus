@@ -141,18 +141,25 @@ internal class DualPaneFeature : FeatureHook {
     override fun isEnabled(context: HookContext): Boolean = context.config.settings().dualPaneEnabled
 
     override fun install(context: HookContext) {
-        val controller = context.locator.playerController()
+        val controllerResolution = context.symbols.resolve(AppleMusicSymbols.PlayerController)
+        val controller = controllerResolution.valueOrNull()
             ?: run {
-                context.report(key, FeatureState.DEGRADED, "Player controller w0 was not found")
+                context.report(key, FeatureState.DEGRADED, controllerResolution.summary)
                 return
-        }
+            }
         val controllerHooks = installControllerHooks(controller)
-        val navigationMenuMeasureHooks = installStackedBottomNavigationMenuMeasureHook(controller.classLoader)
-        val chromeHooks = context.locator.playerActivity()?.let { activityClass ->
+        val navigationMenuResolution = context.symbols.resolve(AppleMusicSymbols.StackedNavigationMenu)
+        val navigationMenuMeasureHooks = installStackedBottomNavigationMenuMeasureHook(
+            navigationMenuResolution.valueOrNull(),
+        )
+        val activityResolution = context.symbols.resolve(AppleMusicSymbols.PlayerActivity)
+        val chromeHooks = activityResolution.valueOrNull()?.let { activityClass ->
             installNativeStackedNavigationHolderHook(activityClass)
         } ?: 0
-        val lyricsFragmentClass = context.locator.lyricsFragment()
-        val lyricsChromeHooks = context.locator.lyricsChromeFragment()?.let { chromeClass ->
+        val lyricsFragmentResolution = context.symbols.resolve(AppleMusicSymbols.LyricsFragment)
+        val lyricsFragmentClass = lyricsFragmentResolution.valueOrNull()
+        val lyricsChromeResolution = context.symbols.resolve(AppleMusicSymbols.LyricsChromeFragment)
+        val lyricsChromeHooks = lyricsChromeResolution.valueOrNull()?.let { chromeClass ->
             lyricsFragmentClass?.let { lyricsClass ->
                 installLandscapeLyricsChromeHook(chromeClass, lyricsClass)
             }
@@ -169,14 +176,24 @@ internal class DualPaneFeature : FeatureHook {
             context.report(
                 key,
                 FeatureState.DEGRADED,
-                "Installed controller=$controllerHooks chrome=$chromeHooks lyricsChrome=$lyricsChromeHooks lyricsMetrics=$lyricsMetricsHooks lyricsTypography=$lyricsTypographyHooks hook(s)",
+                "Installed controller=$controllerHooks chrome=$chromeHooks lyricsChrome=$lyricsChromeHooks " +
+                    "lyricsMetrics=$lyricsMetricsHooks lyricsTypography=$lyricsTypographyHooks hook(s); " +
+                    listOf(
+                        navigationMenuResolution,
+                        activityResolution,
+                        lyricsFragmentResolution,
+                        lyricsChromeResolution,
+                    ).filterNot { it is TargetResolution.Found<*> }
+                        .joinToString { it.summary },
             )
             return
         }
         context.report(
             key,
             FeatureState.ACTIVE,
-            "Installed exact player controller and chrome hooks; stackedNavigationMenuMeasure=$navigationMenuMeasureHooks",
+            "Installed player controller and chrome hooks; " +
+                "stackedNavigationMenuMeasure=$navigationMenuMeasureHooks; " +
+                controllerResolution.summary,
         )
     }
 
@@ -187,16 +204,8 @@ internal class DualPaneFeature : FeatureHook {
      * the cached 40dp spec even when the public parent becomes full-width.
      * Feed the exact same 56dp height into that direct menu on every measure.
      */
-    private fun installStackedBottomNavigationMenuMeasureHook(classLoader: ClassLoader?): Int {
-        val menuClass = runCatching {
-            classLoader?.let {
-                Class.forName(
-                    "Hd.b",
-                    false,
-                    it,
-                )
-            }
-        }.getOrNull() ?: return 0
+    private fun installStackedBottomNavigationMenuMeasureHook(menuClass: Class<*>?): Int {
+        menuClass ?: return 0
         val onMeasure = menuClass.declaredMethods.firstOrNull { method ->
             method.name == "onMeasure" &&
                 !Modifier.isStatic(method.modifiers) &&

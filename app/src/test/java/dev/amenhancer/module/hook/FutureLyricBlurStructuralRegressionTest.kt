@@ -66,6 +66,14 @@ class FutureLyricBlurStructuralRegressionTest {
         assertTrue(portSource.contains("scrollHandler.removeCallbacks(discovery)"))
     }
 
+    @Test
+    fun `lyric port consumes shared target symbols instead of rescanning the base apk`() {
+        assertTrue(portSource.contains("fun install(targets: LyricBlurTargets)"))
+        assertTrue(portSource.contains("targets.highlightCallback"))
+        assertFalse(portSource.contains("DexFile("))
+        assertFalse(portSource.contains("sourceDir"))
+    }
+
     private fun sourceFile(name: String): File = sequenceOf(
         File("src/main/java/dev/amenhancer/module/hook/$name"),
         File("app/src/main/java/dev/amenhancer/module/hook/$name"),

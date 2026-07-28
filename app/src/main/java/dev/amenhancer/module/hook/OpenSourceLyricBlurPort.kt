@@ -14,14 +14,12 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.widget.ImageView
-import dalvik.system.DexFile
 import dev.amenhancer.module.hook.ModernMethodHook as XC_MethodHook
 import java.lang.reflect.Method
 
 internal class OpenSourceLyricBlurPort {
     companion object {
         private const val TAG = "AMLyricBlur"
-        private const val PKG = "com.apple.android.music"
         private const val SCROLL_RESTORE_DELAY_MS = 1_000L
     }
 
@@ -49,20 +47,16 @@ internal class OpenSourceLyricBlurPort {
         isUserScrolling = false
         scheduleBlurUpdate()
     }
-    private var apkSourceDir: String? = null
-
-    fun install(classLoader: ClassLoader, sourceDir: String) {
-        Log.i(TAG, "handleLoadPackage: $PKG")
-        apkSourceDir = sourceDir
-        initReflectionCache(classLoader)
-        hookHighlightCallback(classLoader)
-        hookLyricsFragment(classLoader)
-        hookViewModel(classLoader)
+    fun install(targets: LyricBlurTargets) {
+        Log.i(TAG, "install with shared target symbols")
+        initReflectionCache(targets.recyclerViewClass)
+        hookHighlightCallback(targets.highlightCallback, targets.lyricsLineVectorClass)
+        hookLyricsFragment(targets.lyricsFragmentClass)
+        hookViewModel(targets.lyricsViewModelClass)
     }
 
-    private fun initReflectionCache(cl: ClassLoader) {
+    private fun initReflectionCache(rvClass: Class<*>) {
         try {
-            val rvClass = cl.loadClass("androidx.recyclerview.widget.RecyclerView")
             for (m in rvClass.declaredMethods) {
                 if (java.lang.reflect.Modifier.isStatic(m.modifiers)
                     && m.parameterTypes.size == 1
@@ -79,41 +73,14 @@ internal class OpenSourceLyricBlurPort {
         }
     }
 
-    private fun hookHighlightCallback(cl: ClassLoader) {
+    private fun hookHighlightCallback(method: Method?, vectorClass: Class<*>?) {
         if (highlightHookInstalled) return
-        val sourceDir = apkSourceDir ?: return
-        val vectorClass = try {
-            cl.loadClass("com.apple.android.music.ttml.javanative.model.LyricsLineVector")
-        } catch (e: Throwable) {
-            Log.e(TAG, "LyricsLineVector NOT loadable: ${e.message}")
+        if (method == null || vectorClass == null) {
+            Log.w(TAG, "Highlight callback symbols were unavailable")
             return
         }
-        try {
-            val dexFile = DexFile(sourceDir)
-            val entries = dexFile.entries()
-            while (entries.hasMoreElements()) {
-                val className = entries.nextElement()
-                if (!className.startsWith("com.apple")) continue
-                try {
-                    val cls = cl.loadClass(className)
-                    for (method in cls.declaredMethods) {
-                        for (pt in method.parameterTypes) {
-                            if (pt == vectorClass || vectorClass.isAssignableFrom(pt)) {
-                                Log.i(TAG, "FOUND: $className.${method.name}")
-                                installHighlightHook(method, vectorClass)
-                                dexFile.close()
-                                return
-                            }
-                        }
-                    }
-                } catch (_: Throwable) {
-                }
-            }
-            dexFile.close()
-            Log.w(TAG, "No LyricsLineVector method found")
-        } catch (t: Throwable) {
-            Log.e(TAG, "DexFile scan failed", t)
-        }
+        Log.i(TAG, "FOUND: ${method.declaringClass.name}.${method.name}")
+        installHighlightHook(method, vectorClass)
     }
 
     private fun installHighlightHook(method: Method, vectorClass: Class<*>) {
@@ -161,9 +128,8 @@ internal class OpenSourceLyricBlurPort {
         }
     }
 
-    private fun hookLyricsFragment(cl: ClassLoader) {
+    private fun hookLyricsFragment(cls: Class<*>) {
         try {
-            val cls = cl.loadClass("com.apple.android.music.player.fragment.PlayerLyricsViewFragment")
             ModernXposedRuntime.hookAllMethods(cls, "onCreateView", object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     val result = param.result as? View ?: return
@@ -230,11 +196,12 @@ internal class OpenSourceLyricBlurPort {
         scrollHandler.postDelayed(discovery, delayMs)
     }
 
-    private fun hookViewModel(cl: ClassLoader) {
+    private fun hookViewModel(vmClass: Class<*>?) {
+        if (vmClass == null) {
+            Log.w(TAG, "VM symbol was unavailable")
+            return
+        }
         try {
-            val vmClass = cl.loadClass(
-                "com.apple.android.music.player.viewmodel.PlayerLyricsViewModel",
-            )
             Log.i(TAG, "Found VM")
 
             for (m in vmClass.declaredMethods) {
@@ -435,3 +402,11 @@ internal class OpenSourceLyricBlurPort {
     }
 
 }
+
+internal data class LyricBlurTargets(
+    val recyclerViewClass: Class<*>,
+    val lyricsFragmentClass: Class<*>,
+    val lyricsLineVectorClass: Class<*>?,
+    val highlightCallback: Method?,
+    val lyricsViewModelClass: Class<*>?,
+)
