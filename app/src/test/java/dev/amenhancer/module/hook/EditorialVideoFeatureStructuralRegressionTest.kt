@@ -20,17 +20,17 @@ class EditorialVideoFeatureStructuralRegressionTest {
     fun `persists and transports the tablet editorial video setting default on`() {
         val models = source("dev/amenhancer/module/model/ModuleModels.kt")
         val store = source("dev/amenhancer/module/config/ConfigStore.kt")
-        val contract = source("dev/amenhancer/module/config/ConfigContract.kt")
+        val schema = source("dev/amenhancer/module/config/ModuleSettingsSchema.kt")
         val client = source("dev/amenhancer/module/config/TargetConfigClient.kt")
         val application = source("dev/amenhancer/module/ModuleApplication.kt")
         val settings = source("dev/amenhancer/module/ui/SettingsActivity.kt")
 
         assertTrue(models.contains("val disableEditorialVideoOnTablet: Boolean = true"))
-        assertTrue(store.contains("KEY_DISABLE_EDITORIAL_VIDEO_ON_TABLET"))
-        assertTrue(store.contains("settings.disableEditorialVideoOnTablet"))
-        assertTrue(contract.contains("KEY_DISABLE_EDITORIAL_VIDEO_ON_TABLET"))
+        assertTrue(schema.contains("\"disable_editorial_video_on_tablet\""))
+        assertTrue(schema.contains("settings.disableEditorialVideoOnTablet"))
+        assertTrue(store.contains("ModuleSettingsSchema.encode(settings)"))
         assertTrue(application.contains("getRemotePreferences(ModuleConstants.REMOTE_PREFERENCES_GROUP)"))
-        assertTrue(client.contains("disableEditorialVideoOnTablet = preferences.getBoolean("))
+        assertTrue(client.contains("ModuleSettingsSchema.decode(preferences.all)"))
         assertTrue(settings.contains("平板禁用动态视频"))
         assertTrue(settings.contains("store.settings().copy(disableEditorialVideoOnTablet = it)"))
     }
