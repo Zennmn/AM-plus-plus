@@ -10,6 +10,7 @@ AM++ 是面向 libxposed API 102 的 Apple Music 增强模块。目前主要针�
 | 平板动态视频抑制 | 开启 | 平板横屏的 Editorial Video | 可用 |
 | 未来歌词模糊 | 开启 | Android 12 及以上 | 可用 |
 | 手机液态玻璃底栏 | 关闭 | Apple Music 官方 `is_tablet=false` | **WIP** |
+| 隐藏启动器图标 | 关闭 | AM++ 设置应用 | 可用 |
 
 手机液态玻璃会为底部导航栏和迷你播放器增加实时背景模糊、半透明材质与选中项胶囊。该功能仍可能在冷启动或全屏播放器收回时出现单帧闪烁，因此默认关闭并统一标记为 WIP。
 
@@ -56,9 +57,9 @@ AM++ 是面向 libxposed API 102 的 Apple Music 增强模块。目前主要针�
 2. 在 LSPosed 中启用 **AM++**。
 3. 仅选择 Apple Music（`com.apple.android.music`）作为作用域。
 4. 强制停止并重新打开 Apple Music。
-5. 从桌面打开模块设置页，根据需要调整功能。
+5. 从桌面打开模块设置页，根据需要调整功能。隐藏启动器图标后，可从 LSPosed 的模块详情重新打开设置。
 
-设置修改后需要强制停止并重新打开 Apple Music。设置页显示“已连接 LSPosed API 102”后才能写入框架托管的 remote preferences。
+Apple Music 功能修改后需要强制停止并重新打开目标应用。设置页显示“已连接 LSPosed API 102”后才能写入框架托管的 remote preferences；隐藏启动器图标是本地组件设置，不依赖该连接。
 
 ## 从源码构建
 
@@ -94,7 +95,7 @@ app/build/outputs/apk/release/app-release.apk
 
 ## 隐私与安全
 
-模块不请求网络、存储或通知权限，也不包含分析服务。设置保存在 Xposed 框架管理的 remote preferences 中；模块不自行暴露配置 Provider、广播接收器或跨应用写入接口。`libxposed/service` 依赖会注册其框架连接所需的 `XposedProvider`。
+模块不请求网络、存储或通知权限，也不包含分析服务。Apple Music 功能设置保存在 Xposed 框架管理的 remote preferences 中；启动器图标状态由 Android PackageManager 本地保存。模块不自行暴露配置 Provider、广播接收器或跨应用写入接口。`libxposed/service` 依赖会注册其框架连接所需的 `XposedProvider`。
 
 ## 项目结构
 

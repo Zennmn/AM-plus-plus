@@ -28,6 +28,7 @@ import dev.amenhancer.module.model.ModuleSettings
 
 class SettingsActivity : Activity() {
     private lateinit var store: ConfigStore
+    private lateinit var launcherIconController: LauncherIconController
     private lateinit var content: LinearLayout
     private lateinit var palette: Palette
 
@@ -38,6 +39,7 @@ class SettingsActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         store = ConfigStore(this)
+        launcherIconController = LauncherIconController(this)
         palette = Palette.resolve(this)
         configureSystemBars()
         setContentView(buildScreen().also(::applySystemBarInsets))
@@ -140,6 +142,10 @@ class SettingsActivity : Activity() {
         content.addView(spacer(20))
         content.addView(featureCard(settings, writable))
         content.addView(spacer(24))
+        content.addView(sectionLabel("应用"))
+        content.addView(spacer(10))
+        content.addView(appCard())
+        content.addView(spacer(24))
         content.addView(sectionLabel("帮助"))
         content.addView(spacer(10))
         content.addView(helpRow())
@@ -222,6 +228,22 @@ class SettingsActivity : Activity() {
                 store.saveSettings(store.settings().copy(futureBlurEnabled = enabled))
             })
         }
+
+    private fun appCard(): View = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        background = roundedDrawable(palette.surface, radiusDp = 20, strokeColor = palette.outline)
+        elevation = dp(2).toFloat()
+        clipToOutline = true
+
+        addView(settingRow(
+            title = "隐藏启动器图标",
+            summary = "隐藏后可从 LSPosed 模块详情重新打开设置",
+            checked = launcherIconController.isHidden(),
+            enabled = true,
+        ) { hidden ->
+            launcherIconController.setHidden(hidden)
+        })
+    }
 
     private fun settingRow(
         title: String,
