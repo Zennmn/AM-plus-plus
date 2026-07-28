@@ -1,125 +1,20 @@
 package dev.amenhancer.module.hook
 
 import java.io.File
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Locks the blur implementation to a direct port of a23bc/amlyricblur. */
+/** Guards the tablet-only typography seam without constraining blur internals. */
 class FutureLyricBlurStructuralRegressionTest {
-    private val featureSource: String by lazy {
-        sourceFile("FutureLyricBlurFeature.kt").readText()
-    }
     private val portSource: String by lazy {
-        sequenceOf(
-            File("src/main/java/dev/amenhancer/module/hook/OpenSourceLyricBlurPort.kt"),
-            File("app/src/main/java/dev/amenhancer/module/hook/OpenSourceLyricBlurPort.kt"),
-        ).firstOrNull(File::isFile)?.readText().orEmpty()
+        sourceFile("OpenSourceLyricBlurPort.kt").readText()
     }
     private val typographySource: String by lazy {
-        sequenceOf(
-            File("src/main/java/dev/amenhancer/module/hook/TabletLyricTypography.kt"),
-            File("app/src/main/java/dev/amenhancer/module/hook/TabletLyricTypography.kt"),
-            sourceFile("FutureLyricBlurFeature.kt"),
-        ).firstOrNull(File::isFile)?.readText()
-            ?: error("Tablet lyric typography source was not found")
+        sourceFile("TabletLyricTypography.kt").readText()
     }
     private val dualPaneSource: String by lazy {
         sourceFile("DualPaneFeature.kt").readText()
-    }
-
-    @Test
-    fun `feature is only the module adapter for the upstream port`() {
-        assertTrue(featureSource.contains("OpenSourceLyricBlurPort"))
-        assertTrue(
-            featureSource.contains(
-                "install(context.classLoader, context.application.applicationInfo.sourceDir)",
-            ),
-        )
-        assertFalse(featureSource.contains("FutureBlurController"))
-        assertFalse(featureSource.contains("FutureLyricBlurTouchStateMachine"))
-        assertFalse(featureSource.contains("FutureLyricBlurRowPolicy"))
-        assertFalse(featureSource.contains("USER_SCROLL_PAUSE_MS"))
-    }
-
-    @Test
-    fun `port keeps the upstream singleton state and blur constants`() {
-        assertTrue(portSource.contains("private const val TAG = \"AMLyricBlur\""))
-        assertTrue(portSource.contains("private const val BLUR_BASE = 12f"))
-        assertTrue(portSource.contains("private const val BLUR_STEP = 4f"))
-        assertTrue(portSource.contains("private const val BLUR_MAX = 20f"))
-        assertTrue(portSource.contains("private val highlightedLineIds = mutableSetOf<Int>()"))
-        assertTrue(portSource.contains("private var previousHighlightIds = setOf<Int>()"))
-        assertTrue(portSource.contains("private val viewBlurValues = WeakHashMap<View, Float>()"))
-        assertTrue(portSource.contains("private val viewAnimators = WeakHashMap<View, ValueAnimator>()"))
-        assertTrue(portSource.contains("private var recyclerView: Any? = null"))
-        assertTrue(portSource.contains("private var lyricsRootView: View? = null"))
-        assertTrue(portSource.contains("private var isUserScrolling = false"))
-    }
-
-    @Test
-    fun `port keeps the complete upstream private method inventory`() {
-        val expected = setOf(
-            "initReflectionCache",
-            "hookHighlightCallback",
-            "installHighlightHook",
-            "hookLyricsFragment",
-            "hookViewModel",
-            "findRecyclerView",
-            "findRVInHierarchy",
-            "scheduleBlurUpdate",
-            "attachScrollListener",
-            "onScrollDetected",
-            "clearAllBlur",
-            "getRv",
-            "applyBlur",
-            "isLyricsLine",
-            "hasDescendantOfType",
-            "getAdapterPosition",
-            "animateBlur",
-        )
-        val actual = Regex("""private fun (\w+)\(""")
-            .findAll(portSource)
-            .map { it.groupValues[1] }
-            .toSet()
-
-        assertEquals(expected, actual)
-    }
-
-    @Test
-    fun `scroll clearing matches upstream without a recovery timer`() {
-        assertTrue(portSource.contains("view.setOnTouchListener"))
-        assertTrue(portSource.contains("event.action != MotionEvent.ACTION_CANCEL"))
-        assertTrue(portSource.contains("event.action != MotionEvent.ACTION_UP"))
-        assertTrue(portSource.contains("addOnScrollChangedListener { onScrollDetected() }"))
-        assertTrue(portSource.contains("if (isUserScrolling) clearAllBlur()"))
-        assertFalse(portSource.contains("postDelayed(resume"))
-        assertFalse(portSource.contains("USER_SCROLL_PAUSE_MS"))
-        assertFalse(portSource.contains("touch-end-schedule"))
-    }
-
-    @Test
-    fun `blur calculation and animation match upstream`() {
-        assertTrue(portSource.contains("highlightedLineIds + previousHighlightIds"))
-        assertTrue(portSource.contains("val minDist = effectiveIds.minOf"))
-        assertTrue(
-            portSource.contains(
-                "(BLUR_BASE + (minDist - 1) * BLUR_STEP).coerceAtMost(BLUR_MAX)",
-            ),
-        )
-        assertTrue(portSource.contains("ValueAnimator.ofFloat(current, targetBlur)"))
-        assertTrue(portSource.contains("duration = 300"))
-        assertTrue(portSource.contains("Shader.TileMode.MIRROR"))
-        assertTrue(portSource.contains("hasDescendantOfType(view, ImageView::class.java)"))
-    }
-
-    @Test
-    fun `native vector scanner is installed as documented upstream`() {
-        assertEquals(2, Regex("""hookHighlightCallback\(""").findAll(portSource).count())
-        assertTrue(portSource.contains("hookHighlightCallback(classLoader)"))
-        assertTrue(portSource.contains("LyricsLineVector"))
-        assertTrue(portSource.contains("getLineId"))
     }
 
     @Test
@@ -133,6 +28,42 @@ class FutureLyricBlurStructuralRegressionTest {
             dualPaneSource.contains("TabletLyricTypography::attach") ||
                 dualPaneSource.contains("TabletLyricTypography.attach"),
         )
+    }
+
+    @Test
+    fun `programmatic lyric scrolling refreshes recycled rows`() {
+        assertTrue(portSource.contains("if (!isUserScrolling) {"))
+        assertTrue(portSource.contains("scheduleBlurUpdate()\n            return"))
+    }
+
+    @Test
+    fun `manual lyric scrolling restores blur after one second`() {
+        assertTrue(portSource.contains("SCROLL_RESTORE_DELAY_MS = 1_000L"))
+        assertTrue(portSource.contains("postDelayed(restoreBlurRunnable, SCROLL_RESTORE_DELAY_MS)"))
+    }
+
+    @Test
+    fun `scroll restore keeps only the current lyric line clear`() {
+        assertFalse(portSource.contains("previousHighlightIds"))
+        assertFalse(portSource.contains("highlightedLineIds +"))
+    }
+
+    @Test
+    fun `fragment view destruction releases only the matching lyric view session`() {
+        assertTrue(portSource.contains("findLifecycleDeclaringClass(cls, \"onDestroyView\")"))
+        assertTrue(portSource.contains("hookAllMethods(destroyDeclaringClass, \"onDestroyView\""))
+        assertTrue(portSource.contains("takeIf(cls::isInstance)"))
+        assertTrue(portSource.contains("if (owner !== lyricsFragmentOwner) return"))
+        assertTrue(portSource.contains("scrollHandler.removeCallbacks(restoreBlurRunnable)"))
+        assertTrue(portSource.contains("blurRenderer.clearAll()"))
+        assertFalse(portSource.contains("addOnAttachStateChangeListener"))
+    }
+
+    @Test
+    fun `recycler discovery cannot rebind a destroyed lyric root`() {
+        assertTrue(portSource.contains("recyclerDiscoveryRunnable"))
+        assertTrue(portSource.contains("if (root === lyricsRootView) findRecyclerView(root)"))
+        assertTrue(portSource.contains("scrollHandler.removeCallbacks(discovery)"))
     }
 
     private fun sourceFile(name: String): File = sequenceOf(

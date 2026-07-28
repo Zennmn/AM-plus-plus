@@ -5,46 +5,50 @@ package dev.amenhancer.module.hook
  * Copyright (c) 2026 a23bc. Licensed under the MIT License.
  */
 
-import android.animation.ValueAnimator
-import android.graphics.Shader
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.Choreographer
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import android.widget.ImageView
 import dalvik.system.DexFile
 import dev.amenhancer.module.hook.ModernMethodHook as XC_MethodHook
 import java.lang.reflect.Method
-import java.util.WeakHashMap
 
 internal class OpenSourceLyricBlurPort {
     companion object {
         private const val TAG = "AMLyricBlur"
         private const val PKG = "com.apple.android.music"
-        private const val BLUR_BASE = 12f
-        private const val BLUR_STEP = 4f
-        private const val BLUR_MAX = 20f
+        private const val SCROLL_RESTORE_DELAY_MS = 1_000L
     }
 
     private val highlightedLineIds = mutableSetOf<Int>()
-    private var previousHighlightIds = setOf<Int>()
-    private val viewBlurValues = WeakHashMap<View, Float>()
-    private val viewAnimators = WeakHashMap<View, ValueAnimator>()
+    private val blurRenderer = LyricBlurRenderer()
 
-    private var getChildCountMethod: Method? = null
-    private var getChildAtMethod: Method? = null
-    private var setRenderEffectMethod: Method? = null
-    private var createBlurEffectMethod: Method? = null
     private var getAdapterPositionFromView: Method? = null
 
     private var recyclerView: Any? = null
     private var lyricsRootView: View? = null
+    private var lyricsFragmentOwner: Any? = null
+    private var recyclerDiscoveryRunnable: Runnable? = null
+    private var observedScrollView: View? = null
+    private var scrollChangedListener: ViewTreeObserver.OnScrollChangedListener? = null
     private var isUserScrolling = false
     private var highlightHookInstalled = false
-    private var pendingBlurRunnable: Runnable? = null
     private val scrollHandler by lazy { Handler(Looper.getMainLooper()) }
+    private var blurFrameScheduled = false
+    private val blurFrameCallback = Choreographer.FrameCallback {
+        blurFrameScheduled = false
+        runCatching(::applyBlur)
+            .onFailure { error -> Log.e(TAG, "Blur failed", error) }
+    }
+    private val restoreBlurRunnable = Runnable {
+        isUserScrolling = false
+        scheduleBlurUpdate()
+    }
     private var apkSourceDir: String? = null
 
     fun install(classLoader: ClassLoader, sourceDir: String) {
@@ -59,29 +63,16 @@ internal class OpenSourceLyricBlurPort {
     private fun initReflectionCache(cl: ClassLoader) {
         try {
             val rvClass = cl.loadClass("androidx.recyclerview.widget.RecyclerView")
-            getChildCountMethod = ViewGroup::class.java.getMethod("getChildCount")
-            getChildAtMethod = ViewGroup::class.java.getMethod("getChildAt", Int::class.javaPrimitiveType)
             for (m in rvClass.declaredMethods) {
                 if (java.lang.reflect.Modifier.isStatic(m.modifiers)
                     && m.parameterTypes.size == 1
                     && m.parameterTypes[0] == View::class.java
                     && m.returnType == Int::class.javaPrimitiveType
                 ) {
-                    getAdapterPositionFromView = m
+                    getAdapterPositionFromView = m.apply { isAccessible = true }
                     break
                 }
             }
-            setRenderEffectMethod = View::class.java.getMethod(
-                "setRenderEffect",
-                Class.forName("android.graphics.RenderEffect"),
-            )
-            createBlurEffectMethod = Class.forName("android.graphics.RenderEffect")
-                .getMethod(
-                    "createBlurEffect",
-                    Float::class.javaPrimitiveType,
-                    Float::class.javaPrimitiveType,
-                    Shader.TileMode::class.java,
-                )
             Log.i(TAG, "Reflection OK")
         } catch (t: Throwable) {
             Log.e(TAG, "Reflection failed", t)
@@ -149,9 +140,12 @@ internal class OpenSourceLyricBlurPort {
                             }
                         }
                         synchronized(highlightedLineIds) {
-                            previousHighlightIds = highlightedLineIds.toSet()
+                            val resolved = BidirectionalBlurPolicy.resolveHighlights(
+                                current = highlightedLineIds,
+                                incoming = newIds,
+                            )
                             highlightedLineIds.clear()
-                            highlightedLineIds.addAll(newIds)
+                            highlightedLineIds.addAll(resolved)
                         }
                         scheduleBlurUpdate()
                     } catch (t: Throwable) {
@@ -173,15 +167,67 @@ internal class OpenSourceLyricBlurPort {
             ModernXposedRuntime.hookAllMethods(cls, "onCreateView", object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     val result = param.result as? View ?: return
-                    lyricsRootView = result
+                    val owner = param.thisObject ?: return
+                    bindLyricsView(owner, result)
                     Log.i(TAG, "onCreateView hooked")
-                    Handler(Looper.getMainLooper()).postDelayed({ findRecyclerView(result) }, 500)
                 }
             })
-            Log.i(TAG, "Fragment hook installed")
+            val destroyDeclaringClass = findLifecycleDeclaringClass(cls, "onDestroyView")
+                ?: error("onDestroyView declaration was unavailable")
+            ModernXposedRuntime.hookAllMethods(destroyDeclaringClass, "onDestroyView", object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    val owner = param.thisObject?.takeIf(cls::isInstance) ?: return
+                    releaseLyricsView(owner)
+                }
+            })
+            Log.i(TAG, "Fragment lifecycle hooks installed")
         } catch (t: Throwable) {
             Log.w(TAG, "Fragment hook failed: ${t.message}")
         }
+    }
+
+    private fun findLifecycleDeclaringClass(start: Class<*>, methodName: String): Class<*>? =
+        generateSequence<Class<*>>(start) { type -> type.superclass }
+            .firstOrNull { type ->
+                type.declaredMethods.any { method ->
+                    method.name == methodName && method.parameterCount == 0
+                }
+            }
+
+    private fun bindLyricsView(owner: Any, root: View) {
+        lyricsFragmentOwner?.let(::releaseLyricsView)
+        lyricsFragmentOwner = owner
+        lyricsRootView = root
+        scheduleRecyclerViewDiscovery(root, delayMs = 500L)
+    }
+
+    private fun releaseLyricsView(owner: Any) {
+        if (owner !== lyricsFragmentOwner) return
+        recyclerDiscoveryRunnable?.let { discovery ->
+            scrollHandler.removeCallbacks(discovery)
+        }
+        recyclerDiscoveryRunnable = null
+        scrollHandler.removeCallbacks(restoreBlurRunnable)
+        if (blurFrameScheduled) {
+            Choreographer.getInstance().removeFrameCallback(blurFrameCallback)
+            blurFrameScheduled = false
+        }
+        detachScrollListener()
+        blurRenderer.clearAll()
+        recyclerView = null
+        lyricsRootView = null
+        lyricsFragmentOwner = null
+        isUserScrolling = false
+    }
+
+    private fun scheduleRecyclerViewDiscovery(root: View, delayMs: Long) {
+        recyclerDiscoveryRunnable?.let(scrollHandler::removeCallbacks)
+        val discovery = Runnable {
+            recyclerDiscoveryRunnable = null
+            if (root === lyricsRootView) findRecyclerView(root)
+        }
+        recyclerDiscoveryRunnable = discovery
+        scrollHandler.postDelayed(discovery, delayMs)
     }
 
     private fun hookViewModel(cl: ClassLoader) {
@@ -218,7 +264,6 @@ internal class OpenSourceLyricBlurPort {
                             if (lineId < 0) return
                             if (!highlightHookInstalled) {
                                 synchronized(highlightedLineIds) {
-                                    previousHighlightIds = highlightedLineIds.toSet()
                                     highlightedLineIds.clear()
                                     highlightedLineIds.add(lineId)
                                 }
@@ -242,7 +287,7 @@ internal class OpenSourceLyricBlurPort {
                 Log.i(TAG, "RV FOUND")
                 attachScrollListener(rv)
             } else {
-                Handler(Looper.getMainLooper()).postDelayed({ findRecyclerView(view) }, 1000)
+                scheduleRecyclerViewDiscovery(view, delayMs = 1_000L)
             }
         } catch (t: Throwable) {
             Log.e(TAG, "findRV error", t)
@@ -261,60 +306,77 @@ internal class OpenSourceLyricBlurPort {
     }
 
     private fun scheduleBlurUpdate() {
-        pendingBlurRunnable?.let { scrollHandler.removeCallbacks(it) }
-        val r = Runnable {
-            try {
-                applyBlur()
-            } catch (t: Throwable) {
-                Log.e(TAG, "Blur failed", t)
-            }
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            scrollHandler.post(::scheduleBlurUpdate)
+            return
         }
-        pendingBlurRunnable = r
-        scrollHandler.post(r)
+        if (blurFrameScheduled) return
+        blurFrameScheduled = true
+        Choreographer.getInstance().postFrameCallback(blurFrameCallback)
     }
 
     private fun attachScrollListener(rv: Any) {
         try {
             val view = rv as View
+            detachScrollListener()
             view.setOnTouchListener { _, event ->
-                isUserScrolling = event.action != MotionEvent.ACTION_CANCEL
-                    && event.action != MotionEvent.ACTION_UP
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                        isUserScrolling = true
+                        scrollHandler.removeCallbacks(restoreBlurRunnable)
+                    }
+                    MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_UP -> scheduleScrollRestore()
+                }
                 false
             }
-            view.viewTreeObserver.addOnScrollChangedListener { onScrollDetected() }
+            val listener = ViewTreeObserver.OnScrollChangedListener(::onScrollDetected)
+            view.viewTreeObserver.addOnScrollChangedListener(listener)
+            observedScrollView = view
+            scrollChangedListener = listener
             Log.i(TAG, "Scroll listener attached")
         } catch (t: Throwable) {
             Log.e(TAG, "Failed to attach scroll listener", t)
         }
     }
 
+    private fun detachScrollListener() {
+        val view = observedScrollView
+        val listener = scrollChangedListener
+        if (view != null && listener != null) {
+            val observer = view.viewTreeObserver
+            if (observer.isAlive) observer.removeOnScrollChangedListener(listener)
+            view.setOnTouchListener(null)
+        }
+        observedScrollView = null
+        scrollChangedListener = null
+    }
+
     private fun onScrollDetected() {
-        if (isUserScrolling) clearAllBlur()
+        if (!isUserScrolling) {
+            scheduleBlurUpdate()
+            return
+        }
+        clearAllBlur()
+        scheduleScrollRestore()
+    }
+
+    private fun scheduleScrollRestore() {
+        scrollHandler.removeCallbacks(restoreBlurRunnable)
+        scrollHandler.postDelayed(restoreBlurRunnable, SCROLL_RESTORE_DELAY_MS)
     }
 
     private fun clearAllBlur() {
-        val rv = getRv() ?: return
-        val gcm = getChildCountMethod ?: return
-        val gca = getChildAtMethod ?: return
-        val childCount = gcm.invoke(rv) as Int
-        for (i in 0 until childCount) {
-            val child = gca.invoke(rv, i) as? View ?: continue
+        val rv = getRv() as? ViewGroup ?: return
+        for (i in 0 until rv.childCount) {
+            val child = rv.getChildAt(i) ?: continue
             if (!isLyricsLine(child)) continue
-            viewBlurValues[child] = 0f
-            viewAnimators[child]?.cancel()
-            setRenderEffectMethod?.invoke(child, null)
+            blurRenderer.clear(child)
         }
     }
 
     private fun getRv(): Any? {
         val rv = recyclerView ?: return null
-        val gcm = getChildCountMethod ?: return null
-        val count = try {
-            gcm.invoke(rv) as Int
-        } catch (_: Throwable) {
-            -1
-        }
-        if (count > 0) return rv
+        if ((rv as? ViewGroup)?.childCount?.let { it > 0 } == true) return rv
         val root = lyricsRootView ?: return null
         val fresh = findRVInHierarchy(root)
         if (fresh != null) {
@@ -325,27 +387,26 @@ internal class OpenSourceLyricBlurPort {
     }
 
     private fun applyBlur() {
-        val rv = getRv() ?: return
-        val gcm = getChildCountMethod ?: return
-        val gca = getChildAtMethod ?: return
-        val childCount = gcm.invoke(rv) as Int
-        val effectiveIds = synchronized(highlightedLineIds) { highlightedLineIds + previousHighlightIds }
+        val rv = getRv() as? ViewGroup ?: return
+        val visibleRows = ArrayList<Pair<View, Int>>(rv.childCount)
 
-        for (i in 0 until childCount) {
-            val child = gca.invoke(rv, i) as? View ?: continue
+        for (i in 0 until rv.childCount) {
+            val child = rv.getChildAt(i) ?: continue
             if (!isLyricsLine(child)) continue
             val adapterPos = getAdapterPosition(child)
-            val isHighlighted = adapterPos in effectiveIds
-            val targetBlur = if (effectiveIds.isEmpty()) {
-                BLUR_MAX
-            } else if (isHighlighted) {
-                0f
-            } else {
-                val minDist = effectiveIds.minOf { Math.abs(adapterPos - it) }
-                (BLUR_BASE + (minDist - 1) * BLUR_STEP).coerceAtMost(BLUR_MAX)
-            }
-            animateBlur(child, targetBlur)
+            visibleRows += child to adapterPos
         }
+        val activeIds = synchronized(highlightedLineIds) { highlightedLineIds.toSet() }
+        val effectiveIds = BidirectionalBlurPolicy.resolveDisplayHighlights(
+            active = activeIds,
+            visiblePositions = visibleRows.map { (_, position) -> position },
+        )
+        val targets = LinkedHashMap<View, Float>(visibleRows.size)
+        visibleRows.forEach { (child, adapterPos) ->
+            val target = BidirectionalBlurPolicy.targetRadius(adapterPos, effectiveIds)
+            targets[child] = target
+        }
+        blurRenderer.animateTo(targets)
     }
 
     private fun isLyricsLine(view: View): Boolean {
@@ -373,28 +434,4 @@ internal class OpenSourceLyricBlurPort {
         }
     }
 
-    private fun animateBlur(view: View, targetBlur: Float) {
-        val current = viewBlurValues[view] ?: 0f
-        if (current == targetBlur) return
-        viewAnimators[view]?.cancel()
-        ValueAnimator.ofFloat(current, targetBlur).apply {
-            duration = 300
-            addUpdateListener { anim ->
-                try {
-                    val v = anim.animatedValue as Float
-                    if (v <= 0f) {
-                        setRenderEffectMethod?.invoke(view, null)
-                    } else {
-                        val effect = createBlurEffectMethod?.invoke(null, v, v, Shader.TileMode.MIRROR)
-                        setRenderEffectMethod?.invoke(view, effect)
-                    }
-                } catch (t: Throwable) {
-                    Log.e(TAG, "Render err: ${t.message}", t)
-                }
-            }
-            viewBlurValues[view] = targetBlur
-            viewAnimators[view] = this
-            start()
-        }
-    }
 }

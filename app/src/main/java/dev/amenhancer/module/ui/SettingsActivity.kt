@@ -220,8 +220,8 @@ class SettingsActivity : Activity() {
             })
             addView(insetDivider())
             addView(settingRow(
-                title = "未来歌词模糊",
-                summary = "Android 12 及以上 · 手动滚动时会暂时暂停",
+                title = "双向歌词模糊",
+                summary = "Android 12 及以上 · 手动滚动停止 1 秒后恢复",
                 checked = settings.futureBlurEnabled,
                 enabled = writable,
             ) { enabled ->

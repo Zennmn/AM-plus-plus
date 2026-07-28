@@ -8,13 +8,13 @@ AM++ 是面向 libxposed API 102 的 Apple Music 增强模块。目前主要针�
 | --- | --- | --- | --- |
 | 平板双栏播放器 | 开启 | Apple Music 官方 `is_tablet=true` 且横屏 | 可用 |
 | 平板动态视频抑制 | 开启 | 平板横屏的 Editorial Video | 可用 |
-| 未来歌词模糊 | 开启 | Android 12 及以上 | 可用 |
+| 双向歌词模糊 | 开启 | Android 12 及以上 | 可用 |
 | 手机液态玻璃底栏 | 关闭 | Apple Music 官方 `is_tablet=false` | **WIP** |
 | 隐藏启动器图标 | 关闭 | AM++ 设置应用 | 可用 |
 
 手机液态玻璃会为底部导航栏和迷你播放器增加实时背景模糊、半透明材质与选中项胶囊。该功能仍可能在冷启动或全屏播放器收回时出现单帧闪烁，因此默认关闭并统一标记为 WIP。
 
-未来歌词模糊方案移植并适配自 [a23bc/amlyricblur](https://github.com/a23bc/amlyricblur)
+双向歌词模糊方案移植并适配自 [a23bc/amlyricblur](https://github.com/a23bc/amlyricblur)
 
 ## 平板双栏播放器演示
 
@@ -85,7 +85,7 @@ app/build/outputs/apk/release/app-release.apk
 - API 102 不再提供旧式资源 Hook，因此布局接入通过受限的 `LayoutInflater.inflate` 拦截和布局根节点识别完成。
 - 各项功能独立定位、独立降级；某一组 Hook 定位失败时不应阻止其他功能加载。
 - 平板判定直接读取 Apple Music 的 `bool/is_tablet`，不使用模块自定义屏幕宽度阈值。
-- 未来歌词模糊核心来自 [a23bc/amlyricblur](https://github.com/a23bc/amlyricblur)，模块只负责版本定位、配置开关和 libxposed API 102 接入。
+- 双向歌词模糊核心来自 [a23bc/amlyricblur](https://github.com/a23bc/amlyricblur)，模块负责版本定位、配置开关、libxposed API 102 接入与渲染热路径优化。
 
 ## 隐私与安全
 

@@ -1,4 +1,4 @@
 <resources>
     <string name="app_name">AM++</string>
-    <string name="xposed_description">Apple Music 平板双栏、手机液态玻璃底栏（WIP）、未来歌词模糊与平板动态视频抑制</string>
+    <string name="xposed_description">Apple Music 平板双栏、手机液态玻璃底栏（WIP）、双向歌词模糊与平板动态视频抑制</string>
 </resources>
