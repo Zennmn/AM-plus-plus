@@ -159,6 +159,8 @@ class DualPaneStructuralRegressionTest {
     fun `mirrors modified landscape lyrics metrics correction`() {
         assertTrue(source.contains("installLandscapeLyricsMetricsHook"))
         assertTrue(source.contains("method.name == \"j2\""))
+        assertTrue(source.contains("alignSynchronizedLyricsHighlightAnchor"))
+        assertTrue(source.contains("TabletLyricAnchorPolicy.highlightOffset"))
         assertTrue(source.contains("listOf(\"z0\", \"A0\")"))
         assertTrue(source.contains("lowerBoundary.getInt(bounds) - controlsHeight"))
         assertTrue(source.contains("ModernXposedRuntime.callMethod(recycler, \"S\")"))

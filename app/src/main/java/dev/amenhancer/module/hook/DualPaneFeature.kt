@@ -331,14 +331,22 @@ internal class DualPaneFeature : FeatureHook {
                         ModernXposedRuntime.callMethod(fragment, "f2") as? View
                     }.getOrNull() ?: return
                     if (!TabletModeQualifier.isEligible(controls.context)) return
+                    val highlightAnchorAligned = alignSynchronizedLyricsHighlightAnchor(fragment)
                     val controlsHeight = controls.height
-                    if (controlsHeight == 0) return
-                    val updatedBothBounds = listOf("z0", "A0").all { fieldName ->
-                        subtractControlsHeightFromLyricsBoundary(fragment, fieldName, controlsHeight)
+                    val endPaddingCorrected = controlsHeight == 0 ||
+                        listOf("z0", "A0").all { fieldName ->
+                            subtractControlsHeightFromLyricsBoundary(fragment, fieldName, controlsHeight)
+                        }
+                    if (!endPaddingCorrected) return
+                    if (!highlightAnchorAligned && controlsHeight == 0) {
+                        debug("landscape lyrics metrics unchanged")
+                        return
                     }
-                    if (!updatedBothBounds) return
                     refreshLyricsRecycler(fragment)
-                    debug("corrected landscape lyrics metrics")
+                    debug(
+                        "corrected landscape lyrics metrics highlightAnchorAligned=" +
+                            highlightAnchorAligned + " controlsHeight=" + controlsHeight,
+                    )
                 }
             })
         ) {
@@ -347,6 +355,26 @@ internal class DualPaneFeature : FeatureHook {
             0
         }
     }
+
+    private fun alignSynchronizedLyricsHighlightAnchor(fragment: Any): Boolean = runCatching {
+        val binding = findField(fragment.javaClass, "i0")?.get(fragment)
+            ?: return@runCatching false
+        val container = findField(binding.javaClass, "U")?.get(binding) as? View
+            ?: return@runCatching false
+        if (container.height <= 0) return@runCatching false
+        val metrics = findField(fragment.javaClass, "z0")?.get(fragment)
+            ?: return@runCatching false
+        val highlightOffset = findField(metrics.javaClass, "a")
+            ?: return@runCatching false
+        highlightOffset.setInt(
+            metrics,
+            TabletLyricAnchorPolicy.highlightOffset(
+                currentOffset = highlightOffset.getInt(metrics),
+                containerHeight = container.height,
+            ),
+        )
+        true
+    }.getOrDefault(false)
 
     private fun subtractControlsHeightFromLyricsBoundary(
         fragment: Any,
