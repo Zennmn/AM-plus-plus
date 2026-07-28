@@ -8,7 +8,7 @@ internal class LauncherIconController(context: Context) {
     private val appContext = context.applicationContext
     private val launcherComponent = ComponentName(
         appContext,
-        "${appContext.packageName}.LauncherAlias",
+        LAUNCHER_ALIAS_CLASS,
     )
 
     fun isHidden(): Boolean =
@@ -25,5 +25,9 @@ internal class LauncherIconController(context: Context) {
             },
             PackageManager.DONT_KILL_APP,
         )
+    }
+
+    private companion object {
+        const val LAUNCHER_ALIAS_CLASS = "dev.amenhancer.module.LauncherAlias"
     }
 }

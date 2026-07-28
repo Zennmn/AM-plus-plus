@@ -34,7 +34,8 @@ class LauncherIconVisibilityStructuralRegressionTest {
         )
 
         assertTrue(controller.contains("ComponentName("))
-        assertTrue(controller.contains("${'$'}{appContext.packageName}.LauncherAlias"))
+        assertTrue(controller.contains("dev.amenhancer.module.LauncherAlias"))
+        assertFalse(controller.contains("${'$'}{appContext.packageName}.LauncherAlias"))
         assertTrue(controller.contains("getComponentEnabledSetting"))
         assertTrue(controller.contains("setComponentEnabledSetting"))
         assertTrue(controller.contains("COMPONENT_ENABLED_STATE_DISABLED"))
