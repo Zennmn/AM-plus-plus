@@ -40,9 +40,9 @@ class BidirectionalBlurPolicyTest {
         assertRadius(16f, position = 6, highlighted)
         assertRadius(12f, position = 7, highlighted)
         assertRadius(8f, position = 8, highlighted)
-        assertRadius(4f, position = 9, highlighted)
+        assertRadius(6f, position = 9, highlighted)
         assertRadius(0f, position = 10, highlighted)
-        assertRadius(4f, position = 11, highlighted)
+        assertRadius(6f, position = 11, highlighted)
         assertRadius(8f, position = 12, highlighted)
         assertRadius(12f, position = 13, highlighted)
         assertRadius(16f, position = 14, highlighted)
@@ -53,12 +53,12 @@ class BidirectionalBlurPolicyTest {
     fun `nearest highlighted row determines radius when several rows are highlighted`() {
         val highlighted = setOf(3, 9)
 
-        assertRadius(4f, position = 2, highlighted)
+        assertRadius(6f, position = 2, highlighted)
         assertRadius(0f, position = 3, highlighted)
         assertRadius(8f, position = 5, highlighted)
         assertRadius(8f, position = 7, highlighted)
         assertRadius(0f, position = 9, highlighted)
-        assertRadius(4f, position = 10, highlighted)
+        assertRadius(6f, position = 10, highlighted)
     }
 
     @Test
