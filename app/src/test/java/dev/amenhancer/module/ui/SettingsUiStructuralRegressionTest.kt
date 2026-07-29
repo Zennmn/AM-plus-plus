@@ -40,7 +40,8 @@ class SettingsUiStructuralRegressionTest {
     fun `renders selected grouped settings direction without changing storage`() {
         val activity = projectFile("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
 
-        assertTrue(activity.contains("statusCard(writable)"))
+        assertTrue(activity.contains("statusCard(snapshot)"))
+        assertTrue(activity.contains("store.settings(snapshot)"))
         assertTrue(activity.contains("featureCard(settings, writable)"))
         assertTrue(activity.contains("badge = \"WIP\""))
         assertTrue(activity.contains("LSPosed 配置提示"))

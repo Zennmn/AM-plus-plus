@@ -23,6 +23,7 @@ import android.widget.Switch
 import android.widget.TextView
 import dev.amenhancer.module.ModuleApplication
 import dev.amenhancer.module.R
+import dev.amenhancer.module.XposedServiceSnapshot
 import dev.amenhancer.module.config.ConfigStore
 import dev.amenhancer.module.model.ModuleSettings
 
@@ -32,8 +33,8 @@ class SettingsActivity : Activity() {
     private lateinit var content: LinearLayout
     private lateinit var palette: Palette
 
-    private val serviceListener: (android.content.SharedPreferences?) -> Unit = {
-        runOnUiThread { if (::content.isInitialized) render() }
+    private val serviceListener: (XposedServiceSnapshot) -> Unit = { snapshot ->
+        runOnUiThread { if (::content.isInitialized) render(snapshot) }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -133,12 +134,12 @@ class SettingsActivity : Activity() {
         ))
     }
 
-    private fun render() {
+    private fun render(snapshot: XposedServiceSnapshot = ModuleApplication.serviceSnapshot) {
         content.removeAllViews()
-        val settings = store.settings()
-        val writable = store.isRemoteAvailable
+        val settings = store.settings(snapshot)
+        val writable = snapshot.isRemoteAvailable
 
-        content.addView(statusCard(writable))
+        content.addView(statusCard(snapshot))
         content.addView(spacer(20))
         content.addView(featureCard(settings, writable))
         content.addView(spacer(24))
@@ -151,7 +152,8 @@ class SettingsActivity : Activity() {
         content.addView(helpRow())
     }
 
-    private fun statusCard(writable: Boolean): View = LinearLayout(this).apply {
+    private fun statusCard(snapshot: XposedServiceSnapshot): View = LinearLayout(this).apply {
+        val writable = snapshot.isRemoteAvailable
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         setPadding(dp(16), dp(14), dp(16), dp(14))
@@ -165,14 +167,14 @@ class SettingsActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), 0, 0, 0)
             addView(TextView(this@SettingsActivity).apply {
-                text = if (writable) ModuleApplication.serviceStatus else "配置暂时只读"
+                text = if (writable) snapshot.status else "配置暂时只读"
                 textSize = 17f
                 setTextColor(palette.onSurface)
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             })
             if (!writable) {
                 addView(TextView(this@SettingsActivity).apply {
-                    text = ModuleApplication.serviceStatus
+                    text = snapshot.status
                     textSize = 13f
                     setTextColor(palette.onSurfaceVariant)
                     setPadding(0, dp(3), 0, 0)

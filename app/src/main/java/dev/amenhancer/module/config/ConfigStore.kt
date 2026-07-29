@@ -3,6 +3,7 @@ package dev.amenhancer.module.config
 import android.content.Context
 import android.content.SharedPreferences
 import dev.amenhancer.module.ModuleApplication
+import dev.amenhancer.module.XposedServiceSnapshot
 import dev.amenhancer.module.model.ModuleSettings
 
 class ConfigStore(context: Context) {
@@ -11,14 +12,13 @@ class ConfigStore(context: Context) {
         LEGACY_PREFERENCES_NAME,
         Context.MODE_PRIVATE,
     )
-    val isRemoteAvailable: Boolean get() = ModuleApplication.remotePreferences != null
+    fun settings(): ModuleSettings = settings(ModuleApplication.serviceSnapshot)
 
-    fun settings(): ModuleSettings = ModuleSettingsSchema.decode(
-        (ModuleApplication.remotePreferences ?: legacyPreferences).all,
-    )
+    internal fun settings(snapshot: XposedServiceSnapshot): ModuleSettings =
+        ModuleSettingsSchema.decode((snapshot.preferences ?: legacyPreferences).all)
 
     fun saveSettings(settings: ModuleSettings): Boolean {
-        val preferences = ModuleApplication.remotePreferences ?: return false
+        val preferences = ModuleApplication.serviceSnapshot.preferences ?: return false
         return writeValues(preferences, ModuleSettingsSchema.encode(settings), synchronous = false)
     }
 
