@@ -16,10 +16,13 @@ class FutureLyricBlurStructuralRegressionTest {
     private val dualPaneSource: String by lazy {
         sourceFile("DualPaneFeature.kt").readText()
     }
+    private val rendererSource: String by lazy {
+        sourceFile("LyricBlurRenderer.kt").readText()
+    }
 
     @Test
     fun `tablet lyric typography remains independent of blur`() {
-        assertTrue(typographySource.contains("TABLET_LANDSCAPE_LYRICS_TEXT_SIZE_SP = 35f"))
+        assertTrue(typographySource.contains("TabletLyricVisualPolicy.textSizeSp"))
         assertTrue(typographySource.contains("\"song_lyrics_line\""))
         assertTrue(typographySource.contains("\"song_lyrics_word\""))
         assertTrue(typographySource.contains("TabletModeQualifier.isEligible"))
@@ -37,6 +40,19 @@ class FutureLyricBlurStructuralRegressionTest {
     }
 
     @Test
+    fun `edge fading is continuous at the viewport instead of sliced per lyric row`() {
+        assertFalse(portSource.contains("child.alpha = visual.alpha"))
+        assertFalse(portSource.contains("child.alpha = 1f"))
+        assertTrue(dualPaneSource.contains("configureVerticalGradientEdges"))
+    }
+
+    @Test
+    fun `blur samples transparent pixels beyond each lyric row instead of mirroring a seam`() {
+        assertTrue(rendererSource.contains("Shader.TileMode.DECAL"))
+        assertFalse(rendererSource.contains("Shader.TileMode.MIRROR"))
+    }
+
+    @Test
     fun `manual lyric scrolling restores blur after one second`() {
         assertTrue(portSource.contains("SCROLL_RESTORE_DELAY_MS = 1_000L"))
         assertTrue(portSource.contains("postDelayed(restoreBlurRunnable, SCROLL_RESTORE_DELAY_MS)"))
@@ -46,6 +62,13 @@ class FutureLyricBlurStructuralRegressionTest {
     fun `scroll restore keeps only the current lyric line clear`() {
         assertFalse(portSource.contains("previousHighlightIds"))
         assertFalse(portSource.contains("highlightedLineIds +"))
+    }
+
+    @Test
+    fun `view model fallback cannot accumulate a previous highlight beside the current line`() {
+        assertFalse(portSource.contains("highlightSession.add(lineId)"))
+        assertTrue(portSource.contains("if (!highlightHookInstalled && !isBg && lineId > 0)"))
+        assertTrue(portSource.contains("highlightSession.replace(lineId)"))
     }
 
     @Test

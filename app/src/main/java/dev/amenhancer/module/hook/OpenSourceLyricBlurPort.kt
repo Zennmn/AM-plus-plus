@@ -237,8 +237,8 @@ internal class OpenSourceLyricBlurPort {
                         override fun beforeHookedMethod(param: MethodHookParam) {
                             val lineId = param.args[0] as Int
                             val isBg = param.args[3] as Boolean
-                            if (!isBg && lineId > 0) {
-                                highlightSession.add(lineId)
+                            if (!highlightHookInstalled && !isBg && lineId > 0) {
+                                highlightSession.replace(lineId)
                                 scheduleBlurUpdate()
                             }
                         }
@@ -345,7 +345,7 @@ internal class OpenSourceLyricBlurPort {
             scheduleBlurUpdate()
             return
         }
-        clearAllBlur()
+        applyBlur(includeFocus = false, immediate = true)
         scheduleScrollRestore()
     }
 
@@ -375,7 +375,10 @@ internal class OpenSourceLyricBlurPort {
         return null
     }
 
-    private fun applyBlur() {
+    private fun applyBlur(
+        includeFocus: Boolean = true,
+        immediate: Boolean = false,
+    ) {
         val rv = getRv() as? ViewGroup ?: return
         val visibleRows = ArrayList<Pair<View, Int>>(rv.childCount)
 
@@ -390,12 +393,29 @@ internal class OpenSourceLyricBlurPort {
             active = activeIds,
             visiblePositions = visibleRows.map { (_, position) -> position },
         )
+        val useTabletEdges = TabletModeQualifier.isEligible(rv.context)
         val targets = LinkedHashMap<View, Float>(visibleRows.size)
         visibleRows.forEach { (child, adapterPos) ->
-            val target = BidirectionalBlurPolicy.targetRadius(adapterPos, effectiveIds)
-            targets[child] = target
+            val focusBlur = if (includeFocus) {
+                BidirectionalBlurPolicy.targetRadius(adapterPos, effectiveIds)
+            } else {
+                0f
+            }
+            val edgeBlur = if (useTabletEdges) {
+                TabletLyricVisualPolicy.edgeBlurRadius(
+                    rowCenterPx = (child.top + child.bottom) / 2f,
+                    viewportHeightPx = rv.height.toFloat(),
+                )
+            } else {
+                0f
+            }
+            targets[child] = TabletLyricVisualPolicy.mergeBlurRadius(focusBlur, edgeBlur)
         }
-        blurRenderer.animateTo(targets)
+        if (immediate) {
+            blurRenderer.applyImmediately(targets)
+        } else {
+            blurRenderer.animateTo(targets)
+        }
     }
 
     private fun isLyricsLine(view: View): Boolean {

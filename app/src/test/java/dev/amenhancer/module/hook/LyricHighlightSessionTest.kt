@@ -33,6 +33,16 @@ class LyricHighlightSessionTest {
     }
 
     @Test
+    fun `fallback replacement keeps only the latest lyric line clear`() {
+        val session = LyricHighlightSession()
+
+        session.replace(46)
+        session.replace(47)
+
+        assertEquals(setOf(47), session.snapshot())
+    }
+
+    @Test
     fun `song boundaries use pointer identity rather than value equality`() {
         val session = LyricHighlightSession()
         val firstWrapper = EqualToken(7)

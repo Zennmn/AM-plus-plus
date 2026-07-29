@@ -33,39 +33,39 @@ class BidirectionalBlurPolicyTest {
     }
 
     @Test
-    fun `highlighted row is clear and surrounding rows blur by absolute distance`() {
+    fun `highlighted row is clear and surrounding rows follow open source directional blur`() {
         val highlighted = setOf(10)
 
-        assertRadius(20f, position = 5, highlighted)
-        assertRadius(16f, position = 6, highlighted)
-        assertRadius(12f, position = 7, highlighted)
-        assertRadius(8f, position = 8, highlighted)
-        assertRadius(6f, position = 9, highlighted)
+        assertRadius(22f, position = 5, highlighted)
+        assertRadius(22f, position = 6, highlighted)
+        assertRadius(22f, position = 7, highlighted)
+        assertRadius(17f, position = 8, highlighted)
+        assertRadius(13f, position = 9, highlighted)
         assertRadius(0f, position = 10, highlighted)
-        assertRadius(6f, position = 11, highlighted)
-        assertRadius(8f, position = 12, highlighted)
-        assertRadius(12f, position = 13, highlighted)
-        assertRadius(16f, position = 14, highlighted)
-        assertRadius(20f, position = 15, highlighted)
+        assertRadius(8f, position = 11, highlighted)
+        assertRadius(13f, position = 12, highlighted)
+        assertRadius(17f, position = 13, highlighted)
+        assertRadius(22f, position = 14, highlighted)
+        assertRadius(22f, position = 15, highlighted)
     }
 
     @Test
     fun `nearest highlighted row determines radius when several rows are highlighted`() {
         val highlighted = setOf(3, 9)
 
-        assertRadius(6f, position = 2, highlighted)
+        assertRadius(13f, position = 2, highlighted)
         assertRadius(0f, position = 3, highlighted)
-        assertRadius(8f, position = 5, highlighted)
-        assertRadius(8f, position = 7, highlighted)
+        assertRadius(13f, position = 5, highlighted)
+        assertRadius(17f, position = 7, highlighted)
         assertRadius(0f, position = 9, highlighted)
-        assertRadius(6f, position = 10, highlighted)
+        assertRadius(8f, position = 10, highlighted)
     }
 
     @Test
     fun `rows use maximum blur when there is no highlight`() {
-        assertRadius(20f, position = -1, highlighted = emptySet())
-        assertRadius(20f, position = 0, highlighted = emptySet())
-        assertRadius(20f, position = 42, highlighted = emptySet())
+        assertRadius(22f, position = -1, highlighted = emptySet())
+        assertRadius(22f, position = 0, highlighted = emptySet())
+        assertRadius(22f, position = 42, highlighted = emptySet())
     }
 
     @Test
@@ -76,6 +76,7 @@ class BidirectionalBlurPolicyTest {
         assertEquals(12, BidirectionalBlurPolicy.quantize(12.49f))
         assertEquals(13, BidirectionalBlurPolicy.quantize(12.5f))
         assertEquals(20, BidirectionalBlurPolicy.quantize(20f))
+        assertEquals(22, BidirectionalBlurPolicy.quantize(25f))
     }
 
     @Test

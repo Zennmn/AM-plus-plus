@@ -3,6 +3,7 @@ package dev.amenhancer.module.hook
 import android.app.Activity
 import android.content.Context
 import android.content.res.Configuration
+import android.graphics.Color
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
@@ -15,6 +16,7 @@ import dev.amenhancer.module.config.TargetConfigClient
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
+import kotlin.math.roundToInt
 
 /**
  * Mirrors the modified APK's landscape resource overlays without replacing
@@ -72,8 +74,11 @@ private object RightLyricsPaneLayout {
     private const val CONTROLS_TAP_TARGET = "controls_tap_target"
     private const val ALPHA_GRADIENT_FRAME_LAYOUT =
         "com.apple.android.music.common.views.AlphaGradientFrameLayout"
+    private const val TOP_EDGE_FRACTION = 0.30f
+    private const val TOP_CLEAR_FRACTION = 0.075f
+    private const val TOP_CLEAR_WITHIN_FADE_FRACTION = 0.25f
+    private const val BOTTOM_EDGE_FRACTION = 0.15f
     private val gradientEdgeBooleans = listOf("R", "S", "T", "U")
-    private val gradientEdgeIntegers = listOf("V", "W", "a0", "b0", "k0")
 
     fun apply(root: View) {
         if (!TabletModeQualifier.isEligible(root.context)) return
@@ -91,7 +96,7 @@ private object RightLyricsPaneLayout {
         hide(root, resources, CONTROLS)
         hide(root, resources, CONTROLS_TAP_TARGET)
         ConstraintLayoutPane.anchorTopToParent(gradients, RECYCLER_VIEW_GRADIENTS)
-        clearGradientEdges(gradients)
+        configureVerticalGradientEdges(gradients)
         root.requestLayout()
         debug(
             "right lyrics pane landscape resource installed root=" + System.identityHashCode(root) +
@@ -108,29 +113,54 @@ private object RightLyricsPaneLayout {
         root.findViewById<View>(targetId(resources, name))?.visibility = View.GONE
     }
 
-    /**
-     * The official XML enables all four AlphaGradientFrameLayout edges. The
-     * modified landscape overlay omits gradient_edge, whose constructor leaves
-     * the recovered flags and edge sizes at their zero defaults.
-     */
-    private fun clearGradientEdges(gradients: View) {
+    /** Uses the target view's single DST_IN layer so scrolling rows fade continuously. */
+    private fun configureVerticalGradientEdges(gradients: View) {
         if (gradients.javaClass.name != ALPHA_GRADIENT_FRAME_LAYOUT) return
-        runCatching {
-            gradientEdgeBooleans.forEach { fieldName ->
-                val field = findField(gradients.javaClass, fieldName)
-                    ?: error("AlphaGradientFrameLayout.$fieldName was unavailable")
-                field.setBoolean(gradients, false)
+        val applyGradient = fun() {
+            if (gradients.height <= 0) return
+            runCatching {
+                gradientEdgeBooleans.forEach { fieldName ->
+                    val field = findField(gradients.javaClass, fieldName)
+                        ?: error("AlphaGradientFrameLayout.$fieldName was unavailable")
+                    field.setBoolean(gradients, fieldName == "R" || fieldName == "S")
+                }
+                val topFadeColors = intArrayOf(
+                    Color.TRANSPARENT,
+                    Color.TRANSPARENT,
+                    Color.BLACK,
+                )
+                val topFadePositions = floatArrayOf(
+                    0f,
+                    TOP_CLEAR_WITHIN_FADE_FRACTION,
+                    1f,
+                )
+                val topFadeColorsField = findField(gradients.javaClass, "a")
+                    ?: error("AlphaGradientFrameLayout.a was unavailable")
+                val topFadePositionsField = findField(gradients.javaClass, "e")
+                    ?: error("AlphaGradientFrameLayout.e was unavailable")
+                topFadeColorsField.set(gradients, topFadeColors)
+                topFadePositionsField.set(gradients, topFadePositions)
+                val topEdgeSize = (gradients.height * TOP_EDGE_FRACTION)
+                    .roundToInt()
+                    .coerceAtLeast(1)
+                val bottomEdgeSize = (gradients.height * BOTTOM_EDGE_FRACTION)
+                    .roundToInt()
+                    .coerceAtLeast(1)
+                val setVerticalFadeSizes = gradients.javaClass.getDeclaredMethod(
+                    "d",
+                    Int::class.javaPrimitiveType,
+                    Int::class.javaPrimitiveType,
+                ).apply { isAccessible = true }
+                setVerticalFadeSizes.invoke(gradients, topEdgeSize, bottomEdgeSize)
+                gradients.invalidate()
+            }.onFailure {
+                debug("right lyrics pane vertical gradient setup failed: $it")
             }
-            gradientEdgeIntegers.forEach { fieldName ->
-                val field = findField(gradients.javaClass, fieldName)
-                    ?: error("AlphaGradientFrameLayout.$fieldName was unavailable")
-                field.setInt(gradients, 0)
-            }
-            gradients.requestLayout()
-            gradients.invalidate()
-        }.onFailure {
-            debug("right lyrics pane gradient reset failed: $it")
         }
+        gradients.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            if (bottom - top != oldBottom - oldTop) applyGradient()
+        }
+        gradients.post(applyGradient)
     }
 }
 

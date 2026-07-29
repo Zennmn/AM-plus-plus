@@ -25,11 +25,6 @@ internal class LyricHighlightSession {
     }
 
     @Synchronized
-    fun add(lineId: Int) {
-        highlightedLineIds.add(lineId)
-    }
-
-    @Synchronized
     fun replace(lineId: Int) {
         highlightedLineIds.clear()
         highlightedLineIds.add(lineId)

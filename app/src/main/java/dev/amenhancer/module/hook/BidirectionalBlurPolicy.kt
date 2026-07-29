@@ -4,8 +4,9 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 internal object BidirectionalBlurPolicy {
-    private const val BLUR_MAX = 20f
-    private val BLUR_RADII_BY_DISTANCE = floatArrayOf(0f, 6f, 8f, 12f, 16f, BLUR_MAX)
+    private const val BLUR_MAX = 22f
+    private val PAST_RADII_BY_DISTANCE = floatArrayOf(0f, 13f, 17f, BLUR_MAX)
+    private val FUTURE_RADII_BY_DISTANCE = floatArrayOf(0f, 8f, 13f, 17f, BLUR_MAX)
     const val TRANSITION_DURATION_MS = 300L
 
     fun resolveHighlights(current: Set<Int>, incoming: Set<Int>): Set<Int> =
@@ -24,8 +25,15 @@ internal object BidirectionalBlurPolicy {
     fun targetRadius(position: Int, highlighted: Set<Int>): Float {
         if (highlighted.isEmpty()) return BLUR_MAX
         if (position in highlighted) return 0f
-        val distance = highlighted.minOf { abs(position - it) }
-        return BLUR_RADII_BY_DISTANCE.getOrElse(distance) { BLUR_MAX }
+        return highlighted.minOf { highlightedPosition ->
+            val offset = position - highlightedPosition
+            val radii = if (offset < 0) {
+                PAST_RADII_BY_DISTANCE
+            } else {
+                FUTURE_RADII_BY_DISTANCE
+            }
+            radii.getOrElse(abs(offset)) { BLUR_MAX }
+        }
     }
 
     fun quantize(radius: Float): Int = radius

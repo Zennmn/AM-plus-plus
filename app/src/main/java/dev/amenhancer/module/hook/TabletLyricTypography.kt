@@ -13,8 +13,6 @@ import java.util.WeakHashMap
 import kotlin.math.abs
 
 internal object TabletLyricTypography {
-    private const val TABLET_LANDSCAPE_LYRICS_TEXT_SIZE_SP = 35f
-
     private val states = WeakHashMap<ViewGroup, TypographyState>()
     private val eligibilityByResources = WeakHashMap<Resources, Pair<Int, Boolean>>()
 
@@ -67,6 +65,7 @@ internal object TabletLyricTypography {
 
         private fun applyToLyricRow(row: View) {
             applyPrimaryLyricTextSize(row, primaryLyricTextIds)
+            applyLyricRowSpacing(row)
         }
 
         private fun installChildAttachObserver(recycler: ViewGroup) {
@@ -123,19 +122,36 @@ internal object TabletLyricTypography {
 
     private fun applyPrimaryLyricTextSize(root: View, primaryLyricTextIds: Set<Int>) {
         if (primaryLyricTextIds.isEmpty()) return
+        val metrics = root.resources.displayMetrics
+        val targetSizeSp = TabletLyricVisualPolicy.textSizeSp(
+            viewportWidthPx = metrics.widthPixels.toFloat(),
+            viewportHeightPx = metrics.heightPixels.toFloat(),
+            scaledDensity = metrics.density * root.resources.configuration.fontScale,
+        )
         val targetSizePx = TypedValue.applyDimension(
             TypedValue.COMPLEX_UNIT_SP,
-            TABLET_LANDSCAPE_LYRICS_TEXT_SIZE_SP,
-            root.resources.displayMetrics,
+            targetSizeSp,
+            metrics,
         )
         fun visit(view: View) {
             if (view is TextView && view.id in primaryLyricTextIds && abs(view.textSize - targetSizePx) > 0.5f) {
-                view.setTextSize(TypedValue.COMPLEX_UNIT_SP, TABLET_LANDSCAPE_LYRICS_TEXT_SIZE_SP)
+                view.setTextSize(TypedValue.COMPLEX_UNIT_SP, targetSizeSp)
             }
             (view as? ViewGroup)?.let { parent ->
                 repeat(parent.childCount) { childIndex -> visit(parent.getChildAt(childIndex)) }
             }
         }
         visit(root)
+    }
+
+    private fun applyLyricRowSpacing(row: View) {
+        if (row.getTag(dev.amenhancer.module.R.id.am_enhancer_lyric_spacing_applied) == true) return
+        val params = row.layoutParams as? ViewGroup.MarginLayoutParams ?: return
+        val spacingPx = (
+            TabletLyricVisualPolicy.ITEM_SPACING_EXTRA_DP * row.resources.displayMetrics.density + 0.5f
+            ).toInt()
+        params.bottomMargin += spacingPx
+        row.layoutParams = params
+        row.setTag(dev.amenhancer.module.R.id.am_enhancer_lyric_spacing_applied, true)
     }
 }

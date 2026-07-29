@@ -45,9 +45,29 @@ internal class LyricBlurRenderer {
         scheduleFrame()
     }
 
+    /** Manual scrolling needs position-driven edge blur without temporal lag. */
+    fun applyImmediately(targets: Map<View, Float>) {
+        val now = SystemClock.uptimeMillis()
+        transitions.keys
+            .filterNot(targets::containsKey)
+            .toList()
+            .forEach(::clear)
+        targets.forEach { (view, target) ->
+            val quantized = BidirectionalBlurPolicy.quantize(target)
+            applyRadius(view, quantized)
+            transitions[view] = Transition(
+                startRadius = target,
+                targetRadius = target,
+                startedAtMs = now,
+                appliedRadius = quantized,
+            )
+        }
+    }
+
     fun clear(view: View) {
         transitions.remove(view)
         view.setRenderEffect(null)
+        view.alpha = 1f
     }
 
     fun clearAll() {
@@ -55,7 +75,10 @@ internal class LyricBlurRenderer {
             Choreographer.getInstance().removeFrameCallback(frameCallback)
             frameScheduled = false
         }
-        transitions.keys.toList().forEach { view -> view.setRenderEffect(null) }
+        transitions.keys.toList().forEach { view ->
+            view.setRenderEffect(null)
+            view.alpha = 1f
+        }
         transitions.clear()
     }
 
@@ -86,7 +109,7 @@ internal class LyricBlurRenderer {
                 RenderEffect.createBlurEffect(
                     quantized.toFloat(),
                     quantized.toFloat(),
-                    Shader.TileMode.MIRROR,
+                    Shader.TileMode.DECAL,
                 )
             }
         }

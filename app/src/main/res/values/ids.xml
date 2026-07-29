@@ -1,3 +1,4 @@
 <resources>
+    <item name="am_enhancer_lyric_spacing_applied" type="id" />
     <item name="am_enhancer_dual_pane_state" type="id" />
 </resources>
