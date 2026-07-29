@@ -12,7 +12,6 @@ import dev.amenhancer.module.hook.ModernMethodHook as XC_MethodHook
 import dev.amenhancer.module.ModuleConstants
 import dev.amenhancer.module.R
 import dev.amenhancer.module.config.TargetConfigClient
-import dev.amenhancer.module.model.FeatureState
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
@@ -138,15 +137,11 @@ private object RightLyricsPaneLayout {
 internal class DualPaneFeature : FeatureHook {
     override val key: String = ModuleConstants.FEATURE_DUAL_PANE
 
-    override fun isEnabled(context: HookContext): Boolean = context.config.settings().dualPaneEnabled
-
-    override fun install(context: HookContext) {
+    override fun install(context: HookContext): FeatureInstallResult {
+        if (!context.config.settings().dualPaneEnabled) return FeatureInstallResult.disabled()
         val controllerResolution = context.symbols.resolve(AppleMusicSymbols.PlayerController)
         val controller = controllerResolution.valueOrNull()
-            ?: run {
-                context.report(key, FeatureState.DEGRADED, controllerResolution.summary)
-                return
-            }
+            ?: return FeatureInstallResult.degraded(controllerResolution.summary)
         val controllerHooks = installControllerHooks(controller)
         val navigationMenuResolution = context.symbols.resolve(AppleMusicSymbols.StackedNavigationMenu)
         val navigationMenuMeasureHooks = installStackedBottomNavigationMenuMeasureHook(
@@ -173,9 +168,7 @@ internal class DualPaneFeature : FeatureHook {
             lyricsMetricsHooks == 0 ||
             lyricsTypographyHooks == 0
         ) {
-            context.report(
-                key,
-                FeatureState.DEGRADED,
+            return FeatureInstallResult.degraded(
                 "Installed controller=$controllerHooks chrome=$chromeHooks lyricsChrome=$lyricsChromeHooks " +
                     "lyricsMetrics=$lyricsMetricsHooks lyricsTypography=$lyricsTypographyHooks hook(s); " +
                     listOf(
@@ -186,11 +179,8 @@ internal class DualPaneFeature : FeatureHook {
                     ).filterNot { it is TargetResolution.Found<*> }
                         .joinToString { it.summary },
             )
-            return
         }
-        context.report(
-            key,
-            FeatureState.ACTIVE,
+        return FeatureInstallResult.active(
             "Installed player controller and chrome hooks; " +
                 "stackedNavigationMenuMeasure=$navigationMenuMeasureHooks; " +
                 controllerResolution.summary,

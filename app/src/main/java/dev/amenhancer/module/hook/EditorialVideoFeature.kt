@@ -2,7 +2,6 @@ package dev.amenhancer.module.hook
 
 import dev.amenhancer.module.hook.ModernMethodHook as XC_MethodHook
 import dev.amenhancer.module.ModuleConstants
-import dev.amenhancer.module.model.FeatureState
 
 /**
  * Mirrors the modified APK's c1.e(...) prefix, but only while Apple Music's
@@ -13,16 +12,13 @@ import dev.amenhancer.module.model.FeatureState
 internal class EditorialVideoFeature : FeatureHook {
     override val key: String = ModuleConstants.FEATURE_EDITORIAL_VIDEO
 
-    override fun isEnabled(context: HookContext): Boolean =
-        context.config.settings().disableEditorialVideoOnTablet
-
-    override fun install(context: HookContext) {
+    override fun install(context: HookContext): FeatureInstallResult {
+        if (!context.config.settings().disableEditorialVideoOnTablet) {
+            return FeatureInstallResult.disabled()
+        }
         val resolution = context.symbols.resolve(AppleMusicSymbols.EditorialVideoUrlSelector)
         val selector = resolution.valueOrNull()
-            ?: run {
-                context.report(key, FeatureState.DEGRADED, resolution.summary)
-                return
-            }
+            ?: return FeatureInstallResult.degraded(resolution.summary)
 
         ModernXposedRuntime.hookMethod(selector, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
@@ -30,9 +26,7 @@ internal class EditorialVideoFeature : FeatureHook {
                 param.result = null
             }
         })
-        context.report(
-            key,
-            FeatureState.ACTIVE,
+        return FeatureInstallResult.active(
             "Installed tablet-landscape Editorial Video URL suppression on " +
                 "${selector.declaringClass.name}.${selector.name}; ${resolution.summary}",
         )

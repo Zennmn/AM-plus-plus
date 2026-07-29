@@ -13,6 +13,7 @@ data class ModuleSettings(
 enum class FeatureState {
     ACTIVE,
     DISABLED,
+    UNSUPPORTED,
     DEGRADED,
     FAILED,
 }

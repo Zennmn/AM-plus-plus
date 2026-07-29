@@ -28,16 +28,12 @@ internal object HookCoordinator {
             PhoneLiquidGlassFeature(),
             FutureLyricBlurFeature(),
         ).forEach { feature ->
-            runCatching {
-                if (!feature.isEnabled(context)) {
-                    context.report(feature.key, FeatureState.DISABLED, "Disabled in module settings")
-                } else {
-                    feature.install(context)
+            val result = runCatching { feature.install(context) }
+                .getOrElse { error ->
+                    ModernXposedRuntime.log("${feature.key} failed", error)
+                    FeatureInstallResult.failed(error.shortMessage())
                 }
-            }.onFailure { error ->
-                ModernXposedRuntime.log("${feature.key} failed", error)
-                context.report(feature.key, FeatureState.FAILED, error.shortMessage())
-            }
+            context.report(feature.key, result)
         }
     }
 
@@ -63,18 +59,43 @@ internal data class HookContext(
     val symbols: TargetSymbolResolver,
     val targetVersion: String,
 ) {
-    fun report(feature: String, state: FeatureState, message: String) {
-        config.reportHealth(FeatureHealth(feature, state, message, targetVersion))
+    fun report(feature: String, result: FeatureInstallResult) {
+        config.reportHealth(FeatureHealth(feature, result.state, result.message, targetVersion))
     }
 }
 
 private fun Throwable.shortMessage(): String = buildString {
-    append(javaClass.simpleName)
+    append(javaClass.simpleName.ifBlank { javaClass.name })
     message?.takeIf(String::isNotBlank)?.let { append(": ").append(it.take(180)) }
 }
 
 internal interface FeatureHook {
     val key: String
-    fun isEnabled(context: HookContext): Boolean
-    fun install(context: HookContext)
+    fun install(context: HookContext): FeatureInstallResult
+}
+
+internal class FeatureInstallResult private constructor(
+    val state: FeatureState,
+    val message: String,
+) {
+    init {
+        require(message.isNotBlank()) { "Feature install diagnostic must not be blank" }
+    }
+
+    companion object {
+        fun active(message: String): FeatureInstallResult =
+            FeatureInstallResult(FeatureState.ACTIVE, message)
+
+        fun disabled(message: String = "Disabled in module settings"): FeatureInstallResult =
+            FeatureInstallResult(FeatureState.DISABLED, message)
+
+        fun unsupported(message: String): FeatureInstallResult =
+            FeatureInstallResult(FeatureState.UNSUPPORTED, message)
+
+        fun degraded(message: String): FeatureInstallResult =
+            FeatureInstallResult(FeatureState.DEGRADED, message)
+
+        fun failed(message: String): FeatureInstallResult =
+            FeatureInstallResult(FeatureState.FAILED, message)
+    }
 }

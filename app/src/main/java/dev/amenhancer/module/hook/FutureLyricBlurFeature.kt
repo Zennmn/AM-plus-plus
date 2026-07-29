@@ -2,19 +2,15 @@ package dev.amenhancer.module.hook
 
 import android.os.Build
 import dev.amenhancer.module.ModuleConstants
-import dev.amenhancer.module.model.FeatureState
 
 /** Module setting and health adapter around the upstream AMLyricBlur core. */
 internal class FutureLyricBlurFeature : FeatureHook {
     override val key: String = ModuleConstants.FEATURE_FUTURE_BLUR
 
-    override fun isEnabled(context: HookContext): Boolean =
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && context.config.settings().futureBlurEnabled
-
-    override fun install(context: HookContext) {
+    override fun install(context: HookContext): FeatureInstallResult {
+        if (!context.config.settings().futureBlurEnabled) return FeatureInstallResult.disabled()
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-            context.report(key, FeatureState.DISABLED, "Requires Android 12 or newer")
-            return
+            return FeatureInstallResult.unsupported("Requires Android 12 or newer")
         }
 
         val recyclerResolution = context.symbols.resolve(AppleMusicSymbols.RecyclerView)
@@ -22,14 +18,11 @@ internal class FutureLyricBlurFeature : FeatureHook {
         val recyclerClass = recyclerResolution.valueOrNull()
         val fragmentClass = fragmentResolution.valueOrNull()
         if (recyclerClass == null || fragmentClass == null) {
-            context.report(
-                key,
-                FeatureState.DEGRADED,
+            return FeatureInstallResult.degraded(
                 listOf(recyclerResolution, fragmentResolution)
                     .filterNot { it is TargetResolution.Found<*> }
                     .joinToString { it.summary },
             )
-            return
         }
 
         val vectorResolution = context.symbols.resolve(AppleMusicSymbols.LyricsLineVector)
@@ -45,12 +38,9 @@ internal class FutureLyricBlurFeature : FeatureHook {
             lyricsViewModelClass = viewModelResolution.valueOrNull(),
         )
         if (targets.highlightCallback == null && targets.lyricsViewModelClass == null) {
-            context.report(
-                key,
-                FeatureState.DEGRADED,
+            return FeatureInstallResult.degraded(
                 listOf(callbackResolution, viewModelResolution).joinToString { it.summary },
             )
-            return
         }
 
         OpenSourceLyricBlurPort().install(targets)
@@ -61,14 +51,14 @@ internal class FutureLyricBlurFeature : FeatureHook {
             viewModelResolution,
         )
             .filterNot { it is TargetResolution.Found<*> }
-        context.report(
-            key,
-            if (optionalFailures.isEmpty()) FeatureState.ACTIVE else FeatureState.DEGRADED,
-            if (optionalFailures.isEmpty()) {
+        return if (optionalFailures.isEmpty()) {
+            FeatureInstallResult.active(
                 "a23bc/amlyricblur core installed; ${fragmentResolution.summary}; ${callbackResolution.summary}"
-            } else {
+            )
+        } else {
+            FeatureInstallResult.degraded(
                 "Lyric blur installed with fallback hooks; " + optionalFailures.joinToString { it.summary }
-            },
-        )
+            )
+        }
     }
 }

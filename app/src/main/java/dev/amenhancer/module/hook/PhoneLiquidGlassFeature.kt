@@ -34,7 +34,6 @@ import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
 import dev.amenhancer.module.ModuleConstants
 import dev.amenhancer.module.config.TargetConfigClient
-import dev.amenhancer.module.model.FeatureState
 import eightbitlab.com.blurview.BlurTarget
 import eightbitlab.com.blurview.BlurView
 import java.util.Collections
@@ -44,13 +43,9 @@ import java.util.WeakHashMap
 internal class PhoneLiquidGlassFeature : FeatureHook {
     override val key: String = ModuleConstants.FEATURE_PHONE_LIQUID_GLASS
 
-    override fun isEnabled(context: HookContext): Boolean =
-        context.config.settings().phoneLiquidGlassEnabled
-
-    override fun install(context: HookContext) {
-        context.report(
-            key,
-            FeatureState.DEGRADED,
+    override fun install(context: HookContext): FeatureInstallResult {
+        if (!context.config.settings().phoneLiquidGlassEnabled) return FeatureInstallResult.disabled()
+        return FeatureInstallResult.degraded(
             "WIP: resource hooks registered; a single-frame bottom-chrome flicker remains possible during cold start or player collapse",
         )
     }

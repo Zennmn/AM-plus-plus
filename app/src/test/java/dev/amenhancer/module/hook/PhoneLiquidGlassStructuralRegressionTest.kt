@@ -137,7 +137,7 @@ class PhoneLiquidGlassStructuralRegressionTest {
         assertTrue(constants.contains("FEATURE_PHONE_LIQUID_GLASS"))
         assertTrue(coordinator.contains("PhoneLiquidGlassFeature()"))
         val glass = source("dev/amenhancer/module/hook/PhoneLiquidGlassFeature.kt")
-        assertTrue(glass.contains("FeatureState.DEGRADED"))
+        assertTrue(glass.contains("FeatureInstallResult.degraded"))
         assertTrue(glass.contains("WIP: resource hooks registered"))
     }
 }
