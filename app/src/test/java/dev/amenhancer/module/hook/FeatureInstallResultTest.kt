@@ -35,21 +35,30 @@ class FeatureInstallResultTest {
     }
 
     @Test
-    fun `feature seam returns one result and coordinator owns reporting`() {
-        val coordinator = source("dev/amenhancer/module/hook/HookCoordinator.kt")
-        val featureSources = listOf(
-            "DualPaneFeature.kt",
-            "EditorialVideoFeature.kt",
-            "PhoneLiquidGlassFeature.kt",
-            "FutureLyricBlurFeature.kt",
-        ).map { source("dev/amenhancer/module/hook/$it") }
+    fun `entry delegates both installation phases to the complete module`() {
+        val entry = source("dev/amenhancer/module/hook/HookEntry.kt")
+        val installation = source("dev/amenhancer/module/hook/FeatureInstallation.kt")
 
-        assertTrue(coordinator.contains("fun install(context: HookContext): FeatureInstallResult"))
-        assertFalse(coordinator.contains("fun isEnabled(context: HookContext)"))
-        assertTrue(coordinator.contains("context.report(feature.key, result)"))
-        featureSources.forEach { feature ->
-            assertFalse(feature.contains("context.report("))
-        }
+        assertTrue(entry.contains("FeatureInstallation.install(config, param.classLoader)"))
+        listOf(
+            "DualPaneResourceHook.install",
+            "PhoneLiquidGlassResourceHook.install",
+            "LayoutInflationRegistry.install",
+            "Application::class.java",
+            "FeatureHook",
+        ).forEach { leaked -> assertFalse("entry leaked $leaked", entry.contains(leaked)) }
+
+        val orderedFeatures = listOf(
+            "DualPaneFeature()",
+            "EditorialVideoFeature()",
+            "PhoneLiquidGlassFeature()",
+            "FutureLyricBlurFeature()",
+        ).map(installation::indexOf)
+        assertTrue(orderedFeatures.all { it >= 0 })
+        assertEquals(orderedFeatures.sorted(), orderedFeatures)
+        assertTrue(installation.contains("DualPaneResourceHook.install()"))
+        assertTrue(installation.contains("PhoneLiquidGlassResourceHook::install"))
+        assertTrue(installation.contains("LayoutInflationRegistry::install"))
     }
 
     @Test

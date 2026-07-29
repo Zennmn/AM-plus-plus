@@ -86,6 +86,7 @@ app/build/outputs/apk/release/app-release.apk
 - 各项功能独立定位、独立降级；某一组 Hook 定位失败时不应阻止其他功能加载。
 - 平板判定直接读取 Apple Music 的 `bool/is_tablet`，不使用模块自定义屏幕宽度阈值。
 - 双向歌词模糊核心来自 [a23bc/amlyricblur](https://github.com/a23bc/amlyricblur)，模块负责版本定位、配置开关、libxposed API 102 接入与渲染热路径优化。
+- 适配新的 Apple Music 版本时，请遵循 [Apple Music 新版本适配手册](docs/apple-music-target-adaptation.md)，按精确 profile、独立能力降级和同签名真机 QA 流程验证。
 
 ## 隐私与安全
 
@@ -98,6 +99,7 @@ app/src/main/java/      模块入口、配置与功能实现
 app/src/main/resources/ libxposed 模块元数据和作用域
 app/src/test/           JVM 与结构回归测试
 docs/adr/               当前架构决策记录
+docs/apple-music-target-adaptation.md  Apple Music 新版本适配手册
 scripts/                可选的真机回归与录屏分析脚本
 ```
 

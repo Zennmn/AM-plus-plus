@@ -50,11 +50,9 @@ class PhoneLiquidGlassStructuralRegressionTest {
 
     @Test
     fun `registers both target layouts without entering the tablet path`() {
-        val entry = source("dev/amenhancer/module/hook/HookEntry.kt")
         val glass = source("dev/amenhancer/module/hook/PhoneLiquidGlassFeature.kt")
-        val tablet = source("dev/amenhancer/module/hook/DualPaneFeature.kt")
+        val tablet = source("dev/amenhancer/module/hook/AppleMusicDualPaneTarget.kt")
 
-        assertTrue(entry.contains("PhoneLiquidGlassResourceHook.install(config)"))
         assertTrue(glass.contains("\"bottom_navigation\""))
         assertTrue(glass.contains("\"mini_player\""))
         assertTrue(tablet.contains("fun isOfficialTablet(context: Context): Boolean"))
@@ -128,14 +126,12 @@ class PhoneLiquidGlassStructuralRegressionTest {
         val settingsBuild = projectFile("settings.gradle.kts")
         val notices = projectFile("THIRD_PARTY_NOTICES.md")
         val constants = source("dev/amenhancer/module/ModuleConstants.kt")
-        val coordinator = source("dev/amenhancer/module/hook/HookCoordinator.kt")
 
         assertTrue(appBuild.contains("com.github.Dimezis:BlurView:version-3.2.0"))
         assertTrue(settingsBuild.contains("https://jitpack.io"))
         assertTrue(notices.contains("Dimezis/BlurView"))
         assertTrue(notices.contains("Apache License, Version 2.0"))
         assertTrue(constants.contains("FEATURE_PHONE_LIQUID_GLASS"))
-        assertTrue(coordinator.contains("PhoneLiquidGlassFeature()"))
         val glass = source("dev/amenhancer/module/hook/PhoneLiquidGlassFeature.kt")
         assertTrue(glass.contains("FeatureInstallResult.degraded"))
         assertTrue(glass.contains("WIP: resource hooks registered"))

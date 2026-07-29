@@ -13,52 +13,6 @@ internal class FutureLyricBlurFeature : FeatureHook {
             return FeatureInstallResult.unsupported("Requires Android 12 or newer")
         }
 
-        val recyclerResolution = context.symbols.resolve(AppleMusicSymbols.RecyclerView)
-        val fragmentResolution = context.symbols.resolve(AppleMusicSymbols.LyricsFragment)
-        val recyclerClass = recyclerResolution.valueOrNull()
-        val fragmentClass = fragmentResolution.valueOrNull()
-        if (recyclerClass == null || fragmentClass == null) {
-            return FeatureInstallResult.degraded(
-                listOf(recyclerResolution, fragmentResolution)
-                    .filterNot { it is TargetResolution.Found<*> }
-                    .joinToString { it.summary },
-            )
-        }
-
-        val vectorResolution = context.symbols.resolve(AppleMusicSymbols.LyricsLineVector)
-        val sessionResolution = context.symbols.resolve(AppleMusicSymbols.LyricsSessionProcessor)
-        val callbackResolution = context.symbols.resolve(AppleMusicSymbols.LyricsHighlightCallback)
-        val viewModelResolution = context.symbols.resolve(AppleMusicSymbols.LyricsViewModel)
-        val targets = LyricBlurTargets(
-            recyclerViewClass = recyclerClass,
-            lyricsFragmentClass = fragmentClass,
-            lyricsLineVectorClass = vectorResolution.valueOrNull(),
-            sessionProcessor = sessionResolution.valueOrNull(),
-            highlightCallback = callbackResolution.valueOrNull(),
-            lyricsViewModelClass = viewModelResolution.valueOrNull(),
-        )
-        if (targets.highlightCallback == null && targets.lyricsViewModelClass == null) {
-            return FeatureInstallResult.degraded(
-                listOf(callbackResolution, viewModelResolution).joinToString { it.summary },
-            )
-        }
-
-        OpenSourceLyricBlurPort().install(targets)
-        val optionalFailures = listOf(
-            vectorResolution,
-            sessionResolution,
-            callbackResolution,
-            viewModelResolution,
-        )
-            .filterNot { it is TargetResolution.Found<*> }
-        return if (optionalFailures.isEmpty()) {
-            FeatureInstallResult.active(
-                "a23bc/amlyricblur core installed; ${fragmentResolution.summary}; ${callbackResolution.summary}"
-            )
-        } else {
-            FeatureInstallResult.degraded(
-                "Lyric blur installed with fallback hooks; " + optionalFailures.joinToString { it.summary }
-            )
-        }
+        return context.target.bidirectionalLyricBlur.install().toFeatureInstallResult()
     }
 }

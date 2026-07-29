@@ -16,10 +16,29 @@ import org.junit.Test
 class DualPaneStructuralRegressionTest {
     private val source: String by lazy {
         sequenceOf(
+            File("src/main/java/dev/amenhancer/module/hook/AppleMusicDualPaneTarget.kt"),
+            File("app/src/main/java/dev/amenhancer/module/hook/AppleMusicDualPaneTarget.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+            ?: error("AppleMusicDualPaneTarget.kt was not found from the unit-test working directory")
+    }
+    private val featureSource: String by lazy {
+        sequenceOf(
             File("src/main/java/dev/amenhancer/module/hook/DualPaneFeature.kt"),
             File("app/src/main/java/dev/amenhancer/module/hook/DualPaneFeature.kt"),
         ).firstOrNull(File::isFile)?.readText()
             ?: error("DualPaneFeature.kt was not found from the unit-test working directory")
+    }
+
+    @Test
+    fun `keeps target internals behind the dual pane capability seam`() {
+        assertTrue(source.contains("internal class AppleMusicDualPaneTarget("))
+        assertTrue(source.contains(") : DualPaneTarget"))
+        assertTrue(featureSource.contains("context.target.dualPane.install().toFeatureInstallResult()"))
+        assertFalse(featureSource.contains("AppleMusicSymbols"))
+        assertFalse(featureSource.contains("TargetResolution"))
+        assertFalse(featureSource.contains("Class<"))
+        assertFalse(featureSource.contains("java.lang.reflect"))
+        assertFalse(featureSource.contains("LayoutInflationRegistry"))
     }
 
     @Test

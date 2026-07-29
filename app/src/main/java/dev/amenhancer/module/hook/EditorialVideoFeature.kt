@@ -1,6 +1,5 @@
 package dev.amenhancer.module.hook
 
-import dev.amenhancer.module.hook.ModernMethodHook as XC_MethodHook
 import dev.amenhancer.module.ModuleConstants
 
 /**
@@ -16,19 +15,6 @@ internal class EditorialVideoFeature : FeatureHook {
         if (!context.config.settings().disableEditorialVideoOnTablet) {
             return FeatureInstallResult.disabled()
         }
-        val resolution = context.symbols.resolve(AppleMusicSymbols.EditorialVideoUrlSelector)
-        val selector = resolution.valueOrNull()
-            ?: return FeatureInstallResult.degraded(resolution.summary)
-
-        ModernXposedRuntime.hookMethod(selector, object : XC_MethodHook() {
-            override fun beforeHookedMethod(param: MethodHookParam) {
-                if (!TabletModeQualifier.isOfficialTabletLandscape(context.application)) return
-                param.result = null
-            }
-        })
-        return FeatureInstallResult.active(
-            "Installed tablet-landscape Editorial Video URL suppression on " +
-                "${selector.declaringClass.name}.${selector.name}; ${resolution.summary}",
-        )
+        return context.target.editorialVideo.install().toFeatureInstallResult()
     }
 }

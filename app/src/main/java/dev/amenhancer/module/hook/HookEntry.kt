@@ -1,6 +1,5 @@
 package dev.amenhancer.module.hook
 
-import android.app.Application
 import android.util.Log
 import dev.amenhancer.module.ModuleConstants
 import dev.amenhancer.module.config.TargetConfigClient
@@ -31,20 +30,6 @@ class HookEntry : XposedModule() {
             getRemotePreferences(ModuleConstants.REMOTE_PREFERENCES_GROUP),
         )
 
-        DualPaneResourceHook.install()
-        PhoneLiquidGlassResourceHook.install(config)
-        LayoutInflationRegistry.install()
-
-        val targetClassLoader = param.classLoader
-        val onCreate = Application::class.java.getDeclaredMethod("onCreate")
-        ModernXposedRuntime.hookMethod(onCreate, object : ModernMethodHook() {
-            override fun afterHookedMethod(param: MethodHookParam) {
-                HookCoordinator.install(
-                    param.thisObject as Application,
-                    targetClassLoader,
-                    config,
-                )
-            }
-        })
+        FeatureInstallation.install(config, param.classLoader)
     }
 }

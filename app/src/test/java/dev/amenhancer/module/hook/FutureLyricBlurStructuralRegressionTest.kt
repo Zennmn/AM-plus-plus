@@ -10,11 +10,17 @@ class FutureLyricBlurStructuralRegressionTest {
     private val portSource: String by lazy {
         sourceFile("OpenSourceLyricBlurPort.kt").readText()
     }
+    private val featureSource: String by lazy {
+        sourceFile("FutureLyricBlurFeature.kt").readText()
+    }
+    private val targetSource: String by lazy {
+        sourceFile("AppleMusicBidirectionalLyricBlurTarget.kt").readText()
+    }
     private val typographySource: String by lazy {
         sourceFile("TabletLyricTypography.kt").readText()
     }
     private val dualPaneSource: String by lazy {
-        sourceFile("DualPaneFeature.kt").readText()
+        sourceFile("AppleMusicDualPaneTarget.kt").readText()
     }
     private val rendererSource: String by lazy {
         sourceFile("LyricBlurRenderer.kt").readText()
@@ -65,17 +71,9 @@ class FutureLyricBlurStructuralRegressionTest {
     }
 
     @Test
-    fun `view model fallback cannot accumulate a previous highlight beside the current line`() {
-        assertFalse(portSource.contains("highlightSession.add(lineId)"))
-        assertTrue(portSource.contains("if (!highlightHookInstalled && !isBg && lineId > 0)"))
-        assertTrue(portSource.contains("highlightSession.replace(lineId)"))
-    }
-
-    @Test
     fun `fragment view destruction releases only the matching lyric view session`() {
-        assertTrue(portSource.contains("findLifecycleDeclaringClass(cls, \"onDestroyView\")"))
-        assertTrue(portSource.contains("hookAllMethods(destroyDeclaringClass, \"onDestroyView\""))
-        assertTrue(portSource.contains("takeIf(cls::isInstance)"))
+        assertTrue(targetSource.contains("findLifecycleDeclaringClass(fragmentClass, \"onDestroyView\")"))
+        assertTrue(targetSource.contains("runtime.onLyricsViewDestroyed(owner)"))
         assertTrue(portSource.contains("if (owner !== lyricsFragmentOwner) return"))
         assertTrue(portSource.contains("scrollHandler.removeCallbacks(restoreBlurRunnable)"))
         assertTrue(portSource.contains("blurRenderer.clearAll()"))
@@ -103,12 +101,17 @@ class FutureLyricBlurStructuralRegressionTest {
     }
 
     @Test
-    fun `lyric port consumes shared target symbols instead of rescanning the base apk`() {
-        assertTrue(portSource.contains("fun install(targets: LyricBlurTargets)"))
-        assertTrue(portSource.contains("targets.sessionProcessor"))
-        assertTrue(portSource.contains("targets.highlightCallback"))
+    fun `feature and runtime stay behind the semantic target seam`() {
+        assertTrue(featureSource.contains("context.target.bidirectionalLyricBlur.install()"))
+        listOf("Class<", "Method", "Field", "TargetResolution", "context.symbols").forEach { forbidden ->
+            assertFalse("feature leaked $forbidden", featureSource.contains(forbidden))
+        }
+        listOf("Class<", "java.lang.reflect", "ModernXposedRuntime", "TargetResolution").forEach { forbidden ->
+            assertFalse("runtime leaked $forbidden", portSource.contains(forbidden))
+        }
         assertFalse(portSource.contains("DexFile("))
         assertFalse(portSource.contains("sourceDir"))
+        assertTrue(targetSource.contains("view.javaClass == recyclerViewClass"))
     }
 
     private fun sourceFile(name: String): File = sequenceOf(

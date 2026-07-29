@@ -38,7 +38,7 @@ class EditorialVideoFeatureStructuralRegressionTest {
     @Test
     fun `matches only the modified apk editorial video url selector contract`() {
         val symbols = source("dev/amenhancer/module/hook/TargetSymbols.kt")
-        val feature = source("dev/amenhancer/module/hook/EditorialVideoFeature.kt")
+        val target = source("dev/amenhancer/module/hook/TargetAdaptation.kt")
 
         assertTrue(symbols.contains("com.apple.android.music.player.c1"))
         assertTrue(symbols.contains("com.apple.android.music.model.Song"))
@@ -46,31 +46,34 @@ class EditorialVideoFeatureStructuralRegressionTest {
         assertTrue(symbols.contains("EditorialVideo\\\$Flavor"))
         assertTrue(symbols.contains("method.parameterTypes[2].isArray"))
         assertTrue(symbols.contains("method.returnType == String::class.java"))
-        assertTrue(feature.contains("AppleMusicSymbols.EditorialVideoUrlSelector"))
-        assertFalse(feature.contains("TextureView"))
+        assertTrue(target.contains("AppleMusicSymbols.EditorialVideoUrlSelector"))
+        assertFalse(target.contains("TextureView"))
     }
 
     @Test
     fun `suppresses only in official tablet landscape without consulting dual pane`() {
-        val qualifier = source("dev/amenhancer/module/hook/DualPaneFeature.kt")
+        val qualifier = source("dev/amenhancer/module/hook/AppleMusicDualPaneTarget.kt")
         val feature = source("dev/amenhancer/module/hook/EditorialVideoFeature.kt")
+        val target = source("dev/amenhancer/module/hook/TargetAdaptation.kt")
 
         assertTrue(qualifier.contains("fun isOfficialTabletLandscape(context: Context): Boolean"))
-        assertTrue(feature.contains("TabletModeQualifier.isOfficialTabletLandscape(context.application)"))
-        assertTrue(feature.contains("param.result = null"))
+        assertTrue(target.contains("TabletModeQualifier.isOfficialTabletLandscape(application)"))
+        assertTrue(target.contains("param.result = null"))
         assertFalse(feature.contains("dualPaneEnabled"))
-        assertFalse(feature.contains("TabletModeQualifier.isEligible"))
+        assertFalse(target.contains("TabletModeQualifier.isEligible"))
     }
 
     @Test
     fun `installs editorial suppression as an independent reported feature`() {
         val constants = source("dev/amenhancer/module/ModuleConstants.kt")
-        val coordinator = source("dev/amenhancer/module/hook/HookCoordinator.kt")
         val feature = source("dev/amenhancer/module/hook/EditorialVideoFeature.kt")
 
         assertTrue(constants.contains("FEATURE_EDITORIAL_VIDEO"))
-        assertTrue(coordinator.contains("EditorialVideoFeature()"))
         assertTrue(feature.contains("ModuleConstants.FEATURE_EDITORIAL_VIDEO"))
         assertTrue(feature.contains("settings().disableEditorialVideoOnTablet"))
+        assertTrue(feature.contains("context.target.editorialVideo.install()"))
+        listOf("Class<", "Method", "Field", "TargetResolution", "AppleMusicSymbols").forEach {
+            forbidden -> assertFalse("feature leaked $forbidden", feature.contains(forbidden))
+        }
     }
 }

@@ -14,10 +14,16 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.widget.ImageView
-import dev.amenhancer.module.hook.ModernMethodHook as XC_MethodHook
-import java.lang.reflect.Method
 
-internal class OpenSourceLyricBlurPort {
+/**
+ * Target-independent AMLyricBlur runtime.
+ *
+ * Apple Music discovery and hooks live in [AppleMusicBidirectionalLyricBlurTarget]. This class
+ * only consumes semantic lyric events and the two view accessors required by the renderer.
+ */
+internal class OpenSourceLyricBlurPort(
+    private val targetAccess: LyricBlurTargetAccess,
+) : LyricBlurRuntime {
     companion object {
         private const val TAG = "AMLyricBlur"
         private const val SCROLL_RESTORE_DELAY_MS = 1_000L
@@ -27,8 +33,6 @@ internal class OpenSourceLyricBlurPort {
     private val highlightSession = LyricHighlightSession()
     private val blurRenderer = LyricBlurRenderer()
 
-    private var getAdapterPositionFromView: Method? = null
-
     private var recyclerView: Any? = null
     private var lyricsRootView: View? = null
     private var lyricsFragmentOwner: Any? = null
@@ -37,7 +41,6 @@ internal class OpenSourceLyricBlurPort {
     private var observedScrollView: View? = null
     private var scrollChangedListener: ViewTreeObserver.OnScrollChangedListener? = null
     private var isUserScrolling = false
-    private var highlightHookInstalled = false
     private val scrollHandler by lazy { Handler(Looper.getMainLooper()) }
     private var blurFrameScheduled = false
     private val blurFrameCallback = Choreographer.FrameCallback {
@@ -49,140 +52,33 @@ internal class OpenSourceLyricBlurPort {
         isUserScrolling = false
         scheduleBlurUpdate()
     }
-    fun install(targets: LyricBlurTargets) {
-        Log.i(TAG, "install with shared target symbols")
-        initReflectionCache(targets.recyclerViewClass)
-        hookSessionProcessor(targets.sessionProcessor)
-        hookHighlightCallback(targets.highlightCallback, targets.lyricsLineVectorClass)
-        hookLyricsFragment(targets.lyricsFragmentClass)
-        hookViewModel(targets.lyricsViewModelClass)
-    }
-
-    private fun hookSessionProcessor(method: Method?) {
-        if (method == null) {
-            Log.w(TAG, "Lyric session processor symbol was unavailable")
-            return
-        }
-        try {
-            ModernXposedRuntime.hookMethod(method, object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    val songInfo = param.args.firstOrNull() ?: return
-                    if (highlightSession.enter(songInfo)) {
-                        Log.i(TAG, "Lyric session changed")
-                        scheduleBlurUpdate()
-                    }
-                }
-            })
-            Log.i(TAG, "Lyric session hook installed on ${method.name}")
-        } catch (t: Throwable) {
-            Log.e(TAG, "Lyric session hook failed", t)
-        }
-    }
-
-    private fun initReflectionCache(rvClass: Class<*>) {
-        try {
-            for (m in rvClass.declaredMethods) {
-                if (java.lang.reflect.Modifier.isStatic(m.modifiers)
-                    && m.parameterTypes.size == 1
-                    && m.parameterTypes[0] == View::class.java
-                    && m.returnType == Int::class.javaPrimitiveType
-                ) {
-                    getAdapterPositionFromView = m.apply { isAccessible = true }
-                    break
-                }
-            }
-            Log.i(TAG, "Reflection OK")
-        } catch (t: Throwable) {
-            Log.e(TAG, "Reflection failed", t)
-        }
-    }
-
-    private fun hookHighlightCallback(method: Method?, vectorClass: Class<*>?) {
-        if (highlightHookInstalled) return
-        if (method == null || vectorClass == null) {
-            Log.w(TAG, "Highlight callback symbols were unavailable")
-            return
-        }
-        Log.i(TAG, "FOUND: ${method.declaringClass.name}.${method.name}")
-        installHighlightHook(method, vectorClass)
-    }
-
-    private fun installHighlightHook(method: Method, vectorClass: Class<*>) {
-        try {
-            ModernXposedRuntime.hookMethod(method, object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    try {
-                        val vector = param.args.firstOrNull { arg ->
-                            arg != null && vectorClass.isInstance(arg)
-                        } ?: return
-                        val sizeMethod = vectorClass.getMethod("size")
-                        val size = (sizeMethod.invoke(vector) as Long).toInt()
-                        val getMethod = vectorClass.getMethod("get", Long::class.javaPrimitiveType)
-                        val newIds = mutableSetOf<Int>()
-                        for (i in 0 until size) {
-                            try {
-                                val ptr = getMethod.invoke(vector, i.toLong()) ?: continue
-                                val nativeObj = ptr.javaClass.getMethod("get").invoke(ptr) ?: continue
-                                val lineId = (
-                                    nativeObj.javaClass.getMethod("getLineId").invoke(nativeObj) as Number
-                                ).toInt()
-                                newIds.add(lineId)
-                            } catch (_: Exception) {
-                            }
-                        }
-                        highlightSession.update(newIds)
-                        scheduleBlurUpdate()
-                    } catch (t: Throwable) {
-                        Log.e(TAG, "Highlight hook error", t)
-                    }
-                }
-            })
-            highlightHookInstalled = true
-            Log.i(TAG, "Highlight hook installed on ${method.name}")
+    override fun onSessionChanged(songInfo: Any) {
+        if (highlightSession.enter(songInfo)) {
+            Log.i(TAG, "Lyric session changed")
             scheduleBlurUpdate()
-        } catch (t: Throwable) {
-            Log.e(TAG, "installHighlightHook failed", t)
         }
     }
 
-    private fun hookLyricsFragment(cls: Class<*>) {
-        try {
-            ModernXposedRuntime.hookAllMethods(cls, "onCreateView", object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    val result = param.result as? View ?: return
-                    val owner = param.thisObject ?: return
-                    bindLyricsView(owner, result)
-                    Log.i(TAG, "onCreateView hooked")
-                }
-            })
-            val destroyDeclaringClass = findLifecycleDeclaringClass(cls, "onDestroyView")
-                ?: error("onDestroyView declaration was unavailable")
-            ModernXposedRuntime.hookAllMethods(destroyDeclaringClass, "onDestroyView", object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    val owner = param.thisObject?.takeIf(cls::isInstance) ?: return
-                    releaseLyricsView(owner)
-                }
-            })
-            Log.i(TAG, "Fragment lifecycle hooks installed")
-        } catch (t: Throwable) {
-            Log.w(TAG, "Fragment hook failed: ${t.message}")
-        }
+    override fun onHighlightsChanged(lineIds: Set<Int>) {
+        highlightSession.update(lineIds)
+        scheduleBlurUpdate()
     }
 
-    private fun findLifecycleDeclaringClass(start: Class<*>, methodName: String): Class<*>? =
-        generateSequence<Class<*>>(start) { type -> type.superclass }
-            .firstOrNull { type ->
-                type.declaredMethods.any { method ->
-                    method.name == methodName && method.parameterCount == 0
-                }
-            }
+    override fun onFallbackHighlightChanged(lineId: Int) {
+        highlightSession.replace(lineId)
+        scheduleBlurUpdate()
+    }
 
-    private fun bindLyricsView(owner: Any, root: View) {
+    override fun onLyricsViewCreated(owner: Any, root: View) {
         lyricsFragmentOwner?.let(::releaseLyricsView)
         lyricsFragmentOwner = owner
         lyricsRootView = root
         recyclerDiscoveryAttempts = 0
         scheduleRecyclerViewDiscovery(root, delayMs = 500L)
+    }
+
+    override fun onLyricsViewDestroyed(owner: Any) {
+        releaseLyricsView(owner)
     }
 
     private fun releaseLyricsView(owner: Any) {
@@ -222,50 +118,6 @@ internal class OpenSourceLyricBlurPort {
         scrollHandler.postDelayed(discovery, delayMs)
     }
 
-    private fun hookViewModel(vmClass: Class<*>?) {
-        if (vmClass == null) {
-            Log.w(TAG, "VM symbol was unavailable")
-            return
-        }
-        try {
-            Log.i(TAG, "Found VM")
-
-            for (m in vmClass.declaredMethods) {
-                val p = m.parameterTypes
-                if (p.size == 4 && p[0] == Int::class.javaPrimitiveType && p[3] == Boolean::class.javaPrimitiveType) {
-                    ModernXposedRuntime.hookMethod(m, object : XC_MethodHook() {
-                        override fun beforeHookedMethod(param: MethodHookParam) {
-                            val lineId = param.args[0] as Int
-                            val isBg = param.args[3] as Boolean
-                            if (!highlightHookInstalled && !isBg && lineId > 0) {
-                                highlightSession.replace(lineId)
-                                scheduleBlurUpdate()
-                            }
-                        }
-                    })
-                }
-            }
-
-            for (m in vmClass.declaredMethods) {
-                val p = m.parameterTypes
-                if (p.size == 1 && p[0] == Int::class.javaPrimitiveType && m.returnType == Void.TYPE) {
-                    ModernXposedRuntime.hookMethod(m, object : XC_MethodHook() {
-                        override fun beforeHookedMethod(param: MethodHookParam) {
-                            val lineId = param.args[0] as Int
-                            if (lineId < 0) return
-                            if (!highlightHookInstalled) {
-                                highlightSession.replace(lineId)
-                                scheduleBlurUpdate()
-                            }
-                        }
-                    })
-                }
-            }
-        } catch (t: Throwable) {
-            Log.w(TAG, "VM hook failed: ${t.message}")
-        }
-    }
-
     private fun findRecyclerView(view: View) {
         if (recyclerView != null) return
         try {
@@ -284,7 +136,7 @@ internal class OpenSourceLyricBlurPort {
     }
 
     private fun findRVInHierarchy(view: View): Any? {
-        if (view.javaClass.name == "androidx.recyclerview.widget.RecyclerView") return view
+        if (targetAccess.isRecyclerView(view)) return view
         if (view is ViewGroup) {
             for (i in 0 until view.childCount) {
                 val result = findRVInHierarchy(view.getChildAt(i))
@@ -385,7 +237,7 @@ internal class OpenSourceLyricBlurPort {
         for (i in 0 until rv.childCount) {
             val child = rv.getChildAt(i) ?: continue
             if (!isLyricsLine(child)) continue
-            val adapterPos = getAdapterPosition(child)
+            val adapterPos = targetAccess.adapterPosition(child)
             visibleRows += child to adapterPos
         }
         val activeIds = highlightSession.snapshot()
@@ -420,36 +272,31 @@ internal class OpenSourceLyricBlurPort {
 
     private fun isLyricsLine(view: View): Boolean {
         if (view !is ViewGroup) return false
-        if (hasDescendantOfType(view, ImageView::class.java)) return false
+        if (hasImageDescendant(view)) return false
         return true
     }
 
-    private fun hasDescendantOfType(view: View, cls: Class<*>): Boolean {
-        if (cls.isInstance(view)) return true
+    private fun hasImageDescendant(view: View): Boolean {
+        if (view is ImageView) return true
         if (view is ViewGroup) {
             for (i in 0 until view.childCount) {
-                if (hasDescendantOfType(view.getChildAt(i), cls)) return true
+                if (hasImageDescendant(view.getChildAt(i))) return true
             }
         }
         return false
     }
 
-    private fun getAdapterPosition(child: View): Int {
-        val method = getAdapterPositionFromView ?: return -1
-        return try {
-            method.invoke(null, child) as Int
-        } catch (_: Throwable) {
-            -1
-        }
-    }
-
 }
 
-internal data class LyricBlurTargets(
-    val recyclerViewClass: Class<*>,
-    val lyricsFragmentClass: Class<*>,
-    val lyricsLineVectorClass: Class<*>?,
-    val sessionProcessor: Method?,
-    val highlightCallback: Method?,
-    val lyricsViewModelClass: Class<*>?,
-)
+internal interface LyricBlurRuntime {
+    fun onSessionChanged(songInfo: Any)
+    fun onHighlightsChanged(lineIds: Set<Int>)
+    fun onFallbackHighlightChanged(lineId: Int)
+    fun onLyricsViewCreated(owner: Any, root: View)
+    fun onLyricsViewDestroyed(owner: Any)
+}
+
+internal interface LyricBlurTargetAccess {
+    fun isRecyclerView(view: View): Boolean
+    fun adapterPosition(view: View): Int
+}
