@@ -14,6 +14,7 @@ class ModuleSettingsSchemaTest {
                 disableEditorialVideoOnTablet = true,
                 phoneLiquidGlassEnabled = false,
                 futureBlurEnabled = true,
+                lyricBlurRadiusOffsetPx = 0,
                 schemaVersion = ModuleConstants.CONFIG_SCHEMA_VERSION,
             ),
             ModuleSettingsSchema.decode(emptyMap<String, Any?>()),
@@ -28,6 +29,7 @@ class ModuleSettingsSchemaTest {
                 disableEditorialVideoOnTablet = false,
                 phoneLiquidGlassEnabled = true,
                 futureBlurEnabled = false,
+                lyricBlurRadiusOffsetPx = 6,
                 schemaVersion = 1,
             ),
         )
@@ -38,6 +40,7 @@ class ModuleSettingsSchemaTest {
                 "disable_editorial_video_on_tablet" to false,
                 "phone_liquid_glass_enabled" to true,
                 "future_blur_enabled" to false,
+                "lyric_blur_radius_offset_px" to 6,
                 "schema_version" to ModuleConstants.CONFIG_SCHEMA_VERSION,
             ),
             encoded,
@@ -60,6 +63,7 @@ class ModuleSettingsSchemaTest {
                 "disable_editorial_video_on_tablet" to true,
                 "phone_liquid_glass_enabled" to true,
                 "future_blur_enabled" to true,
+                "lyric_blur_radius_offset_px" to 0,
                 "schema_version" to ModuleConstants.CONFIG_SCHEMA_VERSION,
             ),
             upgraded,
@@ -101,6 +105,7 @@ class ModuleSettingsSchemaTest {
                 "disable_editorial_video_on_tablet" to false,
                 "phone_liquid_glass_enabled" to 1,
                 "future_blur_enabled" to false,
+                "lyric_blur_radius_offset_px" to "too-strong",
                 "schema_version" to "three",
             ),
         )
@@ -111,6 +116,7 @@ class ModuleSettingsSchemaTest {
                 disableEditorialVideoOnTablet = false,
                 phoneLiquidGlassEnabled = false,
                 futureBlurEnabled = false,
+                lyricBlurRadiusOffsetPx = 0,
                 schemaVersion = ModuleConstants.CONFIG_SCHEMA_VERSION,
             ),
             decoded,
@@ -125,5 +131,21 @@ class ModuleSettingsSchemaTest {
         )
 
         assertEquals(null, upgraded)
+    }
+
+    @Test
+    fun `blur radius offset is clamped to the supported range`() {
+        assertEquals(
+            ModuleSettings.MAX_LYRIC_BLUR_RADIUS_OFFSET_PX,
+            ModuleSettingsSchema.decode(
+                mapOf("lyric_blur_radius_offset_px" to 99),
+            ).lyricBlurRadiusOffsetPx,
+        )
+        assertEquals(
+            ModuleSettings.MIN_LYRIC_BLUR_RADIUS_OFFSET_PX,
+            ModuleSettingsSchema.decode(
+                mapOf("lyric_blur_radius_offset_px" to -99),
+            ).lyricBlurRadiusOffsetPx,
+        )
     }
 }

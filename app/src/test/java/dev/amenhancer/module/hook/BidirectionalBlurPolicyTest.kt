@@ -76,7 +76,17 @@ class BidirectionalBlurPolicyTest {
         assertEquals(12, BidirectionalBlurPolicy.quantize(12.49f))
         assertEquals(13, BidirectionalBlurPolicy.quantize(12.5f))
         assertEquals(20, BidirectionalBlurPolicy.quantize(20f))
-        assertEquals(22, BidirectionalBlurPolicy.quantize(25f))
+        assertEquals(25, BidirectionalBlurPolicy.quantize(25f))
+        assertEquals(32, BidirectionalBlurPolicy.quantize(40f))
+    }
+
+    @Test
+    fun `global offset adjusts nonzero focus radii while highlighted rows stay clear`() {
+        assertEquals(18f, BidirectionalBlurPolicy.applyRadiusOffset(8f, 10), FLOAT_TOLERANCE)
+        assertEquals(3f, BidirectionalBlurPolicy.applyRadiusOffset(13f, -10), FLOAT_TOLERANCE)
+        assertEquals(0f, BidirectionalBlurPolicy.applyRadiusOffset(8f, -10), FLOAT_TOLERANCE)
+        assertEquals(32f, BidirectionalBlurPolicy.applyRadiusOffset(22f, 10), FLOAT_TOLERANCE)
+        assertEquals(0f, BidirectionalBlurPolicy.applyRadiusOffset(0f, 10), FLOAT_TOLERANCE)
     }
 
     @Test

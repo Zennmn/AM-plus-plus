@@ -23,6 +23,7 @@ import android.widget.ImageView
  */
 internal class OpenSourceLyricBlurPort(
     private val targetAccess: LyricBlurTargetAccess,
+    private val blurRadiusOffsetPx: Int = 0,
 ) : LyricBlurRuntime {
     companion object {
         private const val TAG = "AMLyricBlur"
@@ -249,7 +250,10 @@ internal class OpenSourceLyricBlurPort(
         val targets = LinkedHashMap<View, Float>(visibleRows.size)
         visibleRows.forEach { (child, adapterPos) ->
             val focusBlur = if (includeFocus) {
-                BidirectionalBlurPolicy.targetRadius(adapterPos, effectiveIds)
+                BidirectionalBlurPolicy.applyRadiusOffset(
+                    radius = BidirectionalBlurPolicy.targetRadius(adapterPos, effectiveIds),
+                    offsetPx = blurRadiusOffsetPx,
+                )
             } else {
                 0f
             }

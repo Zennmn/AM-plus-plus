@@ -7,8 +7,14 @@ data class ModuleSettings(
     val disableEditorialVideoOnTablet: Boolean = true,
     val phoneLiquidGlassEnabled: Boolean = false,
     val futureBlurEnabled: Boolean = true,
+    val lyricBlurRadiusOffsetPx: Int = 0,
     val schemaVersion: Int = ModuleConstants.CONFIG_SCHEMA_VERSION,
-)
+) {
+    companion object {
+        const val MIN_LYRIC_BLUR_RADIUS_OFFSET_PX = -10
+        const val MAX_LYRIC_BLUR_RADIUS_OFFSET_PX = 10
+    }
+}
 
 enum class FeatureState {
     ACTIVE,

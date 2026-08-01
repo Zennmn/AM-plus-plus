@@ -15,6 +15,11 @@ internal object ModuleSettingsSchema {
             default = false,
         ),
         futureBlurEnabled = values.boolean(KEY_FUTURE_BLUR, default = true),
+        lyricBlurRadiusOffsetPx = values.number(KEY_LYRIC_BLUR_RADIUS_OFFSET)
+            ?.coerceIn(
+                ModuleSettings.MIN_LYRIC_BLUR_RADIUS_OFFSET_PX,
+                ModuleSettings.MAX_LYRIC_BLUR_RADIUS_OFFSET_PX,
+            ) ?: 0,
         schemaVersion = values.number(KEY_SCHEMA_VERSION)
             ?: ModuleConstants.CONFIG_SCHEMA_VERSION,
     )
@@ -24,6 +29,10 @@ internal object ModuleSettingsSchema {
         KEY_DISABLE_EDITORIAL_VIDEO_ON_TABLET to settings.disableEditorialVideoOnTablet,
         KEY_PHONE_LIQUID_GLASS to settings.phoneLiquidGlassEnabled,
         KEY_FUTURE_BLUR to settings.futureBlurEnabled,
+        KEY_LYRIC_BLUR_RADIUS_OFFSET to settings.lyricBlurRadiusOffsetPx.coerceIn(
+            ModuleSettings.MIN_LYRIC_BLUR_RADIUS_OFFSET_PX,
+            ModuleSettings.MAX_LYRIC_BLUR_RADIUS_OFFSET_PX,
+        ),
         KEY_SCHEMA_VERSION to ModuleConstants.CONFIG_SCHEMA_VERSION,
     )
 
@@ -49,6 +58,7 @@ internal object ModuleSettingsSchema {
         KEY_DISABLE_EDITORIAL_VIDEO_ON_TABLET,
         KEY_PHONE_LIQUID_GLASS,
         KEY_FUTURE_BLUR,
+        KEY_LYRIC_BLUR_RADIUS_OFFSET,
     )
 
     private const val KEY_DUAL_PANE = "dual_pane_enabled"
@@ -56,5 +66,6 @@ internal object ModuleSettingsSchema {
         "disable_editorial_video_on_tablet"
     private const val KEY_PHONE_LIQUID_GLASS = "phone_liquid_glass_enabled"
     private const val KEY_FUTURE_BLUR = "future_blur_enabled"
+    private const val KEY_LYRIC_BLUR_RADIUS_OFFSET = "lyric_blur_radius_offset_px"
     private const val KEY_SCHEMA_VERSION = "schema_version"
 }

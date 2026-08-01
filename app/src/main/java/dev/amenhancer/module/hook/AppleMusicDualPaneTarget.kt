@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import dev.amenhancer.module.hook.ModernMethodHook as XC_MethodHook
 import dev.amenhancer.module.ModuleConstants
@@ -16,6 +17,8 @@ import dev.amenhancer.module.config.TargetConfigClient
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
+import java.lang.ref.WeakReference
+import java.util.WeakHashMap
 import kotlin.math.roundToInt
 
 /**
@@ -78,7 +81,6 @@ private object RightLyricsPaneLayout {
     private const val TOP_CLEAR_FRACTION = 0.075f
     private const val TOP_CLEAR_WITHIN_FADE_FRACTION = 0.25f
     private const val BOTTOM_EDGE_FRACTION = 0.15f
-    private val gradientEdgeBooleans = listOf("R", "S", "T", "U")
 
     fun apply(root: View) {
         if (!TabletModeQualifier.isEligible(root.context)) return
@@ -116,57 +118,153 @@ private object RightLyricsPaneLayout {
     /** Uses the target view's single DST_IN layer so scrolling rows fade continuously. */
     private fun configureVerticalGradientEdges(gradients: View) {
         if (gradients.javaClass.name != ALPHA_GRADIENT_FRAME_LAYOUT) return
-        val applyGradient = fun() {
-            if (gradients.height <= 0) return
-            runCatching {
-                gradientEdgeBooleans.forEach { fieldName ->
-                    val field = findField(gradients.javaClass, fieldName)
-                        ?: error("AlphaGradientFrameLayout.$fieldName was unavailable")
-                    field.setBoolean(gradients, fieldName == "R" || fieldName == "S")
-                }
-                val topFadeColors = intArrayOf(
-                    Color.TRANSPARENT,
-                    Color.TRANSPARENT,
-                    Color.BLACK,
-                )
-                val topFadePositions = floatArrayOf(
-                    0f,
-                    TOP_CLEAR_WITHIN_FADE_FRACTION,
-                    1f,
-                )
-                val topFadeColorsField = findField(gradients.javaClass, "a")
-                    ?: error("AlphaGradientFrameLayout.a was unavailable")
-                val topFadePositionsField = findField(gradients.javaClass, "e")
-                    ?: error("AlphaGradientFrameLayout.e was unavailable")
-                topFadeColorsField.set(gradients, topFadeColors)
-                topFadePositionsField.set(gradients, topFadePositions)
-                val topEdgeSize = (gradients.height * TOP_EDGE_FRACTION)
-                    .roundToInt()
-                    .coerceAtLeast(1)
-                val bottomEdgeSize = (gradients.height * BOTTOM_EDGE_FRACTION)
-                    .roundToInt()
-                    .coerceAtLeast(1)
-                val setVerticalFadeSizes = gradients.javaClass.getDeclaredMethod(
-                    "d",
-                    Int::class.javaPrimitiveType,
-                    Int::class.javaPrimitiveType,
-                ).apply { isAccessible = true }
-                setVerticalFadeSizes.invoke(gradients, topEdgeSize, bottomEdgeSize)
-                gradients.invalidate()
-            }.onFailure {
-                debug("right lyrics pane vertical gradient setup failed: $it")
+        gradients.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            if (bottom - top != oldBottom - oldTop) applyVerticalGradientEdges(gradients)
+        }
+        gradients.post { applyVerticalGradientEdges(gradients) }
+    }
+
+    fun reapplyVerticalGradientEdges(gradients: View) {
+        applyVerticalGradientEdges(gradients)
+    }
+
+    private fun applyVerticalGradientEdges(gradients: View) {
+        if (gradients.javaClass.name != ALPHA_GRADIENT_FRAME_LAYOUT || gradients.height <= 0) return
+        runCatching {
+            val profile = AlphaGradientEdgeFieldProfiles.resolve(gradients.javaClass)
+                ?: error("AlphaGradientFrameLayout edge profile was unavailable")
+            profile.vertical.forEach { fieldName ->
+                setGradientEdge(gradients, fieldName, enabled = true)
+            }
+            profile.horizontal.forEach { fieldName ->
+                setGradientEdge(gradients, fieldName, enabled = false)
+            }
+            val topFadeColors = intArrayOf(
+                Color.TRANSPARENT,
+                Color.TRANSPARENT,
+                Color.BLACK,
+            )
+            val topFadePositions = floatArrayOf(
+                0f,
+                TOP_CLEAR_WITHIN_FADE_FRACTION,
+                1f,
+            )
+            val topFadeColorsField = findField(gradients.javaClass, "a")
+                ?: error("AlphaGradientFrameLayout.a was unavailable")
+            val topFadePositionsField = findField(gradients.javaClass, "e")
+                ?: error("AlphaGradientFrameLayout.e was unavailable")
+            topFadeColorsField.set(gradients, topFadeColors)
+            topFadePositionsField.set(gradients, topFadePositions)
+            val topEdgeSize = (gradients.height * TOP_EDGE_FRACTION)
+                .roundToInt()
+                .coerceAtLeast(1)
+            val bottomEdgeSize = (gradients.height * BOTTOM_EDGE_FRACTION)
+                .roundToInt()
+                .coerceAtLeast(1)
+            val setVerticalFadeSizes = gradients.javaClass.getDeclaredMethod(
+                "d",
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+            ).apply { isAccessible = true }
+            setVerticalFadeSizes.invoke(gradients, topEdgeSize, bottomEdgeSize)
+            gradients.invalidate()
+        }.onFailure {
+            debug("right lyrics pane vertical gradient setup failed: $it")
+        }
+    }
+
+    private fun setGradientEdge(gradients: View, fieldName: String, enabled: Boolean) {
+        val field = findField(gradients.javaClass, fieldName)
+            ?: error("AlphaGradientFrameLayout.$fieldName was unavailable")
+        field.setBoolean(gradients, enabled)
+    }
+}
+
+internal data class AlphaGradientEdgeFieldProfile(
+    val vertical: List<String>,
+    val horizontal: List<String>,
+    val requiredIntegers: List<String>,
+)
+
+/** Resolves the two Apple Music 6.5.0 AlphaGradientFrameLayout obfuscation variants. */
+internal object AlphaGradientEdgeFieldProfiles {
+    private val profiles = listOf(
+        AlphaGradientEdgeFieldProfile(
+            vertical = listOf("P", "Q"),
+            horizontal = listOf("R", "S"),
+            requiredIntegers = listOf("T", "U", "V", "W"),
+        ),
+        AlphaGradientEdgeFieldProfile(
+            vertical = listOf("R", "S"),
+            horizontal = listOf("T", "U"),
+            requiredIntegers = listOf("V", "W"),
+        ),
+    )
+
+    fun resolve(type: Class<*>): AlphaGradientEdgeFieldProfile? = resolve(
+        type.declaredFields.associate { field -> field.name to field.type },
+    )
+
+    internal fun resolve(fields: Map<String, Class<*>>): AlphaGradientEdgeFieldProfile? =
+        profiles.singleOrNull { profile ->
+            (profile.vertical + profile.horizontal).all { fieldName ->
+                fields[fieldName] == Boolean::class.javaPrimitiveType
+            } && profile.requiredIntegers.all { fieldName ->
+                fields[fieldName] == Int::class.javaPrimitiveType
             }
         }
-        gradients.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
-            if (bottom - top != oldBottom - oldTop) applyGradient()
+}
+
+internal data class LyricsLayoutFieldProfile(
+    val binding: String,
+    val container: String,
+    val recycler: String,
+    val gradients: String,
+    val synchronizedMetrics: List<String>,
+)
+
+/** Resolves PlayerLyricsViewFragment fields in official and adapted Apple Music 6.5.0 builds. */
+internal object LyricsLayoutFieldProfiles {
+    private val profiles = listOf(
+        LyricsLayoutFieldProfile(
+            binding = "g0",
+            container = "S",
+            recycler = "Y",
+            gradients = "e0",
+            synchronizedMetrics = listOf("x0", "y0"),
+        ),
+        LyricsLayoutFieldProfile(
+            binding = "i0",
+            container = "U",
+            recycler = "a0",
+            gradients = "g0",
+            synchronizedMetrics = listOf("z0", "A0"),
+        ),
+    )
+
+    fun resolve(fragmentType: Class<*>): LyricsLayoutFieldProfile? = profiles.singleOrNull { profile ->
+        val bindingType = findField(fragmentType, profile.binding)?.type
+            ?: return@singleOrNull false
+        val bindingContractPresent = listOf(
+            profile.container,
+            profile.recycler,
+            profile.gradients,
+        ).all { fieldName -> findField(bindingType, fieldName) != null }
+        bindingContractPresent && profile.synchronizedMetrics.all { fieldName ->
+            val metricsType = findField(fragmentType, fieldName)?.type
+                ?: return@all false
+            listOf("a", "b", "c").all { metricName ->
+                findField(metricsType, metricName)?.type == Int::class.javaPrimitiveType
+            }
         }
-        gradients.post(applyGradient)
     }
 }
 
 internal class AppleMusicDualPaneTarget(
     private val symbols: TargetSymbolResolver,
 ) : DualPaneTarget {
+    private val anchorResizeListeners = WeakHashMap<View, View.OnLayoutChangeListener>()
+
     override fun install(): TargetCapabilityInstall {
         val controllerResolution = symbols.resolve(AppleMusicSymbols.PlayerController)
         val controller = controllerResolution.valueOrNull()
@@ -281,7 +379,10 @@ internal class AppleMusicDualPaneTarget(
         } ?: return 0
         return if (hook(onResume, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    param.thisObject?.let(TabletLyricTypography::attach)
+                    param.thisObject?.let { fragment ->
+                        installHighlightAnchorResizeSync(fragment)
+                        TabletLyricTypography.attach(fragment)
+                    }
                 }
             })
         ) {
@@ -350,10 +451,12 @@ internal class AppleMusicDualPaneTarget(
                         ModernXposedRuntime.callMethod(fragment, "f2") as? View
                     }.getOrNull() ?: return
                     if (!TabletModeQualifier.isEligible(controls.context)) return
-                    val highlightAnchorAligned = alignSynchronizedLyricsHighlightAnchor(fragment)
+                    val profile = LyricsLayoutFieldProfiles.resolve(fragment.javaClass) ?: return
+                    installHighlightAnchorResizeSync(fragment)
+                    val highlightAnchorAligned = alignSynchronizedLyricsHighlightAnchor(fragment, profile)
                     val controlsHeight = controls.height
                     val endPaddingCorrected = controlsHeight == 0 ||
-                        listOf("z0", "A0").all { fieldName ->
+                        profile.synchronizedMetrics.all { fieldName ->
                             subtractControlsHeightFromLyricsBoundary(fragment, fieldName, controlsHeight)
                         }
                     if (!endPaddingCorrected) return
@@ -361,7 +464,8 @@ internal class AppleMusicDualPaneTarget(
                         debug("landscape lyrics metrics unchanged")
                         return
                     }
-                    refreshLyricsRecycler(fragment)
+                    refreshLyricsRecycler(fragment, profile)
+                    reapplyVerticalLyricsGradient(fragment, profile)
                     debug(
                         "corrected landscape lyrics metrics highlightAnchorAligned=" +
                             highlightAnchorAligned + " controlsHeight=" + controlsHeight,
@@ -375,13 +479,56 @@ internal class AppleMusicDualPaneTarget(
         }
     }
 
-    private fun alignSynchronizedLyricsHighlightAnchor(fragment: Any): Boolean = runCatching {
-        val binding = findField(fragment.javaClass, "i0")?.get(fragment)
+    private fun installHighlightAnchorResizeSync(fragment: Any) {
+        val profile = LyricsLayoutFieldProfiles.resolve(fragment.javaClass) ?: return
+        val binding = findField(fragment.javaClass, profile.binding)?.get(fragment) ?: return
+        val container = findField(binding.javaClass, profile.container)?.get(binding) as? View ?: return
+        synchronized(anchorResizeListeners) {
+            if (anchorResizeListeners.containsKey(container)) return
+            val fragmentReference = WeakReference(fragment)
+            val listener = View.OnLayoutChangeListener {
+                    changedView,
+                    _,
+                    top,
+                    _,
+                    bottom,
+                    _,
+                    oldTop,
+                    _,
+                    oldBottom,
+                ->
+                if (bottom - top == oldBottom - oldTop || bottom <= top) return@OnLayoutChangeListener
+                refreshHighlightAnchor(changedView, fragmentReference)
+            }
+            anchorResizeListeners[container] = listener
+            container.addOnLayoutChangeListener(listener)
+            refreshHighlightAnchor(container, fragmentReference)
+        }
+    }
+
+    private fun refreshHighlightAnchor(container: View, fragmentReference: WeakReference<Any>) {
+        container.post {
+            val currentFragment = fragmentReference.get() ?: return@post
+            if (!container.isAttachedToWindow || container.height <= 0) return@post
+            if (!TabletModeQualifier.isEligible(container.context)) return@post
+            runCatching {
+                ModernXposedRuntime.callMethod(currentFragment, "j2")
+            }.onFailure {
+                debug("lyrics anchor resize sync failed: $it")
+            }
+        }
+    }
+
+    private fun alignSynchronizedLyricsHighlightAnchor(
+        fragment: Any,
+        profile: LyricsLayoutFieldProfile,
+    ): Boolean = runCatching {
+        val binding = findField(fragment.javaClass, profile.binding)?.get(fragment)
             ?: return@runCatching false
-        val container = findField(binding.javaClass, "U")?.get(binding) as? View
+        val container = findField(binding.javaClass, profile.container)?.get(binding) as? View
             ?: return@runCatching false
         if (container.height <= 0) return@runCatching false
-        val metrics = findField(fragment.javaClass, "z0")?.get(fragment)
+        val metrics = findField(fragment.javaClass, profile.synchronizedMetrics.first())?.get(fragment)
             ?: return@runCatching false
         val highlightOffset = findField(metrics.javaClass, "a")
             ?: return@runCatching false
@@ -406,14 +553,24 @@ internal class AppleMusicDualPaneTarget(
         true
     }.getOrDefault(false)
 
-    private fun refreshLyricsRecycler(fragment: Any) {
+    private fun refreshLyricsRecycler(fragment: Any, profile: LyricsLayoutFieldProfile) {
         val recycler = runCatching {
-            val binding = findField(fragment.javaClass, "i0")?.get(fragment) ?: return@runCatching null
-            findField(binding.javaClass, "a0")?.get(binding)
+            val binding = findField(fragment.javaClass, profile.binding)?.get(fragment)
+                ?: return@runCatching null
+            findField(binding.javaClass, profile.recycler)?.get(binding)
         }.getOrNull() as? View ?: return
         if (runCatching { ModernXposedRuntime.callMethod(recycler, "S") }.isFailure) {
             recycler.requestLayout()
         }
+    }
+
+    private fun reapplyVerticalLyricsGradient(fragment: Any, profile: LyricsLayoutFieldProfile) {
+        val gradients = runCatching {
+            val binding = findField(fragment.javaClass, profile.binding)?.get(fragment)
+                ?: return@runCatching null
+            findField(binding.javaClass, profile.gradients)?.get(binding)
+        }.getOrNull() as? View ?: return
+        RightLyricsPaneLayout.reapplyVerticalGradientEdges(gradients)
     }
 
     private fun installControllerHooks(controller: Class<*>): Int {
@@ -702,6 +859,18 @@ internal object TabletModeQualifier {
         isOfficialTabletLandscape(context) && TargetConfigClient.currentSettings().dualPaneEnabled
 }
 
+internal object FlatLandscapeWindowPolicy {
+    fun shouldReserveNavigationSpace(context: Context): Boolean {
+        val configuration = context.resources.configuration
+        val width = configuration.screenWidthDp
+        val height = configuration.screenHeightDp
+        return TabletModeQualifier.isOfficialTablet(context) &&
+            configuration.orientation == Configuration.ORIENTATION_LANDSCAPE &&
+            height > 0 &&
+            width.toFloat() / height.toFloat() >= 1.7f
+    }
+}
+
 internal object DualPaneShell {
     /** Mirrors the modified PlayerActivity's BaseActivity.n0() root lookup. */
     fun activityRoot(activity: Activity): View? = runCatching {
@@ -749,6 +918,7 @@ private object ConstraintLayoutPane {
     private const val NAVIGATION_TABS_HEIGHT = "navigation_tabs_height"
     private const val STACKED_TABS_VERTICAL_INSET_DP = 8
     private const val PLAYER_CONTAINER = "player_container"
+    private const val PLAYER_SHEET_CONTAINER = "player_sheet_container"
     private const val PLAYER_CONTAINER_ELEVATION = "player_container_elevation"
     private const val PLAYER_ROOT = "player_root"
     private const val PLAYER_FRAGMENTS_HOST = "player_fragments_host"
@@ -838,7 +1008,8 @@ private object ConstraintLayoutPane {
                 configureTabsContent(bottomNavigation)
             }
             configureTabsTopShadow(topShadow)
-            configurePlayerContainer(playerContainer)
+            configurePlayerContainer(playerContainer, tabsHeight, root.context)
+            installFlatPlayerBoundarySync(root, playerContainer, tabsFrame, tabsHeight)
             installTabsDivider(tabsFrame, resources)
 
             root.setTag(R.id.am_enhancer_dual_pane_state, BottomNavigationLandscapeInstalled)
@@ -973,11 +1144,15 @@ private object ConstraintLayoutPane {
         topShadow.requestLayout()
     }
 
-    private fun configurePlayerContainer(playerContainer: View) {
+    private fun configurePlayerContainer(playerContainer: View, tabsHeight: Int, context: Context) {
         val params = constraintMarginParams(playerContainer, PLAYER_CONTAINER)
         params.width = ViewGroup.LayoutParams.MATCH_PARENT
         params.height = ViewGroup.LayoutParams.MATCH_PARENT
-        params.bottomMargin = 0
+        params.bottomMargin = if (FlatLandscapeWindowPolicy.shouldReserveNavigationSpace(context)) {
+            tabsHeight
+        } else {
+            0
+        }
         clearLegacyWidthContract(params)
         constrainFullWidth(params)
         params.setInt("topToTop", PARENT_ID)
@@ -986,6 +1161,66 @@ private object ConstraintLayoutPane {
         params.setInt("bottomToTop", -1)
         playerContainer.layoutParams = params
         playerContainer.requestLayout()
+    }
+
+    private fun installFlatPlayerBoundarySync(
+        root: ViewGroup,
+        playerContainer: View,
+        tabsFrame: View,
+        tabsHeight: Int,
+    ) {
+        if (!FlatLandscapeWindowPolicy.shouldReserveNavigationSpace(root.context)) return
+        val sheetId = targetId(root.resources, PLAYER_SHEET_CONTAINER)
+        val sheet = sheetId.takeIf { it != 0 }?.let { root.findViewById<View>(it) } ?: return
+        var lastBottomMargin = Int.MIN_VALUE
+        fun sync() {
+            val rootHeight = root.height
+            if (rootHeight <= 0) return
+            val expanded = sheet.top <= rootHeight / 2
+            val desired = if (expanded) 0 else tabsHeight
+            val desiredTabsVisibility = if (expanded) View.INVISIBLE else View.VISIBLE
+            val tabsVisibilityChanged = tabsFrame.visibility != desiredTabsVisibility
+            if (desired == lastBottomMargin && !tabsVisibilityChanged) return
+            lastBottomMargin = desired
+            val params = constraintMarginParams(playerContainer, PLAYER_CONTAINER)
+            if (params.bottomMargin != desired) {
+                params.bottomMargin = desired
+                playerContainer.layoutParams = params
+                playerContainer.requestLayout()
+            }
+            if (tabsVisibilityChanged) tabsFrame.visibility = desiredTabsVisibility
+        }
+        var observedTree: ViewTreeObserver? = null
+        val preDrawListener = ViewTreeObserver.OnPreDrawListener {
+            sync()
+            true
+        }
+        fun removePreDrawListener() {
+            observedTree?.takeIf(ViewTreeObserver::isAlive)
+                ?.removeOnPreDrawListener(preDrawListener)
+            observedTree = null
+        }
+        fun addPreDrawListener() {
+            val tree = sheet.viewTreeObserver
+            if (!tree.isAlive || tree === observedTree) return
+            removePreDrawListener()
+            sheet.viewTreeObserver.addOnPreDrawListener(preDrawListener)
+            observedTree = tree
+        }
+        sheet.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(view: View) {
+                addPreDrawListener()
+            }
+
+            override fun onViewDetachedFromWindow(view: View) {
+                removePreDrawListener()
+            }
+        })
+        if (sheet.isAttachedToWindow) addPreDrawListener()
+        root.post {
+            if (sheet.isAttachedToWindow) addPreDrawListener()
+            sync()
+        }
     }
 
     private fun installTabsDivider(tabsFrame: FrameLayout, resources: android.content.res.Resources) {

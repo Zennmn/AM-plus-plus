@@ -2,6 +2,7 @@ package dev.amenhancer.module.hook
 
 import android.util.Log
 import android.view.View
+import dev.amenhancer.module.config.TargetConfigClient
 import dev.amenhancer.module.hook.ModernMethodHook as XC_MethodHook
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
@@ -36,7 +37,10 @@ internal class AppleMusicBidirectionalLyricBlurTarget(
         }
 
         val targetAccess = AppleMusicLyricBlurTargetAccess(recyclerClass)
-        val runtime = OpenSourceLyricBlurPort(targetAccess)
+        val runtime = OpenSourceLyricBlurPort(
+            targetAccess = targetAccess,
+            blurRadiusOffsetPx = TargetConfigClient.currentSettings().lyricBlurRadiusOffsetPx,
+        )
         val highlights = LyricHighlightEventRouter(runtime)
 
         // Preserve the upstream installation order: recycler, session, callback, lifecycle, VM.

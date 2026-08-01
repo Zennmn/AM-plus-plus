@@ -19,6 +19,7 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
 import dev.amenhancer.module.ModuleApplication
@@ -229,6 +230,13 @@ class SettingsActivity : Activity() {
             ) { enabled ->
                 store.saveSettings(store.settings().copy(futureBlurEnabled = enabled))
             })
+            addView(insetDivider())
+            addView(blurRadiusOffsetRow(
+                offsetPx = settings.lyricBlurRadiusOffsetPx,
+                enabled = writable,
+            ) { offsetPx ->
+                store.saveSettings(store.settings().copy(lyricBlurRadiusOffsetPx = offsetPx))
+            })
         }
 
     private fun appCard(): View = LinearLayout(this).apply {
@@ -298,6 +306,79 @@ class SettingsActivity : Activity() {
             addView(switch, LinearLayout.LayoutParams(dp(64), dp(48)))
             setOnClickListener { switch.isChecked = !switch.isChecked }
         }
+    }
+
+    private fun blurRadiusOffsetRow(
+        offsetPx: Int,
+        enabled: Boolean,
+        onChanged: (Int) -> Unit,
+    ): View {
+        val safeOffset = offsetPx.coerceIn(
+            ModuleSettings.MIN_LYRIC_BLUR_RADIUS_OFFSET_PX,
+            ModuleSettings.MAX_LYRIC_BLUR_RADIUS_OFFSET_PX,
+        )
+        val valueLabel = TextView(this).apply {
+            textSize = 16f
+            setTextColor(palette.primary)
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            text = formatBlurRadiusOffset(safeOffset)
+        }
+        val seekBar = SeekBar(this@SettingsActivity).apply {
+            max = ModuleSettings.MAX_LYRIC_BLUR_RADIUS_OFFSET_PX -
+                ModuleSettings.MIN_LYRIC_BLUR_RADIUS_OFFSET_PX
+            progress = safeOffset - ModuleSettings.MIN_LYRIC_BLUR_RADIUS_OFFSET_PX
+            isEnabled = enabled
+            contentDescription = "歌词模糊半径偏移"
+            progressTintList = ColorStateList.valueOf(palette.primary)
+            thumbTintList = ColorStateList.valueOf(palette.primary)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                    val value = progress + ModuleSettings.MIN_LYRIC_BLUR_RADIUS_OFFSET_PX
+                    valueLabel.text = formatBlurRadiusOffset(value)
+                }
+
+                override fun onStartTrackingTouch(seekBar: SeekBar) = Unit
+
+                override fun onStopTrackingTouch(seekBar: SeekBar) {
+                    onChanged(
+                        seekBar.progress + ModuleSettings.MIN_LYRIC_BLUR_RADIUS_OFFSET_PX,
+                    )
+                }
+            })
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            minimumHeight = dp(116)
+            isEnabled = enabled
+            alpha = if (enabled) 1f else 0.58f
+            setPadding(dp(16), dp(14), dp(16), dp(12))
+            addView(LinearLayout(this@SettingsActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(TextView(this@SettingsActivity).apply {
+                    text = "歌词模糊半径偏移"
+                    textSize = 17f
+                    setTextColor(palette.onSurface)
+                    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(valueLabel)
+            })
+            addView(TextView(this@SettingsActivity).apply {
+                text = "统一调整非高亮歌词 · 更改后需重开 Apple Music"
+                textSize = 13.5f
+                setTextColor(palette.onSurfaceVariant)
+                setPadding(0, dp(4), 0, dp(2))
+            })
+            addView(
+                seekBar,
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)),
+            )
+        }
+    }
+
+    private fun formatBlurRadiusOffset(offsetPx: Int): String = when {
+        offsetPx > 0 -> "+${offsetPx}px"
+        else -> "${offsetPx}px"
     }
 
     private fun badge(text: String): View = TextView(this).apply {

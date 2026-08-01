@@ -1,5 +1,6 @@
 package dev.amenhancer.module.hook
 
+import dev.amenhancer.module.model.ModuleSettings
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -36,8 +37,17 @@ internal object BidirectionalBlurPolicy {
         }
     }
 
+    fun applyRadiusOffset(radius: Float, offsetPx: Int): Float {
+        if (radius <= 0f) return 0f
+        val safeOffset = offsetPx.coerceIn(
+            ModuleSettings.MIN_LYRIC_BLUR_RADIUS_OFFSET_PX,
+            ModuleSettings.MAX_LYRIC_BLUR_RADIUS_OFFSET_PX,
+        )
+        return (radius + safeOffset).coerceIn(0f, RENDER_BLUR_MAX)
+    }
+
     fun quantize(radius: Float): Int = radius
-        .coerceIn(0f, BLUR_MAX)
+        .coerceIn(0f, RENDER_BLUR_MAX)
         .roundToInt()
 
     fun interpolate(
@@ -50,4 +60,6 @@ internal object BidirectionalBlurPolicy {
         val progress = (elapsedMs.toFloat() / durationMs).coerceIn(0f, 1f)
         return start + (target - start) * progress
     }
+
+    private const val RENDER_BLUR_MAX = 32f
 }

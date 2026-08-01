@@ -48,6 +48,10 @@ class SettingsUiStructuralRegressionTest {
         assertTrue(activity.contains("store.saveSettings(store.settings().copy("))
         assertTrue(activity.contains("minimumHeight = dp(84)"))
         assertTrue(activity.contains("contentDescription = title"))
+        assertTrue(activity.contains("歌词模糊半径偏移"))
+        assertTrue(activity.contains("blurRadiusOffsetRow("))
+        assertTrue(activity.contains("SeekBar(this@SettingsActivity)"))
+        assertTrue(activity.contains("lyricBlurRadiusOffsetPx = offsetPx"))
     }
 
     @Test
