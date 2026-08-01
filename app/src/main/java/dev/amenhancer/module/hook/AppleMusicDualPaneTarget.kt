@@ -871,6 +871,43 @@ internal object FlatLandscapeWindowPolicy {
     }
 }
 
+internal data class FlatPlayerBoundaryDecision(
+    val reserveNavigationSpace: Boolean,
+    val bottomMargin: Int,
+    val tabsVisible: Boolean,
+)
+
+/**
+ * Keeps the eager ultra-wide hint, but also learns from the actual flat-player
+ * geometry. Projection side rails can make a physical 17:10 display report an
+ * activity viewport below the 1.7 ratio even though its collapsed sheet still
+ * uses the no-tabs offset.
+ */
+internal object FlatPlayerBoundaryPolicy {
+    fun decide(
+        rootHeight: Int,
+        sheetTop: Int,
+        sheetBottom: Int,
+        tabsTop: Int,
+        tabsHeight: Int,
+        wasNavigationSpaceReserved: Boolean,
+    ): FlatPlayerBoundaryDecision {
+        require(rootHeight > 0) { "rootHeight must be positive" }
+        val expanded = sheetTop <= rootHeight / 2
+        val collapsedOverlap = !expanded &&
+            tabsTop > rootHeight / 2 &&
+            sheetBottom > tabsTop
+        val reserveNavigationSpace = wasNavigationSpaceReserved || collapsedOverlap
+        return FlatPlayerBoundaryDecision(
+            reserveNavigationSpace = reserveNavigationSpace,
+            bottomMargin = if (!expanded && reserveNavigationSpace) tabsHeight else 0,
+            // Before this root proves it needs compensation, remain visually
+            // inert so ordinary tablet windows keep their native tab behavior.
+            tabsVisible = !reserveNavigationSpace || !expanded,
+        )
+    }
+}
+
 internal object DualPaneShell {
     /** Mirrors the modified PlayerActivity's BaseActivity.n0() root lookup. */
     fun activityRoot(activity: Activity): View? = runCatching {
@@ -1169,16 +1206,32 @@ private object ConstraintLayoutPane {
         tabsFrame: View,
         tabsHeight: Int,
     ) {
-        if (!FlatLandscapeWindowPolicy.shouldReserveNavigationSpace(root.context)) return
         val sheetId = targetId(root.resources, PLAYER_SHEET_CONTAINER)
         val sheet = sheetId.takeIf { it != 0 }?.let { root.findViewById<View>(it) } ?: return
+        var reserveNavigationSpace =
+            FlatLandscapeWindowPolicy.shouldReserveNavigationSpace(root.context)
         var lastBottomMargin = Int.MIN_VALUE
+        val rootLocation = IntArray(2)
+        val sheetLocation = IntArray(2)
+        val tabsLocation = IntArray(2)
         fun sync() {
             val rootHeight = root.height
             if (rootHeight <= 0) return
-            val expanded = sheet.top <= rootHeight / 2
-            val desired = if (expanded) 0 else tabsHeight
-            val desiredTabsVisibility = if (expanded) View.INVISIBLE else View.VISIBLE
+            root.getLocationInWindow(rootLocation)
+            sheet.getLocationInWindow(sheetLocation)
+            tabsFrame.getLocationInWindow(tabsLocation)
+            val rootTop = rootLocation[1]
+            val decision = FlatPlayerBoundaryPolicy.decide(
+                rootHeight = rootHeight,
+                sheetTop = sheetLocation[1] - rootTop,
+                sheetBottom = sheetLocation[1] - rootTop + sheet.height,
+                tabsTop = tabsLocation[1] - rootTop,
+                tabsHeight = tabsHeight,
+                wasNavigationSpaceReserved = reserveNavigationSpace,
+            )
+            reserveNavigationSpace = decision.reserveNavigationSpace
+            val desired = decision.bottomMargin
+            val desiredTabsVisibility = if (decision.tabsVisible) View.VISIBLE else View.INVISIBLE
             val tabsVisibilityChanged = tabsFrame.visibility != desiredTabsVisibility
             if (desired == lastBottomMargin && !tabsVisibilityChanged) return
             lastBottomMargin = desired

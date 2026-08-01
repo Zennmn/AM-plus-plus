@@ -148,11 +148,14 @@ class DualPaneStructuralRegressionTest {
     }
 
     @Test
-    fun `gates flat player boundary changes through the window policy`() {
+    fun `detects flat player overlap beyond the eager window policy`() {
         assertTrue(source.contains("installFlatPlayerBoundarySync(root, playerContainer, tabsFrame, tabsHeight)"))
-        assertTrue(source.contains("if (!FlatLandscapeWindowPolicy.shouldReserveNavigationSpace(root.context)) return"))
+        assertFalse(source.contains("if (!FlatLandscapeWindowPolicy.shouldReserveNavigationSpace(root.context)) return"))
         assertTrue(source.contains("params.bottomMargin = if (FlatLandscapeWindowPolicy.shouldReserveNavigationSpace(context))"))
-        assertTrue(source.contains("val desired = if (expanded) 0 else tabsHeight"))
+        assertTrue(source.contains("FlatPlayerBoundaryPolicy.decide"))
+        assertTrue(source.contains("sheet.getLocationInWindow(sheetLocation)"))
+        assertTrue(source.contains("tabsFrame.getLocationInWindow(tabsLocation)"))
+        assertTrue(source.contains("reserveNavigationSpace = decision.reserveNavigationSpace"))
         assertTrue(source.contains("params.bottomMargin = desired"))
     }
 
@@ -163,7 +166,7 @@ class DualPaneStructuralRegressionTest {
         assertTrue(source.contains("removeOnPreDrawListener"))
         assertTrue(source.contains("sheet.addOnAttachStateChangeListener"))
         assertTrue(source.contains("installFlatPlayerBoundarySync(root, playerContainer, tabsFrame, tabsHeight)"))
-        assertTrue(source.contains("val desiredTabsVisibility = if (expanded) View.INVISIBLE else View.VISIBLE"))
+        assertTrue(source.contains("val desiredTabsVisibility = if (decision.tabsVisible) View.VISIBLE else View.INVISIBLE"))
         assertTrue(source.contains("tabsFrame.visibility = desiredTabsVisibility"))
     }
 
