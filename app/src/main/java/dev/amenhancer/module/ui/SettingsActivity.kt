@@ -28,6 +28,11 @@ import dev.amenhancer.module.XposedServiceSnapshot
 import dev.amenhancer.module.config.ConfigStore
 import dev.amenhancer.module.model.ModuleSettings
 
+internal object BlurRadiusSeekBarPersistencePolicy {
+    fun shouldPersistProgressChange(fromUser: Boolean, trackingTouch: Boolean): Boolean =
+        fromUser && !trackingTouch
+}
+
 class SettingsActivity : Activity() {
     private lateinit var store: ConfigStore
     private lateinit var launcherIconController: LauncherIconController
@@ -323,6 +328,7 @@ class SettingsActivity : Activity() {
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             text = formatBlurRadiusOffset(safeOffset)
         }
+        var trackingTouch = false
         val seekBar = SeekBar(this@SettingsActivity).apply {
             max = ModuleSettings.MAX_LYRIC_BLUR_RADIUS_OFFSET_PX -
                 ModuleSettings.MIN_LYRIC_BLUR_RADIUS_OFFSET_PX
@@ -335,11 +341,21 @@ class SettingsActivity : Activity() {
                 override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
                     val value = progress + ModuleSettings.MIN_LYRIC_BLUR_RADIUS_OFFSET_PX
                     valueLabel.text = formatBlurRadiusOffset(value)
+                    if (BlurRadiusSeekBarPersistencePolicy.shouldPersistProgressChange(
+                            fromUser = fromUser,
+                            trackingTouch = trackingTouch,
+                        )
+                    ) {
+                        onChanged(value)
+                    }
                 }
 
-                override fun onStartTrackingTouch(seekBar: SeekBar) = Unit
+                override fun onStartTrackingTouch(seekBar: SeekBar) {
+                    trackingTouch = true
+                }
 
                 override fun onStopTrackingTouch(seekBar: SeekBar) {
+                    trackingTouch = false
                     onChanged(
                         seekBar.progress + ModuleSettings.MIN_LYRIC_BLUR_RADIUS_OFFSET_PX,
                     )

@@ -55,6 +55,18 @@ class SettingsUiStructuralRegressionTest {
     }
 
     @Test
+    fun `persists non touch blur radius changes without duplicating touch writes`() {
+        val activity = projectFile("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
+
+        assertTrue(activity.contains("var trackingTouch = false"))
+        assertTrue(activity.contains("BlurRadiusSeekBarPersistencePolicy.shouldPersistProgressChange("))
+        assertTrue(activity.contains("fromUser = fromUser"))
+        assertTrue(activity.contains("trackingTouch = trackingTouch"))
+        assertTrue(activity.contains("trackingTouch = true"))
+        assertTrue(activity.contains("trackingTouch = false"))
+    }
+
+    @Test
     fun `provides a dedicated dark theme and system bar colors`() {
         val activity = projectFile("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
         val darkTheme = projectFile("app/src/main/res/values-night/styles.xml")
