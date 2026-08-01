@@ -29,7 +29,16 @@ class PhoneLiquidGlassStructuralRegressionTest {
         val settings = source("dev/amenhancer/module/ui/SettingsActivity.kt")
 
         assertTrue(models.contains("val phoneLiquidGlassEnabled: Boolean = false"))
-        assertTrue(store.contains("ModuleSettingsSchema.encode(settings)"))
+        assertTrue(store.contains("ModuleSettingsSchema.encodeOrdinarySettings(settings)"))
+        assertTrue(store.contains("ModuleSettingsSchema.encodeFontManifest(manifest)"))
+        assertFalse(store.contains("lyrics_font_"))
+        listOf(
+            "lyrics_font_enabled",
+            "lyrics_font_file_id",
+            "lyrics_font_display_name",
+            "lyrics_font_size_bytes",
+            "lyrics_font_sha256",
+        ).forEach { key -> assertTrue(schema.contains("\"$key\"")) }
         assertTrue(schema.contains("\"phone_liquid_glass_enabled\""))
         assertTrue(application.contains("getRemotePreferences(ModuleConstants.REMOTE_PREFERENCES_GROUP)"))
         assertTrue(client.contains("ModuleSettingsSchema.decode(preferences.all)"))

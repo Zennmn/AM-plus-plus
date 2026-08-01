@@ -28,7 +28,16 @@ class EditorialVideoFeatureStructuralRegressionTest {
         assertTrue(models.contains("val disableEditorialVideoOnTablet: Boolean = true"))
         assertTrue(schema.contains("\"disable_editorial_video_on_tablet\""))
         assertTrue(schema.contains("settings.disableEditorialVideoOnTablet"))
-        assertTrue(store.contains("ModuleSettingsSchema.encode(settings)"))
+        assertTrue(store.contains("ModuleSettingsSchema.encodeOrdinarySettings(settings)"))
+        assertTrue(store.contains("ModuleSettingsSchema.encodeFontManifest(manifest)"))
+        assertFalse(store.contains("lyrics_font_"))
+        listOf(
+            "lyrics_font_enabled",
+            "lyrics_font_file_id",
+            "lyrics_font_display_name",
+            "lyrics_font_size_bytes",
+            "lyrics_font_sha256",
+        ).forEach { key -> assertTrue(schema.contains("\"$key\"")) }
         assertTrue(application.contains("getRemotePreferences(ModuleConstants.REMOTE_PREFERENCES_GROUP)"))
         assertTrue(client.contains("ModuleSettingsSchema.decode(preferences.all)"))
         assertTrue(settings.contains("平板禁用动态视频"))

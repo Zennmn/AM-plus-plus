@@ -26,7 +26,16 @@ internal object ModuleSettingsSchema {
             ?: ModuleConstants.CONFIG_SCHEMA_VERSION,
     )
 
-    fun encode(settings: ModuleSettings): Map<String, Any> {
+    fun encode(settings: ModuleSettings): Map<String, Any> =
+        encodeOrdinarySettings(settings) + encodeFontManifest(settings.fontManifest)
+
+    /**
+     * Runtime write map for ordinary settings only. Never carries the
+     * lyrics_font_* manifest keys, so a stale ModuleSettings captured before
+     * a font import cannot overwrite a manifest that saveFontManifest
+     * committed afterwards.
+     */
+    fun encodeOrdinarySettings(settings: ModuleSettings): Map<String, Any> {
         val values = linkedMapOf<String, Any>(
             KEY_DUAL_PANE to settings.dualPaneEnabled,
             KEY_DISABLE_EDITORIAL_VIDEO_ON_TABLET to settings.disableEditorialVideoOnTablet,
@@ -37,10 +46,7 @@ internal object ModuleSettingsSchema {
                 ModuleSettings.MAX_LYRIC_BLUR_RADIUS_OFFSET_PX,
             ),
         )
-        values.apply {
-            putAll(encodeFontManifest(settings.fontManifest))
-            put(KEY_SCHEMA_VERSION, ModuleConstants.CONFIG_SCHEMA_VERSION)
-        }
+        values[KEY_SCHEMA_VERSION] = ModuleConstants.CONFIG_SCHEMA_VERSION
         return values
     }
 

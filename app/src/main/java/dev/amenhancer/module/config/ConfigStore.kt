@@ -20,7 +20,11 @@ class ConfigStore(context: Context) {
 
     fun saveSettings(settings: ModuleSettings): Boolean {
         val preferences = ModuleApplication.serviceSnapshot.preferences ?: return false
-        return writeValues(preferences, ModuleSettingsSchema.encode(settings), synchronous = false)
+        return writeValues(
+            preferences,
+            ModuleSettingsSchema.encodeOrdinarySettings(settings),
+            synchronous = false,
+        )
     }
 
     internal fun saveFontManifest(
