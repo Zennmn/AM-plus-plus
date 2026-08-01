@@ -28,6 +28,7 @@ class XposedServiceSnapshotTest {
 
         assertSame(preferences, snapshot.preferences)
         assertTrue(snapshot.isRemoteAvailable)
+        assertFalse(snapshot.isRemoteFileAvailable)
         assertEquals("已连接 LSPosed API 102", snapshot.status)
     }
 
@@ -39,7 +40,9 @@ class XposedServiceSnapshotTest {
 
         listOf(waiting, unsupported, disconnected).forEach { snapshot ->
             assertNull(snapshot.preferences)
+            assertNull(snapshot.service)
             assertFalse(snapshot.isRemoteAvailable)
+            assertFalse(snapshot.isRemoteFileAvailable)
         }
         assertEquals("等待 libxposed API 102 服务", waiting.status)
         assertEquals(
@@ -57,11 +60,13 @@ class XposedServiceSnapshotTest {
 
         assertTrue(application.contains("AtomicReference(XposedServiceSnapshot.waiting())"))
         assertTrue(application.contains("publish(XposedServiceSnapshot.connected("))
+        assertTrue(application.contains("service = service"))
         assertTrue(application.contains("listeners.forEach { it(snapshot) }"))
         assertFalse(application.contains("var remotePreferences"))
         assertFalse(application.contains("var serviceStatus"))
         assertTrue(store.contains("fun settings(snapshot: XposedServiceSnapshot)"))
         assertTrue(store.contains("snapshot.preferences ?: legacyPreferences"))
+        assertTrue(store.contains("snapshot.isRemoteFileAvailable"))
         assertTrue(settings.contains(
             "private fun render(snapshot: XposedServiceSnapshot = ModuleApplication.serviceSnapshot)",
         ))

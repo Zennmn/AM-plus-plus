@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import dev.amenhancer.module.ModuleApplication
 import dev.amenhancer.module.XposedServiceSnapshot
+import dev.amenhancer.module.model.LyricsFontManifest
 import dev.amenhancer.module.model.ModuleSettings
 
 class ConfigStore(context: Context) {
@@ -20,6 +21,21 @@ class ConfigStore(context: Context) {
     fun saveSettings(settings: ModuleSettings): Boolean {
         val preferences = ModuleApplication.serviceSnapshot.preferences ?: return false
         return writeValues(preferences, ModuleSettingsSchema.encode(settings), synchronous = false)
+    }
+
+    internal fun saveFontManifest(
+        manifest: LyricsFontManifest,
+        snapshot: XposedServiceSnapshot = ModuleApplication.serviceSnapshot,
+    ): Boolean {
+        if (!snapshot.isRemoteFileAvailable || !ModuleApplication.isCurrentSnapshot(snapshot)) {
+            return false
+        }
+        val preferences = snapshot.preferences ?: return false
+        return writeValues(
+            preferences,
+            ModuleSettingsSchema.encodeFontManifest(manifest),
+            synchronous = true,
+        )
     }
 
     companion object {
@@ -42,6 +58,8 @@ class ConfigStore(context: Context) {
                 when (value) {
                     is Boolean -> editor.putBoolean(key, value)
                     is Int -> editor.putInt(key, value)
+                    is Long -> editor.putLong(key, value)
+                    is String -> editor.putString(key, value)
                     else -> error("Unsupported configuration value for $key: ${value.javaClass.name}")
                 }
             }

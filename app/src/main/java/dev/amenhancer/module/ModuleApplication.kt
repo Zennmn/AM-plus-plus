@@ -25,6 +25,7 @@ class ModuleApplication : Application(), XposedServiceHelper.OnServiceListener {
             preferences = preferences,
             frameworkName = service.frameworkName,
             apiVersion = service.apiVersion,
+            service = service,
         ))
     }
 
@@ -35,6 +36,9 @@ class ModuleApplication : Application(), XposedServiceHelper.OnServiceListener {
     companion object {
         private val serviceSnapshotReference = AtomicReference(XposedServiceSnapshot.waiting())
         internal val serviceSnapshot: XposedServiceSnapshot get() = serviceSnapshotReference.get()
+
+        internal fun isCurrentSnapshot(snapshot: XposedServiceSnapshot): Boolean =
+            serviceSnapshotReference.get() === snapshot
         private val listeners = CopyOnWriteArraySet<(XposedServiceSnapshot) -> Unit>()
 
         internal fun addServiceListener(listener: (XposedServiceSnapshot) -> Unit) {

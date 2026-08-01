@@ -190,8 +190,12 @@ internal fun targetBuild(context: Context): TargetBuild = runCatching {
     )
 }.getOrDefault(TargetBuild.UNKNOWN)
 
-private fun productionFeatureInstallationModule(): FeatureInstallationModule =
-    FeatureInstallationModule(
+private fun productionFeatureInstallationModule(): FeatureInstallationModule {
+    // The same session is used by resource callbacks registered before
+    // Application.onCreate and by lifecycle hooks installed afterwards.
+    // It owns the one lazy remote-file open and Typeface build.
+    val lyricsTypefaceSession = LyricsTypefaceSession()
+    return FeatureInstallationModule(
         plans = listOf(
             FeatureInstallationPlan(
                 feature = DualPaneFeature(),
@@ -203,6 +207,10 @@ private fun productionFeatureInstallationModule(): FeatureInstallationModule =
                 registerResources = PhoneLiquidGlassResourceHook::install,
             ),
             FeatureInstallationPlan(feature = FutureLyricBlurFeature()),
+            FeatureInstallationPlan(
+                feature = LyricsTypefaceFeature(),
+                registerResources = lyricsTypefaceSession::registerResources,
+            ),
         ),
         installLayoutInflationHooks = LayoutInflationRegistry::install,
         registerApplicationCreated = { config, targetClassLoader, onCreated ->
@@ -213,7 +221,11 @@ private fun productionFeatureInstallationModule(): FeatureInstallationModule =
                     onCreated {
                         HookContext(
                             config = config,
-                            target = TargetAdaptation.appleMusic(application, targetClassLoader),
+                            target = TargetAdaptation.appleMusic(
+                                application,
+                                targetClassLoader,
+                                lyricsTypefaceSession,
+                            ),
                         )
                     }
                 }
@@ -222,6 +234,7 @@ private fun productionFeatureInstallationModule(): FeatureInstallationModule =
         reportHealth = { context, health -> context.config.reportHealth(health) },
         reportError = ModernXposedRuntime::log,
     )
+}
 
 private fun Throwable.shortMessage(): String = buildString {
     append(javaClass.simpleName.ifBlank { javaClass.name })

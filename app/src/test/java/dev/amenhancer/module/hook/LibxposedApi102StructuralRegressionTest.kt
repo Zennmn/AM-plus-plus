@@ -35,9 +35,12 @@ class LibxposedApi102StructuralRegressionTest {
 
         assertTrue(application.contains("XposedServiceHelper.registerListener(this)"))
         assertTrue(application.contains("XposedService.PROP_CAP_REMOTE"))
+        assertTrue(application.contains("service = service"))
         assertTrue(target.contains("ModuleSettingsSchema.decode(preferences.all)"))
+        assertTrue(target.contains("openRemoteFile"))
         assertFalse(target.contains("contentResolver"))
         assertTrue(entry.contains("class HookEntry : XposedModule()"))
+        assertTrue(entry.contains("openRemoteFile(name)"))
         assertTrue(entry.contains("frameworkProperties.and(PROP_CAP_REMOTE)"))
         assertTrue(layouts.contains("LayoutInflater::class.java.getDeclaredMethod"))
         assertTrue(layouts.contains("XmlPullParser::class.java"))

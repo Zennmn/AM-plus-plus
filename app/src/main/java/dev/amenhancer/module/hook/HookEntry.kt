@@ -28,6 +28,7 @@ class HookEntry : XposedModule() {
         }
         val config = TargetConfigClient(
             getRemotePreferences(ModuleConstants.REMOTE_PREFERENCES_GROUP),
+            remoteFileOpener = { name -> openRemoteFile(name) },
         )
 
         FeatureInstallation.install(config, param.classLoader)

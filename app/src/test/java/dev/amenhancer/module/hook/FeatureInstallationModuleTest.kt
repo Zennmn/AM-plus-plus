@@ -22,6 +22,7 @@ class FeatureInstallationModuleTest {
                 plan("editorial", events),
                 plan("phone", events, "phone resources"),
                 plan("blur", events),
+                plan("font", events, "font resources"),
             ),
             installLayoutInflationHooks = { events += "layout hooks" },
             registerApplicationCreated = { _, _, callback ->
@@ -35,7 +36,13 @@ class FeatureInstallationModuleTest {
         val session = module.install(config(), javaClass.classLoader!!)
 
         assertEquals(
-            listOf("dual resources", "phone resources", "layout hooks", "application observer"),
+            listOf(
+                "dual resources",
+                "phone resources",
+                "font resources",
+                "layout hooks",
+                "application observer",
+            ),
             events,
         )
         assertEquals(FeatureInstallationPhase.RESOURCES_REGISTERED, session.snapshot().phase)
@@ -49,6 +56,7 @@ class FeatureInstallationModuleTest {
             listOf(
                 "dual resources",
                 "phone resources",
+                "font resources",
                 "layout hooks",
                 "application observer",
                 "install dual",
@@ -59,16 +67,24 @@ class FeatureInstallationModuleTest {
                 "report phone",
                 "install blur",
                 "report blur",
+                "install font",
+                "report font",
             ),
             events,
         )
         assertEquals(FeatureInstallationPhase.COMPLETE, session.snapshot().phase)
         assertEquals(
-            listOf("dual", "editorial", "phone", "blur"),
+            listOf("dual", "editorial", "phone", "blur", "font"),
             session.snapshot().health.map(FeatureHealth::feature),
         )
         assertEquals(
-            listOf("6.5.0 (1580)", "6.5.0 (1580)", "6.5.0 (1580)", "6.5.0 (1580)"),
+            listOf(
+                "6.5.0 (1580)",
+                "6.5.0 (1580)",
+                "6.5.0 (1580)",
+                "6.5.0 (1580)",
+                "6.5.0 (1580)",
+            ),
             session.snapshot().health.map(FeatureHealth::targetVersion),
         )
 
@@ -77,7 +93,7 @@ class FeatureInstallationModuleTest {
             context("unexpected")
         }
         assertSame(session, module.install(config(), javaClass.classLoader!!))
-        assertEquals(12, events.size)
+        assertEquals(15, events.size)
         assertEquals(1, contextFactoryCalls)
     }
 

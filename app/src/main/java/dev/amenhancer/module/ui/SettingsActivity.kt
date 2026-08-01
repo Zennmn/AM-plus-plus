@@ -3,6 +3,7 @@ package dev.amenhancer.module.ui
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
+import android.content.Intent
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
@@ -18,15 +19,22 @@ import android.view.WindowInsets
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.Button
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
+import android.widget.Toast
 import dev.amenhancer.module.ModuleApplication
 import dev.amenhancer.module.R
 import dev.amenhancer.module.XposedServiceSnapshot
 import dev.amenhancer.module.config.ConfigStore
+import dev.amenhancer.module.font.FontImportResult
+import dev.amenhancer.module.font.SafFontImporter
+import dev.amenhancer.module.model.LyricsFontManifest
 import dev.amenhancer.module.model.ModuleSettings
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 internal object BlurRadiusSeekBarPersistencePolicy {
     fun shouldPersistProgressChange(fromUser: Boolean, trackingTouch: Boolean): Boolean =
@@ -38,6 +46,7 @@ class SettingsActivity : Activity() {
     private lateinit var launcherIconController: LauncherIconController
     private lateinit var content: LinearLayout
     private lateinit var palette: Palette
+    private val backgroundExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 
     private val serviceListener: (XposedServiceSnapshot) -> Unit = { snapshot ->
         runOnUiThread { if (::content.isInitialized) render(snapshot) }
@@ -62,6 +71,21 @@ class SettingsActivity : Activity() {
     override fun onPause() {
         ModuleApplication.removeServiceListener(serviceListener)
         super.onPause()
+    }
+
+    override fun onDestroy() {
+        // Let an in-flight remote-file transaction finish so it cannot leave a
+        // partially written shared font when the Activity is recreated.
+        backgroundExecutor.shutdown()
+        super.onDestroy()
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != FONT_PICKER_REQUEST_CODE || resultCode != RESULT_OK) return
+        val uri = data?.data ?: return
+        importFont(uri)
     }
 
     private fun configureSystemBars() {
@@ -148,6 +172,8 @@ class SettingsActivity : Activity() {
         content.addView(statusCard(snapshot))
         content.addView(spacer(20))
         content.addView(featureCard(settings, writable))
+        content.addView(spacer(24))
+        content.addView(fontCard(settings.fontManifest, snapshot.isRemoteFileAvailable))
         content.addView(spacer(24))
         content.addView(sectionLabel("应用"))
         content.addView(spacer(10))
@@ -243,6 +269,131 @@ class SettingsActivity : Activity() {
                 store.saveSettings(store.settings().copy(lyricBlurRadiusOffsetPx = offsetPx))
             })
         }
+
+    private fun fontCard(manifest: LyricsFontManifest, writable: Boolean): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = roundedDrawable(palette.surface, radiusDp = 20, strokeColor = palette.outline)
+            elevation = dp(2).toFloat()
+            clipToOutline = true
+
+            addView(sectionLabel("歌词字体").apply {
+                setPadding(dp(16), dp(18), dp(16), dp(8))
+            })
+            addView(TextView(this@SettingsActivity).apply {
+                text = if (manifest.enabled) manifest.displayName else "原字体"
+                textSize = 17f
+                setTextColor(palette.onSurface)
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                setPadding(dp(16), dp(4), dp(16), 0)
+            })
+            addView(TextView(this@SettingsActivity).apply {
+                text = when {
+                    !writable -> "需要 libxposed API 102 remote file 服务"
+                    manifest.enabled -> "仅覆盖播放器歌词 · 重开 Apple Music 后生效"
+                    else -> "导入 TTF/OTF · 重开 Apple Music 后生效"
+                }
+                textSize = 13.5f
+                setTextColor(palette.onSurfaceVariant)
+                setPadding(dp(16), dp(4), dp(16), dp(12))
+            })
+            addView(LinearLayout(this@SettingsActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(dp(12), dp(0), dp(12), dp(12))
+                addView(fontActionButton("选择字体", writable) { chooseFont() },
+                    LinearLayout.LayoutParams(0, dp(48), 1f))
+                addView(spacer(8), LinearLayout.LayoutParams(dp(8), dp(1)))
+                addView(
+                    fontActionButton("恢复原字体", writable && manifest.enabled) { restoreFont() },
+                    LinearLayout.LayoutParams(0, dp(48), 1f),
+                )
+            })
+        }
+
+    private fun fontActionButton(
+        label: String,
+        enabled: Boolean,
+        onClick: () -> Unit,
+    ): Button = Button(this).apply {
+        text = label
+        isAllCaps = false
+        isEnabled = enabled
+        isClickable = enabled
+        alpha = if (enabled) 1f else 0.58f
+        minHeight = dp(48)
+        setTextColor(if (enabled) palette.primary else palette.onSurfaceVariant)
+        background = rippleDrawable(
+            roundedDrawable(
+                color = if (enabled) palette.primaryContainer else palette.disabledContainer,
+                radiusDp = 14,
+            ),
+        )
+        setOnClickListener { if (enabled) onClick() }
+    }
+
+    private fun chooseFont() {
+        if (!ModuleApplication.serviceSnapshot.isRemoteFileAvailable) {
+            toast("libxposed remote file 服务不可用")
+            return
+        }
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(
+                Intent.EXTRA_MIME_TYPES,
+                arrayOf(
+                    "font/ttf",
+                    "font/otf",
+                    "application/x-font-ttf",
+                    "application/x-font-opentype",
+                    "application/vnd.ms-opentype",
+                ),
+            )
+        }, FONT_PICKER_REQUEST_CODE)
+    }
+
+    private fun importFont(uri: android.net.Uri) {
+        val snapshot = ModuleApplication.serviceSnapshot
+        if (!snapshot.isRemoteFileAvailable) {
+            toast("libxposed remote file 服务不可用")
+            return
+        }
+        backgroundExecutor.execute {
+            val result = SafFontImporter(applicationContext, snapshot, store).import(uri)
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed) {
+                    if (::content.isInitialized) render()
+                    when (result) {
+                        is FontImportResult.Imported -> toast("字体已导入，重开 Apple Music 后生效")
+                        is FontImportResult.Failed -> toast(result.message)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun restoreFont() {
+        val snapshot = ModuleApplication.serviceSnapshot
+        if (!snapshot.isRemoteFileAvailable) {
+            toast("libxposed remote file 服务不可用")
+            return
+        }
+        val oldManifest = store.settings(snapshot).fontManifest
+        backgroundExecutor.execute {
+            val cleared = store.saveFontManifest(LyricsFontManifest.disabled(), snapshot)
+            if (cleared && oldManifest.enabled) snapshot.deleteRemoteFile(oldManifest.fileId)
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed) {
+                    if (::content.isInitialized) render()
+                    toast(if (cleared) "已恢复原字体，重开 Apple Music 后生效" else "恢复原字体失败")
+                }
+            }
+        }
+    }
+
+    private fun toast(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
 
     private fun appCard(): View = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
@@ -518,6 +669,10 @@ class SettingsActivity : Activity() {
         Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color))
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private companion object {
+        const val FONT_PICKER_REQUEST_CODE = 4401
+    }
 
     private data class Palette(
         val isDark: Boolean,

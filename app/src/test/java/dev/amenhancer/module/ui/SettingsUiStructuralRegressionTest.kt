@@ -55,6 +55,37 @@ class SettingsUiStructuralRegressionTest {
     }
 
     @Test
+    fun `imports fonts through a transient open document grant and keeps controls read only offline`() {
+        val activity = projectFile("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
+        val importer = projectFile("app/src/main/java/dev/amenhancer/module/font/SafFontImporter.kt")
+        val manifest = projectFile("app/src/main/AndroidManifest.xml")
+
+        assertTrue(activity.contains("Intent.ACTION_OPEN_DOCUMENT"))
+        assertTrue(activity.contains("Intent.CATEGORY_OPENABLE"))
+        assertTrue(activity.contains("type = \"*/*\""))
+        listOf(
+            "font/ttf",
+            "font/otf",
+            "application/x-font-ttf",
+            "application/x-font-opentype",
+            "application/vnd.ms-opentype",
+        ).forEach { mime -> assertTrue(activity.contains("\"$mime\"")) }
+        assertTrue(activity.contains("backgroundExecutor.execute"))
+        assertTrue(activity.contains("backgroundExecutor.shutdown()"))
+        assertFalse(activity.contains("backgroundExecutor.shutdownNow()"))
+        assertTrue(activity.contains("snapshot.isRemoteFileAvailable"))
+        assertTrue(activity.contains("歌词字体"))
+        assertTrue(activity.contains("原字体"))
+        assertTrue(activity.contains("选择字体"))
+        assertTrue(activity.contains("恢复原字体"))
+        assertTrue(importer.contains("readBounded"))
+        assertTrue(importer.contains("snapshot.openRemoteFile(fileId)"))
+        assertFalse(activity.contains("takePersistableUriPermission"))
+        assertFalse(importer.contains("uri.toString()"))
+        assertFalse(manifest.contains("<provider"))
+    }
+
+    @Test
     fun `persists non touch blur radius changes without duplicating touch writes`() {
         val activity = projectFile("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
 

@@ -13,9 +13,16 @@ internal data class TargetAdaptation(
     val dualPane: DualPaneTarget,
     val editorialVideo: EditorialVideoTarget,
     val bidirectionalLyricBlur: BidirectionalLyricBlurTarget,
+    val lyricsTypeface: LyricsTypefaceTarget = LyricsTypefaceTarget {
+        TargetCapabilityInstall.Degraded("Lyrics typeface target was not configured")
+    },
 ) {
     companion object {
-        fun appleMusic(application: Application, classLoader: ClassLoader): TargetAdaptation {
+        fun appleMusic(
+            application: Application,
+            classLoader: ClassLoader,
+            lyricsTypefaceSession: LyricsTypefaceSession? = null,
+        ): TargetAdaptation {
             val build = targetBuild(application)
             val resolver = IndexedTargetSymbolResolver(
                 build = build,
@@ -26,6 +33,10 @@ internal data class TargetAdaptation(
                 dualPane = AppleMusicDualPaneTarget(resolver),
                 editorialVideo = AppleMusicEditorialVideoTarget(application, resolver),
                 bidirectionalLyricBlur = AppleMusicBidirectionalLyricBlurTarget(resolver),
+                lyricsTypeface = AppleMusicLyricsTypefaceTarget(
+                    symbols = resolver,
+                    session = lyricsTypefaceSession ?: LyricsTypefaceSession(),
+                ),
             )
         }
     }
@@ -40,6 +51,10 @@ internal fun interface EditorialVideoTarget {
 }
 
 internal fun interface BidirectionalLyricBlurTarget {
+    fun install(): TargetCapabilityInstall
+}
+
+internal fun interface LyricsTypefaceTarget {
     fun install(): TargetCapabilityInstall
 }
 
