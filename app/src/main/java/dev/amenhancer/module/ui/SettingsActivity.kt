@@ -763,14 +763,15 @@ class SettingsActivity : Activity() {
                     return@save
                 }
                 saveCustomLyrics(
-                    CustomLyricsDraft(
+                    draft = CustomLyricsDraft(
                         appleMusicId = id,
                         displayName = displayName.text.toString(),
                         ttml = rawTtml,
                         source = source,
                         enabled = existing?.enabled ?: true,
                     ),
-                    dialog,
+                    replacingAppleMusicId = existing?.appleMusicId,
+                    dialog = dialog,
                 )
             })
         }
@@ -946,14 +947,18 @@ class SettingsActivity : Activity() {
         }
     }
 
-    private fun saveCustomLyrics(draft: CustomLyricsDraft, dialog: AlertDialog) {
+    private fun saveCustomLyrics(
+        draft: CustomLyricsDraft,
+        replacingAppleMusicId: Long?,
+        dialog: AlertDialog,
+    ) {
         val snapshot = ModuleApplication.serviceSnapshot
         if (!snapshot.isRemoteFileAvailable) {
             toast("libxposed remote file 服务不可用")
             return
         }
         backgroundExecutor.execute {
-            val result = CustomLyricsManager(snapshot, store).save(draft)
+            val result = CustomLyricsManager(snapshot, store).save(draft, replacingAppleMusicId)
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 when (result) {

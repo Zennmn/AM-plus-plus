@@ -18,7 +18,10 @@ internal class CustomLyricsManager(
     private val snapshot: XposedServiceSnapshot,
     private val configStore: ConfigStore,
 ) {
-    fun save(draft: CustomLyricsDraft): CustomLyricsSaveResult = synchronized(mutationLock) {
+    fun save(
+        draft: CustomLyricsDraft,
+        replacingAppleMusicId: Long? = null,
+    ): CustomLyricsSaveResult = synchronized(mutationLock) {
         if (!isWritable()) return CustomLyricsSaveResult.Failed("libxposed remote file 服务不可用")
         val oldManifest = configStore.settings(snapshot).customLyricsManifest
         return CustomLyricsImportTransaction(
@@ -30,7 +33,7 @@ internal class CustomLyricsManager(
             deleteRemoteFile = { fileId ->
                 if (ModuleApplication.isCurrentSnapshot(snapshot)) snapshot.deleteRemoteFile(fileId)
             },
-        ).upsert(oldManifest, draft)
+        ).upsert(oldManifest, draft, replacingAppleMusicId)
     }
 
     fun setEnabled(appleMusicId: Long, enabled: Boolean): CustomLyricsMutationResult = synchronized(mutationLock) {

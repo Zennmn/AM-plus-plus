@@ -32,9 +32,24 @@ internal class CustomLyricsImportTransaction(
     fun upsert(
         oldManifest: CustomLyricsManifest,
         draft: CustomLyricsDraft,
+        replacingAppleMusicId: Long? = null,
     ): CustomLyricsSaveResult {
         if (draft.appleMusicId <= 0L) {
             return CustomLyricsSaveResult.Failed("Apple Music ID 必须是正整数")
+        }
+        val replacedAppleMusicId = replacingAppleMusicId ?: draft.appleMusicId
+        val replacedEntry = oldManifest.entries.firstOrNull {
+            it.appleMusicId == replacedAppleMusicId
+        }
+        if (replacingAppleMusicId != null && replacedEntry == null) {
+            return CustomLyricsSaveResult.Failed("原歌词映射不存在")
+        }
+        if (
+            replacingAppleMusicId != null &&
+            replacingAppleMusicId != draft.appleMusicId &&
+            oldManifest.entries.any { it.appleMusicId == draft.appleMusicId }
+        ) {
+            return CustomLyricsSaveResult.Failed("目标 Apple Music ID 已存在")
         }
         val inspection = CustomLyricsFilePolicy.inspect(draft.ttml)
         if (inspection is CustomLyricsInspection.Rejected) {
@@ -57,7 +72,9 @@ internal class CustomLyricsImportTransaction(
         )
         val manifest = CustomLyricsManifestPolicy.sanitize(
             CustomLyricsManifest(
-                oldManifest.entries.filterNot { it.appleMusicId == draft.appleMusicId } + entry,
+                oldManifest.entries.filterNot {
+                    it.appleMusicId == replacedAppleMusicId || it.appleMusicId == draft.appleMusicId
+                } + entry,
             ),
         )
         if (manifest.entries.none { it.appleMusicId == entry.appleMusicId && it.fileId == entry.fileId }) {
@@ -71,8 +88,7 @@ internal class CustomLyricsImportTransaction(
             runCatching { deleteRemoteFile(fileId) }
             return CustomLyricsSaveResult.Failed("无法发布歌词映射")
         }
-        oldManifest.entries.firstOrNull { it.appleMusicId == entry.appleMusicId }
-            ?.fileId
+        replacedEntry?.fileId
             ?.takeIf { it != entry.fileId }
             ?.let { oldFileId -> runCatching { deleteRemoteFile(oldFileId) } }
         return CustomLyricsSaveResult.Saved(manifest, entry)

@@ -47,6 +47,48 @@ class CustomLyricsImportTransactionTest {
         assertTrue(events.isEmpty())
     }
 
+    @Test
+    fun `editing an entry to a new id replaces its original identity and file`() {
+        val events = mutableListOf<String>()
+        var published = CustomLyricsManifest.empty()
+        val transaction = transaction(events) { manifest ->
+            events += "publish"
+            published = manifest
+            true
+        }
+
+        val result = transaction.upsert(
+            oldManifest = CustomLyricsManifest(listOf(existingEntry())),
+            draft = draft(appleMusicId = 84L),
+            replacingAppleMusicId = 42L,
+        )
+
+        assertTrue(result is CustomLyricsSaveResult.Saved)
+        assertEquals(listOf(84L), published.entries.map(CustomLyricsEntry::appleMusicId))
+        assertEquals(listOf("write", "publish", "delete:lyrics_old"), events)
+    }
+
+    @Test
+    fun `editing to an id owned by another entry fails before writing`() {
+        val events = mutableListOf<String>()
+        val transaction = transaction(events) { events += "publish"; true }
+        val old = CustomLyricsManifest(
+            listOf(
+                existingEntry(),
+                existingEntry(appleMusicId = 84L, fileId = "lyrics_other"),
+            ),
+        )
+
+        val result = transaction.upsert(
+            oldManifest = old,
+            draft = draft(appleMusicId = 84L),
+            replacingAppleMusicId = 42L,
+        )
+
+        assertEquals(CustomLyricsSaveResult.Failed("目标 Apple Music ID 已存在"), result)
+        assertTrue(events.isEmpty())
+    }
+
     private fun transaction(
         events: MutableList<String>,
         publish: (CustomLyricsManifest) -> Boolean,
@@ -57,17 +99,23 @@ class CustomLyricsImportTransactionTest {
         deleteRemoteFile = { fileId -> events += "delete:$fileId" },
     )
 
-    private fun draft(ttml: String = this.ttml) = CustomLyricsDraft(
-        appleMusicId = 42L,
+    private fun draft(
+        ttml: String = this.ttml,
+        appleMusicId: Long = 42L,
+    ) = CustomLyricsDraft(
+        appleMusicId = appleMusicId,
         displayName = "Song",
         ttml = ttml,
         source = CustomLyricsSources.MANUAL,
     )
 
-    private fun existingEntry() = CustomLyricsEntry(
-        appleMusicId = 42L,
+    private fun existingEntry(
+        appleMusicId: Long = 42L,
+        fileId: String = "lyrics_old",
+    ) = CustomLyricsEntry(
+        appleMusicId = appleMusicId,
         displayName = "Old song",
-        fileId = "lyrics_old",
+        fileId = fileId,
         sizeBytes = 42L,
         sha256 = "0cba697d61a21fb62408b2411aa2152d1bc24cc2414d2bd162f70e04d20c5e53",
         source = CustomLyricsSources.MANUAL,
