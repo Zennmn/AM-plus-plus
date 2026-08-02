@@ -120,11 +120,19 @@ internal class TargetClassIndex(private val source: TargetClassSource) {
 internal class TargetSymbolKey<T : Any>(
     val id: String,
     internal val profileCandidates: TargetClassIndex.(AppleMusicProfile?) -> List<T> = { emptyList() },
-    internal val profileBound: Boolean = false,
+    internal val profilePolicy: ProfilePolicy = ProfilePolicy.NO_PROFILE,
     internal val stableCandidates: TargetClassIndex.() -> List<T> = { emptyList() },
     internal val structuralCandidates: TargetClassIndex.() -> List<T>,
     internal val identity: (T) -> String,
 )
+
+internal enum class ProfilePolicy {
+    NO_PROFILE,
+    /** The verified identity is authoritative; a stale profile degrades this symbol. */
+    EXACT_REQUIRED,
+    /** Try the verified identity first, then the symbol's reviewed safe fallback contract. */
+    EXACT_PREFERRED,
+}
 
 internal interface TargetSymbolResolver {
     fun <T : Any> resolve(symbol: TargetSymbolKey<T>): TargetResolution<T>
@@ -146,12 +154,15 @@ internal class IndexedTargetSymbolResolver(
         }
 
     private fun <T : Any> resolveUncached(symbol: TargetSymbolKey<T>): TargetResolution<T> {
-        if (profile != null && symbol.profileBound) {
-            return select(
+        if (profile != null && symbol.profilePolicy != ProfilePolicy.NO_PROFILE) {
+            select(
                 symbol,
                 symbol.profileCandidates(index, profile),
                 SymbolMatch.VERSION_PROFILE,
-            ) ?: TargetResolution.Missing(symbol.id, profile.id)
+            )?.let { return it }
+            if (symbol.profilePolicy == ProfilePolicy.EXACT_REQUIRED) {
+                return TargetResolution.Missing(symbol.id, profile.id)
+            }
         }
         select(symbol, symbol.stableCandidates(index), SymbolMatch.STABLE_NAME)?.let { return it }
         val fallback = distinctCandidates(symbol, symbol.structuralCandidates(index))
@@ -299,6 +310,7 @@ internal object AppleMusicSymbols {
     val PlayerActivity = classSymbol(
         id = "player-activity",
         profileId = TargetSymbolId.PLAYER_ACTIVITY,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
         fallbackName = { it.endsWith(".common.activity.PlayerActivity") },
         contract = { true },
     )
@@ -306,6 +318,7 @@ internal object AppleMusicSymbols {
     val EditorialVideoUrlSelector = methodSymbol(
         id = "editorial-video-url-selector",
         profileOwner = TargetSymbolId.EDITORIAL_VIDEO_OWNER,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
         fallbackOwner = { name ->
             name.startsWith("com.apple.android.music.player.") &&
                 name.substringAfterLast('.').substringBefore('$').length <= 3
@@ -316,6 +329,7 @@ internal object AppleMusicSymbols {
     val LyricsFragment = classSymbol(
         id = "lyrics-fragment",
         profileId = TargetSymbolId.LYRICS_FRAGMENT,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
         fallbackName = { it.endsWith(".PlayerLyricsViewFragment") },
         contract = { true },
     )
@@ -337,6 +351,7 @@ internal object AppleMusicSymbols {
     val LyricsLineVector = classSymbol(
         id = "lyrics-line-vector",
         profileId = TargetSymbolId.LYRICS_LINE_VECTOR,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
         stableName = "com.apple.android.music.ttml.javanative.model.LyricsLineVector",
         fallbackName = { it.endsWith(".ttml.javanative.model.LyricsLineVector") },
         contract = { true },
@@ -345,13 +360,14 @@ internal object AppleMusicSymbols {
     val LyricsSessionProcessor = methodSymbol(
         id = "lyrics-session-processor",
         profileOwner = TargetSymbolId.LYRICS_EVENT_PROCESSOR,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
         fallbackOwner = { it.endsWith(".ttml.SongInfoTimeProcessor") },
         contract = ::isLyricsSessionProcessor,
     )
 
     val LyricsHighlightCallback = TargetSymbolKey(
         id = "lyrics-highlight-callback",
-        profileBound = true,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
         profileCandidates = { profile ->
             val owner = profile?.exactClasses?.get(TargetSymbolId.LYRICS_HIGHLIGHT_CALLBACK_OWNER)
                 ?.let(::load)
@@ -392,6 +408,7 @@ internal object AppleMusicSymbols {
     val LyricsViewModel = classSymbol(
         id = "lyrics-view-model",
         profileId = TargetSymbolId.LYRICS_VIEW_MODEL,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
         stableName = "com.apple.android.music.player.viewmodel.PlayerLyricsViewModel",
         fallbackName = { it.endsWith(".PlayerLyricsViewModel", ignoreCase = true) },
         contract = { true },
@@ -408,6 +425,7 @@ internal object AppleMusicSymbols {
     val SongInfoPtr = classSymbol(
         id = "song-info-ptr",
         profileId = TargetSymbolId.SONG_INFO_PTR,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
         stableName = "com.apple.android.music.ttml.javanative.model.SongInfo\$SongInfoPtr",
         fallbackName = { it.endsWith(".ttml.javanative.model.SongInfo\$SongInfoPtr") },
         contract = ::hasSongInfoPtrContract,
@@ -416,6 +434,7 @@ internal object AppleMusicSymbols {
     val SongInfoNative = classSymbol(
         id = "song-info-native",
         profileId = TargetSymbolId.SONG_INFO_NATIVE,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
         stableName = "com.apple.android.music.ttml.javanative.model.SongInfo\$SongInfoNative",
         fallbackName = { it.endsWith(".ttml.javanative.model.SongInfo\$SongInfoNative") },
         contract = ::hasSongInfoNativeContract,
@@ -424,6 +443,7 @@ internal object AppleMusicSymbols {
     val TtmlParserNative = classSymbol(
         id = "ttml-parser-native",
         profileId = TargetSymbolId.TTML_PARSER_NATIVE,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
         stableName = "com.apple.android.music.ttml.javanative.TTMLParser\$TTMLParserNative",
         fallbackName = { it.endsWith(".ttml.javanative.TTMLParser\$TTMLParserNative") },
         contract = ::hasTtmlParserNativeContract,
@@ -445,7 +465,7 @@ internal object AppleMusicSymbols {
 
     val PlayerMetadataPublishMethod = TargetSymbolKey(
         id = "player-metadata-publish-method",
-        profileBound = true,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
         profileCandidates = { profile ->
             profile?.exactClasses?.get(TargetSymbolId.PLAYER_METADATA_HUB)
                 ?.let(::load)
@@ -471,6 +491,7 @@ internal object AppleMusicSymbols {
     val MetadataToPlaybackItemMethod = methodSymbol(
         id = "metadata-to-playback-item-method",
         profileOwner = TargetSymbolId.METADATA_TO_ITEM_CONVERTER,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
         fallbackOwner = ::isShortPlayerClass,
         contract = ::isMetadataToPlaybackItemMethod,
         structuralContract = ::isStructurallyMetadataToPlaybackItemMethod,
@@ -479,6 +500,7 @@ internal object AppleMusicSymbols {
     val LyricsAvailabilityPredicate = methodSymbol(
         id = "lyrics-availability-predicate",
         profileOwner = TargetSymbolId.LYRICS_AVAILABILITY_OWNER,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
         fallbackOwner = ::isShortPlayerClass,
         contract = ::isLyricsAvailabilityPredicate,
         structuralContract = ::isStructurallyLyricsAvailabilityPredicate,
@@ -487,6 +509,7 @@ internal object AppleMusicSymbols {
     val TtmlSongInfoFromTtml = methodSymbol(
         id = "ttml-song-info-from-ttml",
         profileOwner = TargetSymbolId.TTML_PARSER_NATIVE,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
         fallbackOwner = { it.endsWith(".ttml.javanative.TTMLParser\$TTMLParserNative") },
         contract = ::isTtmlSongInfoFromTtml,
     )
@@ -499,12 +522,13 @@ internal object AppleMusicSymbols {
      * SongInfoPtr whose Adam ID differs — so the incoming pointer can be a
      * stale leftover from a previous song, and this field is the only
      * authoritative song identity for every I2 entry. The contract requires
-     * the exact field name "c" plus the exact declared type, so a same-named
-     * field of another type can never be selected silently.
+     * the exact field name "c" plus the exact declared type. If a profile pin
+     * is stale, structural discovery is restricted to the lyrics fragment's
+     * hierarchy and accepts only a unique BaseContentItem field.
      */
     val LyricsCurrentItemField = TargetSymbolKey(
         id = "lyrics-current-item-field",
-        profileBound = true,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
         profileCandidates = { profile ->
             profile?.exactClasses?.get(TargetSymbolId.LYRICS_CURRENT_ITEM_FIELD)
                 ?.let(::load)
@@ -517,10 +541,7 @@ internal object AppleMusicSymbols {
                 "com.apple.android.music.player.fragment.PlayerLyricsViewFragment",
             )
             if (lyricsFragment == null) {
-                fields(
-                    { it.startsWith("com.apple.android.music.player.fragment.") },
-                    ::isLyricsCurrentItemField,
-                )
+                emptyList()
             } else {
                 val hierarchyFields = fields(
                     { it.startsWith("com.apple.android.music.player.fragment.") },
@@ -539,12 +560,17 @@ internal object AppleMusicSymbols {
 private fun classSymbol(
     id: String,
     profileId: TargetSymbolId? = null,
+    profilePolicy: ProfilePolicy = if (profileId == null) {
+        ProfilePolicy.NO_PROFILE
+    } else {
+        ProfilePolicy.EXACT_REQUIRED
+    },
     stableName: String? = null,
     fallbackName: (String) -> Boolean,
     contract: (Class<*>) -> Boolean,
 ): TargetSymbolKey<Class<*>> = TargetSymbolKey(
     id = id,
-    profileBound = profileId != null,
+    profilePolicy = profilePolicy,
     profileCandidates = { profile ->
         profileId?.let { profile?.exactClasses?.get(it) }
             ?.let(::load)
@@ -562,12 +588,13 @@ private fun classSymbol(
 private fun methodSymbol(
     id: String,
     profileOwner: TargetSymbolId,
+    profilePolicy: ProfilePolicy = ProfilePolicy.EXACT_REQUIRED,
     fallbackOwner: (String) -> Boolean,
     contract: (Method) -> Boolean,
     structuralContract: (Method) -> Boolean = contract,
 ): TargetSymbolKey<Method> = TargetSymbolKey(
     id = id,
-    profileBound = true,
+    profilePolicy = profilePolicy,
     profileCandidates = { profile ->
         profile?.exactClasses?.get(profileOwner)
             ?.let(::load)

@@ -459,21 +459,108 @@ class TargetSymbolsTest {
     }
 
     @Test
-    fun `a matched profile never guesses when its exact owner is missing`() {
+    fun `exact required profile policy never scans structural candidates`() {
         val source = FakeTargetClassSource(
-            names = listOf("com.apple.android.music.player.fragment.n"),
-            classes = mapOf("com.apple.android.music.player.fragment.n" to n::class.java),
+            names = listOf("com.apple.structural.Decoy"),
+            classes = mapOf("com.apple.structural.Decoy" to FirstFixture::class.java),
         )
         val resolver = IndexedTargetSymbolResolver(
             build = TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.0", 1580L),
             source = source,
         )
+        val symbol = TargetSymbolKey(
+            id = "exact-required-fixture",
+            profilePolicy = ProfilePolicy.EXACT_REQUIRED,
+            structuralCandidates = { classes({ true }) { true } },
+            identity = { type: Class<*> -> type.name },
+        )
 
-        val resolution = resolver.resolve(AppleMusicSymbols.LyricsCurrentItemField)
+        val resolution = resolver.resolve(symbol)
 
         assertTrue(resolution is TargetResolution.Missing)
         assertEquals(0, source.classNameReads)
-        assertEquals("apple-music-6.5.0-1580", (resolution as TargetResolution.Missing).profileId)
+    }
+
+    @Test
+    fun `ambiguous exact preferred profile candidates never fall through`() {
+        val source = FakeTargetClassSource(
+            names = listOf("com.apple.structural.Fallback"),
+            classes = mapOf("com.apple.structural.Fallback" to ProfileFixture::class.java),
+        )
+        val resolver = IndexedTargetSymbolResolver(
+            build = TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.0", 1580L),
+            source = source,
+        )
+        val symbol = TargetSymbolKey(
+            id = "ambiguous-preferred-fixture",
+            profilePolicy = ProfilePolicy.EXACT_PREFERRED,
+            profileCandidates = { listOf(FirstFixture::class.java, SecondFixture::class.java) },
+            structuralCandidates = { classes({ true }) { true } },
+            identity = { type: Class<*> -> type.name },
+        )
+
+        val resolution = resolver.resolve(symbol)
+
+        assertTrue(resolution is TargetResolution.Ambiguous)
+        assertEquals(0, source.classNameReads)
+    }
+
+    @Test
+    fun `profile backed symbols declare reviewed fallback policies`() {
+        listOf(
+            AppleMusicSymbols.PlayerController,
+            AppleMusicSymbols.LyricsChromeFragment,
+            AppleMusicSymbols.StackedNavigationMenu,
+            AppleMusicSymbols.LyricsInstallMethod,
+        ).forEach { symbol ->
+            assertEquals(ProfilePolicy.EXACT_REQUIRED, symbol.profilePolicy)
+        }
+        listOf(
+            AppleMusicSymbols.PlayerActivity,
+            AppleMusicSymbols.EditorialVideoUrlSelector,
+            AppleMusicSymbols.LyricsFragment,
+            AppleMusicSymbols.LyricsLineVector,
+            AppleMusicSymbols.LyricsSessionProcessor,
+            AppleMusicSymbols.LyricsHighlightCallback,
+            AppleMusicSymbols.LyricsViewModel,
+            AppleMusicSymbols.SongInfoPtr,
+            AppleMusicSymbols.SongInfoNative,
+            AppleMusicSymbols.TtmlParserNative,
+            AppleMusicSymbols.PlayerMetadataPublishMethod,
+            AppleMusicSymbols.MetadataToPlaybackItemMethod,
+            AppleMusicSymbols.LyricsAvailabilityPredicate,
+            AppleMusicSymbols.TtmlSongInfoFromTtml,
+            AppleMusicSymbols.LyricsCurrentItemField,
+        ).forEach { symbol ->
+            assertEquals(ProfilePolicy.EXACT_PREFERRED, symbol.profilePolicy)
+        }
+        assertEquals(ProfilePolicy.NO_PROFILE, AppleMusicSymbols.RecyclerView.profilePolicy)
+    }
+
+    @Test
+    fun `a matched profile falls back to the verified current item hierarchy when its owner is stale`() {
+        val fragmentName = "com.apple.android.music.player.fragment.PlayerLyricsViewFragment"
+        val currentItemOwner = "com.apple.android.music.player.fragment.z"
+        val source = FakeTargetClassSource(
+            names = listOf(fragmentName, currentItemOwner),
+            classes = mapOf(
+                fragmentName to CurrentLyricsFragmentFixture::class.java,
+                currentItemOwner to RenamedCurrentItemOwnerFixture::class.java,
+            ),
+        )
+        val resolver = IndexedTargetSymbolResolver(
+            build = TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.1", 1583L),
+            source = source,
+        )
+
+        val resolution = resolver.resolve(AppleMusicSymbols.LyricsCurrentItemField)
+
+        assertTrue(resolution is TargetResolution.Found)
+        resolution as TargetResolution.Found
+        assertEquals(SymbolMatch.STRUCTURAL_FALLBACK, resolution.match)
+        assertEquals("renamedItem", resolution.value.name)
+        assertEquals("apple-music-6.5.1-1583", resolution.profileId)
+        assertEquals(1, source.classNameReads)
     }
 
     @Test
@@ -524,7 +611,7 @@ class TargetSymbolsTest {
     }
 
     @Test
-    fun `unknown version reports ambiguous structural metadata converters`() {
+    fun `matched profile reports ambiguous structural metadata converters`() {
         val source = FakeTargetClassSource(
             names = listOf(
                 "com.apple.android.music.player.X",
@@ -535,12 +622,17 @@ class TargetSymbolsTest {
                 "com.apple.android.music.player.Y" to SecondMetadataConverterFixture::class.java,
             ),
         )
-        val resolver = IndexedTargetSymbolResolver(TargetBuild.UNKNOWN, source)
+        val resolver = IndexedTargetSymbolResolver(
+            TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.1", 1583L),
+            source,
+        )
 
         val resolution = resolver.resolve(AppleMusicSymbols.MetadataToPlaybackItemMethod)
 
         assertTrue(resolution is TargetResolution.Ambiguous)
-        assertEquals(2, (resolution as TargetResolution.Ambiguous).candidates.size)
+        resolution as TargetResolution.Ambiguous
+        assertEquals(2, resolution.candidates.size)
+        assertEquals("apple-music-6.5.1-1583", resolution.profileId)
     }
 
     @Test
@@ -558,7 +650,10 @@ class TargetSymbolsTest {
                 weakAvailability to PrimaryOnlyLyricsAvailabilityFixture::class.java,
             ),
         )
-        val resolver = IndexedTargetSymbolResolver(TargetBuild.UNKNOWN, source)
+        val resolver = IndexedTargetSymbolResolver(
+            TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.1", 1583L),
+            source,
+        )
 
         val publish = resolver.resolve(AppleMusicSymbols.PlayerMetadataPublishMethod)
         val availability = resolver.resolve(AppleMusicSymbols.LyricsAvailabilityPredicate)
@@ -592,7 +687,10 @@ class TargetSymbolsTest {
                 decoyName to DecoyProfileCallback::class.java,
             ),
         )
-        val resolver = IndexedTargetSymbolResolver(TargetBuild.UNKNOWN, source)
+        val resolver = IndexedTargetSymbolResolver(
+            TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.1", 1583L),
+            source,
+        )
 
         val resolution = resolver.resolve(AppleMusicSymbols.LyricsHighlightCallback)
 
@@ -603,27 +701,30 @@ class TargetSymbolsTest {
 
     @Test
     fun `structural ambiguity of the current item field is reported instead of a silent first match`() {
+        val fragmentName = "com.apple.android.music.player.fragment.PlayerLyricsViewFragment"
+        val ownerName = "com.apple.android.music.player.fragment.z"
         val source = FakeTargetClassSource(
-            names = listOf(
-                "com.apple.android.music.player.fragment.m",
-                "com.apple.android.music.player.fragment.n",
-            ),
+            names = listOf(fragmentName, ownerName),
             classes = mapOf(
-                "com.apple.android.music.player.fragment.m" to m::class.java,
-                "com.apple.android.music.player.fragment.n" to n::class.java,
+                fragmentName to AmbiguousLyricsFragmentFixture::class.java,
+                ownerName to AmbiguousCurrentItemOwnerFixture::class.java,
             ),
         )
-        val resolver = IndexedTargetSymbolResolver(TargetBuild.UNKNOWN, source)
+        val resolver = IndexedTargetSymbolResolver(
+            TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.1", 1583L),
+            source,
+        )
 
         val resolution = resolver.resolve(AppleMusicSymbols.LyricsCurrentItemField)
 
         assertTrue(resolution is TargetResolution.Ambiguous)
         resolution as TargetResolution.Ambiguous
         assertEquals(2, resolution.candidates.size)
+        assertEquals("apple-music-6.5.1-1583", resolution.profileId)
         assertTrue(
             resolution.candidates.any { candidate ->
                 candidate.contains(
-                    "com.apple.android.music.player.fragment.m#c:" +
+                    "AmbiguousCurrentItemOwnerFixture#first:" +
                         "com.apple.android.music.model.BaseContentItem",
                 )
             },
@@ -632,10 +733,14 @@ class TargetSymbolsTest {
 
     @Test
     fun `structural fallback uniquely finds the current item field`() {
-        val ownerName = "com.apple.android.music.player.fragment.m"
+        val fragmentName = "com.apple.android.music.player.fragment.PlayerLyricsViewFragment"
+        val ownerName = "com.apple.android.music.player.fragment.z"
         val source = FakeTargetClassSource(
-            names = listOf(ownerName),
-            classes = mapOf(ownerName to m::class.java),
+            names = listOf(fragmentName, ownerName),
+            classes = mapOf(
+                fragmentName to CurrentLyricsFragmentFixture::class.java,
+                ownerName to RenamedCurrentItemOwnerFixture::class.java,
+            ),
         )
         val resolver = IndexedTargetSymbolResolver(TargetBuild.UNKNOWN, source)
 
@@ -643,7 +748,7 @@ class TargetSymbolsTest {
 
         assertTrue(resolution is TargetResolution.Found)
         assertEquals(SymbolMatch.STRUCTURAL_FALLBACK, (resolution as TargetResolution.Found).match)
-        assertEquals("c", resolution.value.name)
+        assertEquals("renamedItem", resolution.value.name)
         assertEquals(BaseContentItem::class.java, resolution.value.type)
     }
 
@@ -698,6 +803,13 @@ private open class RenamedCurrentItemOwnerFixture {
 }
 
 private class CurrentLyricsFragmentFixture : RenamedCurrentItemOwnerFixture()
+
+private open class AmbiguousCurrentItemOwnerFixture {
+    val first: BaseContentItem = BaseContentItem()
+    val second: BaseContentItem = BaseContentItem()
+}
+
+private class AmbiguousLyricsFragmentFixture : AmbiguousCurrentItemOwnerFixture()
 
 private class RenamedPlayerMetadataHubFixture {
     @Suppress("UNUSED_PARAMETER")
