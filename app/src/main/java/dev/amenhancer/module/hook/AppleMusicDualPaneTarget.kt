@@ -266,51 +266,67 @@ internal class AppleMusicDualPaneTarget(
     private val anchorResizeListeners = WeakHashMap<View, View.OnLayoutChangeListener>()
 
     override fun install(): TargetCapabilityInstall {
-        val controllerResolution = symbols.resolve(AppleMusicSymbols.PlayerController)
-        val controller = controllerResolution.valueOrNull()
-            ?: return TargetCapabilityInstall.Degraded(controllerResolution.summary)
-        val controllerHooks = installControllerHooks(controller)
-        val navigationMenuResolution = symbols.resolve(AppleMusicSymbols.StackedNavigationMenu)
+        val controllerInitializeResolution = symbols.resolve(AppleMusicSymbols.PlayerControllerInitialize)
+        val controllerCreateViewResolution = symbols.resolve(AppleMusicSymbols.PlayerControllerCreateView)
+        val controllerSelectPaneResolution = symbols.resolve(AppleMusicSymbols.PlayerControllerSelectPane)
+        val controllerHooks = installControllerHooks(
+            controllerInitializeResolution.valueOrNull(),
+            controllerCreateViewResolution.valueOrNull(),
+            controllerSelectPaneResolution.valueOrNull(),
+        )
+        val navigationMenuResolution = symbols.resolve(AppleMusicSymbols.StackedNavigationMenuOnMeasure)
         val navigationMenuMeasureHooks = installStackedBottomNavigationMenuMeasureHook(
             navigationMenuResolution.valueOrNull(),
         )
-        val activityResolution = symbols.resolve(AppleMusicSymbols.PlayerActivity)
-        val chromeHooks = activityResolution.valueOrNull()?.let { activityClass ->
-            installNativeStackedNavigationHolderHook(activityClass)
-        } ?: 0
+        val activityResolution = symbols.resolve(AppleMusicSymbols.PlayerActivityCreateStackedNavigationHolder)
+        val chromeHooks = installNativeStackedNavigationHolderHook(activityResolution.valueOrNull())
         val lyricsFragmentResolution = symbols.resolve(AppleMusicSymbols.LyricsFragment)
         val lyricsFragmentClass = lyricsFragmentResolution.valueOrNull()
-        val lyricsChromeResolution = symbols.resolve(AppleMusicSymbols.LyricsChromeFragment)
-        val lyricsChromeHooks = lyricsChromeResolution.valueOrNull()?.let { chromeClass ->
-            lyricsFragmentClass?.let { lyricsClass ->
-                installLandscapeLyricsChromeHook(chromeClass, lyricsClass)
-            }
-        } ?: 0
-        val lyricsMetricsHooks = lyricsFragmentClass?.let(::installLandscapeLyricsMetricsHook) ?: 0
-        val lyricsTypographyHooks = lyricsFragmentClass?.let(::installLandscapeLyricsTypographyHook) ?: 0
+        val lyricsChromeResolution = symbols.resolve(AppleMusicSymbols.LyricsChromeAnimate)
+        val lyricsChromeHooks = installLandscapeLyricsChromeHook(
+            lyricsChromeResolution.valueOrNull(),
+            lyricsFragmentClass,
+        )
+        val lyricsMetricsResolution = symbols.resolve(AppleMusicSymbols.LyricsFragmentUpdateMetrics)
+        val lyricsMetricsHooks = installLandscapeLyricsMetricsHook(lyricsMetricsResolution.valueOrNull())
+        val lyricsTypographyResolution = symbols.resolve(AppleMusicSymbols.LyricsFragmentOnResume)
+        val lyricsTypographyHooks = installLandscapeLyricsTypographyHook(
+            lyricsTypographyResolution.valueOrNull(),
+        )
+        val failures = listOf(
+            controllerInitializeResolution,
+            controllerCreateViewResolution,
+            controllerSelectPaneResolution,
+            navigationMenuResolution,
+            activityResolution,
+            lyricsFragmentResolution,
+            lyricsChromeResolution,
+            lyricsMetricsResolution,
+            lyricsTypographyResolution,
+        ).filterNot { it is TargetResolution.Found<*> }
+        val failureSummary = failures.takeIf(List<*>::isNotEmpty)
+            ?.joinToString(prefix = "; ") { it.summary }
+            .orEmpty()
         if (
-            controllerHooks == 0 ||
+            controllerHooks != 3 ||
+            navigationMenuMeasureHooks == 0 ||
             chromeHooks == 0 ||
             lyricsChromeHooks == 0 ||
             lyricsMetricsHooks == 0 ||
-            lyricsTypographyHooks == 0
+            lyricsTypographyHooks == 0 ||
+            failures.isNotEmpty()
         ) {
             return TargetCapabilityInstall.Degraded(
-                "Installed controller=$controllerHooks chrome=$chromeHooks lyricsChrome=$lyricsChromeHooks " +
-                    "lyricsMetrics=$lyricsMetricsHooks lyricsTypography=$lyricsTypographyHooks hook(s); " +
-                    listOf(
-                        navigationMenuResolution,
-                        activityResolution,
-                        lyricsFragmentResolution,
-                        lyricsChromeResolution,
-                    ).filterNot { it is TargetResolution.Found<*> }
-                        .joinToString { it.summary },
+                "Installed controller=$controllerHooks navigationMeasure=$navigationMenuMeasureHooks " +
+                    "chrome=$chromeHooks lyricsChrome=$lyricsChromeHooks " +
+                    "lyricsMetrics=$lyricsMetricsHooks lyricsTypography=$lyricsTypographyHooks hook(s)" +
+                    failureSummary,
             )
         }
         return TargetCapabilityInstall.Active(
             "Installed player controller and chrome hooks; " +
                 "stackedNavigationMenuMeasure=$navigationMenuMeasureHooks; " +
-                controllerResolution.summary,
+                controllerInitializeResolution.summary,
         )
     }
 
@@ -321,15 +337,8 @@ internal class AppleMusicDualPaneTarget(
      * the cached 40dp spec even when the public parent becomes full-width.
      * Feed the exact same 56dp height into that direct menu on every measure.
      */
-    private fun installStackedBottomNavigationMenuMeasureHook(menuClass: Class<*>?): Int {
-        menuClass ?: return 0
-        val onMeasure = menuClass.declaredMethods.firstOrNull { method ->
-            method.name == "onMeasure" &&
-                !Modifier.isStatic(method.modifiers) &&
-                method.returnType == Void.TYPE &&
-                method.parameterTypes.size == 2 &&
-                method.parameterTypes.all { it == Int::class.javaPrimitiveType }
-        } ?: return 0
+    private fun installStackedBottomNavigationMenuMeasureHook(onMeasure: Method?): Int {
+        onMeasure ?: return 0
         return if (hook(onMeasure, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val menu = param.thisObject as? View ?: return
@@ -370,13 +379,8 @@ internal class AppleMusicDualPaneTarget(
      * owned by dual-pane rather than future-blur: disabling blur must not
      * shrink the tablet player back to the stock 24sp size.
      */
-    private fun installLandscapeLyricsTypographyHook(lyricsFragmentClass: Class<*>): Int {
-        val onResume = lyricsFragmentClass.declaredMethods.firstOrNull { method ->
-            method.name == "onResume" &&
-                !Modifier.isStatic(method.modifiers) &&
-                method.returnType == Void.TYPE &&
-                method.parameterTypes.isEmpty()
-        } ?: return 0
+    private fun installLandscapeLyricsTypographyHook(onResume: Method?): Int {
+        onResume ?: return 0
         return if (hook(onResume, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     param.thisObject?.let { fragment ->
@@ -399,17 +403,11 @@ internal class AppleMusicDualPaneTarget(
      * lyrics pane without touching the left player pane.
      */
     private fun installLandscapeLyricsChromeHook(
-        chromeClass: Class<*>,
-        lyricsFragmentClass: Class<*>,
+        animateChrome: Method?,
+        lyricsFragmentClass: Class<*>?,
     ): Int {
-        val animateChrome = chromeClass.declaredMethods.firstOrNull { method ->
-            method.name == "a2" &&
-                !Modifier.isStatic(method.modifiers) &&
-                method.returnType == Void.TYPE &&
-                method.parameterTypes.size == 2 &&
-                method.parameterTypes[0] == Int::class.javaPrimitiveType &&
-                method.parameterTypes[1] == IntArray::class.java
-        } ?: return 0
+        animateChrome ?: return 0
+        lyricsFragmentClass ?: return 0
         return if (hook(animateChrome, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val fragment = param.thisObject ?: return
@@ -437,13 +435,8 @@ internal class AppleMusicDualPaneTarget(
      * all of its normal calculations, then remove the same control height and
      * refresh the same RecyclerView it refreshes in j2().
      */
-    private fun installLandscapeLyricsMetricsHook(lyricsFragmentClass: Class<*>): Int {
-        val updateMetrics = lyricsFragmentClass.declaredMethods.firstOrNull { method ->
-            method.name == "j2" &&
-                !Modifier.isStatic(method.modifiers) &&
-                method.returnType == Boolean::class.javaPrimitiveType &&
-                method.parameterTypes.isEmpty()
-        } ?: return 0
+    private fun installLandscapeLyricsMetricsHook(updateMetrics: Method?): Int {
+        updateMetrics ?: return 0
         return if (hook(updateMetrics, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     val fragment = param.thisObject ?: return
@@ -573,14 +566,12 @@ internal class AppleMusicDualPaneTarget(
         RightLyricsPaneLayout.reapplyVerticalGradientEdges(gradients)
     }
 
-    private fun installControllerHooks(controller: Class<*>): Int {
+    private fun installControllerHooks(
+        initialize: Method?,
+        createView: Method?,
+        selectPane: Method?,
+    ): Int {
         var hooks = 0
-        val initialize = controller.declaredMethods.firstOrNull { method ->
-            method.name == "w1" &&
-                !Modifier.isStatic(method.modifiers) &&
-                method.returnType == Void.TYPE &&
-                method.parameterTypes.singleOrNull()?.name?.endsWith(".BagConfig") == true
-        }
         if (initialize != null && hook(initialize, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     val controllerInstance = param.thisObject ?: return
@@ -595,16 +586,6 @@ internal class AppleMusicDualPaneTarget(
         // The modified APK's transaction is still the model; onCreateView's
         // result is the first deterministic moment at which its two target
         // containers can be resolved by the child FragmentManager.
-        val createView = controller.declaredMethods.firstOrNull { method ->
-            method.name == "onCreateView" &&
-                !Modifier.isStatic(method.modifiers) &&
-                View::class.java.isAssignableFrom(method.returnType) &&
-                method.parameterTypes.map { it.name } == listOf(
-                "android.view.LayoutInflater",
-                "android.view.ViewGroup",
-                "android.os.Bundle",
-            )
-        }
         if (createView != null && hook(createView, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     val controllerInstance = param.thisObject ?: return
@@ -615,14 +596,6 @@ internal class AppleMusicDualPaneTarget(
             hooks += 1
         }
 
-        val selectPane = controller.declaredMethods.firstOrNull { method ->
-            method.name == "F1" &&
-                !Modifier.isStatic(method.modifiers) &&
-                method.returnType == Void.TYPE &&
-                method.parameterTypes.size == 2 &&
-                method.parameterTypes[0].isEnum &&
-                method.parameterTypes[1] == Bundle::class.java
-        }
         if (selectPane != null && hook(selectPane, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val requested = param.args.firstOrNull() as? Enum<*> ?: return
@@ -642,13 +615,9 @@ internal class AppleMusicDualPaneTarget(
      * tablet holder. The native object then owns slide interpolation, peek
      * height, navigation translation, colors and system-bar transitions.
      */
-    private fun installNativeStackedNavigationHolderHook(activityClass: Class<*>): Int {
-        val method = activityClass.declaredMethods.firstOrNull { method ->
-            method.name == "k1" &&
-                !Modifier.isStatic(method.modifiers) &&
-                method.parameterTypes.isEmpty() &&
-                method.returnType.name == "com.apple.android.music.common.activity.PlayerActivity\$m"
-        } ?: return 0
+    private fun installNativeStackedNavigationHolderHook(method: Method?): Int {
+        method ?: return 0
+        val activityClass = method.declaringClass
         val holderClass = activityClass.declaredClasses.firstOrNull { nested ->
             nested.simpleName == "StackedBottomNavigationHolder" ||
                 nested.declaredConstructors.any { constructor ->

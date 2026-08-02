@@ -42,6 +42,26 @@ class DualPaneStructuralRegressionTest {
     }
 
     @Test
+    fun `resolves every dual pane hook entry through target symbols`() {
+        listOf(
+            "PlayerControllerInitialize",
+            "PlayerControllerCreateView",
+            "PlayerControllerSelectPane",
+            "PlayerActivityCreateStackedNavigationHolder",
+            "StackedNavigationMenuOnMeasure",
+            "LyricsFragmentOnResume",
+            "LyricsChromeAnimate",
+            "LyricsFragmentUpdateMetrics",
+        ).forEach { symbol ->
+            assertTrue(source.contains("AppleMusicSymbols.$symbol"))
+        }
+        listOf("w1", "onCreateView", "F1", "k1", "onMeasure", "onResume", "a2", "j2")
+            .forEach { methodName ->
+                assertFalse(source.contains("method.name == \"$methodName\""))
+            }
+    }
+
+    @Test
     fun `does not reparent the player root into a linear layout`() {
         assertFalse(source.contains("parent.removeViewAt(index)"))
         assertFalse(source.contains("paneContainer.addView(root"))
@@ -98,10 +118,9 @@ class DualPaneStructuralRegressionTest {
 
     @Test
     fun `feeds the direct Material menu the modified first-measure height`() {
-        assertTrue(source.contains("AppleMusicSymbols.StackedNavigationMenu"))
+        assertTrue(source.contains("AppleMusicSymbols.StackedNavigationMenuOnMeasure"))
         assertTrue(source.contains("navigationMenuResolution.valueOrNull()"))
         assertFalse(source.contains("\"Hd.b\""))
-        assertTrue(source.contains("method.name == \"onMeasure\""))
         assertTrue(source.contains("View.MeasureSpec.makeMeasureSpec("))
         assertTrue(source.contains("View.MeasureSpec.EXACTLY"))
         assertTrue(source.contains("navigation.id != bottomNavigationId"))
@@ -200,8 +219,7 @@ class DualPaneStructuralRegressionTest {
     @Test
     fun `mirrors modified landscape lyrics chrome suppression`() {
         assertTrue(source.contains("installLandscapeLyricsChromeHook"))
-        assertTrue(source.contains("method.name == \"a2\""))
-        assertTrue(source.contains("IntArray::class.java"))
+        assertTrue(source.contains("AppleMusicSymbols.LyricsChromeAnimate"))
         assertTrue(source.contains("ModernXposedRuntime.callMethod(fragment, \"f2\") as? View"))
         assertTrue(source.contains("suppressed duplicate lyrics pane chrome"))
         assertTrue(source.contains("param.result = null"))
@@ -210,7 +228,7 @@ class DualPaneStructuralRegressionTest {
     @Test
     fun `mirrors modified landscape lyrics metrics correction`() {
         assertTrue(source.contains("installLandscapeLyricsMetricsHook"))
-        assertTrue(source.contains("method.name == \"j2\""))
+        assertTrue(source.contains("AppleMusicSymbols.LyricsFragmentUpdateMetrics"))
         assertTrue(source.contains("alignSynchronizedLyricsHighlightAnchor"))
         assertTrue(source.contains("TabletLyricAnchorPolicy.highlightOffset"))
         assertTrue(source.contains("listOf(\"z0\", \"A0\")"))
@@ -241,8 +259,8 @@ class DualPaneStructuralRegressionTest {
 
     @Test
     fun `returns the official stacked holder before the flat holder can be constructed`() {
-        assertTrue(source.contains("installNativeStackedNavigationHolderHook(activityClass)"))
-        assertTrue(source.contains("method.name == \"k1\""))
+        assertTrue(source.contains("AppleMusicSymbols.PlayerActivityCreateStackedNavigationHolder"))
+        assertTrue(source.contains("installNativeStackedNavigationHolderHook(activityResolution.valueOrNull())"))
         assertTrue(source.contains("nested.simpleName == \"StackedBottomNavigationHolder\""))
         assertTrue(source.contains("override fun beforeHookedMethod(param: MethodHookParam)"))
         assertTrue(source.contains("constructor.newInstance(activity, navigationRoot, behavior)"))

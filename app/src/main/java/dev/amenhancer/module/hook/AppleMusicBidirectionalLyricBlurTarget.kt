@@ -27,12 +27,22 @@ internal class AppleMusicBidirectionalLyricBlurTarget(
         val vectorResolution = symbols.resolve(AppleMusicSymbols.LyricsLineVector)
         val sessionResolution = symbols.resolve(AppleMusicSymbols.LyricsSessionProcessor)
         val callbackResolution = symbols.resolve(AppleMusicSymbols.LyricsHighlightCallback)
-        val viewModelResolution = symbols.resolve(AppleMusicSymbols.LyricsViewModel)
+        val notifyWordHighlightResolution = symbols.resolve(
+            AppleMusicSymbols.LyricsViewModelNotifyWordHighlight,
+        )
+        val setCurrentHighlightedLineResolution = symbols.resolve(
+            AppleMusicSymbols.LyricsViewModelSetCurrentHighlightedLine,
+        )
         val callback = callbackResolution.valueOrNull()
-        val viewModel = viewModelResolution.valueOrNull()
-        if (callback == null && viewModel == null) {
+        val notifyWordHighlight = notifyWordHighlightResolution.valueOrNull()
+        val setCurrentHighlightedLine = setCurrentHighlightedLineResolution.valueOrNull()
+        if (callback == null && notifyWordHighlight == null && setCurrentHighlightedLine == null) {
             return TargetCapabilityInstall.Degraded(
-                listOf(callbackResolution, viewModelResolution).joinToString { it.summary },
+                listOf(
+                    callbackResolution,
+                    notifyWordHighlightResolution,
+                    setCurrentHighlightedLineResolution,
+                ).joinToString { it.summary },
             )
         }
 
@@ -48,13 +58,14 @@ internal class AppleMusicBidirectionalLyricBlurTarget(
         hookSessionProcessor(sessionResolution.valueOrNull(), runtime)
         hookHighlightCallback(callback, vectorResolution.valueOrNull(), highlights)
         hookLyricsFragment(fragmentClass, runtime)
-        hookViewModel(viewModel, highlights)
+        hookViewModel(notifyWordHighlight, setCurrentHighlightedLine, highlights)
 
         val optionalFailures = listOf(
             vectorResolution,
             sessionResolution,
             callbackResolution,
-            viewModelResolution,
+            notifyWordHighlightResolution,
+            setCurrentHighlightedLineResolution,
         ).filterNot { it is TargetResolution.Found<*> }
         return if (optionalFailures.isEmpty()) {
             TargetCapabilityInstall.Active(
@@ -169,21 +180,18 @@ internal class AppleMusicBidirectionalLyricBlurTarget(
                 }
             }
 
-    private fun hookViewModel(vmClass: Class<*>?, highlights: LyricHighlightEventRouter) {
-        if (vmClass == null) {
-            Log.w(TAG, "VM symbol was unavailable")
+    private fun hookViewModel(
+        notifyWordHighlight: Method?,
+        setCurrentHighlightedLine: Method?,
+        highlights: LyricHighlightEventRouter,
+    ) {
+        if (notifyWordHighlight == null && setCurrentHighlightedLine == null) {
+            Log.w(TAG, "VM method symbols were unavailable")
             return
         }
         try {
-            Log.i(TAG, "Found VM")
-            vmClass.declaredMethods.forEach { method ->
-                val parameters = method.parameterTypes
-                if (
-                    parameters.size == 4 &&
-                    parameters[0] == Int::class.javaPrimitiveType &&
-                    parameters[3] == Boolean::class.javaPrimitiveType
-                ) {
-                    ModernXposedRuntime.hookMethod(method, object : XC_MethodHook() {
+            if (notifyWordHighlight != null) {
+                ModernXposedRuntime.hookMethod(notifyWordHighlight, object : XC_MethodHook() {
                         override fun beforeHookedMethod(param: MethodHookParam) {
                             highlights.onFourArgumentViewModelEvent(
                                 lineId = param.args[0] as Int,
@@ -191,21 +199,13 @@ internal class AppleMusicBidirectionalLyricBlurTarget(
                             )
                         }
                     })
-                }
             }
-            vmClass.declaredMethods.forEach { method ->
-                val parameters = method.parameterTypes
-                if (
-                    parameters.size == 1 &&
-                    parameters[0] == Int::class.javaPrimitiveType &&
-                    method.returnType == Void.TYPE
-                ) {
-                    ModernXposedRuntime.hookMethod(method, object : XC_MethodHook() {
+            if (setCurrentHighlightedLine != null) {
+                ModernXposedRuntime.hookMethod(setCurrentHighlightedLine, object : XC_MethodHook() {
                         override fun beforeHookedMethod(param: MethodHookParam) {
                             highlights.onSingleArgumentViewModelEvent(param.args[0] as Int)
                         }
                     })
-                }
             }
         } catch (t: Throwable) {
             Log.w(TAG, "VM hook failed: ${t.message}")

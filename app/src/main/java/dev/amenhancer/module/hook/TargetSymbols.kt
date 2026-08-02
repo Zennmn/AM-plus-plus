@@ -307,12 +307,47 @@ internal object AppleMusicSymbols {
         }
     }
 
+    val PlayerControllerInitialize = methodSymbol(
+        id = "player-controller-initialize",
+        profileOwner = TargetSymbolId.PLAYER_CONTROLLER,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
+        fallbackOwner = { it.startsWith("com.apple.android.music.player.fragment.") },
+        contract = ::isPlayerControllerInitialize,
+        structuralContract = ::isStructuralPlayerControllerInitialize,
+    )
+
+    val PlayerControllerCreateView = methodSymbol(
+        id = "player-controller-create-view",
+        profileOwner = TargetSymbolId.PLAYER_CONTROLLER,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
+        fallbackOwner = { it.startsWith("com.apple.android.music.player.fragment.") },
+        contract = ::isPlayerControllerCreateView,
+        structuralContract = ::isStructuralPlayerControllerCreateView,
+    )
+
+    val PlayerControllerSelectPane = methodSymbol(
+        id = "player-controller-select-pane",
+        profileOwner = TargetSymbolId.PLAYER_CONTROLLER,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
+        fallbackOwner = { it.startsWith("com.apple.android.music.player.fragment.") },
+        contract = ::isPlayerControllerSelectPane,
+        structuralContract = ::isStructuralPlayerControllerSelectPane,
+    )
+
     val PlayerActivity = classSymbol(
         id = "player-activity",
         profileId = TargetSymbolId.PLAYER_ACTIVITY,
         profilePolicy = ProfilePolicy.EXACT_PREFERRED,
         fallbackName = { it.endsWith(".common.activity.PlayerActivity") },
         contract = { true },
+    )
+
+    val PlayerActivityCreateStackedNavigationHolder = methodSymbol(
+        id = "player-activity-create-stacked-navigation-holder",
+        profileOwner = TargetSymbolId.PLAYER_ACTIVITY,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
+        fallbackOwner = { it.endsWith(".common.activity.PlayerActivity") },
+        contract = ::isPlayerActivityCreateStackedNavigationHolder,
     )
 
     val EditorialVideoUrlSelector = methodSymbol(
@@ -334,11 +369,36 @@ internal object AppleMusicSymbols {
         contract = { true },
     )
 
+    val LyricsFragmentOnResume = methodSymbol(
+        id = "lyrics-fragment-on-resume",
+        profileOwner = TargetSymbolId.LYRICS_FRAGMENT,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
+        fallbackOwner = { it.endsWith(".PlayerLyricsViewFragment") },
+        contract = ::isLyricsFragmentOnResume,
+    )
+
+    val LyricsFragmentUpdateMetrics = methodSymbol(
+        id = "lyrics-fragment-update-metrics",
+        profileOwner = TargetSymbolId.LYRICS_FRAGMENT,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
+        fallbackOwner = { it.endsWith(".PlayerLyricsViewFragment") },
+        contract = ::isLyricsFragmentUpdateMetrics,
+    )
+
     val LyricsChromeFragment = classSymbol(
         id = "lyrics-chrome-fragment",
         profileId = TargetSymbolId.LYRICS_CHROME,
         fallbackName = { it.startsWith("com.apple.android.music.player.fragment.") },
         contract = ::hasLyricsChromeContract,
+    )
+
+    val LyricsChromeAnimate = methodSymbol(
+        id = "lyrics-chrome-animate",
+        profileOwner = TargetSymbolId.LYRICS_CHROME,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
+        fallbackOwner = { it.startsWith("com.apple.android.music.player.fragment.") },
+        contract = ::isLyricsChromeAnimate,
+        structuralContract = ::isStructuralLyricsChromeAnimate,
     )
 
     val RecyclerView = classSymbol(
@@ -414,12 +474,36 @@ internal object AppleMusicSymbols {
         contract = { true },
     )
 
+    val LyricsViewModelNotifyWordHighlight = methodSymbol(
+        id = "lyrics-view-model-notify-word-highlight",
+        profileOwner = TargetSymbolId.LYRICS_VIEW_MODEL,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
+        fallbackOwner = { it.endsWith(".PlayerLyricsViewModel", ignoreCase = true) },
+        contract = ::isLyricsViewModelNotifyWordHighlight,
+    )
+
+    val LyricsViewModelSetCurrentHighlightedLine = methodSymbol(
+        id = "lyrics-view-model-set-current-highlighted-line",
+        profileOwner = TargetSymbolId.LYRICS_VIEW_MODEL,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
+        fallbackOwner = { it.endsWith(".PlayerLyricsViewModel", ignoreCase = true) },
+        contract = ::isLyricsViewModelSetCurrentHighlightedLine,
+    )
+
     val StackedNavigationMenu = classSymbol(
         id = "stacked-navigation-menu",
         profileId = TargetSymbolId.STACKED_NAVIGATION_MENU,
         stableName = "Hd.b",
         fallbackName = { false },
         contract = ::hasStackedNavigationMenuContract,
+    )
+
+    val StackedNavigationMenuOnMeasure = methodSymbol(
+        id = "stacked-navigation-menu-on-measure",
+        profileOwner = TargetSymbolId.STACKED_NAVIGATION_MENU,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
+        fallbackOwner = { it == "Hd.b" },
+        contract = ::isStackedNavigationMenuOnMeasure,
     )
 
     val SongInfoPtr = classSymbol(
@@ -467,11 +551,13 @@ internal object AppleMusicSymbols {
         id = "player-metadata-publish-method",
         profilePolicy = ProfilePolicy.EXACT_PREFERRED,
         profileCandidates = { profile ->
-            profile?.exactClasses?.get(TargetSymbolId.PLAYER_METADATA_HUB)
-                ?.let(::load)
-                ?.declaredMethods
-                ?.filter(::isPlayerMetadataPublishMethod)
-                .orEmpty()
+            runCatching {
+                profile?.exactClasses?.get(TargetSymbolId.PLAYER_METADATA_HUB)
+                    ?.let(::load)
+                    ?.declaredMethods
+                    ?.filter(::isPlayerMetadataPublishMethod)
+                    .orEmpty()
+            }.getOrDefault(emptyList())
         },
         structuralCandidates = {
             val metadataType = metadataConverterCandidates().singleOrNull()
@@ -530,11 +616,13 @@ internal object AppleMusicSymbols {
         id = "lyrics-current-item-field",
         profilePolicy = ProfilePolicy.EXACT_PREFERRED,
         profileCandidates = { profile ->
-            profile?.exactClasses?.get(TargetSymbolId.LYRICS_CURRENT_ITEM_FIELD)
-                ?.let(::load)
-                ?.declaredFields
-                ?.filter(::isLyricsCurrentItemField)
-                .orEmpty()
+            runCatching {
+                profile?.exactClasses?.get(TargetSymbolId.LYRICS_CURRENT_ITEM_FIELD)
+                    ?.let(::load)
+                    ?.declaredFields
+                    ?.filter(::isLyricsCurrentItemField)
+                    .orEmpty()
+            }.getOrDefault(emptyList())
         },
         structuralCandidates = {
             val lyricsFragment = load(
@@ -572,14 +660,18 @@ private fun classSymbol(
     id = id,
     profilePolicy = profilePolicy,
     profileCandidates = { profile ->
-        profileId?.let { profile?.exactClasses?.get(it) }
-            ?.let(::load)
-            ?.takeIf(contract)
-            ?.let(::listOf)
-            .orEmpty()
+        runCatching {
+            profileId?.let { profile?.exactClasses?.get(it) }
+                ?.let(::load)
+                ?.takeIf(contract)
+                ?.let(::listOf)
+                .orEmpty()
+        }.getOrDefault(emptyList())
     },
     stableCandidates = {
-        stableName?.let(::load)?.takeIf(contract)?.let(::listOf).orEmpty()
+        runCatching {
+            stableName?.let(::load)?.takeIf(contract)?.let(::listOf).orEmpty()
+        }.getOrDefault(emptyList())
     },
     structuralCandidates = { classes(fallbackName, contract) },
     identity = { it.name },
@@ -596,25 +688,23 @@ private fun methodSymbol(
     id = id,
     profilePolicy = profilePolicy,
     profileCandidates = { profile ->
-        profile?.exactClasses?.get(profileOwner)
-            ?.let(::load)
-            ?.declaredMethods
-            ?.filter(contract)
-            .orEmpty()
+        runCatching {
+            profile?.exactClasses?.get(profileOwner)
+                ?.let(::load)
+                ?.declaredMethods
+                ?.filter(contract)
+                .orEmpty()
+        }.getOrDefault(emptyList())
     },
     structuralCandidates = { methods(fallbackOwner, structuralContract) },
     identity = ::methodIdentity,
 )
 
 private fun hasLyricsChromeContract(candidate: Class<*>): Boolean =
+    candidate.declaredMethods.any(::isLyricsChromeAnimate) && hasLyricsChromeViewContract(candidate)
+
+private fun hasLyricsChromeViewContract(candidate: Class<*>): Boolean =
     candidate.declaredMethods.any { method ->
-        method.name == "a2" &&
-            !Modifier.isStatic(method.modifiers) &&
-            method.returnType == Void.TYPE &&
-            method.parameterTypes.contentEquals(
-                arrayOf(Int::class.javaPrimitiveType, IntArray::class.java),
-            )
-    } && candidate.declaredMethods.any { method ->
         method.name == "f2" &&
             !Modifier.isStatic(method.modifiers) &&
             View::class.java.isAssignableFrom(method.returnType) &&
@@ -630,6 +720,100 @@ private fun hasStackedNavigationMenuContract(candidate: Class<*>): Boolean =
                 arrayOf(Int::class.javaPrimitiveType, Int::class.javaPrimitiveType),
             )
     }
+
+private fun isPlayerControllerInitialize(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "w1" &&
+        method.returnType == Void.TYPE &&
+        method.parameterTypes.singleOrNull()?.name?.endsWith(".BagConfig") == true
+
+private fun isStructuralPlayerControllerInitialize(method: Method): Boolean =
+    isPlayerControllerInitialize(method) && hasPlayerControllerHookContract(method.declaringClass)
+
+private fun isPlayerControllerCreateView(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "onCreateView" &&
+        View::class.java.isAssignableFrom(method.returnType) &&
+        method.parameterTypes.map { it.name } == listOf(
+        "android.view.LayoutInflater",
+        "android.view.ViewGroup",
+        "android.os.Bundle",
+    )
+
+private fun isStructuralPlayerControllerCreateView(method: Method): Boolean =
+    isPlayerControllerCreateView(method) && hasPlayerControllerHookContract(method.declaringClass)
+
+private fun isPlayerControllerSelectPane(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "F1" &&
+        method.returnType == Void.TYPE &&
+        method.parameterTypes.size == 2 &&
+        method.parameterTypes[0].isEnum &&
+        method.parameterTypes[1].name == "android.os.Bundle"
+
+private fun isStructuralPlayerControllerSelectPane(method: Method): Boolean =
+    isPlayerControllerSelectPane(method) && hasPlayerControllerHookContract(method.declaringClass)
+
+private fun hasPlayerControllerHookContract(candidate: Class<*>): Boolean =
+    candidate.declaredMethods.any(::isPlayerControllerInitialize) &&
+        candidate.declaredMethods.any(::isPlayerControllerCreateView) &&
+        candidate.declaredMethods.any(::isPlayerControllerSelectPane)
+
+private fun isPlayerActivityCreateStackedNavigationHolder(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "k1" &&
+        method.parameterTypes.isEmpty() &&
+        method.returnType.name == "com.apple.android.music.common.activity.PlayerActivity\$m"
+
+private fun isLyricsFragmentOnResume(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "onResume" &&
+        method.returnType == Void.TYPE &&
+        method.parameterTypes.isEmpty()
+
+private fun isLyricsFragmentUpdateMetrics(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "j2" &&
+        method.returnType == Boolean::class.javaPrimitiveType &&
+        method.parameterTypes.isEmpty()
+
+private fun isLyricsChromeAnimate(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "a2" &&
+        method.returnType == Void.TYPE &&
+        method.parameterTypes.contentEquals(
+            arrayOf(Int::class.javaPrimitiveType, IntArray::class.java),
+        )
+
+private fun isStructuralLyricsChromeAnimate(method: Method): Boolean =
+    isLyricsChromeAnimate(method) && hasLyricsChromeViewContract(method.declaringClass)
+
+private fun isStackedNavigationMenuOnMeasure(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "onMeasure" &&
+        method.returnType == Void.TYPE &&
+        method.parameterTypes.contentEquals(
+            arrayOf(Int::class.javaPrimitiveType, Int::class.javaPrimitiveType),
+        )
+
+private fun isLyricsViewModelNotifyWordHighlight(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "notifyWordHighlight" &&
+        method.returnType == Void.TYPE &&
+        method.parameterTypes.contentEquals(
+            arrayOf(
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                Boolean::class.javaPrimitiveType,
+            ),
+        )
+
+private fun isLyricsViewModelSetCurrentHighlightedLine(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "setCurrentHighlightedLine" &&
+        method.returnType == Void.TYPE &&
+        method.parameterTypes.contentEquals(arrayOf(Int::class.javaPrimitiveType))
 
 private fun isEditorialVideoUrlSelector(method: Method): Boolean =
     Modifier.isStatic(method.modifiers) &&

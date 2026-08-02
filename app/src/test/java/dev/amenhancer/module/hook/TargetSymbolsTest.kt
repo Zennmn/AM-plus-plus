@@ -1,5 +1,9 @@
 package dev.amenhancer.module.hook
 
+import android.os.Bundle
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
 import com.apple.android.music.model.BaseContentItem
 import com.apple.android.music.player.fragment.m
 import com.apple.android.music.player.fragment.mWrongType
@@ -70,6 +74,188 @@ class TargetSymbolsTest {
         assertEquals(SymbolMatch.VERSION_PROFILE, (resolution as TargetResolution.Found).match)
         assertEquals("processEvents", resolution.value.name)
         assertEquals(0, source.classNameReads)
+    }
+
+    @Test
+    fun `650 profile resolves every dual pane and view model hook entry without scanning dex`() {
+        val source = FakeTargetClassSource(
+            classes = mapOf(
+                "com.apple.android.music.player.fragment.w0" to DualPaneControllerFixture::class.java,
+                "com.apple.android.music.common.activity.PlayerActivity" to DualPaneActivityFixture::class.java,
+                "com.apple.android.music.player.fragment.PlayerLyricsViewFragment" to
+                    DualPaneLyricsFragmentFixture::class.java,
+                "com.apple.android.music.player.fragment.e" to DualPaneLyricsChromeFixture::class.java,
+                "com.apple.android.music.player.viewmodel.PlayerLyricsViewModel" to
+                    LyricsViewModelHookFixture::class.java,
+                "Hd.b" to ProfileFixture::class.java,
+            ),
+        )
+        val resolver = IndexedTargetSymbolResolver(
+            build = TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.0", 1580L),
+            source = source,
+        )
+
+        val resolutions = listOf(
+            resolver.resolve(AppleMusicSymbols.StackedNavigationMenuOnMeasure),
+            resolver.resolve(AppleMusicSymbols.LyricsFragmentOnResume),
+            resolver.resolve(AppleMusicSymbols.LyricsChromeAnimate),
+            resolver.resolve(AppleMusicSymbols.LyricsFragmentUpdateMetrics),
+            resolver.resolve(AppleMusicSymbols.PlayerControllerInitialize),
+            resolver.resolve(AppleMusicSymbols.PlayerControllerCreateView),
+            resolver.resolve(AppleMusicSymbols.PlayerControllerSelectPane),
+            resolver.resolve(AppleMusicSymbols.PlayerActivityCreateStackedNavigationHolder),
+            resolver.resolve(AppleMusicSymbols.LyricsViewModelNotifyWordHighlight),
+            resolver.resolve(AppleMusicSymbols.LyricsViewModelSetCurrentHighlightedLine),
+        )
+
+        resolutions.forEach { resolution ->
+            assertTrue(resolution is TargetResolution.Found)
+            assertEquals(SymbolMatch.VERSION_PROFILE, (resolution as TargetResolution.Found).match)
+        }
+        assertEquals(
+            listOf(
+                "onMeasure",
+                "onResume",
+                "a2",
+                "j2",
+                "w1",
+                "onCreateView",
+                "F1",
+                "k1",
+                "notifyWordHighlight",
+                "setCurrentHighlightedLine",
+            ),
+            resolutions.map { (it as TargetResolution.Found).value.name },
+        )
+        assertEquals(0, source.classNameReads)
+    }
+
+    @Test
+    fun `651 profile resolves migrated dual pane and view model owners without scanning dex`() {
+        val source = FakeTargetClassSource(
+            classes = mapOf(
+                "com.apple.android.music.player.fragment.q0" to DualPaneControllerFixture::class.java,
+                "com.apple.android.music.common.activity.PlayerActivity" to DualPaneActivityFixture::class.java,
+                "com.apple.android.music.player.fragment.PlayerLyricsViewFragment" to
+                    DualPaneLyricsFragmentFixture::class.java,
+                "com.apple.android.music.player.fragment.d" to DualPaneLyricsChromeFixture::class.java,
+                "com.apple.android.music.player.viewmodel.PlayerLyricsViewModel" to
+                    LyricsViewModelHookFixture::class.java,
+                "Hd.b" to ProfileFixture::class.java,
+            ),
+        )
+        val resolver = IndexedTargetSymbolResolver(
+            build = TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.1", 1583L),
+            source = source,
+        )
+
+        listOf(
+            resolver.resolve(AppleMusicSymbols.StackedNavigationMenuOnMeasure),
+            resolver.resolve(AppleMusicSymbols.LyricsFragmentOnResume),
+            resolver.resolve(AppleMusicSymbols.LyricsChromeAnimate),
+            resolver.resolve(AppleMusicSymbols.LyricsFragmentUpdateMetrics),
+            resolver.resolve(AppleMusicSymbols.PlayerControllerInitialize),
+            resolver.resolve(AppleMusicSymbols.PlayerControllerCreateView),
+            resolver.resolve(AppleMusicSymbols.PlayerControllerSelectPane),
+            resolver.resolve(AppleMusicSymbols.PlayerActivityCreateStackedNavigationHolder),
+            resolver.resolve(AppleMusicSymbols.LyricsViewModelNotifyWordHighlight),
+            resolver.resolve(AppleMusicSymbols.LyricsViewModelSetCurrentHighlightedLine),
+        ).forEach { resolution ->
+            assertTrue(resolution is TargetResolution.Found)
+            assertEquals(SymbolMatch.VERSION_PROFILE, (resolution as TargetResolution.Found).match)
+            assertEquals("apple-music-6.5.1-1583", resolution.profileId)
+        }
+        assertEquals(0, source.classNameReads)
+    }
+
+    @Test
+    fun `controller fallback rejects an isolated same shaped hook entry`() {
+        val name = "com.apple.android.music.player.fragment.DecoyController"
+        val resolver = IndexedTargetSymbolResolver(
+            TargetBuild.UNKNOWN,
+            FakeTargetClassSource(
+                names = listOf(name),
+                classes = mapOf(name to ControllerInitializeOnlyFixture::class.java),
+            ),
+        )
+
+        assertTrue(
+            resolver.resolve(AppleMusicSymbols.PlayerControllerInitialize) is TargetResolution.Missing,
+        )
+    }
+
+    @Test
+    fun `lyrics chrome fallback requires the sibling view contract`() {
+        val name = "com.apple.android.music.player.fragment.DecoyChrome"
+        val resolver = IndexedTargetSymbolResolver(
+            TargetBuild.UNKNOWN,
+            FakeTargetClassSource(
+                names = listOf(name),
+                classes = mapOf(name to DualPaneLyricsChromeFixture::class.java),
+            ),
+        )
+
+        assertTrue(resolver.resolve(AppleMusicSymbols.LyricsChromeAnimate) is TargetResolution.Missing)
+    }
+
+    @Test
+    fun `unknown build resolves the unique view model hook entries structurally`() {
+        val name = "com.apple.android.music.player.viewmodel.PlayerLyricsViewModel"
+        val resolver = IndexedTargetSymbolResolver(
+            TargetBuild.UNKNOWN,
+            FakeTargetClassSource(
+                names = listOf(name),
+                classes = mapOf(name to LyricsViewModelHookFixture::class.java),
+            ),
+        )
+
+        val notify = resolver.resolve(AppleMusicSymbols.LyricsViewModelNotifyWordHighlight)
+        val current = resolver.resolve(AppleMusicSymbols.LyricsViewModelSetCurrentHighlightedLine)
+
+        assertEquals(SymbolMatch.STRUCTURAL_FALLBACK, (notify as TargetResolution.Found).match)
+        assertEquals("notifyWordHighlight", notify.value.name)
+        assertEquals(SymbolMatch.STRUCTURAL_FALLBACK, (current as TargetResolution.Found).match)
+        assertEquals("setCurrentHighlightedLine", current.value.name)
+    }
+
+    @Test
+    fun `view model hook entries report missing when their contracts are absent`() {
+        val name = "com.apple.android.music.player.viewmodel.PlayerLyricsViewModel"
+        val resolver = IndexedTargetSymbolResolver(
+            TargetBuild.UNKNOWN,
+            FakeTargetClassSource(
+                names = listOf(name),
+                classes = mapOf(name to BrokenLyricsViewModelHookFixture::class.java),
+            ),
+        )
+
+        assertTrue(
+            resolver.resolve(AppleMusicSymbols.LyricsViewModelNotifyWordHighlight) is TargetResolution.Missing,
+        )
+        assertTrue(
+            resolver.resolve(AppleMusicSymbols.LyricsViewModelSetCurrentHighlightedLine) is TargetResolution.Missing,
+        )
+    }
+
+    @Test
+    fun `view model hook entry ambiguity reports every matching owner`() {
+        val first = "com.apple.first.PlayerLyricsViewModel"
+        val second = "com.apple.second.PlayerLyricsViewModel"
+        val resolver = IndexedTargetSymbolResolver(
+            TargetBuild.UNKNOWN,
+            FakeTargetClassSource(
+                names = listOf(first, second),
+                classes = mapOf(
+                    first to LyricsViewModelHookFixture::class.java,
+                    second to SecondLyricsViewModelHookFixture::class.java,
+                ),
+            ),
+        )
+
+        val resolution = resolver.resolve(AppleMusicSymbols.LyricsViewModelNotifyWordHighlight)
+
+        assertTrue(resolution is TargetResolution.Ambiguous)
+        assertEquals(2, (resolution as TargetResolution.Ambiguous).candidates.size)
     }
 
     @Test
@@ -531,6 +717,16 @@ class TargetSymbolsTest {
             AppleMusicSymbols.LyricsAvailabilityPredicate,
             AppleMusicSymbols.TtmlSongInfoFromTtml,
             AppleMusicSymbols.LyricsCurrentItemField,
+            AppleMusicSymbols.StackedNavigationMenuOnMeasure,
+            AppleMusicSymbols.LyricsFragmentOnResume,
+            AppleMusicSymbols.LyricsChromeAnimate,
+            AppleMusicSymbols.LyricsFragmentUpdateMetrics,
+            AppleMusicSymbols.PlayerControllerInitialize,
+            AppleMusicSymbols.PlayerControllerCreateView,
+            AppleMusicSymbols.PlayerControllerSelectPane,
+            AppleMusicSymbols.PlayerActivityCreateStackedNavigationHolder,
+            AppleMusicSymbols.LyricsViewModelNotifyWordHighlight,
+            AppleMusicSymbols.LyricsViewModelSetCurrentHighlightedLine,
         ).forEach { symbol ->
             assertEquals(ProfilePolicy.EXACT_PREFERRED, symbol.profilePolicy)
         }
@@ -951,6 +1147,58 @@ private class ProfileFixture {
     @Suppress("UNUSED_PARAMETER")
     fun onMeasure(width: Int, height: Int) = Unit
 }
+
+private class BagConfig
+
+private enum class PlayerPane
+
+private class DualPaneControllerFixture {
+    @Suppress("UNUSED_PARAMETER")
+    fun w1(config: BagConfig) = Unit
+
+    @Suppress("UNUSED_PARAMETER")
+    fun onCreateView(inflater: LayoutInflater, container: ViewGroup, state: Bundle): View =
+        throw UnsupportedOperationException()
+
+    @Suppress("UNUSED_PARAMETER")
+    fun F1(pane: PlayerPane, state: Bundle) = Unit
+}
+
+private class ControllerInitializeOnlyFixture {
+    @Suppress("UNUSED_PARAMETER")
+    fun w1(config: BagConfig) = Unit
+}
+
+private class DualPaneActivityFixture {
+    fun k1(): com.apple.android.music.common.activity.PlayerActivity.m =
+        com.apple.android.music.common.activity.PlayerActivity.m()
+}
+
+private class DualPaneLyricsFragmentFixture {
+    fun onResume() = Unit
+    fun j2(): Boolean = false
+}
+
+private class DualPaneLyricsChromeFixture {
+    @Suppress("UNUSED_PARAMETER")
+    fun a2(mode: Int, values: IntArray) = Unit
+}
+
+private class LyricsViewModelHookFixture {
+    @Suppress("UNUSED_PARAMETER")
+    fun notifyWordHighlight(lineId: Int, word: Int, character: Int, isBackground: Boolean) = Unit
+
+    @Suppress("UNUSED_PARAMETER")
+    fun setCurrentHighlightedLine(lineId: Int) = Unit
+}
+
+private class SecondLyricsViewModelHookFixture {
+    @Suppress("UNUSED_PARAMETER")
+    fun notifyWordHighlight(lineId: Int, word: Int, character: Int, isBackground: Boolean) = Unit
+}
+
+private class BrokenLyricsViewModelHookFixture
+
 private class ProfileVector
 private class ProfileCallback {
     @Suppress("UNUSED_PARAMETER")

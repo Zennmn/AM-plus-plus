@@ -114,6 +114,15 @@ class FutureLyricBlurStructuralRegressionTest {
         assertTrue(targetSource.contains("view.javaClass == recyclerViewClass"))
     }
 
+    @Test
+    fun `resolves both view model highlight entries through target symbols`() {
+        assertTrue(targetSource.contains("AppleMusicSymbols.LyricsViewModelNotifyWordHighlight"))
+        assertTrue(targetSource.contains("AppleMusicSymbols.LyricsViewModelSetCurrentHighlightedLine"))
+        val hookViewModel = targetSource.substringAfter("private fun hookViewModel(")
+            .substringBefore("private companion object")
+        assertFalse(hookViewModel.contains("declaredMethods"))
+    }
+
     private fun sourceFile(name: String): File = sequenceOf(
         File("src/main/java/dev/amenhancer/module/hook/$name"),
         File("app/src/main/java/dev/amenhancer/module/hook/$name"),
