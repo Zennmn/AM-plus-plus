@@ -120,6 +120,7 @@ internal class TargetClassIndex(private val source: TargetClassSource) {
 internal class TargetSymbolKey<T : Any>(
     val id: String,
     internal val profileCandidates: TargetClassIndex.(AppleMusicProfile?) -> List<T> = { emptyList() },
+    internal val profileBound: Boolean = false,
     internal val stableCandidates: TargetClassIndex.() -> List<T> = { emptyList() },
     internal val structuralCandidates: TargetClassIndex.() -> List<T>,
     internal val identity: (T) -> String,
@@ -145,7 +146,13 @@ internal class IndexedTargetSymbolResolver(
         }
 
     private fun <T : Any> resolveUncached(symbol: TargetSymbolKey<T>): TargetResolution<T> {
-        select(symbol, symbol.profileCandidates(index, profile), SymbolMatch.VERSION_PROFILE)?.let { return it }
+        if (profile != null && symbol.profileBound) {
+            return select(
+                symbol,
+                symbol.profileCandidates(index, profile),
+                SymbolMatch.VERSION_PROFILE,
+            ) ?: TargetResolution.Missing(symbol.id, profile.id)
+        }
         select(symbol, symbol.stableCandidates(index), SymbolMatch.STABLE_NAME)?.let { return it }
         val fallback = distinctCandidates(symbol, symbol.structuralCandidates(index))
         return when (fallback.size) {
@@ -234,10 +241,44 @@ private object AppleMusicProfiles {
         ),
     )
 
-    fun match(build: TargetBuild): AppleMusicProfile? = appleMusic650.takeIf {
-        build.packageName == ModuleConstants.TARGET_PACKAGE &&
-            build.versionName == "6.5.0" &&
-            build.versionCode == 1580L
+    private val appleMusic651 = AppleMusicProfile(
+        id = "apple-music-6.5.1-1583",
+        exactClasses = mapOf(
+            TargetSymbolId.PLAYER_CONTROLLER to "com.apple.android.music.player.fragment.q0",
+            TargetSymbolId.PLAYER_ACTIVITY to "com.apple.android.music.common.activity.PlayerActivity",
+            TargetSymbolId.EDITORIAL_VIDEO_OWNER to "com.apple.android.music.player.f1",
+            TargetSymbolId.LYRICS_FRAGMENT to "com.apple.android.music.player.fragment.PlayerLyricsViewFragment",
+            TargetSymbolId.LYRICS_CHROME to "com.apple.android.music.player.fragment.d",
+            TargetSymbolId.LYRICS_LINE_VECTOR to
+                "com.apple.android.music.ttml.javanative.model.LyricsLineVector",
+            TargetSymbolId.LYRICS_EVENT_PROCESSOR to
+                "com.apple.android.music.ttml.SongInfoTimeProcessor",
+            TargetSymbolId.LYRICS_HIGHLIGHT_CALLBACK_OWNER to
+                "com.apple.android.music.ttml.SongInfoTimeProcessor\$processEvents\$lineEventCallback\$1",
+            TargetSymbolId.LYRICS_VIEW_MODEL to
+                "com.apple.android.music.player.viewmodel.PlayerLyricsViewModel",
+            TargetSymbolId.STACKED_NAVIGATION_MENU to "Hd.b",
+            TargetSymbolId.SONG_INFO_PTR to
+                "com.apple.android.music.ttml.javanative.model.SongInfo\$SongInfoPtr",
+            TargetSymbolId.SONG_INFO_NATIVE to
+                "com.apple.android.music.ttml.javanative.model.SongInfo\$SongInfoNative",
+            TargetSymbolId.TTML_PARSER_NATIVE to
+                "com.apple.android.music.ttml.javanative.TTMLParser\$TTMLParserNative",
+            TargetSymbolId.LYRICS_CURRENT_ITEM_FIELD to
+                "com.apple.android.music.player.fragment.l",
+            TargetSymbolId.PLAYER_METADATA_HUB to "com.apple.android.music.player.f",
+            TargetSymbolId.METADATA_TO_ITEM_CONVERTER to "com.apple.android.music.player.O",
+            TargetSymbolId.LYRICS_AVAILABILITY_OWNER to "com.apple.android.music.player.e1",
+        ),
+    )
+
+    fun match(build: TargetBuild): AppleMusicProfile? {
+        if (build.packageName != ModuleConstants.TARGET_PACKAGE) return null
+        return when {
+            build.versionName == "6.5.0" && build.versionCode == 1580L -> appleMusic650
+            build.versionName == "6.5.1" && build.versionCode == 1583L -> appleMusic651
+            else -> null
+        }
     }
 }
 
@@ -249,6 +290,7 @@ internal object AppleMusicSymbols {
     ) { candidate ->
         candidate.declaredMethods.any { method ->
             method.name == "w1" &&
+                !Modifier.isStatic(method.modifiers) &&
                 method.returnType == Void.TYPE &&
                 method.parameterTypes.singleOrNull()?.name?.endsWith(".BagConfig") == true
         }
@@ -309,6 +351,7 @@ internal object AppleMusicSymbols {
 
     val LyricsHighlightCallback = TargetSymbolKey(
         id = "lyrics-highlight-callback",
+        profileBound = true,
         profileCandidates = { profile ->
             val owner = profile?.exactClasses?.get(TargetSymbolId.LYRICS_HIGHLIGHT_CALLBACK_OWNER)
                 ?.let(::load)
@@ -336,7 +379,9 @@ internal object AppleMusicSymbols {
                 emptyList()
             } else {
                 methods(
-                    namePredicate = { it.startsWith("com.apple.") },
+                    namePredicate = {
+                        it.startsWith("com.apple.android.music.ttml.SongInfoTimeProcessor\$")
+                    },
                     contract = { method -> isLyricsHighlightCallback(method, vector) },
                 )
             }
@@ -348,15 +393,16 @@ internal object AppleMusicSymbols {
         id = "lyrics-view-model",
         profileId = TargetSymbolId.LYRICS_VIEW_MODEL,
         stableName = "com.apple.android.music.player.viewmodel.PlayerLyricsViewModel",
-        fallbackName = { it.contains("PlayerLyricsViewModel", ignoreCase = true) },
+        fallbackName = { it.endsWith(".PlayerLyricsViewModel", ignoreCase = true) },
         contract = { true },
     )
 
     val StackedNavigationMenu = classSymbol(
         id = "stacked-navigation-menu",
         profileId = TargetSymbolId.STACKED_NAVIGATION_MENU,
+        stableName = "Hd.b",
         fallbackName = { false },
-        contract = { true },
+        contract = ::hasStackedNavigationMenuContract,
     )
 
     val SongInfoPtr = classSymbol(
@@ -397,25 +443,45 @@ internal object AppleMusicSymbols {
         contract = ::isLyricsInstallMethod,
     )
 
-    val PlayerMetadataPublishMethod = methodSymbol(
+    val PlayerMetadataPublishMethod = TargetSymbolKey(
         id = "player-metadata-publish-method",
-        profileOwner = TargetSymbolId.PLAYER_METADATA_HUB,
-        fallbackOwner = { it == "com.apple.android.music.player.f" },
-        contract = ::isPlayerMetadataPublishMethod,
+        profileBound = true,
+        profileCandidates = { profile ->
+            profile?.exactClasses?.get(TargetSymbolId.PLAYER_METADATA_HUB)
+                ?.let(::load)
+                ?.declaredMethods
+                ?.filter(::isPlayerMetadataPublishMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            val metadataType = metadataConverterCandidates().singleOrNull()
+                ?.parameterTypes
+                ?.singleOrNull()
+            if (metadataType == null) {
+                emptyList()
+            } else {
+                methods(::isShortPlayerClass) { method ->
+                    isStructuralPlayerMetadataPublishMethod(method, metadataType)
+                }
+            }
+        },
+        identity = ::methodIdentity,
     )
 
     val MetadataToPlaybackItemMethod = methodSymbol(
         id = "metadata-to-playback-item-method",
         profileOwner = TargetSymbolId.METADATA_TO_ITEM_CONVERTER,
-        fallbackOwner = { it == "com.apple.android.music.player.P" },
+        fallbackOwner = ::isShortPlayerClass,
         contract = ::isMetadataToPlaybackItemMethod,
+        structuralContract = ::isStructurallyMetadataToPlaybackItemMethod,
     )
 
     val LyricsAvailabilityPredicate = methodSymbol(
         id = "lyrics-availability-predicate",
         profileOwner = TargetSymbolId.LYRICS_AVAILABILITY_OWNER,
-        fallbackOwner = { it.startsWith("com.apple.android.music.player.") },
+        fallbackOwner = ::isShortPlayerClass,
         contract = ::isLyricsAvailabilityPredicate,
+        structuralContract = ::isStructurallyLyricsAvailabilityPredicate,
     )
 
     val TtmlSongInfoFromTtml = methodSymbol(
@@ -436,11 +502,36 @@ internal object AppleMusicSymbols {
      * the exact field name "c" plus the exact declared type, so a same-named
      * field of another type can never be selected silently.
      */
-    val LyricsCurrentItemField = fieldSymbol(
+    val LyricsCurrentItemField = TargetSymbolKey(
         id = "lyrics-current-item-field",
-        profileOwner = TargetSymbolId.LYRICS_CURRENT_ITEM_FIELD,
-        fallbackOwner = { it.startsWith("com.apple.android.music.player.fragment.") },
-        contract = ::isLyricsCurrentItemField,
+        profileBound = true,
+        profileCandidates = { profile ->
+            profile?.exactClasses?.get(TargetSymbolId.LYRICS_CURRENT_ITEM_FIELD)
+                ?.let(::load)
+                ?.declaredFields
+                ?.filter(::isLyricsCurrentItemField)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            val lyricsFragment = load(
+                "com.apple.android.music.player.fragment.PlayerLyricsViewFragment",
+            )
+            if (lyricsFragment == null) {
+                fields(
+                    { it.startsWith("com.apple.android.music.player.fragment.") },
+                    ::isLyricsCurrentItemField,
+                )
+            } else {
+                val hierarchyFields = fields(
+                    { it.startsWith("com.apple.android.music.player.fragment.") },
+                    ::isStructurallyLyricsCurrentItemField,
+                ).filter { field ->
+                    field.declaringClass.isAssignableFrom(lyricsFragment)
+                }
+                hierarchyFields.filter { it.name == "c" }.ifEmpty { hierarchyFields }
+            }
+        },
+        identity = ::fieldIdentity,
     )
 
 }
@@ -453,6 +544,7 @@ private fun classSymbol(
     contract: (Class<*>) -> Boolean,
 ): TargetSymbolKey<Class<*>> = TargetSymbolKey(
     id = id,
+    profileBound = profileId != null,
     profileCandidates = { profile ->
         profileId?.let { profile?.exactClasses?.get(it) }
             ?.let(::load)
@@ -472,8 +564,10 @@ private fun methodSymbol(
     profileOwner: TargetSymbolId,
     fallbackOwner: (String) -> Boolean,
     contract: (Method) -> Boolean,
+    structuralContract: (Method) -> Boolean = contract,
 ): TargetSymbolKey<Method> = TargetSymbolKey(
     id = id,
+    profileBound = true,
     profileCandidates = { profile ->
         profile?.exactClasses?.get(profileOwner)
             ?.let(::load)
@@ -481,39 +575,33 @@ private fun methodSymbol(
             ?.filter(contract)
             .orEmpty()
     },
-    structuralCandidates = { methods(fallbackOwner, contract) },
+    structuralCandidates = { methods(fallbackOwner, structuralContract) },
     identity = ::methodIdentity,
-)
-
-private fun fieldSymbol(
-    id: String,
-    profileOwner: TargetSymbolId,
-    fallbackOwner: (String) -> Boolean,
-    contract: (Field) -> Boolean,
-): TargetSymbolKey<Field> = TargetSymbolKey(
-    id = id,
-    profileCandidates = { profile ->
-        profile?.exactClasses?.get(profileOwner)
-            ?.let(::load)
-            ?.declaredFields
-            ?.filter(contract)
-            .orEmpty()
-    },
-    structuralCandidates = { fields(fallbackOwner, contract) },
-    identity = ::fieldIdentity,
 )
 
 private fun hasLyricsChromeContract(candidate: Class<*>): Boolean =
     candidate.declaredMethods.any { method ->
         method.name == "a2" &&
+            !Modifier.isStatic(method.modifiers) &&
             method.returnType == Void.TYPE &&
             method.parameterTypes.contentEquals(
                 arrayOf(Int::class.javaPrimitiveType, IntArray::class.java),
             )
     } && candidate.declaredMethods.any { method ->
         method.name == "f2" &&
+            !Modifier.isStatic(method.modifiers) &&
             View::class.java.isAssignableFrom(method.returnType) &&
             method.parameterTypes.isEmpty()
+    }
+
+private fun hasStackedNavigationMenuContract(candidate: Class<*>): Boolean =
+    candidate.declaredMethods.any { method ->
+        method.name == "onMeasure" &&
+            !Modifier.isStatic(method.modifiers) &&
+            method.returnType == Void.TYPE &&
+            method.parameterTypes.contentEquals(
+                arrayOf(Int::class.javaPrimitiveType, Int::class.javaPrimitiveType),
+            )
     }
 
 private fun isEditorialVideoUrlSelector(method: Method): Boolean =
@@ -568,11 +656,34 @@ private fun isMetadataToPlaybackItemMethod(method: Method): Boolean =
         method.parameterTypes.singleOrNull()?.name == "v3.v" &&
         method.returnType.name == "com.apple.android.music.model.PlaybackItem"
 
+private fun isStructurallyMetadataToPlaybackItemMethod(method: Method): Boolean =
+    Modifier.isStatic(method.modifiers) &&
+        method.parameterTypes.singleOrNull()?.isPrimitive == false &&
+        method.returnType.name == "com.apple.android.music.model.PlaybackItem" &&
+        method.declaringClass.declaredMethods.any { sibling ->
+            Modifier.isStatic(sibling.modifiers) &&
+                sibling.parameterTypes.contentEquals(method.parameterTypes) &&
+                sibling.returnType.name == "com.apple.android.music.model.BaseContentItem"
+        }
+
 private fun isLyricsAvailabilityPredicate(method: Method): Boolean =
     Modifier.isStatic(method.modifiers) &&
         method.name == "i" &&
         method.returnType == Boolean::class.javaPrimitiveType &&
         method.parameterTypes.singleOrNull()?.name == "com.apple.android.music.model.PlaybackItem"
+
+private fun isStructurallyLyricsAvailabilityPredicate(method: Method): Boolean =
+    Modifier.isStatic(method.modifiers) &&
+        method.returnType == Boolean::class.javaPrimitiveType &&
+        method.parameterTypes.singleOrNull()?.name == "com.apple.android.music.model.PlaybackItem" &&
+        method.declaringClass.declaredMethods.any { sibling ->
+            Modifier.isStatic(sibling.modifiers) &&
+                sibling.returnType == Boolean::class.javaPrimitiveType &&
+                sibling.parameterTypes.size == 2 &&
+                sibling.parameterTypes.all {
+                    it.name == "com.apple.android.music.model.PlaybackItem"
+                }
+        }
 
 private fun isTtmlSongInfoFromTtml(method: Method): Boolean =
     !Modifier.isStatic(method.modifiers) &&
@@ -584,6 +695,29 @@ private fun isLyricsCurrentItemField(field: Field): Boolean =
     !Modifier.isStatic(field.modifiers) &&
         field.name == "c" &&
         field.type.name == "com.apple.android.music.model.BaseContentItem"
+
+private fun isStructurallyLyricsCurrentItemField(field: Field): Boolean =
+    !Modifier.isStatic(field.modifiers) &&
+        field.type.name == "com.apple.android.music.model.BaseContentItem"
+
+private fun TargetClassIndex.metadataConverterCandidates(): List<Method> =
+    methods(::isShortPlayerClass, ::isStructurallyMetadataToPlaybackItemMethod)
+
+private fun isStructuralPlayerMetadataPublishMethod(method: Method, metadataType: Class<*>): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name != "onMediaMetadataChanged" &&
+        method.returnType == Void.TYPE &&
+        method.parameterTypes.singleOrNull() == metadataType &&
+        method.declaringClass.declaredMethods.any { sibling ->
+            !Modifier.isStatic(sibling.modifiers) &&
+                sibling.name == "onMediaMetadataChanged" &&
+                sibling.returnType == Void.TYPE &&
+                sibling.parameterTypes.singleOrNull() == metadataType
+        }
+
+private fun isShortPlayerClass(name: String): Boolean =
+    name.startsWith("com.apple.android.music.player.") &&
+        name.substringAfterLast('.').substringBefore('$').length <= 3
 
 private fun hasSongInfoPtrContract(candidate: Class<*>): Boolean =
     candidate.declaredMethods.any { method ->

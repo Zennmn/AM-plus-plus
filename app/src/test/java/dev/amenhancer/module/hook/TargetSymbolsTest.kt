@@ -73,7 +73,7 @@ class TargetSymbolsTest {
     }
 
     @Test
-    fun `unknown build does not trust the 650 exact profile`() {
+    fun `unknown build resolves the verified stable menu without trusting the 650 profile`() {
         val source = FakeTargetClassSource(classes = mapOf("Hd.b" to ProfileFixture::class.java))
         val resolver = IndexedTargetSymbolResolver(
             build = TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.6.0", 1600L),
@@ -82,13 +82,15 @@ class TargetSymbolsTest {
 
         val resolution = resolver.resolve(AppleMusicSymbols.StackedNavigationMenu)
 
-        assertTrue(resolution is TargetResolution.Missing)
-        assertEquals(1, source.classNameReads)
-        assertNull(source.loadCounts["Hd.b"])
+        assertTrue(resolution is TargetResolution.Found)
+        assertEquals(SymbolMatch.STABLE_NAME, (resolution as TargetResolution.Found).match)
+        assertNull(resolution.profileId)
+        assertEquals(0, source.classNameReads)
+        assertEquals(1, source.loadCounts["Hd.b"])
     }
 
     @Test
-    fun `mismatched version name does not trust a reused version code`() {
+    fun `mismatched version name uses stable discovery instead of a reused profile`() {
         val source = FakeTargetClassSource(classes = mapOf("Hd.b" to ProfileFixture::class.java))
         val resolver = IndexedTargetSymbolResolver(
             build = TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.1", 1580L),
@@ -97,8 +99,10 @@ class TargetSymbolsTest {
 
         val resolution = resolver.resolve(AppleMusicSymbols.StackedNavigationMenu)
 
-        assertTrue(resolution is TargetResolution.Missing)
-        assertNull(source.loadCounts["Hd.b"])
+        assertTrue(resolution is TargetResolution.Found)
+        assertEquals(SymbolMatch.STABLE_NAME, (resolution as TargetResolution.Found).match)
+        assertNull(resolution.profileId)
+        assertEquals(1, source.loadCounts["Hd.b"])
     }
 
     @Test
@@ -256,6 +260,38 @@ class TargetSymbolsTest {
     }
 
     @Test
+    fun `651 profile resolves the migrated custom lyrics identity funnel without scanning dex`() {
+        val source = FakeTargetClassSource(
+            classes = mapOf(
+                "com.apple.android.music.player.fragment.l" to CurrentItem651Fixture::class.java,
+                "com.apple.android.music.player.f" to PlayerMetadataHubFixture::class.java,
+                "com.apple.android.music.player.O" to MetadataConverterFixture::class.java,
+                "com.apple.android.music.player.e1" to LyricsAvailabilityFixture::class.java,
+            ),
+        )
+        val resolver = IndexedTargetSymbolResolver(
+            build = TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.1", 1583L),
+            source = source,
+        )
+
+        val currentItem = resolver.resolve(AppleMusicSymbols.LyricsCurrentItemField)
+        val publish = resolver.resolve(AppleMusicSymbols.PlayerMetadataPublishMethod)
+        val converter = resolver.resolve(AppleMusicSymbols.MetadataToPlaybackItemMethod)
+        val availability = resolver.resolve(AppleMusicSymbols.LyricsAvailabilityPredicate)
+
+        listOf(currentItem, publish, converter, availability).forEach { resolution ->
+            assertTrue(resolution is TargetResolution.Found)
+            assertEquals(SymbolMatch.VERSION_PROFILE, (resolution as TargetResolution.Found).match)
+            assertEquals("apple-music-6.5.1-1583", resolution.profileId)
+        }
+        assertEquals("c", (currentItem as TargetResolution.Found).value.name)
+        assertEquals("g", (publish as TargetResolution.Found).value.name)
+        assertEquals("b", (converter as TargetResolution.Found).value.name)
+        assertEquals("i", (availability as TargetResolution.Found).value.name)
+        assertEquals(0, source.classNameReads)
+    }
+
+    @Test
     fun `structural fallback never mistakes same-shaped R2 for I2`() {
         val fragmentName = "com.apple.android.music.player.fragment.PlayerLyricsViewFragment"
         val source = FakeTargetClassSource(
@@ -400,7 +436,16 @@ class TargetSymbolsTest {
     @Test
     fun `a contract broken current item field stays missing under the profile`() {
         val ownerName = "com.apple.android.music.player.fragment.m"
-        val source = FakeTargetClassSource(classes = mapOf(ownerName to mWrongType::class.java))
+        val source = FakeTargetClassSource(
+            names = listOf(
+                ownerName,
+                "com.apple.android.music.player.fragment.n",
+            ),
+            classes = mapOf(
+                ownerName to mWrongType::class.java,
+                "com.apple.android.music.player.fragment.n" to n::class.java,
+            ),
+        )
         val resolver = IndexedTargetSymbolResolver(
             build = TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.0", 1580L),
             source = source,
@@ -409,7 +454,151 @@ class TargetSymbolsTest {
         val resolution = resolver.resolve(AppleMusicSymbols.LyricsCurrentItemField)
 
         assertTrue(resolution is TargetResolution.Missing)
+        assertEquals(0, source.classNameReads)
         assertNull(source.loadCounts["com.apple.android.music.model.BaseContentItem"])
+    }
+
+    @Test
+    fun `a matched profile never guesses when its exact owner is missing`() {
+        val source = FakeTargetClassSource(
+            names = listOf("com.apple.android.music.player.fragment.n"),
+            classes = mapOf("com.apple.android.music.player.fragment.n" to n::class.java),
+        )
+        val resolver = IndexedTargetSymbolResolver(
+            build = TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.0", 1580L),
+            source = source,
+        )
+
+        val resolution = resolver.resolve(AppleMusicSymbols.LyricsCurrentItemField)
+
+        assertTrue(resolution is TargetResolution.Missing)
+        assertEquals(0, source.classNameReads)
+        assertEquals("apple-music-6.5.0-1580", (resolution as TargetResolution.Missing).profileId)
+    }
+
+    @Test
+    fun `unknown minor version discovers the migrated lyrics identity funnel by contract`() {
+        val fragmentName = "com.apple.android.music.player.fragment.PlayerLyricsViewFragment"
+        val currentItemOwner = "com.apple.android.music.player.fragment.z"
+        val metadataHub = "com.apple.android.music.player.y"
+        val metadataConverter = "com.apple.android.music.player.X"
+        val availabilityOwner = "com.apple.android.music.player.z1"
+        val source = FakeTargetClassSource(
+            names = listOf(
+                fragmentName,
+                currentItemOwner,
+                metadataHub,
+                metadataConverter,
+                availabilityOwner,
+                "com.apple.android.music.player.fragment.n",
+            ),
+            classes = mapOf(
+                fragmentName to CurrentLyricsFragmentFixture::class.java,
+                currentItemOwner to RenamedCurrentItemOwnerFixture::class.java,
+                metadataHub to RenamedPlayerMetadataHubFixture::class.java,
+                metadataConverter to RenamedMetadataConverterFixture::class.java,
+                availabilityOwner to RenamedLyricsAvailabilityFixture::class.java,
+                "com.apple.android.music.player.fragment.n" to n::class.java,
+            ),
+        )
+        val resolver = IndexedTargetSymbolResolver(
+            build = TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.2", 1590L),
+            source = source,
+        )
+
+        val currentItem = resolver.resolve(AppleMusicSymbols.LyricsCurrentItemField)
+        val publish = resolver.resolve(AppleMusicSymbols.PlayerMetadataPublishMethod)
+        val converter = resolver.resolve(AppleMusicSymbols.MetadataToPlaybackItemMethod)
+        val availability = resolver.resolve(AppleMusicSymbols.LyricsAvailabilityPredicate)
+
+        listOf(currentItem, publish, converter, availability).forEach { resolution ->
+            assertTrue(resolution is TargetResolution.Found)
+            assertEquals(SymbolMatch.STRUCTURAL_FALLBACK, (resolution as TargetResolution.Found).match)
+            assertNull(resolution.profileId)
+        }
+        assertEquals("renamedItem", (currentItem as TargetResolution.Found).value.name)
+        assertEquals("publish", (publish as TargetResolution.Found).value.name)
+        assertEquals("convert", (converter as TargetResolution.Found).value.name)
+        assertEquals("available", (availability as TargetResolution.Found).value.name)
+        assertEquals(1, source.classNameReads)
+    }
+
+    @Test
+    fun `unknown version reports ambiguous structural metadata converters`() {
+        val source = FakeTargetClassSource(
+            names = listOf(
+                "com.apple.android.music.player.X",
+                "com.apple.android.music.player.Y",
+            ),
+            classes = mapOf(
+                "com.apple.android.music.player.X" to RenamedMetadataConverterFixture::class.java,
+                "com.apple.android.music.player.Y" to SecondMetadataConverterFixture::class.java,
+            ),
+        )
+        val resolver = IndexedTargetSymbolResolver(TargetBuild.UNKNOWN, source)
+
+        val resolution = resolver.resolve(AppleMusicSymbols.MetadataToPlaybackItemMethod)
+
+        assertTrue(resolution is TargetResolution.Ambiguous)
+        assertEquals(2, (resolution as TargetResolution.Ambiguous).candidates.size)
+    }
+
+    @Test
+    fun `structural funnel rejects primary shapes without corroborating members`() {
+        val validConverter = "com.apple.android.music.player.X"
+        val weakConverter = "com.apple.android.music.player.Y"
+        val weakHub = "com.apple.android.music.player.z"
+        val weakAvailability = "com.apple.android.music.player.z1"
+        val source = FakeTargetClassSource(
+            names = listOf(validConverter, weakConverter, weakHub, weakAvailability),
+            classes = mapOf(
+                validConverter to RenamedMetadataConverterFixture::class.java,
+                weakConverter to PrimaryOnlyMetadataConverterFixture::class.java,
+                weakHub to PrimaryOnlyMetadataHubFixture::class.java,
+                weakAvailability to PrimaryOnlyLyricsAvailabilityFixture::class.java,
+            ),
+        )
+        val resolver = IndexedTargetSymbolResolver(TargetBuild.UNKNOWN, source)
+
+        val publish = resolver.resolve(AppleMusicSymbols.PlayerMetadataPublishMethod)
+        val availability = resolver.resolve(AppleMusicSymbols.LyricsAvailabilityPredicate)
+
+        assertTrue(publish is TargetResolution.Missing)
+        assertTrue(availability is TargetResolution.Missing)
+
+        val weakConverterResolver = IndexedTargetSymbolResolver(
+            TargetBuild.UNKNOWN,
+            FakeTargetClassSource(
+                names = listOf(weakConverter),
+                classes = mapOf(weakConverter to PrimaryOnlyMetadataConverterFixture::class.java),
+            ),
+        )
+        assertTrue(
+            weakConverterResolver.resolve(AppleMusicSymbols.MetadataToPlaybackItemMethod) is
+                TargetResolution.Missing,
+        )
+    }
+
+    @Test
+    fun `highlight callback structural fallback stays inside the session processor owner`() {
+        val vectorName = "com.apple.android.music.ttml.javanative.model.LyricsLineVector"
+        val callbackName = "com.apple.android.music.ttml.SongInfoTimeProcessor\$renamedCallback"
+        val decoyName = "com.apple.android.music.unrelated.Callback"
+        val source = FakeTargetClassSource(
+            names = listOf(vectorName, callbackName, decoyName),
+            classes = mapOf(
+                vectorName to ProfileVector::class.java,
+                callbackName to ProfileCallback::class.java,
+                decoyName to DecoyProfileCallback::class.java,
+            ),
+        )
+        val resolver = IndexedTargetSymbolResolver(TargetBuild.UNKNOWN, source)
+
+        val resolution = resolver.resolve(AppleMusicSymbols.LyricsHighlightCallback)
+
+        assertTrue(resolution is TargetResolution.Found)
+        assertEquals(SymbolMatch.STRUCTURAL_FALLBACK, (resolution as TargetResolution.Found).match)
+        assertNull(source.loadCounts[decoyName])
     }
 
     @Test
@@ -500,6 +689,89 @@ private class LyricsAvailabilityFixture {
     }
 }
 
+private class CurrentItem651Fixture {
+    val c: BaseContentItem = BaseContentItem()
+}
+
+private open class RenamedCurrentItemOwnerFixture {
+    val renamedItem: BaseContentItem = BaseContentItem()
+}
+
+private class CurrentLyricsFragmentFixture : RenamedCurrentItemOwnerFixture()
+
+private class RenamedPlayerMetadataHubFixture {
+    @Suppress("UNUSED_PARAMETER")
+    fun publish(metadata: v3.v) = Unit
+
+    @Suppress("UNUSED_PARAMETER")
+    fun onMediaMetadataChanged(metadata: v3.v) = Unit
+}
+
+private class RenamedMetadataConverterFixture {
+    companion object {
+        @JvmStatic
+        @Suppress("UNUSED_PARAMETER")
+        fun convert(metadata: v3.v): com.apple.android.music.model.PlaybackItem =
+            com.apple.android.music.model.PlaybackItem()
+
+        @JvmStatic
+        @Suppress("UNUSED_PARAMETER")
+        fun extract(metadata: v3.v): BaseContentItem = BaseContentItem()
+    }
+}
+
+private class SecondMetadataConverterFixture {
+    companion object {
+        @JvmStatic
+        @Suppress("UNUSED_PARAMETER")
+        fun transform(metadata: OtherMetadata): com.apple.android.music.model.PlaybackItem =
+            com.apple.android.music.model.PlaybackItem()
+
+        @JvmStatic
+        @Suppress("UNUSED_PARAMETER")
+        fun extract(metadata: OtherMetadata): BaseContentItem = BaseContentItem()
+    }
+}
+
+private class OtherMetadata
+
+private class PrimaryOnlyMetadataConverterFixture {
+    companion object {
+        @JvmStatic
+        @Suppress("UNUSED_PARAMETER")
+        fun convert(metadata: v3.v): com.apple.android.music.model.PlaybackItem =
+            com.apple.android.music.model.PlaybackItem()
+    }
+}
+
+private class PrimaryOnlyMetadataHubFixture {
+    @Suppress("UNUSED_PARAMETER")
+    fun publish(metadata: v3.v) = Unit
+}
+
+private class PrimaryOnlyLyricsAvailabilityFixture {
+    companion object {
+        @JvmStatic
+        @Suppress("UNUSED_PARAMETER")
+        fun available(item: com.apple.android.music.model.PlaybackItem): Boolean = false
+    }
+}
+
+private class RenamedLyricsAvailabilityFixture {
+    companion object {
+        @JvmStatic
+        @Suppress("UNUSED_PARAMETER")
+        fun available(item: com.apple.android.music.model.PlaybackItem): Boolean = false
+
+        @JvmStatic
+        @Suppress("UNUSED_PARAMETER")
+        fun changed(
+            first: com.apple.android.music.model.PlaybackItem,
+            second: com.apple.android.music.model.PlaybackItem,
+        ): Boolean = false
+    }
+}
+
 private class TtmlParserNativeFixture {
     @Suppress("UNUSED_PARAMETER")
     fun songInfoFromTTML(ttml: String): SongInfo.SongInfoPtr = SongInfo.SongInfoPtr()
@@ -532,9 +804,16 @@ private class FakeTargetClassSource(
     }
 }
 
-private class ProfileFixture
+private class ProfileFixture {
+    @Suppress("UNUSED_PARAMETER")
+    fun onMeasure(width: Int, height: Int) = Unit
+}
 private class ProfileVector
 private class ProfileCallback {
+    @Suppress("UNUSED_PARAMETER")
+    fun call(time: Long, lines: ProfileVector, position: Long) = Unit
+}
+private class DecoyProfileCallback {
     @Suppress("UNUSED_PARAMETER")
     fun call(time: Long, lines: ProfileVector, position: Long) = Unit
 }

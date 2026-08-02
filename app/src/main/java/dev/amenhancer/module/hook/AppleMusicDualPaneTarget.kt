@@ -186,7 +186,7 @@ internal data class AlphaGradientEdgeFieldProfile(
     val requiredIntegers: List<String>,
 )
 
-/** Resolves the two Apple Music 6.5.0 AlphaGradientFrameLayout obfuscation variants. */
+/** Resolves the verified Apple Music AlphaGradientFrameLayout obfuscation variants. */
 internal object AlphaGradientEdgeFieldProfiles {
     private val profiles = listOf(
         AlphaGradientEdgeFieldProfile(
@@ -223,7 +223,7 @@ internal data class LyricsLayoutFieldProfile(
     val synchronizedMetrics: List<String>,
 )
 
-/** Resolves PlayerLyricsViewFragment fields in official and adapted Apple Music 6.5.0 builds. */
+/** Resolves PlayerLyricsViewFragment fields in the verified Apple Music builds. */
 internal object LyricsLayoutFieldProfiles {
     private val profiles = listOf(
         LyricsLayoutFieldProfile(
