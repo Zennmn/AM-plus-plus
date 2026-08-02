@@ -3,6 +3,7 @@ package dev.amenhancer.module.config
 import dev.amenhancer.module.model.CustomLyricsEntry
 import dev.amenhancer.module.model.CustomLyricsManifest
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 
 /** JSON codec for the manifest only; TTML remains in remote files. */
@@ -49,6 +50,38 @@ internal object CustomLyricsManifestCodec {
         }
         CustomLyricsManifestPolicy.sanitize(CustomLyricsManifest(parsed))
     }.getOrDefault(CustomLyricsManifest.empty())
+
+    /**
+     * Strict decode for backup restore: returns null unless the version
+     * matches exactly, the entries array parses cleanly, and every entry
+     * survives policy sanitization unchanged. A corrupt or foreign-version
+     * manifest is never treated as a valid empty backup.
+     */
+    fun decodeStrict(raw: String): CustomLyricsManifest? {
+        val root = try {
+            JSONObject(raw)
+        } catch (e: JSONException) {
+            return null
+        }
+        if (root.optInt(KEY_VERSION, 0) != VERSION) return null
+        val entries = root.optJSONArray(KEY_ENTRIES) ?: return null
+        if (entries.length() > CustomLyricsManifestPolicy.MAX_ENTRIES) return null
+        val parsed = mutableListOf<CustomLyricsEntry>()
+        for (index in 0 until entries.length()) {
+            val entry = entries.optJSONObject(index) ?: return null
+            parsed += CustomLyricsEntry(
+                appleMusicId = entry.optLong(KEY_APPLE_MUSIC_ID, 0L),
+                displayName = entry.optString(KEY_DISPLAY_NAME),
+                fileId = entry.optString(KEY_FILE_ID),
+                sizeBytes = entry.optLong(KEY_SIZE_BYTES, 0L),
+                sha256 = entry.optString(KEY_SHA256),
+                source = entry.optString(KEY_SOURCE),
+                enabled = entry.optBoolean(KEY_ENABLED, false),
+            )
+        }
+        val sanitized = CustomLyricsManifestPolicy.sanitize(CustomLyricsManifest(parsed))
+        return sanitized.takeIf { it.entries.size == parsed.size }
+    }
 
     private const val VERSION = 1
     private const val KEY_VERSION = "version"

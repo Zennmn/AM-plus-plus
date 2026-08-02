@@ -162,6 +162,27 @@ class SettingsUiStructuralRegressionTest {
     }
 
     @Test
+    fun `backs up and merge restores custom lyrics through transient saf documents`() {
+        val activity = projectFile("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
+
+        assertTrue(activity.contains("fontActionButton(\"备份歌词\""))
+        assertTrue(activity.contains("fontActionButton(\"恢复备份\""))
+        assertTrue(activity.contains("Intent.ACTION_CREATE_DOCUMENT"))
+        assertTrue(activity.contains("CUSTOM_LYRICS_BACKUP_CREATE_REQUEST_CODE"))
+        assertTrue(activity.contains("CUSTOM_LYRICS_BACKUP_RESTORE_REQUEST_CODE"))
+        assertTrue(activity.contains("application/x-zip-compressed"))
+        assertTrue(activity.contains("application/octet-stream"))
+        assertTrue(activity.contains("CustomLyricsManager(snapshot, store).backup(output)"))
+        assertTrue(activity.contains("CustomLyricsManager(snapshot, store).restore(input)"))
+        assertTrue(activity.contains("同 Apple Music ID 的歌词将使用备份版本"))
+        assertTrue(activity.contains("当前独有歌词会保留"))
+        assertTrue(activity.contains("总开关不会改变"))
+        assertTrue(activity.contains("backgroundExecutor.execute"))
+        assertTrue(activity.contains("contentResolver.delete(uri, null, null)"))
+        assertFalse(activity.contains("takePersistableUriPermission"))
+    }
+
+    @Test
     fun `persists non touch blur radius changes without duplicating touch writes`() {
         val activity = projectFile("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
 

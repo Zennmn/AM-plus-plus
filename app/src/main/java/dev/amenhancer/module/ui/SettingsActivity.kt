@@ -37,6 +37,7 @@ import dev.amenhancer.module.hook.AmllTtmlClient
 import dev.amenhancer.module.hook.HttpLyricTransport
 import dev.amenhancer.module.hook.NeteaseLyricClient
 import dev.amenhancer.module.lyrics.CustomLyricsDraft
+import dev.amenhancer.module.lyrics.CustomLyricsBackupResult
 import dev.amenhancer.module.lyrics.CustomLyricsFilePolicy
 import dev.amenhancer.module.lyrics.CustomLyricsFileReader
 import dev.amenhancer.module.lyrics.CustomLyricsInspection
@@ -44,6 +45,7 @@ import dev.amenhancer.module.lyrics.CustomLyricsManager
 import dev.amenhancer.module.lyrics.CustomLyricsMutationResult
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImportResult
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImporter
+import dev.amenhancer.module.lyrics.CustomLyricsRestoreResult
 import dev.amenhancer.module.lyrics.CustomLyricsSaveResult
 import dev.amenhancer.module.model.CustomLyricsEntry
 import dev.amenhancer.module.model.CustomLyricsManifest
@@ -149,6 +151,12 @@ class SettingsActivity : Activity() {
                         }
                     }
                 }
+            }
+            CUSTOM_LYRICS_BACKUP_CREATE_REQUEST_CODE -> {
+                if (resultCode == RESULT_OK) data?.data?.let(::backupCustomLyrics)
+            }
+            CUSTOM_LYRICS_BACKUP_RESTORE_REQUEST_CODE -> {
+                if (resultCode == RESULT_OK) data?.data?.let(::confirmRestoreCustomLyrics)
             }
         }
     }
@@ -590,7 +598,105 @@ class SettingsActivity : Activity() {
                     LinearLayout.LayoutParams(0, dp(48), 1f),
                 )
             })
+            addView(LinearLayout(this@SettingsActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(dp(12), 0, dp(12), dp(12))
+                addView(
+                    fontActionButton("备份歌词", writable) { chooseCustomLyricsBackupDestination() },
+                    LinearLayout.LayoutParams(0, dp(48), 1f),
+                )
+                addView(spacer(8), LinearLayout.LayoutParams(dp(8), dp(1)))
+                addView(
+                    fontActionButton("恢复备份", writable) { chooseCustomLyricsBackupRestore() },
+                    LinearLayout.LayoutParams(0, dp(48), 1f),
+                )
+            })
         }
+
+    private fun chooseCustomLyricsBackupDestination() {
+        if (!ModuleApplication.serviceSnapshot.isRemoteFileAvailable) {
+            toast("libxposed remote file 服务不可用")
+            return
+        }
+        startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = BACKUP_MIME_TYPE
+            putExtra(Intent.EXTRA_TITLE, "AM++-custom-lyrics-backup.zip")
+        }, CUSTOM_LYRICS_BACKUP_CREATE_REQUEST_CODE)
+    }
+
+    private fun chooseCustomLyricsBackupRestore() {
+        if (!ModuleApplication.serviceSnapshot.isRemoteFileAvailable) {
+            toast("libxposed remote file 服务不可用")
+            return
+        }
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(
+                Intent.EXTRA_MIME_TYPES,
+                arrayOf(
+                    BACKUP_MIME_TYPE,
+                    "application/x-zip-compressed",
+                    "application/octet-stream",
+                ),
+            )
+        }, CUSTOM_LYRICS_BACKUP_RESTORE_REQUEST_CODE)
+    }
+
+    private fun backupCustomLyrics(uri: android.net.Uri) {
+        val snapshot = ModuleApplication.serviceSnapshot
+        backgroundExecutor.execute {
+            val result = runCatching {
+                contentResolver.openOutputStream(uri, "wt")?.use { output ->
+                    CustomLyricsManager(snapshot, store).backup(output)
+                } ?: CustomLyricsBackupResult.Failed("无法创建备份文件")
+            }.getOrElse { CustomLyricsBackupResult.Failed("写入备份失败") }
+            if (result is CustomLyricsBackupResult.Failed) {
+                runCatching { contentResolver.delete(uri, null, null) }
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                when (result) {
+                    is CustomLyricsBackupResult.Done -> toast("已备份 ${result.entryCount} 首歌词")
+                    is CustomLyricsBackupResult.Failed -> toast(result.message)
+                }
+            }
+        }
+    }
+
+    private fun confirmRestoreCustomLyrics(uri: android.net.Uri) {
+        AlertDialog.Builder(this)
+            .setTitle("合并恢复歌词备份")
+            .setMessage(
+                "同 Apple Music ID 的歌词将使用备份版本；" +
+                    "当前独有歌词会保留；总开关不会改变。是否继续？",
+            )
+            .setNegativeButton("取消", null)
+            .setPositiveButton("恢复") { _, _ -> restoreCustomLyrics(uri) }
+            .show()
+    }
+
+    private fun restoreCustomLyrics(uri: android.net.Uri) {
+        val snapshot = ModuleApplication.serviceSnapshot
+        backgroundExecutor.execute {
+            val result = runCatching {
+                contentResolver.openInputStream(uri)?.use { input ->
+                    CustomLyricsManager(snapshot, store).restore(input)
+                } ?: CustomLyricsRestoreResult.Failed("无法读取备份文件")
+            }.getOrElse { CustomLyricsRestoreResult.Failed("读取备份失败") }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                when (result) {
+                    is CustomLyricsRestoreResult.Restored -> {
+                        render()
+                        toast("恢复完成，当前共 ${result.manifest.entries.size} 首歌词")
+                    }
+                    is CustomLyricsRestoreResult.Failed -> toast(result.message)
+                }
+            }
+        }
+    }
 
     private fun requestCurrentSongId(appleMusicId: EditText, displayName: EditText) {
         if (!currentSongIdentityRequester.request { currentSong ->
@@ -1297,6 +1403,9 @@ class SettingsActivity : Activity() {
     private companion object {
         const val FONT_PICKER_REQUEST_CODE = 4401
         const val CUSTOM_TTML_PICKER_REQUEST_CODE = 4402
+        const val CUSTOM_LYRICS_BACKUP_CREATE_REQUEST_CODE = 4403
+        const val CUSTOM_LYRICS_BACKUP_RESTORE_REQUEST_CODE = 4404
+        const val BACKUP_MIME_TYPE = "application/zip"
         const val STATE_AWAITING_CUSTOM_TTML_PICKER = "awaiting_custom_ttml_picker"
         const val STATE_SETTINGS_PAGE = "settings_page"
         val settingsExecutor: ExecutorService = Executors.newSingleThreadExecutor()
