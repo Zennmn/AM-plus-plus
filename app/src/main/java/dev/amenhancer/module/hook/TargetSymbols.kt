@@ -549,7 +549,7 @@ internal object AppleMusicSymbols {
                 ).filter { field ->
                     field.declaringClass.isAssignableFrom(lyricsFragment)
                 }
-                hierarchyFields.filter { it.name == "c" }.ifEmpty { hierarchyFields }
+                hierarchyFields
             }
         },
         identity = ::fieldIdentity,

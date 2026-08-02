@@ -732,6 +732,30 @@ class TargetSymbolsTest {
     }
 
     @Test
+    fun `stale profile rejects an old c field beside a renamed current item field`() {
+        val fragmentName = "com.apple.android.music.player.fragment.PlayerLyricsViewFragment"
+        val ownerName = "com.apple.android.music.player.fragment.z"
+        val source = FakeTargetClassSource(
+            names = listOf(fragmentName, ownerName),
+            classes = mapOf(
+                fragmentName to MixedCurrentItemFragmentFixture::class.java,
+                ownerName to MixedCurrentItemOwnerFixture::class.java,
+            ),
+        )
+        val resolver = IndexedTargetSymbolResolver(
+            TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.1", 1583L),
+            source,
+        )
+
+        val resolution = resolver.resolve(AppleMusicSymbols.LyricsCurrentItemField)
+
+        assertTrue(resolution is TargetResolution.Ambiguous)
+        resolution as TargetResolution.Ambiguous
+        assertEquals(2, resolution.candidates.size)
+        assertEquals("apple-music-6.5.1-1583", resolution.profileId)
+    }
+
+    @Test
     fun `structural fallback uniquely finds the current item field`() {
         val fragmentName = "com.apple.android.music.player.fragment.PlayerLyricsViewFragment"
         val ownerName = "com.apple.android.music.player.fragment.z"
@@ -810,6 +834,13 @@ private open class AmbiguousCurrentItemOwnerFixture {
 }
 
 private class AmbiguousLyricsFragmentFixture : AmbiguousCurrentItemOwnerFixture()
+
+private open class MixedCurrentItemOwnerFixture {
+    val c: BaseContentItem = BaseContentItem()
+    val renamedItem: BaseContentItem = BaseContentItem()
+}
+
+private class MixedCurrentItemFragmentFixture : MixedCurrentItemOwnerFixture()
 
 private class RenamedPlayerMetadataHubFixture {
     @Suppress("UNUSED_PARAMETER")
