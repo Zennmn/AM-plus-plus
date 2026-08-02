@@ -8,7 +8,9 @@ data class ModuleSettings(
     val phoneLiquidGlassEnabled: Boolean = false,
     val futureBlurEnabled: Boolean = true,
     val lyricBlurRadiusOffsetPx: Int = 0,
+    val customLyricsEnabled: Boolean = false,
     val fontManifest: LyricsFontManifest = LyricsFontManifest.disabled(),
+    val customLyricsManifest: CustomLyricsManifest = CustomLyricsManifest.empty(),
     val schemaVersion: Int = ModuleConstants.CONFIG_SCHEMA_VERSION,
 ) {
     companion object {
@@ -28,6 +30,32 @@ data class LyricsFontManifest(
     companion object {
         fun disabled(): LyricsFontManifest = LyricsFontManifest()
     }
+}
+
+/** One user-managed Apple Music ID -> TTML file mapping. */
+data class CustomLyricsEntry(
+    val appleMusicId: Long,
+    val displayName: String,
+    val fileId: String,
+    val sizeBytes: Long,
+    val sha256: String,
+    val source: String,
+    val enabled: Boolean = true,
+)
+
+/** Small index shared through remote preferences; TTML bodies stay in remote files. */
+data class CustomLyricsManifest(
+    val entries: List<CustomLyricsEntry> = emptyList(),
+) {
+    companion object {
+        fun empty(): CustomLyricsManifest = CustomLyricsManifest()
+    }
+}
+
+object CustomLyricsSources {
+    const val MANUAL = "manual"
+    const val AMLL = "amll-ttml-db"
+    const val NETEASE = "netease-yrc"
 }
 
 enum class FeatureState {

@@ -1,6 +1,7 @@
 package dev.amenhancer.module.config
 
 import dev.amenhancer.module.ModuleConstants
+import dev.amenhancer.module.model.CustomLyricsManifest
 import dev.amenhancer.module.model.LyricsFontManifest
 import dev.amenhancer.module.model.ModuleSettings
 
@@ -21,18 +22,25 @@ internal object ModuleSettingsSchema {
                 ModuleSettings.MIN_LYRIC_BLUR_RADIUS_OFFSET_PX,
                 ModuleSettings.MAX_LYRIC_BLUR_RADIUS_OFFSET_PX,
             ) ?: 0,
+        customLyricsEnabled = values.boolean(
+            KEY_CUSTOM_LYRICS_ENABLED,
+            default = values.boolean(KEY_LEGACY_ONLINE_LYRIC_REPLACEMENT, default = false),
+        ),
         fontManifest = values.fontManifest(),
+        customLyricsManifest = values.customLyricsManifest(),
         schemaVersion = values.number(KEY_SCHEMA_VERSION)
             ?: ModuleConstants.CONFIG_SCHEMA_VERSION,
     )
 
     fun encode(settings: ModuleSettings): Map<String, Any> =
-        encodeOrdinarySettings(settings) + encodeFontManifest(settings.fontManifest)
+        encodeOrdinarySettings(settings) +
+            encodeFontManifest(settings.fontManifest) +
+            encodeCustomLyricsManifest(settings.customLyricsManifest)
 
     /**
      * Runtime write map for ordinary settings only. Never carries the
-     * lyrics_font_* manifest keys, so a stale ModuleSettings captured before
-     * a font import cannot overwrite a manifest that saveFontManifest
+     * lyrics_font_* or custom_lyrics_manifest keys, so a stale ModuleSettings
+     * captured before a remote-file transaction cannot overwrite a manifest
      * committed afterwards.
      */
     fun encodeOrdinarySettings(settings: ModuleSettings): Map<String, Any> {
@@ -45,6 +53,7 @@ internal object ModuleSettingsSchema {
                 ModuleSettings.MIN_LYRIC_BLUR_RADIUS_OFFSET_PX,
                 ModuleSettings.MAX_LYRIC_BLUR_RADIUS_OFFSET_PX,
             ),
+            KEY_CUSTOM_LYRICS_ENABLED to settings.customLyricsEnabled,
         )
         values[KEY_SCHEMA_VERSION] = ModuleConstants.CONFIG_SCHEMA_VERSION
         return values
@@ -61,6 +70,9 @@ internal object ModuleSettingsSchema {
         )
     }
 
+    fun encodeCustomLyricsManifest(manifest: CustomLyricsManifest): Map<String, Any> =
+        linkedMapOf(KEY_CUSTOM_LYRICS_MANIFEST to CustomLyricsManifestCodec.encode(manifest))
+
     private fun Map<String, *>.fontManifest(): LyricsFontManifest {
         val raw = LyricsFontManifest(
             enabled = boolean(KEY_FONT_ENABLED, default = false),
@@ -71,6 +83,9 @@ internal object ModuleSettingsSchema {
         )
         return FontManifestPolicy.sanitize(raw)
     }
+
+    private fun Map<String, *>.customLyricsManifest(): CustomLyricsManifest =
+        CustomLyricsManifestCodec.decode(string(KEY_CUSTOM_LYRICS_MANIFEST))
 
     private fun Map<String, *>.string(key: String): String = this[key] as? String ?: ""
 
@@ -103,11 +118,14 @@ internal object ModuleSettingsSchema {
         KEY_PHONE_LIQUID_GLASS,
         KEY_FUTURE_BLUR,
         KEY_LYRIC_BLUR_RADIUS_OFFSET,
+        KEY_CUSTOM_LYRICS_ENABLED,
+        KEY_LEGACY_ONLINE_LYRIC_REPLACEMENT,
         KEY_FONT_ENABLED,
         KEY_FONT_FILE_ID,
         KEY_FONT_DISPLAY_NAME,
         KEY_FONT_SIZE_BYTES,
         KEY_FONT_SHA256,
+        KEY_CUSTOM_LYRICS_MANIFEST,
     )
 
     private const val KEY_DUAL_PANE = "dual_pane_enabled"
@@ -116,10 +134,13 @@ internal object ModuleSettingsSchema {
     private const val KEY_PHONE_LIQUID_GLASS = "phone_liquid_glass_enabled"
     private const val KEY_FUTURE_BLUR = "future_blur_enabled"
     private const val KEY_LYRIC_BLUR_RADIUS_OFFSET = "lyric_blur_radius_offset_px"
+    private const val KEY_CUSTOM_LYRICS_ENABLED = "custom_lyrics_enabled"
+    private const val KEY_LEGACY_ONLINE_LYRIC_REPLACEMENT = "online_lyric_replacement_enabled"
     private const val KEY_FONT_ENABLED = "lyrics_font_enabled"
     private const val KEY_FONT_FILE_ID = "lyrics_font_file_id"
     private const val KEY_FONT_DISPLAY_NAME = "lyrics_font_display_name"
     private const val KEY_FONT_SIZE_BYTES = "lyrics_font_size_bytes"
     private const val KEY_FONT_SHA256 = "lyrics_font_sha256"
+    private const val KEY_CUSTOM_LYRICS_MANIFEST = "custom_lyrics_manifest"
     private const val KEY_SCHEMA_VERSION = "schema_version"
 }

@@ -1,0 +1,109 @@
+package dev.amenhancer.module.hook
+
+import java.io.File
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class CurrentSongIdentityStructuralRegressionTest {
+    private fun projectFile(relativePath: String): String = sequenceOf(
+        File(relativePath),
+        File("../$relativePath"),
+    ).firstOrNull(File::isFile)?.readText()
+        ?: error("$relativePath was not found from the unit-test working directory")
+
+    @Test
+    fun `caches the identity in memory without storage or network on the hook path`() {
+        val target = projectFile(
+            "app/src/main/java/dev/amenhancer/module/hook/AppleMusicCurrentSongIdentityTarget.kt",
+        )
+        val feature = projectFile(
+            "app/src/main/java/dev/amenhancer/module/hook/CurrentSongIdentityFeature.kt",
+        )
+
+        assertTrue(target.contains("CurrentItemIdentitySeam(symbols)"))
+        assertTrue(target.contains("private val cache: CurrentSongIdentityCache"))
+        assertTrue(target.contains("PlayerMetadataPublishMethod"))
+        assertTrue(target.contains("MetadataToPlaybackItemMethod"))
+        assertTrue(target.contains("cache.publish(item, seam.detailsOfItem(item))"))
+        assertFalse(target.contains("SharedPreferences"))
+        assertFalse(target.contains("openRemoteFile"))
+        assertFalse(target.contains("HttpLyricTransport"))
+        assertFalse(target.contains("java.io.File"))
+        assertFalse(target.contains("embedded-payload"))
+        assertFalse(target.contains("com.apple.android.music.amplus"))
+        assertFalse(feature.contains("config.settings()"))
+    }
+
+    @Test
+    fun `reuses the verified current item seam instead of duplicating it`() {
+        val target = projectFile(
+            "app/src/main/java/dev/amenhancer/module/hook/AppleMusicCustomLyricsTarget.kt",
+        )
+
+        assertTrue(target.contains("val seam = CurrentItemIdentitySeam(symbols)"))
+        assertTrue(target.contains("seam.currentItemAdamIdOf(param.thisObject)"))
+        assertFalse(target.contains("private fun currentItemAdamIdOf"))
+        assertFalse(target.contains("private fun resolveGetIdMethod"))
+    }
+
+    @Test
+    fun `opens unavailable lyrics only after an exact replacement is ready`() {
+        val target = projectFile(
+            "app/src/main/java/dev/amenhancer/module/hook/AppleMusicCustomLyricsTarget.kt",
+        )
+
+        assertTrue(target.contains("AppleMusicSymbols.LyricsAvailabilityPredicate"))
+        assertTrue(target.contains("override fun afterHookedMethod(param: MethodHookParam)"))
+        assertTrue(target.contains("seam.detailsOfItem(param.args.getOrNull(0))"))
+        assertTrue(target.contains("session.readyReplacementFor(appleMusicId)"))
+        assertTrue(target.contains("shouldExposeCustomLyrics("))
+        assertFalse(target.contains("LyricsResultField"))
+        assertFalse(target.contains("LyricsLoadMethod"))
+        assertFalse(target.contains("LyricsResumeMethod"))
+        assertFalse(target.contains("installMethod.invoke"))
+    }
+
+    @Test
+    fun `registers the capability in adaptation and the feature in installation`() {
+        val adaptation = projectFile(
+            "app/src/main/java/dev/amenhancer/module/hook/TargetAdaptation.kt",
+        )
+        val installation = projectFile(
+            "app/src/main/java/dev/amenhancer/module/hook/FeatureInstallation.kt",
+        )
+        val constants = projectFile("app/src/main/java/dev/amenhancer/module/ModuleConstants.kt")
+
+        assertTrue(adaptation.contains("val currentSong = CurrentSongIdentityCache()"))
+        assertTrue(adaptation.contains("currentSongIdentity = AppleMusicCurrentSongIdentityTarget("))
+        assertTrue(adaptation.contains("customLyrics = AppleMusicCustomLyricsTarget(config, resolver)"))
+        assertTrue(adaptation.contains("internal fun interface CurrentSongIdentityTarget"))
+        assertTrue(installation.contains("FeatureInstallationPlan(feature = CurrentSongIdentityFeature())"))
+        assertTrue(
+            installation.indexOf("FeatureInstallationPlan(feature = CurrentSongIdentityFeature())") <
+                installation.indexOf("FeatureInstallationPlan(feature = CustomLyricsFeature())"),
+        )
+        assertTrue(constants.contains("FEATURE_CURRENT_SONG_IDENTITY = \"current_song_identity\""))
+    }
+
+    @Test
+    fun `uses a signature-protected request responder instead of an embedded holder`() {
+        val target = projectFile(
+            "app/src/main/java/dev/amenhancer/module/hook/AppleMusicCurrentSongIdentityTarget.kt",
+        )
+        val protocol = projectFile(
+            "app/src/main/java/dev/amenhancer/module/CurrentSongIdentityProtocol.kt",
+        )
+        val manifest = projectFile("app/src/main/AndroidManifest.xml")
+
+        assertTrue(target.contains("CurrentSongIdentityRequestResponder"))
+        assertTrue(target.contains("ResultReceiver"))
+        assertTrue(target.contains("Context.RECEIVER_EXPORTED"))
+        assertTrue(target.contains("CurrentSongIdentityProtocol.REQUEST_PERMISSION"))
+        assertTrue(protocol.contains("REQUEST_CURRENT_SONG_ID"))
+        assertTrue(protocol.contains("EXTRA_SONG_TITLE"))
+        assertTrue(protocol.contains("EXTRA_SONG_ARTIST"))
+        assertTrue(manifest.contains("android:protectionLevel=\"signature\""))
+        assertTrue(manifest.contains("permission.REQUEST_CURRENT_SONG_ID"))
+    }
+}

@@ -71,7 +71,9 @@ class SettingsUiStructuralRegressionTest {
             "application/vnd.ms-opentype",
         ).forEach { mime -> assertTrue(activity.contains("\"$mime\"")) }
         assertTrue(activity.contains("backgroundExecutor.execute"))
-        assertTrue(activity.contains("backgroundExecutor.shutdown()"))
+        assertTrue(activity.contains("val backgroundExecutor: ExecutorService get() = settingsExecutor"))
+        assertTrue(activity.contains("val settingsExecutor: ExecutorService = Executors.newSingleThreadExecutor()"))
+        assertFalse(activity.contains("backgroundExecutor.shutdown()"))
         assertFalse(activity.contains("backgroundExecutor.shutdownNow()"))
         assertTrue(activity.contains("snapshot.isRemoteFileAvailable"))
         assertTrue(activity.contains("歌词字体"))
@@ -83,6 +85,80 @@ class SettingsUiStructuralRegressionTest {
         assertFalse(activity.contains("takePersistableUriPermission"))
         assertFalse(importer.contains("uri.toString()"))
         assertFalse(manifest.contains("<provider"))
+    }
+
+    @Test
+    fun `keeps custom lyrics manual at playback time and online only at explicit import time`() {
+        val activity = projectFile("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
+        val target = projectFile(
+            "app/src/main/java/dev/amenhancer/module/hook/AppleMusicCustomLyricsTarget.kt",
+        )
+        val session = projectFile(
+            "app/src/main/java/dev/amenhancer/module/hook/CustomLyricsReplacementSession.kt",
+        )
+        val manifest = projectFile("app/src/main/AndroidManifest.xml")
+
+        assertTrue(activity.contains("从 AMLL 导入"))
+        assertTrue(activity.contains("从网易云导入"))
+        assertTrue(activity.contains("不会在播放时联网识歌"))
+        assertTrue(manifest.contains("android.permission.INTERNET"))
+        assertTrue(target.contains("session.start()"))
+        assertFalse(target.contains("HttpLyricTransport"))
+        assertFalse(session.contains("HttpLyricTransport"))
+        assertFalse(session.contains("config.settings()"))
+        assertTrue(session.contains("files and native parsing are prepared off-hook"))
+    }
+
+    @Test
+    fun `gets the current song id only through an explicit standalone settings request`() {
+        val activity = projectFile("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
+        val requester = projectFile(
+            "app/src/main/java/dev/amenhancer/module/ui/CurrentSongIdentityRequester.kt",
+        )
+
+        assertTrue(activity.contains("获取当前歌曲信息"))
+        assertTrue(activity.contains("dialogActionButton(\"获取 ID\") { requestCurrentSongId(appleMusicId, displayName) }"))
+        assertTrue(activity.contains("requestCurrentSongId(appleMusicId, displayName)"))
+        assertTrue(activity.contains("appleMusicId.setText(currentSong.appleMusicId.toString())"))
+        assertTrue(activity.contains("formatCurrentSongDisplayName(currentSong.title, currentSong.artist)"))
+        assertTrue(activity.contains("displayName.setText(it)"))
+        assertTrue(activity.contains("val actionBar = LinearLayout(this).apply"))
+        assertTrue(activity.contains("orientation = LinearLayout.HORIZONTAL"))
+        assertTrue(activity.contains("dialogActionButton(\"导入 TTML\")"))
+        assertTrue(activity.contains("dialogActionButton(\"取消\") { dialog.dismiss() }"))
+        assertTrue(activity.contains("dialogActionButton(\"保存\") save@{"))
+        assertTrue(activity.contains("LinearLayout.LayoutParams(0, dp(56), 1f)"))
+        assertFalse(activity.contains("setAllowStacking"))
+        assertFalse(activity.contains("dialog.getButton("))
+        assertFalse(activity.contains("fontActionButton(\"获取当前歌曲 ID\""))
+        assertTrue(activity.contains("未获取到当前歌曲信息，请先在 Apple Music 播放一首歌"))
+        assertTrue(requester.contains("setPackage(ModuleConstants.TARGET_PACKAGE)"))
+        assertTrue(requester.contains("ResultReceiver"))
+        assertTrue(requester.contains("TIMEOUT_MILLIS"))
+        assertFalse(requester.contains("SharedPreferences"))
+        assertFalse(requester.contains("HttpLyricTransport"))
+    }
+
+    @Test
+    fun `moves custom lyrics management to a saved secondary page`() {
+        val activity = projectFile("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
+
+        assertTrue(activity.contains("enum class SettingsPage"))
+        assertTrue(activity.contains("STATE_SETTINGS_PAGE"))
+        assertTrue(activity.contains("renderMainPage(settings, snapshot)"))
+        assertTrue(activity.contains("renderCustomLyricsPage(settings, snapshot)"))
+        assertTrue(activity.contains("customLyricsNavigationRow(settings.customLyricsManifest)"))
+        assertTrue(activity.contains("showPage(SettingsPage.CUSTOM_LYRICS)"))
+        assertTrue(activity.contains("customLyricsEnabled = enabled"))
+        assertTrue(activity.contains("customLyricsCard(settings.customLyricsManifest"))
+        assertTrue(activity.contains("override fun onBackPressed()"))
+        assertTrue(activity.contains("showPage(SettingsPage.MAIN)"))
+        assertTrue(activity.contains("settingsScroll.post { settingsScroll.scrollTo(0, 0) }"))
+
+        val mainPage = activity.substringAfter("private fun renderMainPage(")
+            .substringBefore("private fun renderCustomLyricsPage(")
+        assertFalse(mainPage.contains("customLyricsCard("))
+        assertFalse(mainPage.contains("customLyricsEnabled = enabled"))
     }
 
     @Test

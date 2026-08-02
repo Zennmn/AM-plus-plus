@@ -211,6 +211,8 @@ private fun productionFeatureInstallationModule(): FeatureInstallationModule {
                 feature = LyricsTypefaceFeature(),
                 registerResources = lyricsTypefaceSession::registerResources,
             ),
+            FeatureInstallationPlan(feature = CurrentSongIdentityFeature()),
+            FeatureInstallationPlan(feature = CustomLyricsFeature()),
         ),
         installLayoutInflationHooks = LayoutInflationRegistry::install,
         registerApplicationCreated = { config, targetClassLoader, onCreated ->
@@ -222,9 +224,10 @@ private fun productionFeatureInstallationModule(): FeatureInstallationModule {
                         HookContext(
                             config = config,
                             target = TargetAdaptation.appleMusic(
-                                application,
-                                targetClassLoader,
-                                lyricsTypefaceSession,
+                                config = config,
+                                application = application,
+                                classLoader = targetClassLoader,
+                                lyricsTypefaceSession = lyricsTypefaceSession,
                             ),
                         )
                     }

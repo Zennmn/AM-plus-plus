@@ -23,6 +23,7 @@ class FeatureInstallationModuleTest {
                 plan("phone", events, "phone resources"),
                 plan("blur", events),
                 plan("font", events, "font resources"),
+                plan("online", events),
             ),
             installLayoutInflationHooks = { events += "layout hooks" },
             registerApplicationCreated = { _, _, callback ->
@@ -69,22 +70,18 @@ class FeatureInstallationModuleTest {
                 "report blur",
                 "install font",
                 "report font",
+                "install online",
+                "report online",
             ),
             events,
         )
         assertEquals(FeatureInstallationPhase.COMPLETE, session.snapshot().phase)
         assertEquals(
-            listOf("dual", "editorial", "phone", "blur", "font"),
+            listOf("dual", "editorial", "phone", "blur", "font", "online"),
             session.snapshot().health.map(FeatureHealth::feature),
         )
         assertEquals(
-            listOf(
-                "6.5.0 (1580)",
-                "6.5.0 (1580)",
-                "6.5.0 (1580)",
-                "6.5.0 (1580)",
-                "6.5.0 (1580)",
-            ),
+            List(6) { "6.5.0 (1580)" },
             session.snapshot().health.map(FeatureHealth::targetVersion),
         )
 
@@ -93,7 +90,7 @@ class FeatureInstallationModuleTest {
             context("unexpected")
         }
         assertSame(session, module.install(config(), javaClass.classLoader!!))
-        assertEquals(15, events.size)
+        assertEquals(17, events.size)
         assertEquals(1, contextFactoryCalls)
     }
 

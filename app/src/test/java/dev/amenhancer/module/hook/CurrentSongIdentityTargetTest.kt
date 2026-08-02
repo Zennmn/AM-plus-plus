@@ -1,0 +1,252 @@
+package dev.amenhancer.module.hook
+
+import android.content.SharedPreferences
+import dev.amenhancer.module.CurrentSongDetails
+import dev.amenhancer.module.config.TargetConfigClient
+import dev.amenhancer.module.model.FeatureState
+import java.lang.reflect.Field
+import java.lang.reflect.Method
+import java.lang.reflect.Proxy
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class CurrentSongIdentityTargetTest {
+
+    @Test
+    fun `seam resolves and reads the exact current item adam id`() {
+        val seam = CurrentItemIdentitySeam(resolver(SongFragment::class.java))
+        assertNull(seam.resolve(SongFragment.installMethod()))
+        assertNotNull(seam.fieldSummary)
+
+        assertEquals(12345L, seam.currentItemAdamIdOf(SongFragment(SongItem("12345"))))
+    }
+
+    @Test
+    fun `seam reads item update argument without depending on I2`() {
+        val seam = CurrentItemIdentitySeam(resolver(SongFragment::class.java))
+        assertNull(seam.resolve(SongFragment.installMethod()))
+
+        assertEquals(
+            CurrentSongDetails(67890L, "No lyrics", "Artist"),
+            seam.detailsOfItem(SongItem("67890", "No lyrics", "Artist")),
+        )
+    }
+
+    @Test
+    fun `seam reads fail closed when the current item is unavailable`() {
+        val seam = CurrentItemIdentitySeam(resolver(SongFragment::class.java))
+        seam.resolve(SongFragment.installMethod())
+
+        assertNull(seam.currentItemAdamIdOf(null))
+        assertNull(seam.currentItemAdamIdOf(SongFragment(null)))
+        assertNull(seam.currentItemAdamIdOf(SongFragment(SongItem("0"))))
+        assertNull(seam.currentItemAdamIdOf(SongFragment(SongItem("not-a-number"))))
+    }
+
+    @Test
+    fun `seam reports a missing current item field`() {
+        val seam = CurrentItemIdentitySeam(FakeIdentityResolver(field = null))
+        val diagnostic = seam.resolve(SongFragment.installMethod())
+
+        assertNotNull(diagnostic)
+        assertTrue(diagnostic!!.contains("lyrics-current-item-field"))
+        assertTrue(diagnostic.contains("was not found"))
+    }
+
+    @Test
+    fun `seam reports an item type without the getId contract`() {
+        val seam = CurrentItemIdentitySeam(resolver(WrongTypeFragment::class.java))
+        val diagnostic = seam.resolve(WrongTypeFragment.installMethod())
+
+        assertNotNull(diagnostic)
+        assertTrue(diagnostic!!.contains("getId() was unavailable"))
+    }
+
+    @Test
+    fun `seam rejects a field outside the I2 fragment hierarchy`() {
+        val seam = CurrentItemIdentitySeam(
+            resolver(owner = ForeignFieldOwner::class.java, installMethod = ForeignFragment.installMethod()),
+        )
+        val diagnostic = seam.resolve(ForeignFragment.installMethod())
+
+        assertNotNull(diagnostic)
+        assertTrue(diagnostic!!.contains("not in the I2 fragment hierarchy"))
+    }
+
+    @Test
+    fun `cache stores the exact adam id`() {
+        val cache = CurrentSongIdentityCache()
+        val item = Any()
+
+        cache.publish(item, CurrentSongDetails(12345L, "Song title", "Artist name"))
+
+        assertEquals(
+            CurrentSongDetails(12345L, "Song title", "Artist name"),
+            cache.current()?.details,
+        )
+        assertTrue(cache.current()?.item === item)
+    }
+
+    @Test
+    fun `cache fails closed for unavailable identities`() {
+        val cache = CurrentSongIdentityCache()
+        cache.publish(Any(), CurrentSongDetails(12345L))
+
+        cache.publish(null, null)
+        assertNull(cache.current())
+        cache.publish(Any(), CurrentSongDetails(0L))
+        assertNull(cache.current())
+        cache.publish(Any(), CurrentSongDetails(-7L))
+        assertNull(cache.current())
+    }
+
+    @Test
+    fun `feature installs unconditionally and maps the capability result`() {
+        val target = TargetAdaptation(
+            identity = "test",
+            dualPane = DualPaneTarget { TargetCapabilityInstall.Active("unused") },
+            editorialVideo = EditorialVideoTarget { TargetCapabilityInstall.Active("unused") },
+            bidirectionalLyricBlur = BidirectionalLyricBlurTarget {
+                TargetCapabilityInstall.Active("unused")
+            },
+            currentSongIdentity = CurrentSongIdentityTarget {
+                TargetCapabilityInstall.Active("identity published")
+            },
+        )
+
+        val result = CurrentSongIdentityFeature().install(
+            HookContext(config(), target),
+        )
+
+        assertEquals(FeatureState.ACTIVE, result.state)
+        assertTrue(result.message.contains("identity published"))
+    }
+
+    @Test
+    fun `feature maps a degraded capability as degraded without a settings gate`() {
+        val target = TargetAdaptation(
+            identity = "test",
+            dualPane = DualPaneTarget { TargetCapabilityInstall.Active("unused") },
+            editorialVideo = EditorialVideoTarget { TargetCapabilityInstall.Active("unused") },
+            bidirectionalLyricBlur = BidirectionalLyricBlurTarget {
+                TargetCapabilityInstall.Active("unused")
+            },
+            currentSongIdentity = CurrentSongIdentityTarget {
+                TargetCapabilityInstall.Degraded("holder missing")
+            },
+        )
+
+        val result = CurrentSongIdentityFeature().install(
+            HookContext(config(), target),
+        )
+
+        assertEquals(FeatureState.DEGRADED, result.state)
+        assertTrue(result.message.contains("holder missing"))
+    }
+
+    private fun resolver(
+        owner: Class<*>,
+        installMethod: Method = owner.getDeclaredMethod("I2", Any::class.java),
+    ): TargetSymbolResolver = FakeIdentityResolver(
+        field = owner.getDeclaredField("c"),
+        installMethod = installMethod,
+    )
+
+    private fun config(): TargetConfigClient = TargetConfigClient(
+        Proxy.newProxyInstance(
+            SharedPreferences::class.java.classLoader,
+            arrayOf(SharedPreferences::class.java),
+        ) { _, method, _ ->
+            when (method.name) {
+                "getAll" -> emptyMap<String, Any>()
+                "toString" -> "current-song-identity-test-preferences"
+                "hashCode" -> 1
+                "equals" -> false
+                else -> null
+            }
+        } as SharedPreferences,
+    )
+}
+
+private class FakeIdentityResolver(
+    private val field: Field?,
+    private val installMethod: Method? = null,
+) : TargetSymbolResolver {
+    override fun <T : Any> resolve(symbol: TargetSymbolKey<T>): TargetResolution<T> {
+        @Suppress("UNCHECKED_CAST")
+        return when (symbol.id) {
+            AppleMusicSymbols.LyricsCurrentItemField.id ->
+                if (field != null) {
+                    TargetResolution.Found(symbol.id, field, SymbolMatch.VERSION_PROFILE, "test")
+                } else {
+                    TargetResolution.Missing(symbol.id, "test")
+                }
+            AppleMusicSymbols.LyricsInstallMethod.id ->
+                if (installMethod != null) {
+                    TargetResolution.Found(
+                        symbol.id,
+                        installMethod,
+                        SymbolMatch.VERSION_PROFILE,
+                        "test",
+                    )
+                } else {
+                    TargetResolution.Missing(symbol.id, "test")
+                }
+            else -> TargetResolution.Missing(symbol.id, "test")
+        } as TargetResolution<T>
+    }
+}
+
+private class SongItem(
+    private val id: String,
+    private val title: String = "Song title",
+    private val artistName: String = "Artist name",
+) {
+    fun getId(): String = id
+    fun getTitle(): String = title
+    fun getArtistName(): String = artistName
+}
+
+private class SongFragment(item: SongItem?) {
+    @JvmField
+    var c: SongItem? = item
+
+    @Suppress("UNUSED_PARAMETER")
+    fun I2(ptr: Any) = Unit
+
+    companion object {
+        fun installMethod(): Method =
+            SongFragment::class.java.getDeclaredMethod("I2", Any::class.java)
+    }
+}
+
+private class WrongTypeFragment {
+    @JvmField
+    var c: String = ""
+
+    @Suppress("UNUSED_PARAMETER")
+    fun I2(ptr: Any) = Unit
+
+    companion object {
+        fun installMethod(): Method =
+            WrongTypeFragment::class.java.getDeclaredMethod("I2", Any::class.java)
+    }
+}
+
+private class ForeignFieldOwner {
+    @JvmField
+    var c: SongItem? = null
+}
+
+private class ForeignFragment {
+    @Suppress("UNUSED_PARAMETER")
+    fun I2(ptr: Any) = Unit
+
+    companion object {
+        fun installMethod(): Method =
+            ForeignFragment::class.java.getDeclaredMethod("I2", Any::class.java)
+    }
+}

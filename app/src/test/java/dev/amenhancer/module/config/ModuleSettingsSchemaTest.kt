@@ -1,6 +1,7 @@
 package dev.amenhancer.module.config
 
 import dev.amenhancer.module.ModuleConstants
+import dev.amenhancer.module.model.CustomLyricsManifest
 import dev.amenhancer.module.model.ModuleSettings
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -41,11 +42,13 @@ class ModuleSettingsSchemaTest {
                 "phone_liquid_glass_enabled" to true,
                 "future_blur_enabled" to false,
                 "lyric_blur_radius_offset_px" to 6,
+                "custom_lyrics_enabled" to false,
                 "lyrics_font_enabled" to false,
                 "lyrics_font_file_id" to "",
                 "lyrics_font_display_name" to "",
                 "lyrics_font_size_bytes" to 0L,
                 "lyrics_font_sha256" to "",
+                "custom_lyrics_manifest" to CustomLyricsManifestCodec.encode(CustomLyricsManifest.empty()),
                 "schema_version" to ModuleConstants.CONFIG_SCHEMA_VERSION,
             ),
             encoded,
@@ -69,11 +72,13 @@ class ModuleSettingsSchemaTest {
                 "phone_liquid_glass_enabled" to true,
                 "future_blur_enabled" to true,
                 "lyric_blur_radius_offset_px" to 0,
+                "custom_lyrics_enabled" to false,
                 "lyrics_font_enabled" to false,
                 "lyrics_font_file_id" to "",
                 "lyrics_font_display_name" to "",
                 "lyrics_font_size_bytes" to 0L,
                 "lyrics_font_sha256" to "",
+                "custom_lyrics_manifest" to CustomLyricsManifestCodec.encode(CustomLyricsManifest.empty()),
                 "schema_version" to ModuleConstants.CONFIG_SCHEMA_VERSION,
             ),
             upgraded,
@@ -157,5 +162,42 @@ class ModuleSettingsSchemaTest {
                 mapOf("lyric_blur_radius_offset_px" to -99),
             ).lyricBlurRadiusOffsetPx,
         )
+    }
+
+    @Test
+    fun `custom lyrics defaults to disabled and round trips`() {
+        assertEquals(
+            false,
+            ModuleSettingsSchema.decode(emptyMap<String, Any?>()).customLyricsEnabled,
+        )
+        assertEquals(
+            false,
+            ModuleSettingsSchema.decode(
+                mapOf("custom_lyrics_enabled" to "not-a-boolean"),
+            ).customLyricsEnabled,
+        )
+
+        val encoded = ModuleSettingsSchema.encodeOrdinarySettings(
+            ModuleSettings(customLyricsEnabled = true),
+        )
+        assertEquals(true, encoded["custom_lyrics_enabled"])
+        assertEquals(
+            true,
+            ModuleSettingsSchema.decode(encoded).customLyricsEnabled,
+        )
+    }
+
+    @Test
+    fun `an old online lyric setting migrates to the custom lyrics gate`() {
+        val upgraded = ModuleSettingsSchema.upgrade(
+            storedValues = mapOf(
+                "schema_version" to 5,
+                "online_lyric_replacement_enabled" to true,
+            ),
+            legacyValues = emptyMap<String, Any?>(),
+        )
+
+        assertEquals(true, upgraded?.get("custom_lyrics_enabled"))
+        assertEquals(ModuleConstants.CONFIG_SCHEMA_VERSION, upgraded?.get("schema_version"))
     }
 }

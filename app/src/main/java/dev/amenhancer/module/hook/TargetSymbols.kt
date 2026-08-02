@@ -2,6 +2,7 @@ package dev.amenhancer.module.hook
 
 import android.view.View
 import dev.amenhancer.module.ModuleConstants
+import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 import java.util.IdentityHashMap
@@ -101,6 +102,19 @@ internal class TargetClassIndex(private val source: TargetClassSource) {
             }.getOrDefault(emptyList())
         }
         .distinctBy(::methodIdentity)
+
+    fun fields(
+        namePredicate: (String) -> Boolean,
+        contract: (Field) -> Boolean,
+    ): List<Field> = classes(namePredicate) { true }
+        .flatMap { type ->
+            runCatching {
+                type.declaredFields.filter { field ->
+                    runCatching { contract(field) }.getOrDefault(false)
+                }
+            }.getOrDefault(emptyList())
+        }
+        .distinctBy(::fieldIdentity)
 }
 
 internal class TargetSymbolKey<T : Any>(
@@ -179,6 +193,13 @@ internal enum class TargetSymbolId {
     LYRICS_HIGHLIGHT_CALLBACK_OWNER,
     LYRICS_VIEW_MODEL,
     STACKED_NAVIGATION_MENU,
+    SONG_INFO_PTR,
+    SONG_INFO_NATIVE,
+    TTML_PARSER_NATIVE,
+    LYRICS_CURRENT_ITEM_FIELD,
+    PLAYER_METADATA_HUB,
+    METADATA_TO_ITEM_CONVERTER,
+    LYRICS_AVAILABILITY_OWNER,
 }
 
 private object AppleMusicProfiles {
@@ -199,6 +220,17 @@ private object AppleMusicProfiles {
             TargetSymbolId.LYRICS_VIEW_MODEL to
                 "com.apple.android.music.player.viewmodel.PlayerLyricsViewModel",
             TargetSymbolId.STACKED_NAVIGATION_MENU to "Hd.b",
+            TargetSymbolId.SONG_INFO_PTR to
+                "com.apple.android.music.ttml.javanative.model.SongInfo\$SongInfoPtr",
+            TargetSymbolId.SONG_INFO_NATIVE to
+                "com.apple.android.music.ttml.javanative.model.SongInfo\$SongInfoNative",
+            TargetSymbolId.TTML_PARSER_NATIVE to
+                "com.apple.android.music.ttml.javanative.TTMLParser\$TTMLParserNative",
+            TargetSymbolId.LYRICS_CURRENT_ITEM_FIELD to
+                "com.apple.android.music.player.fragment.m",
+            TargetSymbolId.PLAYER_METADATA_HUB to "com.apple.android.music.player.f",
+            TargetSymbolId.METADATA_TO_ITEM_CONVERTER to "com.apple.android.music.player.P",
+            TargetSymbolId.LYRICS_AVAILABILITY_OWNER to "com.apple.android.music.player.d1",
         ),
     )
 
@@ -326,6 +358,91 @@ internal object AppleMusicSymbols {
         fallbackName = { false },
         contract = { true },
     )
+
+    val SongInfoPtr = classSymbol(
+        id = "song-info-ptr",
+        profileId = TargetSymbolId.SONG_INFO_PTR,
+        stableName = "com.apple.android.music.ttml.javanative.model.SongInfo\$SongInfoPtr",
+        fallbackName = { it.endsWith(".ttml.javanative.model.SongInfo\$SongInfoPtr") },
+        contract = ::hasSongInfoPtrContract,
+    )
+
+    val SongInfoNative = classSymbol(
+        id = "song-info-native",
+        profileId = TargetSymbolId.SONG_INFO_NATIVE,
+        stableName = "com.apple.android.music.ttml.javanative.model.SongInfo\$SongInfoNative",
+        fallbackName = { it.endsWith(".ttml.javanative.model.SongInfo\$SongInfoNative") },
+        contract = ::hasSongInfoNativeContract,
+    )
+
+    val TtmlParserNative = classSymbol(
+        id = "ttml-parser-native",
+        profileId = TargetSymbolId.TTML_PARSER_NATIVE,
+        stableName = "com.apple.android.music.ttml.javanative.TTMLParser\$TTMLParserNative",
+        fallbackName = { it.endsWith(".ttml.javanative.TTMLParser\$TTMLParserNative") },
+        contract = ::hasTtmlParserNativeContract,
+    )
+
+    /**
+     * PlayerLyricsViewFragment.I2(SongInfoPtr) — the lyrics installation
+     * entry point. The contract requires the exact name "I2" plus the
+     * SongInfoPtr shape, so the same-shaped R2(SongInfoPtr) can never be
+     * selected silently: a version whose I2 is missing resolves Missing even
+     * when R2 is present.
+     */
+    val LyricsInstallMethod = methodSymbol(
+        id = "lyrics-install-method",
+        profileOwner = TargetSymbolId.LYRICS_FRAGMENT,
+        fallbackOwner = { it.endsWith(".PlayerLyricsViewFragment") },
+        contract = ::isLyricsInstallMethod,
+    )
+
+    val PlayerMetadataPublishMethod = methodSymbol(
+        id = "player-metadata-publish-method",
+        profileOwner = TargetSymbolId.PLAYER_METADATA_HUB,
+        fallbackOwner = { it == "com.apple.android.music.player.f" },
+        contract = ::isPlayerMetadataPublishMethod,
+    )
+
+    val MetadataToPlaybackItemMethod = methodSymbol(
+        id = "metadata-to-playback-item-method",
+        profileOwner = TargetSymbolId.METADATA_TO_ITEM_CONVERTER,
+        fallbackOwner = { it == "com.apple.android.music.player.P" },
+        contract = ::isMetadataToPlaybackItemMethod,
+    )
+
+    val LyricsAvailabilityPredicate = methodSymbol(
+        id = "lyrics-availability-predicate",
+        profileOwner = TargetSymbolId.LYRICS_AVAILABILITY_OWNER,
+        fallbackOwner = { it.startsWith("com.apple.android.music.player.") },
+        contract = ::isLyricsAvailabilityPredicate,
+    )
+
+    val TtmlSongInfoFromTtml = methodSymbol(
+        id = "ttml-song-info-from-ttml",
+        profileOwner = TargetSymbolId.TTML_PARSER_NATIVE,
+        fallbackOwner = { it.endsWith(".ttml.javanative.TTMLParser\$TTMLParserNative") },
+        contract = ::isTtmlSongInfoFromTtml,
+    )
+
+    /**
+     * The fragment hierarchy's current lyrics item
+     * (`com.apple.android.music.player.fragment.m#c` of type
+     * `com.apple.android.music.model.BaseContentItem`). Apple's own I2 body
+     * reads this field, calls `getId()` on the item and refuses any incoming
+     * SongInfoPtr whose Adam ID differs — so the incoming pointer can be a
+     * stale leftover from a previous song, and this field is the only
+     * authoritative song identity for every I2 entry. The contract requires
+     * the exact field name "c" plus the exact declared type, so a same-named
+     * field of another type can never be selected silently.
+     */
+    val LyricsCurrentItemField = fieldSymbol(
+        id = "lyrics-current-item-field",
+        profileOwner = TargetSymbolId.LYRICS_CURRENT_ITEM_FIELD,
+        fallbackOwner = { it.startsWith("com.apple.android.music.player.fragment.") },
+        contract = ::isLyricsCurrentItemField,
+    )
+
 }
 
 private fun classSymbol(
@@ -366,6 +483,24 @@ private fun methodSymbol(
     },
     structuralCandidates = { methods(fallbackOwner, contract) },
     identity = ::methodIdentity,
+)
+
+private fun fieldSymbol(
+    id: String,
+    profileOwner: TargetSymbolId,
+    fallbackOwner: (String) -> Boolean,
+    contract: (Field) -> Boolean,
+): TargetSymbolKey<Field> = TargetSymbolKey(
+    id = id,
+    profileCandidates = { profile ->
+        profile?.exactClasses?.get(profileOwner)
+            ?.let(::load)
+            ?.declaredFields
+            ?.filter(contract)
+            .orEmpty()
+    },
+    structuralCandidates = { fields(fallbackOwner, contract) },
+    identity = ::fieldIdentity,
 )
 
 private fun hasLyricsChromeContract(candidate: Class<*>): Boolean =
@@ -412,8 +547,78 @@ private fun isLyricsSessionProcessor(method: Method): Boolean =
         ) &&
         method.parameterTypes[1] == Long::class.javaPrimitiveType
 
+private fun isLyricsInstallMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "I2" &&
+        method.returnType == Void.TYPE &&
+        method.parameterTypes.size == 1 &&
+        method.parameterTypes[0].name.endsWith(
+            ".ttml.javanative.model.SongInfo\$SongInfoPtr",
+        )
+
+private fun isPlayerMetadataPublishMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "g" &&
+        method.returnType == Void.TYPE &&
+        method.parameterTypes.singleOrNull()?.name == "v3.v"
+
+private fun isMetadataToPlaybackItemMethod(method: Method): Boolean =
+    Modifier.isStatic(method.modifiers) &&
+        method.name == "b" &&
+        method.parameterTypes.singleOrNull()?.name == "v3.v" &&
+        method.returnType.name == "com.apple.android.music.model.PlaybackItem"
+
+private fun isLyricsAvailabilityPredicate(method: Method): Boolean =
+    Modifier.isStatic(method.modifiers) &&
+        method.name == "i" &&
+        method.returnType == Boolean::class.javaPrimitiveType &&
+        method.parameterTypes.singleOrNull()?.name == "com.apple.android.music.model.PlaybackItem"
+
+private fun isTtmlSongInfoFromTtml(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "songInfoFromTTML" &&
+        method.parameterTypes.contentEquals(arrayOf(String::class.java)) &&
+        method.returnType.name.endsWith(".ttml.javanative.model.SongInfo\$SongInfoPtr")
+
+private fun isLyricsCurrentItemField(field: Field): Boolean =
+    !Modifier.isStatic(field.modifiers) &&
+        field.name == "c" &&
+        field.type.name == "com.apple.android.music.model.BaseContentItem"
+
+private fun hasSongInfoPtrContract(candidate: Class<*>): Boolean =
+    candidate.declaredMethods.any { method ->
+        method.name == "get" &&
+            method.parameterCount == 0 &&
+            method.returnType.name.endsWith(".ttml.javanative.model.SongInfo\$SongInfoNative")
+    }
+
+private fun hasSongInfoNativeContract(candidate: Class<*>): Boolean =
+    candidate.declaredMethods.any { method ->
+        method.name == "getSections" &&
+            method.parameterCount == 0 &&
+            method.returnType.name.endsWith(".ttml.javanative.model.LyricsSectionVector")
+    } && candidate.declaredMethods.any { method ->
+        method.name == "getAdamId" &&
+            method.parameterCount == 0 &&
+            method.returnType == Long::class.javaPrimitiveType
+    } && candidate.declaredMethods.any { method ->
+        method.name == "setAdamId" &&
+            method.parameterCount == 1 &&
+            method.parameterTypes[0] == Long::class.javaPrimitiveType
+    }
+
+private fun hasTtmlParserNativeContract(candidate: Class<*>): Boolean =
+    candidate.declaredConstructors.any { constructor ->
+        constructor.parameterCount == 0 && !Modifier.isPrivate(constructor.modifiers)
+    } && candidate.declaredMethods.any(::isTtmlSongInfoFromTtml)
+
 private fun methodIdentity(method: Method): String = buildString {
     append(method.declaringClass.name).append('#').append(method.name).append('(')
     append(method.parameterTypes.joinToString(",") { it.name })
     append("):").append(method.returnType.name)
+}
+
+private fun fieldIdentity(field: Field): String = buildString {
+    append(field.declaringClass.name).append('#').append(field.name).append(':')
+        .append(field.type.name)
 }

@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import dev.amenhancer.module.ModuleApplication
 import dev.amenhancer.module.XposedServiceSnapshot
+import dev.amenhancer.module.model.CustomLyricsManifest
 import dev.amenhancer.module.model.LyricsFontManifest
 import dev.amenhancer.module.model.ModuleSettings
 
@@ -38,6 +39,21 @@ class ConfigStore(context: Context) {
         return writeValues(
             preferences,
             ModuleSettingsSchema.encodeFontManifest(manifest),
+            synchronous = true,
+        )
+    }
+
+    internal fun saveCustomLyricsManifest(
+        manifest: CustomLyricsManifest,
+        snapshot: XposedServiceSnapshot = ModuleApplication.serviceSnapshot,
+    ): Boolean {
+        if (!snapshot.isRemoteFileAvailable || !ModuleApplication.isCurrentSnapshot(snapshot)) {
+            return false
+        }
+        val preferences = snapshot.preferences ?: return false
+        return writeValues(
+            preferences,
+            ModuleSettingsSchema.encodeCustomLyricsManifest(manifest),
             synchronous = true,
         )
     }

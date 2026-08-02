@@ -1,6 +1,9 @@
 package dev.amenhancer.module.config
 
 import dev.amenhancer.module.ModuleConstants
+import dev.amenhancer.module.model.CustomLyricsEntry
+import dev.amenhancer.module.model.CustomLyricsManifest
+import dev.amenhancer.module.model.CustomLyricsSources
 import dev.amenhancer.module.model.LyricsFontManifest
 import dev.amenhancer.module.model.ModuleSettings
 import org.junit.Assert.assertEquals
@@ -10,11 +13,8 @@ import org.junit.Test
 
 /**
  * Guards ConfigStore.saveSettings' write contract: an ordinary runtime write
- * must never carry any of the five lyrics_font_* manifest keys, so a stale
- * ModuleSettings (captured before a font import) cannot overwrite a manifest
- * that saveFontManifest committed afterwards. Merging the ordinary write into
- * the current preferences must leave the committed manifest byte-for-byte
- * intact; saveFontManifest stays the only runtime writer of font keys.
+ * must never carry a remote-file manifest key, so a stale ModuleSettings
+ * cannot overwrite a manifest committed by a file transaction afterwards.
  */
 class OrdinarySettingsWritePolicyTest {
     private val committedManifest = LyricsFontManifest(
@@ -39,12 +39,25 @@ class OrdinarySettingsWritePolicyTest {
         "lyrics_font_size_bytes",
         "lyrics_font_sha256",
     )
+    private val customLyricsManifest = CustomLyricsManifest(
+        entries = listOf(
+            CustomLyricsEntry(
+                appleMusicId = 42L,
+                displayName = "Example",
+                fileId = "lyrics_abc123",
+                sizeBytes = 42L,
+                sha256 = "0cba697d61a21fb62408b2411aa2152d1bc24cc2414d2bd162f70e04d20c5e53",
+                source = CustomLyricsSources.MANUAL,
+            ),
+        ),
+    )
 
     @Test
     fun `stale ordinary settings write after a new manifest commit leaves the manifest unchanged`() {
         val currentPreferences = mutableMapOf<String, Any>().apply {
             putAll(ModuleSettingsSchema.encodeOrdinarySettings(ModuleSettings()))
             putAll(ModuleSettingsSchema.encodeFontManifest(committedManifest))
+            putAll(ModuleSettingsSchema.encodeCustomLyricsManifest(customLyricsManifest))
         }
 
         val ordinaryWrite = ModuleSettingsSchema.encodeOrdinarySettings(staleSettings)
@@ -58,6 +71,7 @@ class OrdinarySettingsWritePolicyTest {
         assertEquals(committedManifest, decoded.fontManifest)
         assertEquals(false, decoded.dualPaneEnabled)
         assertEquals(false, decoded.futureBlurEnabled)
+        assertEquals(customLyricsManifest, decoded.customLyricsManifest)
     }
 
     @Test
@@ -80,11 +94,13 @@ class OrdinarySettingsWritePolicyTest {
                 "phone_liquid_glass_enabled" to true,
                 "future_blur_enabled" to false,
                 "lyric_blur_radius_offset_px" to 6,
+                "custom_lyrics_enabled" to false,
                 "schema_version" to ModuleConstants.CONFIG_SCHEMA_VERSION,
             ),
             encoded,
         )
         assertFalse(encoded.keys.any(fontKeys::contains))
+        assertFalse(encoded.containsKey("custom_lyrics_manifest"))
     }
 
     @Test
@@ -95,5 +111,9 @@ class OrdinarySettingsWritePolicyTest {
 
         fontKeys.forEach { key -> assertTrue("full encode must keep $key", encoded.containsKey(key)) }
         assertEquals(committedManifest, ModuleSettingsSchema.decode(encoded).fontManifest)
+        assertEquals(
+            CustomLyricsManifest.empty(),
+            ModuleSettingsSchema.decode(encoded).customLyricsManifest,
+        )
     }
 }

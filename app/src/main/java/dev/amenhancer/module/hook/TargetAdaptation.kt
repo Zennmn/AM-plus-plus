@@ -1,6 +1,7 @@
 package dev.amenhancer.module.hook
 
 import android.app.Application
+import dev.amenhancer.module.config.TargetConfigClient
 
 /**
  * The complete target-specific seam used by feature hooks.
@@ -16,9 +17,16 @@ internal data class TargetAdaptation(
     val lyricsTypeface: LyricsTypefaceTarget = LyricsTypefaceTarget {
         TargetCapabilityInstall.Degraded("Lyrics typeface target was not configured")
     },
+    val customLyrics: CustomLyricsTarget = CustomLyricsTarget {
+        TargetCapabilityInstall.Degraded("Custom lyrics target was not configured")
+    },
+    val currentSongIdentity: CurrentSongIdentityTarget = CurrentSongIdentityTarget {
+        TargetCapabilityInstall.Degraded("Current song identity target was not configured")
+    },
 ) {
     companion object {
         fun appleMusic(
+            config: TargetConfigClient,
             application: Application,
             classLoader: ClassLoader,
             lyricsTypefaceSession: LyricsTypefaceSession? = null,
@@ -28,6 +36,7 @@ internal data class TargetAdaptation(
                 build = build,
                 source = ApkTargetClassSource(application, classLoader),
             )
+            val currentSong = CurrentSongIdentityCache()
             return TargetAdaptation(
                 identity = build.displayName,
                 dualPane = AppleMusicDualPaneTarget(resolver),
@@ -36,6 +45,12 @@ internal data class TargetAdaptation(
                 lyricsTypeface = AppleMusicLyricsTypefaceTarget(
                     symbols = resolver,
                     session = lyricsTypefaceSession ?: LyricsTypefaceSession(),
+                ),
+                customLyrics = AppleMusicCustomLyricsTarget(config, resolver),
+                currentSongIdentity = AppleMusicCurrentSongIdentityTarget(
+                    application,
+                    resolver,
+                    currentSong,
                 ),
             )
         }
@@ -55,6 +70,14 @@ internal fun interface BidirectionalLyricBlurTarget {
 }
 
 internal fun interface LyricsTypefaceTarget {
+    fun install(): TargetCapabilityInstall
+}
+
+internal fun interface CustomLyricsTarget {
+    fun install(): TargetCapabilityInstall
+}
+
+internal fun interface CurrentSongIdentityTarget {
     fun install(): TargetCapabilityInstall
 }
 

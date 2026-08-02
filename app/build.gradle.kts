@@ -81,4 +81,7 @@ dependencies {
     implementation("com.github.Dimezis:BlurView:version-3.2.0")
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.24")
     testImplementation("junit:junit:4.13.2")
+    // org.json is part of the Android runtime but not of the local JVM; the
+    // test-only copy keeps the NetEase response parsing unit-testable.
+    testImplementation("org.json:json:20240303")
 }
