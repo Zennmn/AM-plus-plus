@@ -174,6 +174,39 @@ class CustomLyricsReplacementSessionTest {
         assertEquals(1, manifestReads)
     }
 
+    @Test
+    fun `availability queues background reprepare only for a mapped dead pointer`() {
+        val queued = QueuedExecutor()
+        var manifestReads = 0
+        var parses = 0
+        val first = Pointer(42L)
+        val second = Pointer(42L)
+        val session = CustomLyricsReplacementSession(
+            manifestProvider = { manifestReads += 1; manifest(entry(42L)) },
+            readTtml = { TTML },
+            parseTtml = { if (parses++ == 0) first else second },
+            isAlive = { it is Pointer && it.live },
+            verifyPtr = { it is Pointer && it.live },
+            readAdamId = { (it as Pointer).adamId },
+            bindAdamId = { value, id -> (value as Pointer).adamId = id; true },
+            executor = queued,
+            logger = {},
+        )
+
+        session.start()
+        queued.runAll()
+        first.live = false
+
+        assertNull(session.replacementOrPrepareFor(42L))
+        assertEquals(1, manifestReads)
+        queued.runAll()
+        assertSame(second, session.replacementOrPrepareFor(42L))
+
+        assertNull(session.replacementOrPrepareFor(41L))
+        queued.runAll()
+        assertEquals(2, manifestReads)
+    }
+
     private fun session(
         manifest: CustomLyricsManifest,
         read: (CustomLyricsEntry) -> String?,
@@ -203,7 +236,7 @@ class CustomLyricsReplacementSessionTest {
         enabled = enabled,
     )
 
-    private data class Pointer(var adamId: Long)
+    private data class Pointer(var adamId: Long, var live: Boolean = true)
 
     private class QueuedExecutor : Executor {
         private val commands = mutableListOf<Runnable>()

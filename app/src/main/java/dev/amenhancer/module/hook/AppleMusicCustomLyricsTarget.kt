@@ -120,7 +120,7 @@ internal class AppleMusicCustomLyricsTarget(
                         if (nativeLyricsAvailable) return@runCatching
                         val appleMusicId = seam.detailsOfItem(param.args.getOrNull(0))?.appleMusicId
                         val replacementReady = appleMusicId != null &&
-                            session.readyReplacementFor(appleMusicId) != null
+                            session.replacementOrPrepareFor(appleMusicId) != null
                         if (
                             shouldExposeCustomLyrics(
                                 nativeLyricsAvailable = nativeLyricsAvailable,

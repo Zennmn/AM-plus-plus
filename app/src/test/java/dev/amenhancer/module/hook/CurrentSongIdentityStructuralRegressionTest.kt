@@ -56,7 +56,7 @@ class CurrentSongIdentityStructuralRegressionTest {
         assertTrue(target.contains("AppleMusicSymbols.LyricsAvailabilityPredicate"))
         assertTrue(target.contains("override fun afterHookedMethod(param: MethodHookParam)"))
         assertTrue(target.contains("seam.detailsOfItem(param.args.getOrNull(0))"))
-        assertTrue(target.contains("session.readyReplacementFor(appleMusicId)"))
+        assertTrue(target.contains("session.replacementOrPrepareFor(appleMusicId)"))
         assertTrue(target.contains("shouldExposeCustomLyrics("))
         assertFalse(target.contains("LyricsResultField"))
         assertFalse(target.contains("LyricsLoadMethod"))

@@ -63,6 +63,14 @@ internal class CustomLyricsReplacementSession(
         return null
     }
 
+    /** Returns a ready pointer or queues off-hook recovery for a known mapping. */
+    fun replacementOrPrepareFor(appleMusicId: Long): Any? {
+        if (appleMusicId <= 0L || !entriesById.containsKey(appleMusicId)) return null
+        readyReplacementFor(appleMusicId)?.let { return it }
+        queuePreload()
+        return null
+    }
+
     private fun queuePreload() {
         if (!preloadQueued.compareAndSet(false, true)) return
         try {
