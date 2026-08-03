@@ -167,9 +167,11 @@ class DualPaneStructuralRegressionTest {
     }
 
     @Test
-    fun `detects flat player overlap beyond the eager window policy`() {
+    fun `limits flat player boundary sync to a wide effective or physical display`() {
         assertTrue(source.contains("installFlatPlayerBoundarySync(root, playerContainer, tabsFrame, tabsHeight)"))
-        assertFalse(source.contains("if (!FlatLandscapeWindowPolicy.shouldReserveNavigationSpace(root.context)) return"))
+        assertTrue(source.contains("if (!FlatLandscapeWindowPolicy.shouldInstallBoundarySync(root.context)) return"))
+        assertTrue(source.contains("display.getRealMetrics(metrics)"))
+        assertTrue(source.contains("physicalWidthPx = metrics?.widthPixels ?: 0"))
         assertTrue(source.contains("params.bottomMargin = if (FlatLandscapeWindowPolicy.shouldReserveNavigationSpace(context))"))
         assertTrue(source.contains("FlatPlayerBoundaryPolicy.decide"))
         assertTrue(source.contains("sheet.getLocationInWindow(sheetLocation)"))

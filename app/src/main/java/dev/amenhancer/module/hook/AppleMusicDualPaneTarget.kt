@@ -4,11 +4,14 @@ import android.app.Activity
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
+import android.util.DisplayMetrics
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
+import android.view.WindowManager
 import android.widget.FrameLayout
 import dev.amenhancer.module.hook.ModernMethodHook as XC_MethodHook
 import dev.amenhancer.module.ModuleConstants
@@ -829,6 +832,9 @@ internal object TabletModeQualifier {
 }
 
 internal object FlatLandscapeWindowPolicy {
+    private const val MIN_ULTRAWIDE_RATIO_NUMERATOR = 17L
+    private const val MIN_ULTRAWIDE_RATIO_DENOMINATOR = 10L
+
     fun shouldReserveNavigationSpace(context: Context): Boolean {
         val configuration = context.resources.configuration
         val width = configuration.screenWidthDp
@@ -837,6 +843,53 @@ internal object FlatLandscapeWindowPolicy {
             configuration.orientation == Configuration.ORIENTATION_LANDSCAPE &&
             height > 0 &&
             width.toFloat() / height.toFloat() >= 1.7f
+    }
+
+    /**
+     * Boundary sync is needed for genuinely wide displays even when a system
+     * rail makes the activity's effective window look narrower than 1.7.
+     * Keep this separate from [shouldReserveNavigationSpace]: the latter is
+     * the eager initial-margin policy and must retain its window semantics.
+     */
+    fun shouldInstallBoundarySync(context: Context): Boolean {
+        if (!TabletModeQualifier.isOfficialTabletLandscape(context)) return false
+        val configuration = context.resources.configuration
+        val metrics = realDisplayMetrics(context)
+        return shouldInstallBoundarySync(
+            windowWidthDp = configuration.screenWidthDp,
+            windowHeightDp = configuration.screenHeightDp,
+            physicalWidthPx = metrics?.widthPixels ?: 0,
+            physicalHeightPx = metrics?.heightPixels ?: 0,
+        )
+    }
+
+    internal fun shouldInstallBoundarySync(
+        windowWidthDp: Int,
+        windowHeightDp: Int,
+        physicalWidthPx: Int,
+        physicalHeightPx: Int,
+    ): Boolean = isUltraWideRatio(windowWidthDp, windowHeightDp) ||
+        isUltraWideRatio(physicalWidthPx, physicalHeightPx)
+
+    private fun isUltraWideRatio(width: Int, height: Int): Boolean {
+        if (width <= 0 || height <= 0) return false
+        val longSide = maxOf(width, height).toLong()
+        val shortSide = minOf(width, height).toLong()
+        return longSide * MIN_ULTRAWIDE_RATIO_DENOMINATOR >=
+            shortSide * MIN_ULTRAWIDE_RATIO_NUMERATOR
+    }
+
+    @Suppress("DEPRECATION")
+    private fun realDisplayMetrics(context: Context): DisplayMetrics? {
+        val display = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            context.display
+        } else {
+            @Suppress("DEPRECATION")
+            (context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)?.defaultDisplay
+        } ?: return null
+        return runCatching {
+            DisplayMetrics().also { metrics -> display.getRealMetrics(metrics) }
+        }.getOrNull()
     }
 }
 
@@ -1175,6 +1228,7 @@ private object ConstraintLayoutPane {
         tabsFrame: View,
         tabsHeight: Int,
     ) {
+        if (!FlatLandscapeWindowPolicy.shouldInstallBoundarySync(root.context)) return
         val sheetId = targetId(root.resources, PLAYER_SHEET_CONTAINER)
         val sheet = sheetId.takeIf { it != 0 }?.let { root.findViewById<View>(it) } ?: return
         var reserveNavigationSpace =
