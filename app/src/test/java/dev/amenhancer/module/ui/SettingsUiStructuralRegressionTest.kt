@@ -41,7 +41,7 @@ class SettingsUiStructuralRegressionTest {
         val activity = projectFile("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
 
         assertTrue(activity.contains("statusCard(snapshot)"))
-        assertTrue(activity.contains("store.settings(snapshot)"))
+        assertTrue(activity.contains("store.settingsWithCustomLyrics(snapshot)"))
         assertTrue(activity.contains("featureCard(settings, writable)"))
         assertTrue(activity.contains("badge = \"WIP\""))
         assertTrue(activity.contains("LSPosed 配置提示"))
@@ -159,6 +159,17 @@ class SettingsUiStructuralRegressionTest {
             .substringBefore("private fun renderCustomLyricsPage(")
         assertFalse(mainPage.contains("customLyricsCard("))
         assertFalse(mainPage.contains("customLyricsEnabled = enabled"))
+    }
+
+    @Test
+    fun `main page count comes from the resolved v2 index, not the legacy manifest`() {
+        val activity = projectFile("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
+
+        assertTrue(activity.contains("已配置 \${manifest.entries.size} 首歌词"))
+        val render = activity.substringAfter("private fun render(")
+            .substringBefore("private fun renderMainPage(")
+        assertTrue(render.contains("val settings = store.settingsWithCustomLyrics(snapshot)"))
+        assertFalse(render.contains("currentPage == SettingsPage.CUSTOM_LYRICS"))
     }
 
     @Test

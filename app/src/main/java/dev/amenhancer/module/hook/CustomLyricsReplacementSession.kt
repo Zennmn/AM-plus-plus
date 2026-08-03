@@ -26,6 +26,10 @@ internal fun interface CustomLyricsIndexProvider {
  * native parsing are prepared per requested Apple Music ID on a single
  * background thread, deduplicated by ID. A miss for an unknown ID triggers
  * one background index refresh to discover mappings published after startup.
+ *
+ * Every successful prepare publishes its Apple Music ID through
+ * [onReplacementPublished] on the preparing thread; callers hop to the main
+ * thread when a UI re-entry is needed.
  */
 internal class CustomLyricsReplacementSession(
     private val index: CustomLyricsIndexProvider,
@@ -35,6 +39,7 @@ internal class CustomLyricsReplacementSession(
     private val verifyPtr: (Any?) -> Boolean,
     private val readAdamId: (Any) -> Long?,
     private val bindAdamId: (Any, Long) -> Boolean,
+    private val onReplacementPublished: ((Long) -> Unit)? = null,
     private val executor: Executor,
     private val logger: (String) -> Unit,
 ) {
@@ -102,7 +107,8 @@ internal class CustomLyricsReplacementSession(
      * prepare, an unknown ID queues a single index refresh so mappings
      * published after startup can be discovered. An unknown ID arriving
      * while a refresh is already queued is still registered so the in-flight
-     * refresh can resolve it.
+     * refresh can resolve it; a rejected refresh drops the unknown pending
+     * IDs so the same IDs can retry from a later request.
      */
     private fun request(appleMusicId: Long, refreshOnUnknown: Boolean) {
         synchronized(lock) {
@@ -137,7 +143,10 @@ internal class CustomLyricsReplacementSession(
         try {
             executor.execute { refreshIndex() }
         } catch (_: RejectedExecutionException) {
-            synchronized(lock) { refreshQueued = false }
+            synchronized(lock) {
+                refreshQueued = false
+                pendingPrepares.retainAll { it in entriesById }
+            }
             logger("custom lyrics index refresh was rejected")
         }
     }
@@ -192,6 +201,7 @@ internal class CustomLyricsReplacementSession(
             synchronized(cache) {
                 cache[key] = replacement
             }
+            onReplacementPublished?.invoke(appleMusicId)
         } finally {
             synchronized(lock) {
                 pendingPrepares.remove(appleMusicId)

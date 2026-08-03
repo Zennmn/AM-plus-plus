@@ -4,11 +4,13 @@ import dev.amenhancer.module.model.CustomLyricsEntry
 import dev.amenhancer.module.model.CustomLyricsManifest
 import dev.amenhancer.module.model.CustomLyricsSources
 import java.util.concurrent.Executor
+import java.util.concurrent.RejectedExecutionException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CustomLyricsReplacementSessionTest {
@@ -445,6 +447,116 @@ class CustomLyricsReplacementSessionTest {
         assertNotSame(first, second)
         assertEquals(listOf("lyrics_v1", "lyrics_v2"), readFiles)
         assertEquals(2, parses)
+    }
+
+    @Test
+    fun `publish callback fires only for a successfully prepared replacement`() {
+        val queued = QueuedExecutor()
+        val published = mutableListOf<Long>()
+        var parses = 0
+        val pointer = Pointer(42L)
+        val session = CustomLyricsReplacementSession(
+            index = CustomLyricsIndexProvider {
+                manifest(entry(42L)).entries.associateBy(CustomLyricsEntry::appleMusicId)
+            },
+            readTtml = { TTML },
+            parseTtml = { parses += 1; pointer },
+            isAlive = { it is Pointer },
+            verifyPtr = { it is Pointer },
+            readAdamId = { (it as Pointer).adamId },
+            bindAdamId = { value, id -> (value as Pointer).adamId = id; true },
+            onReplacementPublished = { published += it },
+            executor = queued,
+            logger = {},
+        )
+
+        session.start()
+        queued.runAll()
+        assertTrue(published.isEmpty())
+
+        assertNull(session.replacementFor(42L))
+        queued.runAll()
+        assertEquals(listOf(42L), published)
+
+        assertSame(pointer, session.replacementFor(42L))
+        queued.runAll()
+        assertEquals(listOf(42L), published)
+        assertEquals(1, parses)
+    }
+
+    @Test
+    fun `publish callback is silent for failed prepares and unknown ids`() {
+        val queued = QueuedExecutor()
+        val published = mutableListOf<Long>()
+        val session = CustomLyricsReplacementSession(
+            index = CustomLyricsIndexProvider {
+                manifest(entry(42L)).entries.associateBy(CustomLyricsEntry::appleMusicId)
+            },
+            readTtml = { null },
+            parseTtml = { Pointer(0L) },
+            isAlive = { it is Pointer },
+            verifyPtr = { it is Pointer },
+            readAdamId = { (it as Pointer).adamId },
+            bindAdamId = { value, id -> (value as Pointer).adamId = id; true },
+            onReplacementPublished = { published += it },
+            executor = queued,
+            logger = {},
+        )
+
+        session.start()
+        queued.runAll()
+        assertNull(session.replacementFor(42L))
+        queued.runAll()
+        assertTrue(published.isEmpty())
+
+        assertNull(session.replacementFor(41L))
+        queued.runAll()
+        assertTrue(published.isEmpty())
+    }
+
+    @Test
+    fun `a rejected index refresh drops the unknown pending id so it can retry later`() {
+        val queued = QueuedExecutor()
+        var manifestReads = 0
+        var parses = 0
+        var reject = true
+        val pointer = Pointer(42L)
+        var manifest = CustomLyricsManifest()
+        val session = CustomLyricsReplacementSession(
+            index = CustomLyricsIndexProvider {
+                manifestReads += 1
+                manifest.entries.associateBy(CustomLyricsEntry::appleMusicId)
+            },
+            readTtml = { TTML },
+            parseTtml = { parses += 1; pointer },
+            isAlive = { it is Pointer },
+            verifyPtr = { it is Pointer },
+            readAdamId = { (it as Pointer).adamId },
+            bindAdamId = { value, id -> (value as Pointer).adamId = id; true },
+            executor = Executor { command ->
+                if (reject) {
+                    throw RejectedExecutionException("index refresh rejected")
+                } else {
+                    queued.execute(command)
+                }
+            },
+            logger = {},
+        )
+
+        session.start()
+        assertEquals(0, manifestReads)
+
+        assertNull(session.replacementFor(42L))
+        assertEquals(0, manifestReads)
+
+        reject = false
+        manifest = manifest(entry(42L))
+        assertNull(session.replacementFor(42L))
+        queued.runAll()
+
+        assertSame(pointer, session.replacementFor(42L))
+        assertEquals(1, manifestReads)
+        assertEquals(1, parses)
     }
 
     private fun session(

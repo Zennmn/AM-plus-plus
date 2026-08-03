@@ -1,5 +1,7 @@
 package dev.amenhancer.module.hook
 
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelFileDescriptor
 import dev.amenhancer.module.config.TargetConfigClient
 import dev.amenhancer.module.lyrics.CustomLyricsFilePolicy
@@ -67,6 +69,8 @@ internal class AppleMusicCustomLyricsTarget(
                 }.getOrNull()
             }
         }
+        val mainHandler = Handler(Looper.getMainLooper())
+        lateinit var readyReapply: CustomLyricsReadyReapply
         val session = CustomLyricsReplacementSession(
             index = CustomLyricsIndexProvider {
                 config.customLyricsManifest().entries.associateBy(
@@ -79,6 +83,9 @@ internal class AppleMusicCustomLyricsTarget(
             verifyPtr = parser::isValid,
             readAdamId = parser::adamIdOf,
             bindAdamId = parser::bindAdamId,
+            onReplacementPublished = { appleMusicId ->
+                mainHandler.post { readyReapply.onReplacementPublished(appleMusicId) }
+            },
             executor = ThreadPoolExecutor(
                 1,
                 1,
@@ -90,6 +97,13 @@ internal class AppleMusicCustomLyricsTarget(
             ),
             logger = ModernXposedRuntime::log,
         )
+        readyReapply = CustomLyricsReadyReapply(
+            installMethod = installMethod,
+            seam = seam,
+            readyReplacementFor = session::readyReplacementFor,
+            isFragmentUsable = fragmentIsAddedPredicate(installMethod.declaringClass),
+            logger = ModernXposedRuntime::log,
+        )
         val hooked = runCatching {
             ModernXposedRuntime.hookMethod(installMethod, object : ModernMethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
@@ -98,7 +112,13 @@ internal class AppleMusicCustomLyricsTarget(
                         val original = param.args[0]
                         val adamId = seam.currentItemAdamIdOf(param.thisObject)
                         adamId ?: return@runCatching
-                        session.replacementFor(adamId)?.let { replacement ->
+                        val replacement = session.replacementFor(adamId)
+                        if (replacement == null) {
+                            if (shouldRecordReadyLateMiss(original, replacement)) {
+                                param.thisObject?.let { readyReapply.recordMiss(it, adamId) }
+                            }
+                        } else {
+                            param.thisObject?.let { readyReapply.dismiss(it) }
                             if (replacement !== original) {
                                 param.args[0] = replacement
                             }
@@ -165,9 +185,10 @@ internal class AppleMusicCustomLyricsTarget(
 }
 
 /**
- * Apple emits a null SongInfoPtr when a playback item has no native lyrics.
- * That null still travels through PlayerLyricsViewFragment.I2 and is the
- * capture point needed to refresh the fragment once a manual pointer is ready.
+ * Apple emits a null SongInfoPtr when a playback item has no native lyrics,
+ * and a live SongInfoPtr otherwise. Only a live original pointer whose custom
+ * replacement is not ready yet is recorded by the ready-late reapply ledger;
+ * a null original is never retried.
  */
 internal fun acceptsLyricsInstallArguments(args: Array<Any?>, ptrClass: Class<*>): Boolean =
     args.isNotEmpty() && (args[0] == null || ptrClass.isInstance(args[0]))

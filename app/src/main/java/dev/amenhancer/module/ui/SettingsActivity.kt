@@ -257,11 +257,7 @@ class SettingsActivity : Activity() {
 
     private fun render(snapshot: XposedServiceSnapshot = ModuleApplication.serviceSnapshot) {
         content.removeAllViews()
-        val settings = if (currentPage == SettingsPage.CUSTOM_LYRICS) {
-            store.settingsWithCustomLyrics(snapshot)
-        } else {
-            store.settings(snapshot)
-        }
+        val settings = store.settingsWithCustomLyrics(snapshot)
         updateTopBar()
         when (currentPage) {
             SettingsPage.MAIN -> renderMainPage(settings, snapshot)
