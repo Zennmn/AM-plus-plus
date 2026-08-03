@@ -15,6 +15,7 @@ import java.util.concurrent.TimeUnit
 internal class AppleMusicCustomLyricsTarget(
     private val config: TargetConfigClient,
     private val symbols: TargetSymbolResolver,
+    private val currentSong: CurrentSongIdentityCache,
 ) : CustomLyricsTarget {
     override fun install(): TargetCapabilityInstall {
         val installMethodResolution = symbols.resolve(AppleMusicSymbols.LyricsInstallMethod)
@@ -110,11 +111,33 @@ internal class AppleMusicCustomLyricsTarget(
                     runCatching {
                         if (!acceptsLyricsInstallArguments(param.args, ptrClass)) return@runCatching
                         val original = param.args[0]
-                        val adamId = seam.currentItemAdamIdOf(param.thisObject)
+                        val fragmentAdamId = seam.currentItemAdamIdOf(param.thisObject)
+                        val publishedCurrent = currentSong.current()
+                        val publishedAdamId = publishedCurrent?.details?.appleMusicId
+                        val adamId = selectLyricsInjectionAdamId(
+                            original = original,
+                            fragmentAdamId = fragmentAdamId,
+                            publishedAdamId = publishedAdamId,
+                        )
                         adamId ?: return@runCatching
                         val replacement = session.replacementFor(adamId)
+                        val tracking = session.isTracking(adamId)
+                        val needsRebind = original == null &&
+                            publishedCurrent != null &&
+                            publishedAdamId != null &&
+                            publishedAdamId != fragmentAdamId
+                        val canRebind = currentSong.canRebind(fragmentAdamId, publishedAdamId)
+                        if (
+                            needsRebind && tracking && canRebind &&
+                            (fragmentAdamId == null || session.isMapped(adamId))
+                        ) {
+                            val rebound = param.thisObject?.let { fragment ->
+                                seam.bindCurrentItemOf(fragment, publishedCurrent.item)
+                            } == true
+                            if (!rebound) return@runCatching
+                        }
                         if (replacement == null) {
-                            if (shouldRecordReadyLateMiss(original, replacement)) {
+                            if (shouldRecordReadyLateMiss(original, replacement) && tracking) {
                                 param.thisObject?.let { readyReapply.recordMiss(it, adamId) }
                             }
                         } else {
@@ -144,6 +167,7 @@ internal class AppleMusicCustomLyricsTarget(
                         val nativeLyricsAvailable = param.result as? Boolean ?: return@runCatching
                         if (nativeLyricsAvailable) return@runCatching
                         val appleMusicId = seam.detailsOfItem(param.args.getOrNull(0))?.appleMusicId
+                        appleMusicId?.let(session::ensureRequested)
                         val replacementReady = appleMusicId != null &&
                             session.replacementOrPrepareFor(appleMusicId) != null
                         if (
@@ -162,6 +186,9 @@ internal class AppleMusicCustomLyricsTarget(
             })
         }.isSuccess
         session.start()
+        currentSong.addListener { current ->
+            current?.details?.appleMusicId?.let(session::ensureRequested)
+        }
         if (!availabilityHooked) {
             return TargetCapabilityInstall.Degraded(
                 "Custom lyric I2 replacement installed, but unavailable-lyrics entry could not be enabled; " +
@@ -184,11 +211,26 @@ internal class AppleMusicCustomLyricsTarget(
 
 }
 
+internal fun selectLyricsInjectionAdamId(
+    original: Any?,
+    fragmentAdamId: Long?,
+    publishedAdamId: Long?,
+): Long? = if (
+    original == null &&
+    publishedAdamId != null &&
+    publishedAdamId > 0L &&
+    publishedAdamId != fragmentAdamId
+) {
+    publishedAdamId
+} else {
+    fragmentAdamId
+}
+
 /**
  * Apple emits a null SongInfoPtr when a playback item has no native lyrics,
- * and a live SongInfoPtr otherwise. Only a live original pointer whose custom
- * replacement is not ready yet is recorded by the ready-late reapply ledger;
- * a null original is never retried.
+ * and a live SongInfoPtr otherwise. Both forms can be recorded by the
+ * ready-late reapply ledger while their custom replacement is preparing; the
+ * ledger applies the same current-item and lifecycle gates to both.
  */
 internal fun acceptsLyricsInstallArguments(args: Array<Any?>, ptrClass: Class<*>): Boolean =
     args.isNotEmpty() && (args[0] == null || ptrClass.isInstance(args[0]))

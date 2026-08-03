@@ -158,12 +158,12 @@ class CustomLyricsReadyReapplyTest {
     }
 
     @Test
-    fun `a ready late miss is recorded only for a valid original without a replacement`() {
+    fun `a ready late miss is recorded for a null or valid original without a replacement`() {
         val original = Any()
         val replacement = Any()
 
         assertTrue(shouldRecordReadyLateMiss(original, null))
-        assertFalse(shouldRecordReadyLateMiss(null, null))
+        assertTrue(shouldRecordReadyLateMiss(null, null))
         assertFalse(shouldRecordReadyLateMiss(original, replacement))
         assertFalse(shouldRecordReadyLateMiss(null, replacement))
     }

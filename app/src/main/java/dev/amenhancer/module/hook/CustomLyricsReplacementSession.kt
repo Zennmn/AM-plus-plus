@@ -79,6 +79,22 @@ internal class CustomLyricsReplacementSession(
         return readyReplacementFor(appleMusicId)
     }
 
+    /** Queues the current-song prewarm without touching the ready-only result. */
+    fun ensureRequested(appleMusicId: Long) {
+        if (appleMusicId <= 0L) return
+        request(appleMusicId, refreshOnUnknown = true)
+    }
+
+    /** True while an ID is known or has an in-flight index/prepare request. */
+    fun isTracking(appleMusicId: Long): Boolean = synchronized(lock) {
+        appleMusicId > 0L && (appleMusicId in entriesById || appleMusicId in pendingPrepares)
+    }
+
+    /** True only after the current index has confirmed an enabled mapping. */
+    fun isMapped(appleMusicId: Long): Boolean = synchronized(lock) {
+        appleMusicId > 0L && appleMusicId in entriesById
+    }
+
     /** Ready cache only; safe for availability predicates and other hot paths. */
     fun readyReplacementFor(appleMusicId: Long): Any? {
         if (appleMusicId <= 0L) return null

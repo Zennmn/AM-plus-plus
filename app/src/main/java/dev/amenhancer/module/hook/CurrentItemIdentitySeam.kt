@@ -69,6 +69,16 @@ internal class CurrentItemIdentitySeam(
         }.getOrNull()
     }
 
+    /** Rebinds the verified lyrics fragment field to an exact player item. */
+    fun bindCurrentItemOf(fragment: Any?, item: Any?): Boolean {
+        if (fragment == null || item == null) return false
+        return runCatching {
+            if (!currentItemField.type.isInstance(item)) return@runCatching false
+            currentItemField.set(fragment, item)
+            currentItemField.get(fragment) === item
+        }.getOrDefault(false)
+    }
+
     /** Reads identity directly from a verified player item argument. */
     fun detailsOfItem(item: Any?): CurrentSongDetails? {
         if (item == null) return null

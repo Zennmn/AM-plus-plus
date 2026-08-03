@@ -37,10 +37,9 @@ internal class CustomLyricsReadyReapply(
     private val pending = mutableListOf<PendingMiss>()
 
     /**
-     * I2 hot path: remembers a fragment that just installed a valid native
-     * pointer while its replacement was still preparing. Pure in-memory map
-     * write — no IO, no native parse. A newer I2 entry for the same fragment
-     * supersedes the older one.
+     * I2 hot path: remembers a fragment whose replacement was still preparing.
+     * Pure in-memory map write — no IO, no native parse. A newer I2 entry for
+     * the same fragment supersedes the older one.
      */
     fun recordMiss(fragment: Any, appleMusicId: Long) {
         synchronized(pending) {
@@ -127,12 +126,13 @@ internal class CustomLyricsReadyReapply(
 }
 
 /**
- * A ready-late candidate is recorded only for a valid original/native lyrics
- * pointer whose custom replacement is not ready yet; a null original (no
- * native lyrics) is never retried.
+ * A ready-late candidate is recorded whenever the custom replacement is not
+ * ready yet. The original pointer may be null for a song without native
+ * lyrics; the ledger applies the same identity and lifecycle gates to both
+ * paths.
  */
 internal fun shouldRecordReadyLateMiss(original: Any?, replacement: Any?): Boolean =
-    original != null && replacement == null
+    replacement == null
 
 /**
  * Fragment usability predicate for ready-late re-entry, backed by the

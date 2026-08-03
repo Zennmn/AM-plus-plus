@@ -22,6 +22,7 @@ class CustomLyricsReadyLateStructuralRegressionTest {
         ).substringBefore("override fun afterHookedMethod(param: MethodHookParam)")
 
         assertTrue(hookBody.contains("shouldRecordReadyLateMiss(original, replacement)"))
+        assertTrue(hookBody.contains("session.isTracking(adamId)"))
         assertTrue(hookBody.contains("readyReapply.recordMiss(it, adamId)"))
         assertTrue(hookBody.contains("readyReapply.dismiss(it)"))
         assertFalse(hookBody.contains("openRemoteFile"))
@@ -38,6 +39,9 @@ class CustomLyricsReadyLateStructuralRegressionTest {
         assertTrue(target.contains("Handler(Looper.getMainLooper())"))
         assertTrue(target.contains("readyReapply.onReplacementPublished(appleMusicId)"))
         assertTrue(target.contains("CustomLyricsReadyReapply("))
+        assertTrue(target.contains("currentSong.addListener"))
+        assertTrue(target.contains("current?.details?.appleMusicId"))
+        assertTrue(target.contains("session::ensureRequested"))
     }
 
     @Test

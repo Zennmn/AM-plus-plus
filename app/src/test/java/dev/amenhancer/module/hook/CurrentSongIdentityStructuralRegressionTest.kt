@@ -43,6 +43,10 @@ class CurrentSongIdentityStructuralRegressionTest {
 
         assertTrue(target.contains("val seam = CurrentItemIdentitySeam(symbols)"))
         assertTrue(target.contains("seam.currentItemAdamIdOf(param.thisObject)"))
+        assertTrue(target.contains("selectLyricsInjectionAdamId("))
+        assertTrue(target.contains("seam.bindCurrentItemOf(fragment, publishedCurrent.item)"))
+        assertTrue(target.contains("currentSong.canRebind(fragmentAdamId, publishedAdamId)"))
+        assertTrue(target.contains("session.isMapped(adamId)"))
         assertFalse(target.contains("private fun currentItemAdamIdOf"))
         assertFalse(target.contains("private fun resolveGetIdMethod"))
     }
@@ -56,6 +60,7 @@ class CurrentSongIdentityStructuralRegressionTest {
         assertTrue(target.contains("AppleMusicSymbols.LyricsAvailabilityPredicate"))
         assertTrue(target.contains("override fun afterHookedMethod(param: MethodHookParam)"))
         assertTrue(target.contains("seam.detailsOfItem(param.args.getOrNull(0))"))
+        assertTrue(target.contains("appleMusicId?.let(session::ensureRequested)"))
         assertTrue(target.contains("session.replacementOrPrepareFor(appleMusicId)"))
         assertTrue(target.contains("shouldExposeCustomLyrics("))
         assertFalse(target.contains("LyricsResultField"))
@@ -76,7 +81,11 @@ class CurrentSongIdentityStructuralRegressionTest {
 
         assertTrue(adaptation.contains("val currentSong = CurrentSongIdentityCache()"))
         assertTrue(adaptation.contains("currentSongIdentity = AppleMusicCurrentSongIdentityTarget("))
-        assertTrue(adaptation.contains("customLyrics = AppleMusicCustomLyricsTarget(config, resolver)"))
+        assertTrue(
+            adaptation.contains(
+                "customLyrics = AppleMusicCustomLyricsTarget(config, resolver, currentSong)",
+            ),
+        )
         assertTrue(adaptation.contains("internal fun interface CurrentSongIdentityTarget"))
         assertTrue(installation.contains("FeatureInstallationPlan(feature = CurrentSongIdentityFeature())"))
         assertTrue(

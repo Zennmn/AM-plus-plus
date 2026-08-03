@@ -10,6 +10,8 @@ import android.os.Bundle
 import android.os.ResultReceiver
 import dev.amenhancer.module.CurrentSongDetails
 import dev.amenhancer.module.CurrentSongIdentityProtocol
+import java.util.ArrayDeque
+import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.atomic.AtomicReference
 
 internal data class TargetCurrentSong(
@@ -20,18 +22,50 @@ internal data class TargetCurrentSong(
 /** Shared target-process state from Apple's player-level metadata funnel. */
 internal class CurrentSongIdentityCache {
     private val current = AtomicReference<TargetCurrentSong?>(null)
+    private val listeners = CopyOnWriteArraySet<(TargetCurrentSong?) -> Unit>()
+    private val recentIds = ArrayDeque<Long>()
+    private val recentIdsLock = Any()
 
     fun publish(item: Any?, details: CurrentSongDetails?) {
-        current.set(
-            if (item != null && details != null && details.appleMusicId > 0L) {
-                TargetCurrentSong(item, details)
+        val published = if (item != null && details != null && details.appleMusicId > 0L) {
+            TargetCurrentSong(item, details)
+        } else {
+            null
+        }
+        current.set(published)
+        synchronized(recentIdsLock) {
+            if (published == null) {
+                recentIds.clear()
             } else {
-                null
-            },
-        )
+                recentIds.remove(published.details.appleMusicId)
+                recentIds.addLast(published.details.appleMusicId)
+                while (recentIds.size > MAX_RECENT_IDS) recentIds.removeFirst()
+            }
+        }
+        listeners.forEach { listener ->
+            runCatching { listener(published) }
+        }
+    }
+
+    fun addListener(listener: (TargetCurrentSong?) -> Unit) {
+        listeners += listener
+        current.get()?.let { published ->
+            runCatching { listener(published) }
+        }
     }
 
     fun current(): TargetCurrentSong? = current.get()
+
+    /** Allows a stale fragment ID only when it was recently observed as current. */
+    fun canRebind(fragmentAdamId: Long?, publishedAdamId: Long?): Boolean {
+        if (publishedAdamId == null || publishedAdamId <= 0L) return false
+        if (fragmentAdamId == null) return true
+        return synchronized(recentIdsLock) { fragmentAdamId in recentIds }
+    }
+
+    private companion object {
+        const val MAX_RECENT_IDS = 8
+    }
 }
 
 /** Responds only to the module's signature-protected, user-initiated requests. */

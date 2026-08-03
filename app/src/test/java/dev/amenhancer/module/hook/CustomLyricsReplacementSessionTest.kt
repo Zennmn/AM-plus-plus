@@ -6,6 +6,7 @@ import dev.amenhancer.module.model.CustomLyricsSources
 import java.util.concurrent.Executor
 import java.util.concurrent.RejectedExecutionException
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -217,6 +218,39 @@ class CustomLyricsReplacementSessionTest {
         assertNull(session.replacementFor(42L))
         queued.runAll()
         assertSame(pointer, session.replacementFor(42L))
+    }
+
+    @Test
+    fun `ensure requested prewarms an unknown mapping before availability check`() {
+        val queued = QueuedExecutor()
+        var manifest = CustomLyricsManifest()
+        val pointer = Pointer(42L)
+        val session = CustomLyricsReplacementSession(
+            index = CustomLyricsIndexProvider {
+                manifest.entries.associateBy(CustomLyricsEntry::appleMusicId)
+            },
+            readTtml = { TTML },
+            parseTtml = { pointer },
+            isAlive = { it is Pointer },
+            verifyPtr = { it is Pointer },
+            readAdamId = { (it as Pointer).adamId },
+            bindAdamId = { value, id -> (value as Pointer).adamId = id; true },
+            executor = queued,
+            logger = {},
+        )
+
+        session.start()
+        queued.runAll()
+        assertFalse(session.isTracking(42L))
+
+        manifest = manifest(entry(42L))
+        session.ensureRequested(42L)
+        assertTrue(session.isTracking(42L))
+
+        queued.runAll()
+
+        assertSame(pointer, session.readyReplacementFor(42L))
+        assertTrue(session.isTracking(42L))
     }
 
     @Test

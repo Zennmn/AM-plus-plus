@@ -36,6 +36,17 @@ class CurrentSongIdentityTargetTest {
     }
 
     @Test
+    fun `seam can rebind a stale lyrics fragment to the verified current item`() {
+        val seam = CurrentItemIdentitySeam(resolver(SongFragment::class.java))
+        assertNull(seam.resolve(SongFragment.installMethod()))
+        val fragment = SongFragment(SongItem("182861090"))
+
+        assertTrue(seam.bindCurrentItemOf(fragment, SongItem("7335408332109193189")))
+        assertEquals(7335408332109193189L, seam.currentItemAdamIdOf(fragment))
+        assertTrue(!seam.bindCurrentItemOf(fragment, Any()))
+    }
+
+    @Test
     fun `seam reads fail closed when the current item is unavailable`() {
         val seam = CurrentItemIdentitySeam(resolver(SongFragment::class.java))
         seam.resolve(SongFragment.installMethod())
@@ -101,6 +112,36 @@ class CurrentSongIdentityTargetTest {
         assertNull(cache.current())
         cache.publish(Any(), CurrentSongDetails(-7L))
         assertNull(cache.current())
+    }
+
+    @Test
+    fun `cache replays and publishes identity changes to listeners`() {
+        val cache = CurrentSongIdentityCache()
+        val first = Any()
+        val second = Any()
+        val events = mutableListOf<TargetCurrentSong?>()
+
+        cache.publish(first, CurrentSongDetails(12345L))
+        cache.addListener { events += it }
+        cache.publish(second, CurrentSongDetails(67890L))
+        cache.publish(null, null)
+
+        assertEquals(3, events.size)
+        assertTrue(events[0]?.item === first)
+        assertTrue(events[1]?.item === second)
+        assertNull(events[2])
+    }
+
+    @Test
+    fun `cache only permits rebinding from a recently published identity`() {
+        val cache = CurrentSongIdentityCache()
+
+        cache.publish(Any(), CurrentSongDetails(182861090L))
+        cache.publish(Any(), CurrentSongDetails(7335408332109193189L))
+
+        assertTrue(cache.canRebind(182861090L, 7335408332109193189L))
+        assertTrue(cache.canRebind(null, 7335408332109193189L))
+        assertTrue(!cache.canRebind(999L, 7335408332109193189L))
     }
 
     @Test

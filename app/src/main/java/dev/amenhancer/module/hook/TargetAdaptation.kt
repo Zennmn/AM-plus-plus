@@ -46,7 +46,7 @@ internal data class TargetAdaptation(
                     symbols = resolver,
                     session = lyricsTypefaceSession ?: LyricsTypefaceSession(),
                 ),
-                customLyrics = AppleMusicCustomLyricsTarget(config, resolver),
+                customLyrics = AppleMusicCustomLyricsTarget(config, resolver, currentSong),
                 currentSongIdentity = AppleMusicCurrentSongIdentityTarget(
                     application,
                     resolver,
