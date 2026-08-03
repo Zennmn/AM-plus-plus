@@ -14,7 +14,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.widget.ImageView
-import kotlin.math.abs
 
 /**
  * Target-independent AMLyricBlur runtime.
@@ -248,18 +247,11 @@ internal class OpenSourceLyricBlurPort(
             visibleRows += child to adapterPos
         }
         val activeIds = highlightSession.snapshot()
-        val gapAnchorPosition = if (highlightSession.isGap()) {
-            val referencePosition = activeIds.maxOrNull()
-            instrumentalRows
-                .asSequence()
-                .map { (_, position) -> position }
-                .filter { position -> position >= 0 }
-                .minByOrNull { position ->
-                    referencePosition?.let { reference -> abs(position - reference) } ?: 0
-                } ?: -1
-        } else {
-            -1
-        }
+        val gapAnchorPosition = BidirectionalBlurPolicy.selectInstrumentalGapAnchor(
+            active = activeIds,
+            isGap = highlightSession.isGap(),
+            instrumentalPositions = instrumentalRows.map { (_, position) -> position },
+        )
         val effectiveIds = BidirectionalBlurPolicy.resolveDisplayHighlights(
             active = activeIds,
             visiblePositions = visibleRows.map { (_, position) -> position },

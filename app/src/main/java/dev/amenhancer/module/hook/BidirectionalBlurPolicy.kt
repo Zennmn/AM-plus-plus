@@ -25,6 +25,21 @@ internal object BidirectionalBlurPolicy {
             .orEmpty()
     }
 
+    fun selectInstrumentalGapAnchor(
+        active: Set<Int>,
+        isGap: Boolean,
+        instrumentalPositions: List<Int>,
+    ): Int {
+        if (active.isNotEmpty() && !isGap) return -1
+        val referencePosition = active.maxOrNull()
+        return instrumentalPositions
+            .asSequence()
+            .filter { position -> position >= 0 }
+            .minByOrNull { position ->
+                referencePosition?.let { reference -> abs(position - reference) } ?: 0
+            } ?: -1
+    }
+
     fun targetRadius(position: Int, highlighted: Set<Int>): Float {
         if (highlighted.isEmpty()) return BLUR_MAX
         if (position in highlighted) return 0f

@@ -43,6 +43,34 @@ class BidirectionalBlurPolicyTest {
     }
 
     @Test
+    fun `instrumental rows anchor both pre-callback intros and explicit gaps`() {
+        assertEquals(
+            0,
+            BidirectionalBlurPolicy.selectInstrumentalGapAnchor(
+                active = emptySet(),
+                isGap = false,
+                instrumentalPositions = listOf(0),
+            ),
+        )
+        assertEquals(
+            5,
+            BidirectionalBlurPolicy.selectInstrumentalGapAnchor(
+                active = setOf(4),
+                isGap = true,
+                instrumentalPositions = listOf(5),
+            ),
+        )
+        assertEquals(
+            -1,
+            BidirectionalBlurPolicy.selectInstrumentalGapAnchor(
+                active = setOf(4),
+                isGap = false,
+                instrumentalPositions = listOf(5),
+            ),
+        )
+    }
+
+    @Test
     fun `highlighted row is clear and surrounding rows follow open source directional blur`() {
         val highlighted = setOf(10)
 
