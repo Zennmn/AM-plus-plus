@@ -10,7 +10,9 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
+import android.text.Editable
 import android.text.InputType
+import android.text.TextWatcher
 import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
@@ -78,6 +80,9 @@ class SettingsActivity : Activity() {
     private var pendingCustomTtmlImport: ((String) -> Unit)? = null
     private var awaitingCustomTtmlPickerResult = false
     private var currentPage = SettingsPage.MAIN
+    private val customLyricsListState = CustomLyricsListState()
+    private var customLyricsSearchQuery = ""
+    private var customLyricsListRegion: LinearLayout? = null
 
     private val serviceListener: (XposedServiceSnapshot) -> Unit = { snapshot ->
         runOnUiThread { if (::content.isInitialized) render(snapshot) }
@@ -252,7 +257,11 @@ class SettingsActivity : Activity() {
 
     private fun render(snapshot: XposedServiceSnapshot = ModuleApplication.serviceSnapshot) {
         content.removeAllViews()
-        val settings = store.settings(snapshot)
+        val settings = if (currentPage == SettingsPage.CUSTOM_LYRICS) {
+            store.settingsWithCustomLyrics(snapshot)
+        } else {
+            store.settings(snapshot)
+        }
         updateTopBar()
         when (currentPage) {
             SettingsPage.MAIN -> renderMainPage(settings, snapshot)
@@ -279,6 +288,10 @@ class SettingsActivity : Activity() {
     }
 
     private fun renderCustomLyricsPage(settings: ModuleSettings, snapshot: XposedServiceSnapshot) {
+        customLyricsListState.update(
+            settings.customLyricsManifest.entries,
+            customLyricsSearchQuery,
+        )
         content.addView(customLyricsSettingsCard(settings, snapshot.isRemoteAvailable))
         content.addView(spacer(20))
         content.addView(
@@ -586,9 +599,19 @@ class SettingsActivity : Activity() {
                 setTextColor(palette.onSurfaceVariant)
                 setPadding(dp(16), dp(4), dp(16), dp(12))
             })
-            manifest.entries.forEach { entry ->
-                addView(customLyricsEntryRow(entry, writable))
-                addView(insetDivider())
+            if (manifest.entries.isNotEmpty()) {
+                addView(
+                    customLyricsSearchInput(writable),
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        dp(44),
+                    ).apply {
+                        marginStart = dp(16)
+                        marginEnd = dp(16)
+                        bottomMargin = dp(6)
+                    },
+                )
+                addView(customLyricsEntriesRegion(writable))
             }
             addView(LinearLayout(this@SettingsActivity).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -612,6 +635,72 @@ class SettingsActivity : Activity() {
                 )
             })
         }
+
+    private fun customLyricsSearchInput(writable: Boolean): View =
+        EditText(this).apply {
+            hint = "搜索名称或 Apple Music ID"
+            textSize = 14f
+            setTextColor(palette.onSurface)
+            setHintTextColor(palette.onSurfaceVariant)
+            isSingleLine = true
+            setText(customLyricsSearchQuery)
+            setPadding(dp(14), 0, dp(14), 0)
+            background = roundedDrawable(palette.background, radiusDp = 12)
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                override fun afterTextChanged(s: Editable?) {
+                    customLyricsSearchQuery = s?.toString().orEmpty()
+                    customLyricsListState.setQuery(customLyricsSearchQuery)
+                    refreshCustomLyricsEntries(writable)
+                }
+            })
+        }
+
+    private fun customLyricsEntriesRegion(writable: Boolean): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            customLyricsListRegion = this
+            refreshCustomLyricsEntries(writable)
+        }
+
+    private fun refreshCustomLyricsEntries(writable: Boolean) {
+        val region = customLyricsListRegion ?: return
+        region.removeAllViews()
+        val state = customLyricsListState
+        if (state.totalCount == 0) {
+            region.addView(TextView(this).apply {
+                text = "没有匹配的歌词"
+                textSize = 13.5f
+                setTextColor(palette.onSurfaceVariant)
+                setPadding(dp(16), dp(8), dp(16), dp(12))
+            })
+            return
+        }
+        state.visibleEntries.forEach { entry ->
+            region.addView(customLyricsEntryRow(entry, writable))
+            region.addView(insetDivider())
+        }
+        region.addView(TextView(this).apply {
+            text = "已显示 ${state.visibleCount} / 共 ${state.totalCount} 首"
+            textSize = 13f
+            setTextColor(palette.onSurfaceVariant)
+            setPadding(dp(16), dp(8), dp(16), dp(12))
+        })
+        if (state.hasMore) {
+            region.addView(LinearLayout(this@SettingsActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(dp(12), 0, dp(12), dp(12))
+                addView(
+                    fontActionButton("加载更多", true) {
+                        customLyricsListState.loadMore()
+                        refreshCustomLyricsEntries(writable)
+                    },
+                    LinearLayout.LayoutParams(0, dp(48), 1f),
+                )
+            })
+        }
+    }
 
     private fun chooseCustomLyricsBackupDestination() {
         if (!ModuleApplication.serviceSnapshot.isRemoteFileAvailable) {

@@ -11,11 +11,12 @@ internal sealed interface CustomLyricsRestoreResult {
 
 /**
  * Merge-restore semantics: backup entries overwrite current entries with the
- * same Apple Music ID, current-only IDs are kept. Every backup entry is
- * rebuilt with a fresh remote fileId; the merged manifest is published once
- * after all new files are written, then old files of overwritten IDs are
- * deleted. Any write or publish failure rolls back only the new files and
- * leaves the old manifest and old files untouched. An empty backup is a
+ * same Apple Music ID, current-only IDs are kept. The backup's files arrive
+ * one at a time through the caller-supplied stream; every one is written to a
+ * fresh remote fileId as it arrives, the merged manifest is published once
+ * after the whole backup scans, then old files of overwritten IDs are
+ * deleted. Any scan, write, or publish failure rolls back only the new files
+ * and leaves the old manifest and old files untouched. An empty backup is a
  * successful no-op.
  */
 internal class CustomLyricsRestoreTransaction(
@@ -26,58 +27,85 @@ internal class CustomLyricsRestoreTransaction(
 ) {
     fun merge(
         oldManifest: CustomLyricsManifest,
-        backup: CustomLyricsBackup,
+        streamBackup: (onFile: (fileId: String, bytes: ByteArray) -> Unit) -> CustomLyricsBackupDecodeResult,
     ): CustomLyricsRestoreResult {
-        if (backup.manifest.entries.isEmpty()) {
-            return CustomLyricsRestoreResult.Restored(oldManifest)
-        }
-        val rebuilt = mutableListOf<Pair<CustomLyricsEntry, ByteArray>>()
         val allocatedFileIds = oldManifest.entries.mapTo(mutableSetOf(), CustomLyricsEntry::fileId)
-        for (incoming in backup.manifest.entries) {
-            val bytes = backup.files[incoming.fileId]
-                ?: return CustomLyricsRestoreResult.Failed("备份内容缺失")
-            val fileId = runCatching(fileIdFactory).getOrNull()
-                ?.takeIf(CustomLyricsManifestPolicy::isValidFileId)
-                ?: return CustomLyricsRestoreResult.Failed("无法生成歌词文件 ID")
-            if (!allocatedFileIds.add(fileId)) {
-                return CustomLyricsRestoreResult.Failed("无法生成唯一歌词文件 ID")
-            }
-            rebuilt += incoming.copy(fileId = fileId) to bytes
-        }
-        val incomingById = rebuilt.associate { it.first.appleMusicId to it }
-        val currentIds = oldManifest.entries.map { it.appleMusicId }.toSet()
-        val mergedEntries = mutableListOf<CustomLyricsEntry>()
-        val retiredFileIds = mutableListOf<String>()
-        oldManifest.entries.forEach { current ->
-            val replacement = incomingById[current.appleMusicId]
-            if (replacement != null) {
-                mergedEntries += replacement.first
-                retiredFileIds += current.fileId
-            } else {
-                mergedEntries += current
-            }
-        }
-        rebuilt.forEach { (entry, _) ->
-            if (entry.appleMusicId !in currentIds) mergedEntries += entry
-        }
-        if (mergedEntries.size > CustomLyricsManifestPolicy.MAX_ENTRIES) {
-            return CustomLyricsRestoreResult.Failed("合并后歌词映射数量超过上限")
-        }
-        val merged = CustomLyricsManifestPolicy.sanitize(CustomLyricsManifest(mergedEntries))
+        val newFileIds = linkedMapOf<String, String>()
         val written = mutableListOf<String>()
-        rebuilt.forEach { (entry, bytes) ->
-            if (!runCatching { writeRemoteFile(entry.fileId, bytes) }.getOrDefault(false)) {
-                runCatching { deleteRemoteFile(entry.fileId) }
-                written.forEach { runCatching { deleteRemoteFile(it) } }
-                return CustomLyricsRestoreResult.Failed("无法写入共享歌词文件")
+        var writeError: String? = null
+        val scan = streamBackup { backupFileId, bytes ->
+            if (writeError != null) return@streamBackup
+            val newFileId = newFileIds[backupFileId]
+            if (newFileId == null) {
+                val generated = runCatching(fileIdFactory).getOrNull()
+                    ?.takeIf(CustomLyricsManifestPolicy::isValidFileId)
+                if (generated == null) {
+                    writeError = "无法生成歌词文件 ID"
+                    return@streamBackup
+                }
+                if (generated in allocatedFileIds) {
+                    writeError = "无法生成唯一歌词文件 ID"
+                    return@streamBackup
+                }
+                allocatedFileIds += generated
+                newFileIds[backupFileId] = generated
             }
-            written += entry.fileId
+            val target = newFileIds.getValue(backupFileId)
+            if (!runCatching { writeRemoteFile(target, bytes) }.getOrDefault(false)) {
+                runCatching { deleteRemoteFile(target) }
+                writeError = "无法写入共享歌词文件"
+                return@streamBackup
+            }
+            written += target
         }
-        if (!runCatching { publishManifest(merged) }.getOrDefault(false)) {
-            written.forEach { runCatching { deleteRemoteFile(it) } }
-            return CustomLyricsRestoreResult.Failed("无法发布歌词映射")
+        return when (scan) {
+            is CustomLyricsBackupDecodeResult.Rejected -> {
+                written.forEach { runCatching { deleteRemoteFile(it) } }
+                CustomLyricsRestoreResult.Failed(scan.message)
+            }
+            is CustomLyricsBackupDecodeResult.Decoded -> {
+                val backup = scan.backup
+                if (backup.manifest.entries.isEmpty()) {
+                    return CustomLyricsRestoreResult.Restored(oldManifest)
+                }
+                val error = writeError
+                if (error != null) {
+                    written.forEach { runCatching { deleteRemoteFile(it) } }
+                    return CustomLyricsRestoreResult.Failed(error)
+                }
+                val rebuilt = mutableListOf<CustomLyricsEntry>()
+                for (incoming in backup.manifest.entries) {
+                    val fileId = newFileIds[incoming.fileId]
+                    if (fileId == null) {
+                        written.forEach { runCatching { deleteRemoteFile(it) } }
+                        return CustomLyricsRestoreResult.Failed("备份内容缺失")
+                    }
+                    rebuilt += incoming.copy(fileId = fileId)
+                }
+                val incomingById = rebuilt.associateBy(CustomLyricsEntry::appleMusicId)
+                val currentIds = oldManifest.entries.mapTo(mutableSetOf(), CustomLyricsEntry::appleMusicId)
+                val mergedEntries = mutableListOf<CustomLyricsEntry>()
+                val retiredFileIds = mutableListOf<String>()
+                oldManifest.entries.forEach { current ->
+                    val replacement = incomingById[current.appleMusicId]
+                    if (replacement != null) {
+                        mergedEntries += replacement
+                        retiredFileIds += current.fileId
+                    } else {
+                        mergedEntries += current
+                    }
+                }
+                rebuilt.forEach { entry ->
+                    if (entry.appleMusicId !in currentIds) mergedEntries += entry
+                }
+                val merged = CustomLyricsManifestPolicy.sanitize(CustomLyricsManifest(mergedEntries))
+                if (!runCatching { publishManifest(merged) }.getOrDefault(false)) {
+                    written.forEach { runCatching { deleteRemoteFile(it) } }
+                    return CustomLyricsRestoreResult.Failed("无法发布歌词映射")
+                }
+                retiredFileIds.forEach { runCatching { deleteRemoteFile(it) } }
+                CustomLyricsRestoreResult.Restored(merged)
+            }
         }
-        retiredFileIds.forEach { runCatching { deleteRemoteFile(it) } }
-        return CustomLyricsRestoreResult.Restored(merged)
     }
 }

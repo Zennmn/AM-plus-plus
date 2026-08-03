@@ -4,6 +4,7 @@ import android.os.ParcelFileDescriptor
 import dev.amenhancer.module.config.TargetConfigClient
 import dev.amenhancer.module.lyrics.CustomLyricsFilePolicy
 import dev.amenhancer.module.lyrics.CustomLyricsFileReader
+import dev.amenhancer.module.model.CustomLyricsEntry
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
@@ -67,7 +68,11 @@ internal class AppleMusicCustomLyricsTarget(
             }
         }
         val session = CustomLyricsReplacementSession(
-            manifestProvider = { config.settings().customLyricsManifest },
+            index = CustomLyricsIndexProvider {
+                config.customLyricsManifest().entries.associateBy(
+                    CustomLyricsEntry::appleMusicId,
+                )
+            },
             readTtml = fileReader::read,
             parseTtml = parser::parse,
             isAlive = parser::isAlive,

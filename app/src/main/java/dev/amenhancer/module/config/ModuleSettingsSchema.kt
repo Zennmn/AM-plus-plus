@@ -73,6 +73,49 @@ internal object ModuleSettingsSchema {
     fun encodeCustomLyricsManifest(manifest: CustomLyricsManifest): Map<String, Any> =
         linkedMapOf(KEY_CUSTOM_LYRICS_MANIFEST to CustomLyricsManifestCodec.encode(manifest))
 
+    /**
+     * Pointer keys point at the remote index file. They are index state, not
+     * settings: never emitted by [encode] or [encodeOrdinarySettings], so an
+     * ordinary settings write can never overwrite a published index pointer.
+     */
+    fun encodeIndexPointer(pointer: CustomLyricsIndexPointer): Map<String, Any> =
+        linkedMapOf(
+            KEY_CUSTOM_LYRICS_INDEX_FILE_ID to pointer.fileId,
+            KEY_CUSTOM_LYRICS_INDEX_GENERATION to pointer.generation,
+            KEY_CUSTOM_LYRICS_INDEX_SHA256 to pointer.sha256,
+            KEY_CUSTOM_LYRICS_INDEX_SIZE_BYTES to pointer.sizeBytes,
+        )
+
+    /** Fails closed: a pointer must be complete, well-formed, and published at least once. */
+    fun decodeIndexPointer(values: Map<String, *>): CustomLyricsIndexPointer? {
+        val fileId = values.string(KEY_CUSTOM_LYRICS_INDEX_FILE_ID)
+        val generation = values.long(KEY_CUSTOM_LYRICS_INDEX_GENERATION)
+        val sha256 = values.string(KEY_CUSTOM_LYRICS_INDEX_SHA256)
+        val sizeBytes = values.long(KEY_CUSTOM_LYRICS_INDEX_SIZE_BYTES)
+        if (generation == null || generation < 1L) return null
+        if (sizeBytes == null || sizeBytes !in 1L..CustomLyricsManifestPolicy.MAX_INDEX_BYTES.toLong()) {
+            return null
+        }
+        if (!CustomLyricsManifestPolicy.isValidFileId(fileId)) return null
+        if (!CustomLyricsManifestPolicy.isValidSha256(sha256)) return null
+        return CustomLyricsIndexPointer(
+            fileId = fileId,
+            generation = generation,
+            sha256 = sha256.lowercase(),
+            sizeBytes = sizeBytes,
+        )
+    }
+
+    fun hasIndexPointerValues(values: Map<String, *>): Boolean =
+        indexPointerKeys.any(values::containsKey)
+
+    /** Legacy v1 preference-string manifest, kept for pre-migration reads. */
+    fun decodeLegacyCustomLyricsManifest(values: Map<String, *>): CustomLyricsManifest =
+        CustomLyricsManifestCodec.decode(values.string(KEY_CUSTOM_LYRICS_MANIFEST))
+
+    fun legacyCustomLyricsManifestRaw(values: Map<String, *>): String =
+        values.string(KEY_CUSTOM_LYRICS_MANIFEST)
+
     private fun Map<String, *>.fontManifest(): LyricsFontManifest {
         val raw = LyricsFontManifest(
             enabled = boolean(KEY_FONT_ENABLED, default = false),
@@ -85,7 +128,7 @@ internal object ModuleSettingsSchema {
     }
 
     private fun Map<String, *>.customLyricsManifest(): CustomLyricsManifest =
-        CustomLyricsManifestCodec.decode(string(KEY_CUSTOM_LYRICS_MANIFEST))
+        decodeLegacyCustomLyricsManifest(this)
 
     private fun Map<String, *>.string(key: String): String = this[key] as? String ?: ""
 
@@ -128,6 +171,13 @@ internal object ModuleSettingsSchema {
         KEY_CUSTOM_LYRICS_MANIFEST,
     )
 
+    private val indexPointerKeys = setOf(
+        KEY_CUSTOM_LYRICS_INDEX_FILE_ID,
+        KEY_CUSTOM_LYRICS_INDEX_GENERATION,
+        KEY_CUSTOM_LYRICS_INDEX_SHA256,
+        KEY_CUSTOM_LYRICS_INDEX_SIZE_BYTES,
+    )
+
     private const val KEY_DUAL_PANE = "dual_pane_enabled"
     private const val KEY_DISABLE_EDITORIAL_VIDEO_ON_TABLET =
         "disable_editorial_video_on_tablet"
@@ -142,5 +192,9 @@ internal object ModuleSettingsSchema {
     private const val KEY_FONT_SIZE_BYTES = "lyrics_font_size_bytes"
     private const val KEY_FONT_SHA256 = "lyrics_font_sha256"
     private const val KEY_CUSTOM_LYRICS_MANIFEST = "custom_lyrics_manifest"
+    private const val KEY_CUSTOM_LYRICS_INDEX_FILE_ID = "custom_lyrics_index_file_id"
+    private const val KEY_CUSTOM_LYRICS_INDEX_GENERATION = "custom_lyrics_index_generation"
+    private const val KEY_CUSTOM_LYRICS_INDEX_SHA256 = "custom_lyrics_index_sha256"
+    private const val KEY_CUSTOM_LYRICS_INDEX_SIZE_BYTES = "custom_lyrics_index_size_bytes"
     private const val KEY_SCHEMA_VERSION = "schema_version"
 }

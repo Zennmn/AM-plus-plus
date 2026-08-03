@@ -4,7 +4,6 @@ import dev.amenhancer.module.config.CustomLyricsManifestCodec
 import dev.amenhancer.module.model.CustomLyricsEntry
 import dev.amenhancer.module.model.CustomLyricsManifest
 import dev.amenhancer.module.model.CustomLyricsSources
-import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -38,16 +37,19 @@ class CustomLyricsBackupCodecTest {
         assertTrue(encoded is CustomLyricsBackupEncodeResult.Encoded)
         assertEquals(2, (encoded as CustomLyricsBackupEncodeResult.Encoded).entryCount)
 
-        val decoded = CustomLyricsBackupCodec.decode(ByteArrayInputStream(out.toByteArray()))
+        val delivered = linkedMapOf<String, ByteArray>()
+        val decoded = CustomLyricsBackupCodec.decode(ByteArrayInputStream(out.toByteArray())) { fileId, bytes ->
+            delivered[fileId] = bytes
+        }
         assertTrue(decoded is CustomLyricsBackupDecodeResult.Decoded)
         val backup = (decoded as CustomLyricsBackupDecodeResult.Decoded).backup
         assertEquals(manifest, backup.manifest)
-        assertEquals(ttml1, backup.files.getValue("lyrics_a").toString(Charsets.UTF_8))
-        assertEquals(ttml2, backup.files.getValue("lyrics_b").toString(Charsets.UTF_8))
+        assertEquals(files.keys, delivered.keys)
+        files.forEach { (fileId, bytes) -> assertTrue(bytes.contentEquals(delivered[fileId])) }
     }
 
     @Test
-    fun `backup fails entirely when any remote file cannot be read`() {
+    fun `a failed backup never decodes as valid`() {
         val manifest = CustomLyricsManifest(
             listOf(
                 entry(appleMusicId = 1L, fileId = "lyrics_a", ttml = ttml1),
@@ -59,12 +61,20 @@ class CustomLyricsBackupCodecTest {
         val result = CustomLyricsBackupCodec.encode(manifest, { null }, out)
 
         assertTrue(result is CustomLyricsBackupEncodeResult.Failed)
-        assertEquals(0, out.size())
+        assertTrue(
+            "a partial backup must never decode as valid",
+            decode(out.toByteArray()) is CustomLyricsBackupDecodeResult.Rejected,
+        )
     }
 
     @Test
     fun `encode rejects a manifest that policy would alter`() {
-        val manifest = CustomLyricsManifest((1L..33L).map { entry(it, "lyrics_$it", ttml1) })
+        val manifest = CustomLyricsManifest(
+            listOf(
+                entry(1L, "lyrics_a", ttml1),
+                entry(1L, "lyrics_b", ttml1),
+            ),
+        )
 
         val result = CustomLyricsBackupCodec.encode(manifest, { ttml1.toByteArray() }, ByteArrayOutputStream())
 
@@ -96,48 +106,75 @@ class CustomLyricsBackupCodecTest {
     }
 
     @Test
-    fun `decode rejects a manifest with more than 32 entries`() {
-        val entries = JSONArray()
-        repeat(33) { index ->
-            entries.put(
-                JSONObject().apply {
-                    put("appleMusicId", index + 1L)
-                    put("displayName", "s")
-                    put("fileId", "lyrics_$index")
-                    put("sizeBytes", 5L)
-                    put("sha256", "0".repeat(64))
-                    put("source", CustomLyricsSources.MANUAL)
-                    put("enabled", true)
-                },
-            )
-        }
-        val json = JSONObject().apply { put("version", 1); put("entries", entries) }.toString()
-        val result = decode(zipBytes(listOf("manifest.json" to json.toByteArray())))
+    fun `decode accepts a manifest with more than 32 entries when every file is present`() {
+        val entries = (1L..40L).map { index -> entry(index, "lyrics_$index", ttml1) }
+        val manifest = CustomLyricsManifest(entries)
+        val files = entries.associate { it.fileId to ttml1.toByteArray(Charsets.UTF_8) }
+        val out = ByteArrayOutputStream()
+        val encoded = CustomLyricsBackupCodec.encode(manifest, { files[it] }, out)
+        assertTrue(encoded is CustomLyricsBackupEncodeResult.Encoded)
+        assertEquals(40, (encoded as CustomLyricsBackupEncodeResult.Encoded).entryCount)
 
-        assertTrue(result is CustomLyricsBackupDecodeResult.Rejected)
+        val delivered = linkedMapOf<String, ByteArray>()
+        val decoded = CustomLyricsBackupCodec.decode(ByteArrayInputStream(out.toByteArray())) { fileId, bytes ->
+            delivered[fileId] = bytes
+        }
+        assertTrue(decoded is CustomLyricsBackupDecodeResult.Decoded)
+        assertEquals(40, (decoded as CustomLyricsBackupDecodeResult.Decoded).backup.manifest.entries.size)
+        assertEquals(40, delivered.size)
+    }
+
+    @Test
+    fun `a backup of over a thousand small entries roundtrips`() {
+        val entries = (1L..1000L).map { index ->
+            entry(index, "lyrics_$index", smallTtml(index))
+        }
+        val manifest = CustomLyricsManifest(entries)
+        val files = entries.associate { it.fileId to smallTtml(it.appleMusicId).toByteArray(Charsets.UTF_8) }
+        val out = ByteArrayOutputStream()
+        val encoded = CustomLyricsBackupCodec.encode(manifest, { files[it] }, out)
+        assertTrue(encoded is CustomLyricsBackupEncodeResult.Encoded)
+        assertEquals(1000, (encoded as CustomLyricsBackupEncodeResult.Encoded).entryCount)
+
+        val delivered = linkedMapOf<String, ByteArray>()
+        val decoded = CustomLyricsBackupCodec.decode(ByteArrayInputStream(out.toByteArray())) { fileId, bytes ->
+            delivered[fileId] = bytes
+        }
+        assertTrue(decoded is CustomLyricsBackupDecodeResult.Decoded)
+        val backup = (decoded as CustomLyricsBackupDecodeResult.Decoded).backup
+        assertEquals(1000, backup.manifest.entries.size)
+        assertEquals(manifest, backup.manifest)
+        assertEquals(1000, delivered.size)
+        files.forEach { (fileId, bytes) -> assertTrue(bytes.contentEquals(delivered[fileId])) }
     }
 
     @Test
     fun `decode rejects duplicate apple music ids in the manifest`() {
-        val entries = JSONArray()
-        listOf(
-            entry(appleMusicId = 1L, fileId = "lyrics_a", ttml = ttml1),
-            entry(appleMusicId = 1L, fileId = "lyrics_b", ttml = ttml2),
-        ).forEach { e ->
-            entries.put(
-                JSONObject().apply {
-                    put("appleMusicId", e.appleMusicId)
-                    put("displayName", e.displayName)
-                    put("fileId", e.fileId)
-                    put("sizeBytes", e.sizeBytes)
-                    put("sha256", e.sha256)
-                    put("source", e.source)
-                    put("enabled", e.enabled)
+        val entries = JSONObject().apply {
+            put("version", 1)
+            put(
+                "entries",
+                org.json.JSONArray().apply {
+                    listOf(
+                        entry(appleMusicId = 1L, fileId = "lyrics_a", ttml = ttml1),
+                        entry(appleMusicId = 1L, fileId = "lyrics_b", ttml = ttml2),
+                    ).forEach { e ->
+                        put(
+                            JSONObject().apply {
+                                put("appleMusicId", e.appleMusicId)
+                                put("displayName", e.displayName)
+                                put("fileId", e.fileId)
+                                put("sizeBytes", e.sizeBytes)
+                                put("sha256", e.sha256)
+                                put("source", e.source)
+                                put("enabled", e.enabled)
+                            },
+                        )
+                    }
                 },
             )
         }
-        val json = JSONObject().apply { put("version", 1); put("entries", entries) }.toString()
-        val result = decode(zipBytes(listOf("manifest.json" to json.toByteArray())))
+        val result = decode(zipBytes(listOf("manifest.json" to entries.toString().toByteArray())))
 
         assertTrue(result is CustomLyricsBackupDecodeResult.Rejected)
     }
@@ -170,8 +207,17 @@ class CustomLyricsBackupCodecTest {
     @Test
     fun `decode rejects duplicate file names`() {
         val bytes = ttml1.toByteArray(Charsets.UTF_8)
+        val manifest = CustomLyricsManifest(listOf(entry(appleMusicId = 1L, fileId = "lyrics_a", ttml = ttml1)))
 
-        val result = decode(zipWithDuplicateName("lyrics_a", bytes, bytes))
+        val result = decode(
+            zipRaw(
+                listOf(
+                    "manifest.json" to manifestJson(manifest),
+                    "lyrics_a" to bytes,
+                    "lyrics_a" to bytes,
+                ),
+            ),
+        )
 
         assertTrue(result is CustomLyricsBackupDecodeResult.Rejected)
     }
@@ -181,6 +227,22 @@ class CustomLyricsBackupCodecTest {
         val json = CustomLyricsManifestCodec.encode(CustomLyricsManifest.empty()).toByteArray()
 
         val result = decode(zipWithDuplicateName("manifest.json", json, json))
+
+        assertTrue(result is CustomLyricsBackupDecodeResult.Rejected)
+    }
+
+    @Test
+    fun `decode rejects files that precede the manifest`() {
+        val manifest = CustomLyricsManifest(listOf(entry(appleMusicId = 1L, fileId = "lyrics_a", ttml = ttml1)))
+
+        val result = decode(
+            zipRaw(
+                listOf(
+                    "lyrics_a" to ttml1.toByteArray(Charsets.UTF_8),
+                    "manifest.json" to manifestJson(manifest),
+                ),
+            ),
+        )
 
         assertTrue(result is CustomLyricsBackupDecodeResult.Rejected)
     }
@@ -299,21 +361,47 @@ class CustomLyricsBackupCodecTest {
 
     @Test
     fun `decode rejects an oversize entry (zip bomb per entry bound)`() {
-        val result = decode(zipBytes(listOf("lyrics_big" to ByteArray(512 * 1024 + 1))))
+        val bytes = ByteArray(512 * 1024 + 1)
+        val oversized = CustomLyricsEntry(
+            appleMusicId = 1L,
+            displayName = "Song",
+            fileId = "lyrics_big",
+            sizeBytes = 512 * 1024L,
+            sha256 = CustomLyricsFilePolicy.sha256(bytes),
+            source = CustomLyricsSources.MANUAL,
+        )
+        val result = decode(
+            zipBytes(
+                listOf(
+                    "manifest.json" to manifestJson(CustomLyricsManifest(listOf(oversized))),
+                    "lyrics_big" to bytes,
+                ),
+            ),
+        )
 
         assertTrue(result is CustomLyricsBackupDecodeResult.Rejected)
     }
 
     @Test
-    fun `decode rejects too many zip entries`() {
-        val bytes = ttml1.toByteArray(Charsets.UTF_8)
-        val result = decode(zipBytes((1..34).map { "lyrics_$it" to bytes }))
-
-        assertTrue(result is CustomLyricsBackupDecodeResult.Rejected)
+    fun `encode rejects a backup whose total ttml exceeds the restore limit`() {
+        val bigTtml = "<tt><body><p><span>" + " ".repeat(TtmlInputPolicy.MAX_TTML_BYTES - 42) + "</span></p></body></tt>"
+        val bigBytes = bigTtml.toByteArray(Charsets.UTF_8)
+        assertEquals(TtmlInputPolicy.MAX_TTML_BYTES, bigBytes.size)
+        val base = entry(appleMusicId = 1L, fileId = "lyrics_1", ttml = bigTtml)
+        val entries = (1..513).map { index -> base.copy(appleMusicId = index.toLong(), fileId = "lyrics_$index") }
+        val manifest = CustomLyricsManifest(entries)
+        val files = entries.associate { it.fileId to bigBytes }
+        val out = ByteArrayOutputStream()
+        val encoded = CustomLyricsBackupCodec.encode(manifest, { files[it] }, out)
+        assertEquals(
+            CustomLyricsBackupEncodeResult.Failed("歌词备份总量超过上限"),
+            encoded,
+        )
+        assertEquals(0, out.size())
     }
 
     private fun decode(zip: ByteArray): CustomLyricsBackupDecodeResult =
-        CustomLyricsBackupCodec.decode(ByteArrayInputStream(zip))
+        CustomLyricsBackupCodec.decode(ByteArrayInputStream(zip)) { _, _ -> }
 
     private fun zipBytes(entries: List<Pair<String, ByteArray>>): ByteArray {
         val out = ByteArrayOutputStream()
@@ -328,16 +416,16 @@ class CustomLyricsBackupCodecTest {
     }
 
     /**
-     * Builds a zip with several entries sharing [name]. ZipOutputStream
-     * refuses duplicate names, so the ZIP is assembled by hand (little-endian
-     * layout, STORED method, real CRC32s).
+     * Builds a zip with arbitrary entries including duplicate names.
+     * ZipOutputStream refuses duplicates, so the ZIP is assembled by hand
+     * (little-endian layout, STORED method, real CRC32s).
      */
-    private fun zipWithDuplicateName(name: String, vararg datas: ByteArray): ByteArray {
-        val nameBytes = name.toByteArray(Charsets.UTF_8)
+    private fun zipRaw(entries: List<Pair<String, ByteArray>>): ByteArray {
         val out = ByteArrayOutputStream()
         var offset = 0
         val centralHeaders = ArrayList<ByteArray>()
-        datas.forEach { data ->
+        entries.forEach { (name, data) ->
+            val nameBytes = name.toByteArray(Charsets.UTF_8)
             val crc = CRC32().apply { update(data) }.value.toInt()
             val local = ByteBuffer.allocate(30 + nameBytes.size).order(ByteOrder.LITTLE_ENDIAN)
             local.putInt(0x04034b50)
@@ -363,7 +451,7 @@ class CustomLyricsBackupCodecTest {
         centralHeaders.forEach { out.write(it) }
         val eocd = ByteBuffer.allocate(22).order(ByteOrder.LITTLE_ENDIAN)
         eocd.putInt(0x06054b50)
-        eocd.putShort(0); eocd.putShort(0); eocd.putShort(datas.size.toShort()); eocd.putShort(datas.size.toShort())
+        eocd.putShort(0); eocd.putShort(0); eocd.putShort(entries.size.toShort()); eocd.putShort(entries.size.toShort())
         eocd.putInt(centralHeaders.sumOf { it.size })
         eocd.putInt(centralStart)
         eocd.putShort(0)
@@ -371,8 +459,13 @@ class CustomLyricsBackupCodecTest {
         return out.toByteArray()
     }
 
+    private fun zipWithDuplicateName(name: String, vararg datas: ByteArray): ByteArray =
+        zipRaw(datas.map { name to it })
+
     private fun manifestJson(manifest: CustomLyricsManifest): ByteArray =
         CustomLyricsManifestCodec.encode(manifest).toByteArray(Charsets.UTF_8)
+
+    private fun smallTtml(index: Long): String = "<tt><body><p><span>$index</span></p></body></tt>"
 
     private fun entry(appleMusicId: Long, fileId: String, ttml: String): CustomLyricsEntry {
         val bytes = ttml.toByteArray(Charsets.UTF_8)

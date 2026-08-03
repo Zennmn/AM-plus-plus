@@ -41,6 +41,9 @@ internal class CustomLyricsImportTransaction(
         val replacedEntry = oldManifest.entries.firstOrNull {
             it.appleMusicId == replacedAppleMusicId
         }
+        if (replacingAppleMusicId == null && replacedEntry != null) {
+            return CustomLyricsSaveResult.Failed("目标 Apple Music ID 已存在")
+        }
         if (replacingAppleMusicId != null && replacedEntry == null) {
             return CustomLyricsSaveResult.Failed("原歌词映射不存在")
         }

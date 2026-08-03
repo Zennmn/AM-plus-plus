@@ -16,7 +16,7 @@ class CustomLyricsImportTransactionTest {
         val old = CustomLyricsManifest(listOf(existingEntry()))
         val transaction = transaction(events) { events += "publish"; true }
 
-        val result = transaction.upsert(old, draft())
+        val result = transaction.upsert(old, draft(), replacingAppleMusicId = 42L)
 
         assertTrue(result is CustomLyricsSaveResult.Saved)
         assertEquals(listOf("write", "publish", "delete:lyrics_old"), events)
@@ -83,6 +83,20 @@ class CustomLyricsImportTransactionTest {
             oldManifest = old,
             draft = draft(appleMusicId = 84L),
             replacingAppleMusicId = 42L,
+        )
+
+        assertEquals(CustomLyricsSaveResult.Failed("目标 Apple Music ID 已存在"), result)
+        assertTrue(events.isEmpty())
+    }
+
+    @Test
+    fun `adding an id that already exists fails without overwriting its file`() {
+        val events = mutableListOf<String>()
+        val transaction = transaction(events) { events += "publish"; true }
+
+        val result = transaction.upsert(
+            oldManifest = CustomLyricsManifest(listOf(existingEntry())),
+            draft = draft(),
         )
 
         assertEquals(CustomLyricsSaveResult.Failed("目标 Apple Music ID 已存在"), result)

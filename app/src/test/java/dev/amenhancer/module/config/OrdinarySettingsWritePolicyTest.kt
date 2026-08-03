@@ -39,6 +39,18 @@ class OrdinarySettingsWritePolicyTest {
         "lyrics_font_size_bytes",
         "lyrics_font_sha256",
     )
+    private val pointerKeys = listOf(
+        "custom_lyrics_index_file_id",
+        "custom_lyrics_index_generation",
+        "custom_lyrics_index_sha256",
+        "custom_lyrics_index_size_bytes",
+    )
+    private val indexPointer = CustomLyricsIndexPointer(
+        fileId = "index_abc123",
+        generation = 3L,
+        sha256 = "0cba697d61a21fb62408b2411aa2152d1bc24cc2414d2bd162f70e04d20c5e53",
+        sizeBytes = 4096L,
+    )
     private val customLyricsManifest = CustomLyricsManifest(
         entries = listOf(
             CustomLyricsEntry(
@@ -115,5 +127,33 @@ class OrdinarySettingsWritePolicyTest {
             CustomLyricsManifest.empty(),
             ModuleSettingsSchema.decode(encoded).customLyricsManifest,
         )
+    }
+
+    @Test
+    fun `stale ordinary settings write after a published index pointer leaves the pointer unchanged`() {
+        val currentPreferences = mutableMapOf<String, Any>().apply {
+            putAll(ModuleSettingsSchema.encodeOrdinarySettings(ModuleSettings()))
+            putAll(ModuleSettingsSchema.encodeIndexPointer(indexPointer))
+        }
+
+        val ordinaryWrite = ModuleSettingsSchema.encodeOrdinarySettings(staleSettings)
+        val merged = currentPreferences + ordinaryWrite
+
+        assertFalse(
+            "ordinary write must not touch any index pointer key",
+            ordinaryWrite.keys.any(pointerKeys::contains),
+        )
+        assertFalse("ordinary write must not carry the legacy manifest key", ordinaryWrite.containsKey("custom_lyrics_manifest"))
+        assertEquals(indexPointer, ModuleSettingsSchema.decodeIndexPointer(merged))
+    }
+
+    @Test
+    fun `full schema encode never emits the index pointer keys`() {
+        val encoded = ModuleSettingsSchema.encode(
+            ModuleSettings(customLyricsManifest = customLyricsManifest),
+        )
+
+        assertFalse(encoded.keys.any(pointerKeys::contains))
+        assertTrue(encoded.containsKey("custom_lyrics_manifest"))
     }
 }

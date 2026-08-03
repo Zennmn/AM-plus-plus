@@ -28,13 +28,16 @@ internal object CustomLyricsFilePolicy {
         )
     }
 
-    fun readBounded(input: InputStream): ByteArray {
+    fun readBounded(input: InputStream): ByteArray =
+        readBounded(input, TtmlInputPolicy.MAX_TTML_BYTES)
+
+    fun readBounded(input: InputStream, maxBytes: Int): ByteArray {
         val output = ByteArrayOutputStream()
         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
         while (true) {
             val count = input.read(buffer)
             if (count < 0) break
-            if (output.size() + count > TtmlInputPolicy.MAX_TTML_BYTES) {
+            if (output.size() + count > maxBytes) {
                 throw SizeLimitExceeded()
             }
             output.write(buffer, 0, count)

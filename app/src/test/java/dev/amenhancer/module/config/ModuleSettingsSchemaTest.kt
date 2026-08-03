@@ -4,6 +4,7 @@ import dev.amenhancer.module.ModuleConstants
 import dev.amenhancer.module.model.CustomLyricsManifest
 import dev.amenhancer.module.model.ModuleSettings
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ModuleSettingsSchemaTest {
@@ -199,5 +200,66 @@ class ModuleSettingsSchemaTest {
 
         assertEquals(true, upgraded?.get("custom_lyrics_enabled"))
         assertEquals(ModuleConstants.CONFIG_SCHEMA_VERSION, upgraded?.get("schema_version"))
+    }
+
+    @Test
+    fun `index pointer round trips through its preference keys`() {
+        val pointer = CustomLyricsIndexPointer(
+            fileId = "index_abc123",
+            generation = 7L,
+            sha256 = "0cba697d61a21fb62408b2411aa2152d1bc24cc2414d2bd162f70e04d20c5e53",
+            sizeBytes = 4096L,
+        )
+
+        assertEquals(
+            pointer,
+            ModuleSettingsSchema.decodeIndexPointer(ModuleSettingsSchema.encodeIndexPointer(pointer)),
+        )
+    }
+
+    @Test
+    fun `malformed index pointers fail closed`() {
+        val base = mapOf(
+            "custom_lyrics_index_file_id" to "index_abc123",
+            "custom_lyrics_index_generation" to 1L,
+            "custom_lyrics_index_sha256" to "0cba697d61a21fb62408b2411aa2152d1bc24cc2414d2bd162f70e04d20c5e53",
+            "custom_lyrics_index_size_bytes" to 4096L,
+        )
+
+        assertNull(ModuleSettingsSchema.decodeIndexPointer(emptyMap<String, Any>()))
+        assertNull(ModuleSettingsSchema.decodeIndexPointer(base - "custom_lyrics_index_file_id"))
+        assertNull(
+            ModuleSettingsSchema.decodeIndexPointer(
+                base + ("custom_lyrics_index_file_id" to "../bad"),
+            ),
+        )
+        assertNull(
+            ModuleSettingsSchema.decodeIndexPointer(
+                base + ("custom_lyrics_index_generation" to 0L),
+            ),
+        )
+        assertNull(
+            ModuleSettingsSchema.decodeIndexPointer(
+                base + ("custom_lyrics_index_sha256" to "not-a-hash"),
+            ),
+        )
+        assertNull(
+            ModuleSettingsSchema.decodeIndexPointer(
+                base + ("custom_lyrics_index_size_bytes" to 0L),
+            ),
+        )
+    }
+
+    @Test
+    fun `legacy manifest decode reads the v1 preference string`() {
+        val values = mapOf(
+            "custom_lyrics_manifest" to
+                """{"version":1,"entries":[{"appleMusicId":42,"displayName":"Old","fileId":"lyrics_old","sizeBytes":42,"sha256":"0cba697d61a21fb62408b2411aa2152d1bc24cc2414d2bd162f70e04d20c5e53","source":"manual","enabled":true}]}""",
+        )
+
+        assertEquals(
+            listOf(42L),
+            ModuleSettingsSchema.decodeLegacyCustomLyricsManifest(values).entries.map { it.appleMusicId },
+        )
     }
 }

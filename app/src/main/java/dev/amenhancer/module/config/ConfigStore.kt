@@ -2,6 +2,7 @@ package dev.amenhancer.module.config
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.ParcelFileDescriptor
 import dev.amenhancer.module.ModuleApplication
 import dev.amenhancer.module.XposedServiceSnapshot
 import dev.amenhancer.module.model.CustomLyricsManifest
@@ -14,10 +15,47 @@ class ConfigStore(context: Context) {
         LEGACY_PREFERENCES_NAME,
         Context.MODE_PRIVATE,
     )
+    @Volatile
+    private var cachedIndex: CachedIndex? = null
     fun settings(): ModuleSettings = settings(ModuleApplication.serviceSnapshot)
 
-    internal fun settings(snapshot: XposedServiceSnapshot): ModuleSettings =
-        ModuleSettingsSchema.decode((snapshot.preferences ?: legacyPreferences).all)
+    internal fun settings(snapshot: XposedServiceSnapshot): ModuleSettings {
+        val preferences = snapshot.preferences ?: legacyPreferences
+        return ModuleSettingsSchema.decode(preferences.all)
+    }
+
+    internal fun settingsWithCustomLyrics(snapshot: XposedServiceSnapshot): ModuleSettings {
+        val preferences = snapshot.preferences ?: legacyPreferences
+        val values = preferences.all
+        val base = ModuleSettingsSchema.decode(values)
+        val pointer = ModuleSettingsSchema.decodeIndexPointer(values)
+        val cacheKey = IndexCacheKey(
+            pointer = pointer,
+            legacyManifest = if (pointer == null) {
+                ModuleSettingsSchema.legacyCustomLyricsManifestRaw(values)
+            } else {
+                null
+            },
+        )
+        val manifest = cachedIndex
+            ?.takeIf { it.key == cacheKey }
+            ?.manifest
+            ?: CustomLyricsIndexRepository.state(values) { fileId ->
+                snapshot.openRemoteFile(fileId)?.let { ParcelFileDescriptor.AutoCloseInputStream(it) }
+            }.let { state ->
+                if (state.canCommit) cachedIndex = CachedIndex(cacheKey, state.manifest)
+                state.manifest
+            }
+        return base.copy(customLyricsManifest = manifest)
+    }
+
+    /** Current index state (pointer + resolved manifest) for settings-process mutations. */
+    internal fun indexState(snapshot: XposedServiceSnapshot): CustomLyricsIndexState {
+        val preferences = snapshot.preferences ?: legacyPreferences
+        return CustomLyricsIndexRepository.state(preferences.all) { fileId ->
+            snapshot.openRemoteFile(fileId)?.let { ParcelFileDescriptor.AutoCloseInputStream(it) }
+        }
+    }
 
     fun saveSettings(settings: ModuleSettings): Boolean {
         val preferences = ModuleApplication.serviceSnapshot.preferences ?: return false
@@ -43,8 +81,9 @@ class ConfigStore(context: Context) {
         )
     }
 
-    internal fun saveCustomLyricsManifest(
-        manifest: CustomLyricsManifest,
+    /** Atomic pointer publication; the index file must already be written. */
+    internal fun publishIndexPointer(
+        pointer: CustomLyricsIndexPointer,
         snapshot: XposedServiceSnapshot = ModuleApplication.serviceSnapshot,
     ): Boolean {
         if (!snapshot.isRemoteFileAvailable || !ModuleApplication.isCurrentSnapshot(snapshot)) {
@@ -53,12 +92,22 @@ class ConfigStore(context: Context) {
         val preferences = snapshot.preferences ?: return false
         return writeValues(
             preferences,
-            ModuleSettingsSchema.encodeCustomLyricsManifest(manifest),
+            ModuleSettingsSchema.encodeIndexPointer(pointer),
             synchronous = true,
         )
     }
 
     companion object {
+        private data class IndexCacheKey(
+            val pointer: CustomLyricsIndexPointer?,
+            val legacyManifest: String?,
+        )
+
+        private data class CachedIndex(
+            val key: IndexCacheKey,
+            val manifest: CustomLyricsManifest,
+        )
+
         fun migrateLegacyPreferences(context: Context, destination: SharedPreferences) {
             val legacy = context.getSharedPreferences(
                 LEGACY_PREFERENCES_NAME,
