@@ -59,15 +59,18 @@ class FutureLyricBlurStructuralRegressionTest {
     }
 
     @Test
-    fun `manual lyric scrolling restores blur after one second`() {
-        assertTrue(portSource.contains("SCROLL_RESTORE_DELAY_MS = 1_000L"))
-        assertTrue(portSource.contains("postDelayed(restoreBlurRunnable, SCROLL_RESTORE_DELAY_MS)"))
+    fun `highlighted rows clear immediately while nonzero blur still animates`() {
+        val compactRenderer = rendererSource.replace(Regex("\\s+"), " ")
+
+        assertTrue(compactRenderer.contains("if (target <= 0f) { clear(view) return@forEach }"))
+        assertTrue(rendererSource.contains("Transition("))
+        assertTrue(rendererSource.contains("scheduleFrame()"))
     }
 
     @Test
-    fun `scroll restore keeps only the current lyric line clear`() {
-        assertFalse(portSource.contains("previousHighlightIds"))
-        assertFalse(portSource.contains("highlightedLineIds +"))
+    fun `manual lyric scrolling restores blur after one second`() {
+        assertTrue(portSource.contains("SCROLL_RESTORE_DELAY_MS = 1_000L"))
+        assertTrue(portSource.contains("postDelayed(restoreBlurRunnable, SCROLL_RESTORE_DELAY_MS)"))
     }
 
     @Test

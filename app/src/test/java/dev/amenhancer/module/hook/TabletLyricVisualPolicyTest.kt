@@ -14,7 +14,10 @@ class TabletLyricVisualPolicyTest {
         assertEquals(0f, edge, TOLERANCE)
         assertEquals(
             12f,
-            TabletLyricVisualPolicy.mergeBlurRadius(focusBlurRadius = 12f, edge),
+            TabletLyricVisualPolicy.mergeBlurRadius(
+                focusBlurRadius = 12f,
+                edgeBlurRadius = edge,
+            ),
             TOLERANCE,
         )
     }
@@ -40,6 +43,19 @@ class TabletLyricVisualPolicyTest {
             TabletLyricVisualPolicy.mergeBlurRadius(
                 focusBlurRadius = 16f,
                 edgeBlurRadius = edgeAt(rowCenterPx = 50f),
+            ),
+            TOLERANCE,
+        )
+    }
+
+    @Test
+    fun `highlighted rows stay clear even inside the tablet edge field`() {
+        assertEquals(
+            0f,
+            TabletLyricVisualPolicy.mergeBlurRadius(
+                focusBlurRadius = 0f,
+                edgeBlurRadius = edgeAt(rowCenterPx = 0f),
+                isHighlighted = true,
             ),
             TOLERANCE,
         )

@@ -237,6 +237,8 @@ internal class AppleMusicLyricBlurTargetAccess(
 
     override fun isRecyclerView(view: View): Boolean = view.javaClass == recyclerViewClass
 
+    override fun isInstrumentalRow(view: View): Boolean = InstrumentalRowIdentity.matches(view)
+
     override fun adapterPosition(view: View): Int = try {
         (adapterPositionAccessor?.invoke(null, view) as? Int) ?: -1
     } catch (_: Throwable) {

@@ -5,16 +5,6 @@ import org.junit.Test
 
 class BidirectionalBlurPolicyTest {
     @Test
-    fun `ordinary lyric gap retains the last non-empty highlight until replacement`() {
-        val active = BidirectionalBlurPolicy.resolveHighlights(emptySet(), setOf(46))
-        val gap = BidirectionalBlurPolicy.resolveHighlights(active, emptySet())
-        val next = BidirectionalBlurPolicy.resolveHighlights(gap, setOf(47))
-
-        assertEquals(setOf(46), gap)
-        assertEquals(setOf(47), next)
-    }
-
-    @Test
     fun `intro without an active highlight focuses the earliest visible lyric row`() {
         assertEquals(
             setOf(0),
@@ -28,6 +18,26 @@ class BidirectionalBlurPolicyTest {
             BidirectionalBlurPolicy.resolveDisplayHighlights(
                 active = setOf(8),
                 visiblePositions = listOf(0, 1, 2),
+            ),
+        )
+    }
+
+    @Test
+    fun `an active instrumental gap anchors blur at the three-dot row`() {
+        assertEquals(
+            setOf(5),
+            BidirectionalBlurPolicy.resolveDisplayHighlights(
+                active = setOf(4),
+                visiblePositions = listOf(3, 4, 6),
+                gapAnchorPosition = 5,
+            ),
+        )
+        assertEquals(
+            setOf(4),
+            BidirectionalBlurPolicy.resolveDisplayHighlights(
+                active = setOf(4),
+                visiblePositions = listOf(3, 4, 6),
+                gapAnchorPosition = -1,
             ),
         )
     }

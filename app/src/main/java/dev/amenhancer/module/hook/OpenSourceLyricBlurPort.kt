@@ -14,6 +14,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.widget.ImageView
+import kotlin.math.abs
 
 /**
  * Target-independent AMLyricBlur runtime.
@@ -234,17 +235,35 @@ internal class OpenSourceLyricBlurPort(
     ) {
         val rv = getRv() as? ViewGroup ?: return
         val visibleRows = ArrayList<Pair<View, Int>>(rv.childCount)
+        val instrumentalRows = ArrayList<Pair<View, Int>>(1)
 
         for (i in 0 until rv.childCount) {
             val child = rv.getChildAt(i) ?: continue
-            if (!isLyricsLine(child)) continue
             val adapterPos = targetAccess.adapterPosition(child)
+            if (targetAccess.isInstrumentalRow(child)) {
+                instrumentalRows += child to adapterPos
+                continue
+            }
+            if (!isLyricsLine(child)) continue
             visibleRows += child to adapterPos
         }
         val activeIds = highlightSession.snapshot()
+        val gapAnchorPosition = if (highlightSession.isGap()) {
+            val referencePosition = activeIds.maxOrNull()
+            instrumentalRows
+                .asSequence()
+                .map { (_, position) -> position }
+                .filter { position -> position >= 0 }
+                .minByOrNull { position ->
+                    referencePosition?.let { reference -> abs(position - reference) } ?: 0
+                } ?: -1
+        } else {
+            -1
+        }
         val effectiveIds = BidirectionalBlurPolicy.resolveDisplayHighlights(
             active = activeIds,
             visiblePositions = visibleRows.map { (_, position) -> position },
+            gapAnchorPosition = gapAnchorPosition,
         )
         val useTabletEdges = TabletModeQualifier.isEligible(rv.context)
         val targets = LinkedHashMap<View, Float>(visibleRows.size)
@@ -265,8 +284,13 @@ internal class OpenSourceLyricBlurPort(
             } else {
                 0f
             }
-            targets[child] = TabletLyricVisualPolicy.mergeBlurRadius(focusBlur, edgeBlur)
+            targets[child] = TabletLyricVisualPolicy.mergeBlurRadius(
+                focusBlurRadius = focusBlur,
+                edgeBlurRadius = edgeBlur,
+                isHighlighted = includeFocus && adapterPos in effectiveIds,
+            )
         }
+        instrumentalRows.forEach { (view, _) -> blurRenderer.clear(view) }
         if (immediate) {
             blurRenderer.applyImmediately(targets)
         } else {
@@ -302,5 +326,6 @@ internal interface LyricBlurRuntime {
 
 internal interface LyricBlurTargetAccess {
     fun isRecyclerView(view: View): Boolean
+    fun isInstrumentalRow(view: View): Boolean
     fun adapterPosition(view: View): Int
 }

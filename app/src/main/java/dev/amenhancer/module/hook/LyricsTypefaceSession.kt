@@ -23,6 +23,8 @@ import java.util.concurrent.Executors
 
 /** The verified Apple Music layout names that may contain player lyric text. */
 internal object LyricsTypefaceLayoutContract {
+    const val INSTRUMENTAL_LAYOUT_NAME = "lyrics_line_instrumental"
+
     val layoutNames: List<String> = listOf(
         "lyrics_line",
         "lyrics_line_karaoke",
@@ -35,7 +37,7 @@ internal object LyricsTypefaceLayoutContract {
         "lyrics_bg_translation_line_karaoke",
         "lyrics_word_karaoke_bg",
         "lyrics_word_pronunciation_bg",
-        "lyrics_line_instrumental",
+        INSTRUMENTAL_LAYOUT_NAME,
     )
 }
 
@@ -95,6 +97,9 @@ internal class LyricsTypefaceSession {
         }
         LyricsTypefaceLayoutContract.layoutNames.forEach { layoutName ->
             LayoutInflationRegistry.register(layoutName) { root ->
+                if (layoutName == LyricsTypefaceLayoutContract.INSTRUMENTAL_LAYOUT_NAME) {
+                    InstrumentalRowIdentity.mark(root)
+                }
                 applyToLyricsLayout(root)
                 installRowLayoutChangeObserver(root)
             }

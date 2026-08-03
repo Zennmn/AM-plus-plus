@@ -4,32 +4,57 @@ package dev.amenhancer.module.hook
 internal class LyricHighlightSession {
     private var token: Any? = null
     private val highlightedLineIds = mutableSetOf<Int>()
+    private val completedOverlapLineIds = mutableSetOf<Int>()
+    private var gap = false
 
     @Synchronized
     fun enter(newToken: Any): Boolean {
         if (token === newToken) return false
         token = newToken
         highlightedLineIds.clear()
+        completedOverlapLineIds.clear()
+        gap = false
         return true
     }
 
     @Synchronized
     fun update(incoming: Set<Int>): Set<Int> {
-        val resolved = BidirectionalBlurPolicy.resolveHighlights(
-            current = highlightedLineIds,
-            incoming = incoming,
-        )
+        if (incoming.isEmpty()) {
+            gap = true
+            return snapshotLocked()
+        }
+        gap = false
+        if (incoming == highlightedLineIds) return snapshotLocked()
+        val completedOverlap = if (
+            highlightedLineIds.size > 1 && highlightedLineIds.containsAll(incoming)
+        ) {
+            val firstIncoming = incoming.min()
+            (highlightedLineIds - incoming).filterTo(mutableSetOf()) { lineId ->
+                lineId < firstIncoming
+            }
+        } else {
+            emptySet()
+        }
+        completedOverlapLineIds.clear()
+        completedOverlapLineIds.addAll(completedOverlap)
         highlightedLineIds.clear()
-        highlightedLineIds.addAll(resolved)
-        return highlightedLineIds.toSet()
+        highlightedLineIds.addAll(incoming)
+        return snapshotLocked()
     }
 
     @Synchronized
     fun replace(lineId: Int) {
+        gap = false
+        completedOverlapLineIds.clear()
         highlightedLineIds.clear()
         highlightedLineIds.add(lineId)
     }
 
     @Synchronized
-    fun snapshot(): Set<Int> = highlightedLineIds.toSet()
+    fun snapshot(): Set<Int> = snapshotLocked()
+
+    @Synchronized
+    fun isGap(): Boolean = gap
+
+    private fun snapshotLocked(): Set<Int> = highlightedLineIds + completedOverlapLineIds
 }

@@ -35,7 +35,10 @@ internal object TabletLyricVisualPolicy {
         return targetPx / scaledDensity
     }
 
-    fun mergeBlurRadius(focusBlurRadius: Float, edgeBlurRadius: Float): Float =
-        max(focusBlurRadius, edgeBlurRadius)
+    fun mergeBlurRadius(
+        focusBlurRadius: Float,
+        edgeBlurRadius: Float,
+        isHighlighted: Boolean = false,
+    ): Float = if (isHighlighted) 0f else max(focusBlurRadius, edgeBlurRadius)
     private const val EDGE_MAX_BLUR_PX = 5f
 }

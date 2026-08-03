@@ -32,6 +32,10 @@ internal class LyricBlurRenderer {
             .toList()
             .forEach(::clear)
         targets.forEach { (view, target) ->
+            if (target <= 0f) {
+                clear(view)
+                return@forEach
+            }
             val state = transitions[view]
             val current = state?.radiusAt(now) ?: 0f
             if (state != null && state.targetRadius == target) return@forEach
