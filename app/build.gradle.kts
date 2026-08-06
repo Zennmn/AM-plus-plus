@@ -35,8 +35,8 @@ android {
         applicationId = "dev.amenhancer.module"
         minSdk = 26
         targetSdk = 37
-        versionCode = 95
-        versionName = "1.3.8"
+        versionCode = 96
+        versionName = "1.3.9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
