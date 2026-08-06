@@ -3,11 +3,11 @@ package dev.amenhancer.module.hook
 import dev.amenhancer.module.lyrics.LyricDocument
 import dev.amenhancer.module.lyrics.NeteaseEapi
 import dev.amenhancer.module.lyrics.YrcParser
+import java.net.URLEncoder
 import org.json.JSONObject
 
 /**
- * AMLL TTML DB client. Direct, fixed URL per Adam ID; a 404 (or any HTTP
- * failure) simply falls through to the next source.
+ * AMLL TTML DB client. Direct, fixed URL per Adam ID; failures return null.
  */
 internal class AmllTtmlClient(private val transport: LyricHttpTransport) {
     fun fetch(adamId: Long): String? =
@@ -16,6 +16,44 @@ internal class AmllTtmlClient(private val transport: LyricHttpTransport) {
     companion object {
         const val AMLL_TTML_DB_BASE =
             "https://raw.githubusercontent.com/amll-dev/amll-ttml-db/refs/heads/main"
+    }
+}
+
+/** User-owned TTML repository indexed by Apple Music Adam ID; settings process only. */
+internal class AmLyricsClient(private val transport: LyricHttpTransport) {
+    fun fetch(adamId: Long): String? {
+        if (adamId <= 0L) return null
+        val index = transport.get(AM_LYRICS_INDEX_URL) ?: return null
+        val path = resolvePath(index, adamId) ?: return null
+        return transport.get("$AM_LYRICS_BASE/$path")
+    }
+
+    private fun resolvePath(indexJson: String, adamId: Long): String? = runCatching {
+        val entries = JSONObject(indexJson).optJSONArray("entries") ?: return@runCatching null
+        for (index in 0 until entries.length()) {
+            val entry = entries.optJSONObject(index) ?: continue
+            if (entry.optLong("appleMusicId", 0L) != adamId) continue
+            if (!entry.optBoolean("enabled", true)) continue
+            val path = entry.optString("path").takeIf(String::isNotBlank)
+                ?: return@runCatching null
+            return@runCatching encodePath(path)
+        }
+        null
+    }.getOrNull()
+
+    private fun encodePath(path: String): String? {
+        if (!path.startsWith(AM_LYRICS_ROOT) || path.contains('\\')) return null
+        val segments = path.split('/')
+        if (segments.any { it.isEmpty() || it == "." || it == ".." }) return null
+        return segments.joinToString("/") { segment ->
+            URLEncoder.encode(segment, Charsets.UTF_8.name()).replace("+", "%20")
+        }
+    }
+
+    companion object {
+        const val AM_LYRICS_BASE = "https://raw.githubusercontent.com/Zennmn/am-lyrics/main"
+        const val AM_LYRICS_INDEX_URL = "$AM_LYRICS_BASE/index.json"
+        private const val AM_LYRICS_ROOT = "am-lyrics/"
     }
 }
 

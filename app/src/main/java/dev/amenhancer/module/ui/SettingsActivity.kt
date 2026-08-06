@@ -35,6 +35,7 @@ import dev.amenhancer.module.XposedServiceSnapshot
 import dev.amenhancer.module.config.ConfigStore
 import dev.amenhancer.module.font.FontImportResult
 import dev.amenhancer.module.font.SafFontImporter
+import dev.amenhancer.module.hook.AmLyricsClient
 import dev.amenhancer.module.hook.AmllTtmlClient
 import dev.amenhancer.module.hook.HttpLyricTransport
 import dev.amenhancer.module.hook.NeteaseLyricClient
@@ -931,6 +932,16 @@ class SettingsActivity : Activity() {
                 },
                 LinearLayout.LayoutParams(0, dp(44), 1f),
             )
+            addView(spacer(8), LinearLayout.LayoutParams(dp(8), dp(1)))
+            addView(
+                fontActionButton("从 GitHub 导入", true) {
+                    importFromAmLyrics(appleMusicId, ttml) { importedSource ->
+                        source = importedSource
+                        updateSourceLabel()
+                    }
+                },
+                LinearLayout.LayoutParams(0, dp(44), 1f),
+            )
         })
         form.addView(ttml, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -1037,6 +1048,12 @@ class SettingsActivity : Activity() {
         }
     }
 
+    private fun onlineLyricsImporter(): CustomLyricsOnlineImporter = CustomLyricsOnlineImporter(
+        fetchAmll = AmllTtmlClient(HttpLyricTransport())::fetch,
+        fetchAmLyrics = AmLyricsClient(HttpLyricTransport())::fetch,
+        fetchNeteaseYrc = NeteaseLyricClient(HttpLyricTransport())::fetchYrc,
+    )
+
     private fun importFromAmll(
         appleMusicIdInput: EditText,
         ttmlInput: EditText,
@@ -1048,10 +1065,23 @@ class SettingsActivity : Activity() {
             return
         }
         backgroundExecutor.execute {
-            val result = CustomLyricsOnlineImporter(
-                fetchAmll = AmllTtmlClient(HttpLyricTransport())::fetch,
-                fetchNeteaseYrc = NeteaseLyricClient(HttpLyricTransport())::fetchYrc,
-            ).importAmll(appleMusicId)
+            val result = onlineLyricsImporter().importAmll(appleMusicId)
+            showOnlineImportResult(result, ttmlInput, onImported)
+        }
+    }
+
+    private fun importFromAmLyrics(
+        appleMusicIdInput: EditText,
+        ttmlInput: EditText,
+        onImported: (String) -> Unit,
+    ) {
+        val appleMusicId = parsePositiveId(appleMusicIdInput.text.toString())
+        if (appleMusicId == null) {
+            appleMusicIdInput.error = "请输入正整数 Apple Music ID"
+            return
+        }
+        backgroundExecutor.execute {
+            val result = onlineLyricsImporter().importAmLyrics(appleMusicId)
             showOnlineImportResult(result, ttmlInput, onImported)
         }
     }
@@ -1067,11 +1097,12 @@ class SettingsActivity : Activity() {
             neteaseIdInput.error = "请输入正整数网易云歌曲 ID"
             return
         }
+        val displayName = displayNameInput.text.toString()
         backgroundExecutor.execute {
-            val result = CustomLyricsOnlineImporter(
-                fetchAmll = AmllTtmlClient(HttpLyricTransport())::fetch,
-                fetchNeteaseYrc = NeteaseLyricClient(HttpLyricTransport())::fetchYrc,
-            ).importNetease(neteaseSongId, displayNameInput.text.toString())
+            val result = onlineLyricsImporter().importNetease(
+                neteaseSongId,
+                displayName,
+            )
             showOnlineImportResult(result, ttmlInput, onImported)
         }
     }
@@ -1218,6 +1249,7 @@ class SettingsActivity : Activity() {
     private fun customLyricsSourceName(source: String): String = when (source) {
         CustomLyricsSources.AMLL -> "AMLL"
         CustomLyricsSources.NETEASE -> "网易云 YRC"
+        CustomLyricsSources.AM_LYRICS -> "AM-Lyrics 仓库"
         else -> "手动 TTML"
     }
 

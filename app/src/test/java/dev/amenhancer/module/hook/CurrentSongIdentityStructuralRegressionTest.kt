@@ -29,6 +29,7 @@ class CurrentSongIdentityStructuralRegressionTest {
         assertFalse(target.contains("SharedPreferences"))
         assertFalse(target.contains("openRemoteFile"))
         assertFalse(target.contains("HttpLyricTransport"))
+        assertFalse(target.contains("AmLyricsClient"))
         assertFalse(target.contains("java.io.File"))
         assertFalse(target.contains("embedded-payload"))
         assertFalse(target.contains("com.apple.android.music.amplus"))

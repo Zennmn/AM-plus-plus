@@ -11,6 +11,7 @@ class OnlineLyricClientsTest {
 
     private class FakeTransport(
         var getResult: String? = null,
+        val getResults: MutableList<String?> = mutableListOf(),
         var postResult: String? = null,
     ) : LyricHttpTransport {
         val getUrls = mutableListOf<String>()
@@ -18,7 +19,7 @@ class OnlineLyricClientsTest {
 
         override fun get(url: String): String? {
             getUrls += url
-            return getResult
+            return if (getResults.isNotEmpty()) getResults.removeAt(0) else getResult
         }
 
         override fun postForm(
@@ -53,6 +54,59 @@ class OnlineLyricClientsTest {
     fun `amll client returns null when the transport fails`() {
         val transport = FakeTransport(getResult = null)
         assertNull(AmllTtmlClient(transport).fetch(42L))
+    }
+
+    @Test
+    fun `am lyrics client resolves an id and encodes the indexed path`() {
+        val index = """
+            {"version":1,"layout":"artist-title-id","entries":[
+              {"appleMusicId":1609445854,"enabled":true,
+               "path":"am-lyrics/八神纯子 - みずいろの雨 - 1609445854.ttml"}
+            ]}
+        """.trimIndent()
+        val transport = FakeTransport(
+            getResults = mutableListOf(index, "<tt>lyrics</tt>"),
+        )
+
+        assertEquals("<tt>lyrics</tt>", AmLyricsClient(transport).fetch(1609445854L))
+        assertEquals(
+            listOf(
+                "https://raw.githubusercontent.com/Zennmn/am-lyrics/main/index.json",
+                "https://raw.githubusercontent.com/Zennmn/am-lyrics/main/" +
+                    "am-lyrics/%E5%85%AB%E7%A5%9E%E7%BA%AF%E5%AD%90%20-%20" +
+                    "%E3%81%BF%E3%81%9A%E3%81%84%E3%82%8D%E3%81%AE%E9%9B%A8%20-%20" +
+                    "1609445854.ttml",
+            ),
+            transport.getUrls,
+        )
+    }
+
+    @Test
+    fun `am lyrics client fails open for missing ids and malformed paths`() {
+        val missing = FakeTransport(
+            getResult = """{"entries":[{"appleMusicId":42,"path":"am-lyrics/42.ttml"}]}""",
+        )
+        assertNull(AmLyricsClient(missing).fetch(43L))
+        assertEquals(listOf(AmLyricsClient.AM_LYRICS_INDEX_URL), missing.getUrls)
+
+        val malformed = FakeTransport(
+            getResult = """{"entries":[{"appleMusicId":42,"path":"../outside.ttml"}]}""",
+        )
+        assertNull(AmLyricsClient(malformed).fetch(42L))
+        assertEquals(listOf(AmLyricsClient.AM_LYRICS_INDEX_URL), malformed.getUrls)
+    }
+
+    @Test
+    fun `am lyrics client fails open for malformed index and disabled entries`() {
+        val malformed = FakeTransport(getResult = "not json")
+        assertNull(AmLyricsClient(malformed).fetch(42L))
+        assertEquals(listOf(AmLyricsClient.AM_LYRICS_INDEX_URL), malformed.getUrls)
+
+        val disabled = FakeTransport(
+            getResult = """{"entries":[{"appleMusicId":42,"enabled":false,"path":"am-lyrics/42.ttml"}]}""",
+        )
+        assertNull(AmLyricsClient(disabled).fetch(42L))
+        assertEquals(listOf(AmLyricsClient.AM_LYRICS_INDEX_URL), disabled.getUrls)
     }
 
     @Test

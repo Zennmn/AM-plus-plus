@@ -16,6 +16,7 @@ internal object CustomLyricsManifestPolicy {
         CustomLyricsSources.MANUAL,
         CustomLyricsSources.AMLL,
         CustomLyricsSources.NETEASE,
+        CustomLyricsSources.AM_LYRICS,
     )
 
     fun sanitize(manifest: CustomLyricsManifest): CustomLyricsManifest {

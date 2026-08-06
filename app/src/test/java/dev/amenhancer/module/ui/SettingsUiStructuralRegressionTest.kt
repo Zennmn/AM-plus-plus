@@ -103,11 +103,14 @@ class SettingsUiStructuralRegressionTest {
 
         assertTrue(activity.contains("从 AMLL 导入"))
         assertTrue(activity.contains("从网易云导入"))
+        assertTrue(activity.contains("从 GitHub 导入"))
         assertTrue(activity.contains("不会在播放时联网识歌"))
         assertTrue(manifest.contains("android.permission.INTERNET"))
         assertTrue(target.contains("session.start()"))
         assertFalse(target.contains("HttpLyricTransport"))
+        assertFalse(target.contains("AmLyricsClient"))
         assertFalse(session.contains("HttpLyricTransport"))
+        assertFalse(session.contains("AmLyricsClient"))
         assertFalse(session.contains("config.settings()"))
         assertTrue(session.contains("files and native parsing are prepared off-hook"))
     }
@@ -140,6 +143,7 @@ class SettingsUiStructuralRegressionTest {
         assertTrue(requester.contains("TIMEOUT_MILLIS"))
         assertFalse(requester.contains("SharedPreferences"))
         assertFalse(requester.contains("HttpLyricTransport"))
+        assertFalse(requester.contains("AmLyricsClient"))
     }
 
     @Test

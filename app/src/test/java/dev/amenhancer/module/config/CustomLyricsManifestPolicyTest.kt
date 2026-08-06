@@ -49,12 +49,25 @@ class CustomLyricsManifestPolicyTest {
         assertEquals(false, CustomLyricsManifestPolicy.isValidSha256(""))
     }
 
-    private fun entry(appleMusicId: Long, fileId: String) = CustomLyricsEntry(
+    @Test
+    fun `sanitize keeps the am lyrics source`() {
+        val sanitized = CustomLyricsManifestPolicy.sanitize(
+            CustomLyricsManifest(listOf(entry(42L, "lyrics_am", CustomLyricsSources.AM_LYRICS))),
+        )
+
+        assertEquals(CustomLyricsSources.AM_LYRICS, sanitized.entries.single().source)
+    }
+
+    private fun entry(
+        appleMusicId: Long,
+        fileId: String,
+        source: String = CustomLyricsSources.MANUAL,
+    ) = CustomLyricsEntry(
         appleMusicId = appleMusicId,
         displayName = "Song $appleMusicId",
         fileId = fileId,
         sizeBytes = 42L,
         sha256 = sha256,
-        source = CustomLyricsSources.MANUAL,
+        source = source,
     )
 }

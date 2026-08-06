@@ -57,6 +57,7 @@ object CustomLyricsSources {
     const val MANUAL = "manual"
     const val AMLL = "amll-ttml-db"
     const val NETEASE = "netease-yrc"
+    const val AM_LYRICS = "am-lyrics"
 }
 
 enum class FeatureState {

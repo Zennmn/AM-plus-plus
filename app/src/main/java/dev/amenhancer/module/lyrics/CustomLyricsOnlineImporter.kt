@@ -14,6 +14,7 @@ internal sealed interface CustomLyricsOnlineImportResult {
 /** User-triggered online imports. Playback hooks never call this class. */
 internal class CustomLyricsOnlineImporter(
     private val fetchAmll: (Long) -> String?,
+    private val fetchAmLyrics: (Long) -> String?,
     private val fetchNeteaseYrc: (Long) -> LyricDocument?,
 ) {
     fun importAmll(appleMusicId: Long): CustomLyricsOnlineImportResult {
@@ -22,6 +23,16 @@ internal class CustomLyricsOnlineImporter(
             ?.takeIf(TtmlInputPolicy::isAcceptable)
             ?: return CustomLyricsOnlineImportResult.Failed("AMLL 未找到可用 TTML")
         return CustomLyricsOnlineImportResult.Imported(ttml, CustomLyricsSources.AMLL)
+    }
+
+    fun importAmLyrics(appleMusicId: Long): CustomLyricsOnlineImportResult {
+        if (appleMusicId <= 0L) return CustomLyricsOnlineImportResult.Failed(
+            "Apple Music ID 必须是正整数",
+        )
+        val ttml = runCatching { fetchAmLyrics(appleMusicId) }.getOrNull()
+            ?.takeIf(TtmlInputPolicy::isAcceptable)
+            ?: return CustomLyricsOnlineImportResult.Failed("GitHub 未找到可用 TTML")
+        return CustomLyricsOnlineImportResult.Imported(ttml, CustomLyricsSources.AM_LYRICS)
     }
 
     fun importNetease(
