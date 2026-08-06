@@ -107,13 +107,18 @@ internal class CustomLyricsManager(
     }
 
     /**
-     * Streams a bounded ZIP backup from [input] into a merge-restore: backup
-     * entries overwrite same-ID current entries, current-only IDs are kept,
-     * every restored entry gets a fresh remote fileId. TTML bodies are
-     * validated and written one at a time, never all at once. Consumes and
-     * closes [input].
+     * Streams a bounded ZIP backup from [input] into a merge-restore. Under
+     * [CustomLyricsRestorePolicy.OVERWRITE] backup entries overwrite same-ID
+     * current entries; under [CustomLyricsRestorePolicy.KEEP_EXISTING]
+     * same-ID conflicts keep the current entry. Current-only IDs are kept and
+     * backup-only IDs are appended under either policy; every restored entry
+     * gets a fresh remote fileId. TTML bodies are validated and written one
+     * at a time, never all at once. Consumes and closes [input].
      */
-    fun restore(input: InputStream): CustomLyricsRestoreResult = synchronized(mutationLock) {
+    fun restore(
+        input: InputStream,
+        policy: CustomLyricsRestorePolicy = CustomLyricsRestorePolicy.OVERWRITE,
+    ): CustomLyricsRestoreResult = synchronized(mutationLock) {
         if (!isWritable()) return CustomLyricsRestoreResult.Failed("libxposed remote file 服务不可用")
         val state = configStore.indexState(snapshot)
         return CustomLyricsRestoreTransaction(
@@ -123,7 +128,7 @@ internal class CustomLyricsManager(
             deleteRemoteFile = { fileId ->
                 if (ModuleApplication.isCurrentSnapshot(snapshot)) snapshot.deleteRemoteFile(fileId)
             },
-        ).merge(state.manifest) { onFile -> CustomLyricsBackupCodec.decode(input, onFile) }
+        ).merge(state.manifest, policy) { onFile -> CustomLyricsBackupCodec.decode(input, onFile) }
     }
 
     private fun readRemoteFile(fileId: String): ByteArray? {

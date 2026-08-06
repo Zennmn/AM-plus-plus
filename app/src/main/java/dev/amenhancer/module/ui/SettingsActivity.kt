@@ -48,6 +48,7 @@ import dev.amenhancer.module.lyrics.CustomLyricsMutationResult
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImportResult
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImporter
 import dev.amenhancer.module.lyrics.CustomLyricsRestoreResult
+import dev.amenhancer.module.lyrics.CustomLyricsRestorePolicy
 import dev.amenhancer.module.lyrics.CustomLyricsSaveResult
 import dev.amenhancer.module.model.CustomLyricsEntry
 import dev.amenhancer.module.model.CustomLyricsManifest
@@ -761,22 +762,27 @@ class SettingsActivity : Activity() {
 
     private fun confirmRestoreCustomLyrics(uri: android.net.Uri) {
         AlertDialog.Builder(this)
-            .setTitle("合并恢复歌词备份")
-            .setMessage(
-                "同 Apple Music ID 的歌词将使用备份版本；" +
-                    "当前独有歌词会保留；总开关不会改变。是否继续？",
-            )
+            .setTitle("恢复歌词备份")
+            .setMessage("覆盖：冲突歌词使用备份版本；不覆盖：冲突歌词保留当前版本。")
             .setNegativeButton("取消", null)
-            .setPositiveButton("恢复") { _, _ -> restoreCustomLyrics(uri) }
+            .setNeutralButton("不覆盖") { _, _ ->
+                restoreCustomLyrics(uri, CustomLyricsRestorePolicy.KEEP_EXISTING)
+            }
+            .setPositiveButton("覆盖") { _, _ ->
+                restoreCustomLyrics(uri, CustomLyricsRestorePolicy.OVERWRITE)
+            }
             .show()
     }
 
-    private fun restoreCustomLyrics(uri: android.net.Uri) {
+    private fun restoreCustomLyrics(
+        uri: android.net.Uri,
+        policy: CustomLyricsRestorePolicy,
+    ) {
         val snapshot = ModuleApplication.serviceSnapshot
         backgroundExecutor.execute {
             val result = runCatching {
                 contentResolver.openInputStream(uri)?.use { input ->
-                    CustomLyricsManager(snapshot, store).restore(input)
+                    CustomLyricsManager(snapshot, store).restore(input, policy)
                 } ?: CustomLyricsRestoreResult.Failed("无法读取备份文件")
             }.getOrElse { CustomLyricsRestoreResult.Failed("读取备份失败") }
             runOnUiThread {

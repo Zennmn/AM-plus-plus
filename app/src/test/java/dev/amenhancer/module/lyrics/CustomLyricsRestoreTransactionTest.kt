@@ -31,7 +31,7 @@ class CustomLyricsRestoreTransactionTest {
             events += "publish"
             published = manifest
             true
-        }.merge(current, streamBackup(backup, files))
+        }.merge(current, CustomLyricsRestorePolicy.OVERWRITE, streamBackup(backup, files))
 
         assertTrue(result is CustomLyricsRestoreResult.Restored)
         assertEquals(
@@ -44,6 +44,106 @@ class CustomLyricsRestoreTransactionTest {
         )
         assertEquals("B new", published.entries[1].displayName)
         assertEquals(listOf("write:lyrics_new1", "write:lyrics_new2", "publish", "delete:lyrics_b"), events)
+    }
+
+    @Test
+    fun `overwrite policy explicitly replaces the same id and retires the current file`() {
+        val events = mutableListOf<String>()
+        var published = CustomLyricsManifest.empty()
+        val current = CustomLyricsManifest(
+            listOf(
+                existingEntry(appleMusicId = 1L, fileId = "lyrics_a"),
+                existingEntry(appleMusicId = 2L, fileId = "lyrics_b"),
+            ),
+        )
+        val (backup, files) = backup(
+            backupEntry(appleMusicId = 2L, fileId = "lyrics_bb", displayName = "B new") to ttmlBytes(),
+        )
+
+        val result = transaction(events) { manifest ->
+            events += "publish"
+            published = manifest
+            true
+        }.merge(current, CustomLyricsRestorePolicy.OVERWRITE, streamBackup(backup, files))
+
+        assertTrue(result is CustomLyricsRestoreResult.Restored)
+        assertEquals(listOf(1L, 2L), published.entries.map(CustomLyricsEntry::appleMusicId))
+        assertEquals(listOf("lyrics_a", "lyrics_new1"), published.entries.map(CustomLyricsEntry::fileId))
+        assertEquals("B new", published.entries[1].displayName)
+        assertEquals(listOf("write:lyrics_new1", "publish", "delete:lyrics_b"), events)
+    }
+
+    @Test
+    fun `keep existing policy keeps the conflict entry appends new ids and deletes dropped backup files after publish`() {
+        val events = mutableListOf<String>()
+        var published = CustomLyricsManifest.empty()
+        val current = CustomLyricsManifest(
+            listOf(
+                existingEntry(appleMusicId = 1L, fileId = "lyrics_a"),
+                existingEntry(appleMusicId = 2L, fileId = "lyrics_b"),
+            ),
+        )
+        val (backup, files) = backup(
+            backupEntry(appleMusicId = 2L, fileId = "lyrics_bb", displayName = "B new") to ttmlBytes(),
+            backupEntry(appleMusicId = 3L, fileId = "lyrics_cc") to ttmlBytes(),
+        )
+
+        val result = transaction(events) { manifest ->
+            events += "publish"
+            published = manifest
+            true
+        }.merge(current, CustomLyricsRestorePolicy.KEEP_EXISTING, streamBackup(backup, files))
+
+        assertTrue(result is CustomLyricsRestoreResult.Restored)
+        assertEquals(listOf(1L, 2L, 3L), published.entries.map(CustomLyricsEntry::appleMusicId))
+        assertEquals(listOf("lyrics_a", "lyrics_b", "lyrics_new2"), published.entries.map(CustomLyricsEntry::fileId))
+        assertEquals("Old song 2", published.entries[1].displayName)
+        assertEquals(
+            listOf("write:lyrics_new1", "write:lyrics_new2", "publish", "delete:lyrics_new1"),
+            events,
+        )
+    }
+
+    @Test
+    fun `keep existing policy without conflicts appends backup only ids and deletes nothing`() {
+        val events = mutableListOf<String>()
+        var published = CustomLyricsManifest.empty()
+        val current = CustomLyricsManifest(listOf(existingEntry(appleMusicId = 1L, fileId = "lyrics_a")))
+        val (backup, files) = backup(backupEntry(appleMusicId = 2L, fileId = "lyrics_bb") to ttmlBytes())
+
+        val result = transaction(events) { manifest ->
+            events += "publish"
+            published = manifest
+            true
+        }.merge(current, CustomLyricsRestorePolicy.KEEP_EXISTING, streamBackup(backup, files))
+
+        assertTrue(result is CustomLyricsRestoreResult.Restored)
+        assertEquals(listOf(1L, 2L), published.entries.map(CustomLyricsEntry::appleMusicId))
+        assertEquals(listOf("write:lyrics_new1", "publish"), events)
+    }
+
+    @Test
+    fun `keep existing policy rolls back every new file when publish fails`() {
+        val events = mutableListOf<String>()
+        val current = CustomLyricsManifest(
+            listOf(
+                existingEntry(appleMusicId = 1L, fileId = "lyrics_a"),
+                existingEntry(appleMusicId = 2L, fileId = "lyrics_b"),
+            ),
+        )
+        val (backup, files) = backup(
+            backupEntry(appleMusicId = 2L, fileId = "lyrics_bb") to ttmlBytes(),
+            backupEntry(appleMusicId = 3L, fileId = "lyrics_cc") to ttmlBytes(),
+        )
+
+        val result = transaction(events) { events += "publish"; false }
+            .merge(current, CustomLyricsRestorePolicy.KEEP_EXISTING, streamBackup(backup, files))
+
+        assertEquals(CustomLyricsRestoreResult.Failed("无法发布歌词映射"), result)
+        assertEquals(
+            listOf("write:lyrics_new1", "write:lyrics_new2", "publish", "delete:lyrics_new1", "delete:lyrics_new2"),
+            events,
+        )
     }
 
     @Test
@@ -66,7 +166,7 @@ class CustomLyricsRestoreTransactionTest {
                 events += "write:$fileId"
                 fileId != "lyrics_new2"
             },
-        ) { events += "publish"; true }.merge(current, streamBackup(backup, files))
+        ) { events += "publish"; true }.merge(current, CustomLyricsRestorePolicy.OVERWRITE, streamBackup(backup, files))
 
         assertEquals(CustomLyricsRestoreResult.Failed("无法写入共享歌词文件"), result)
         assertEquals(
@@ -94,7 +194,8 @@ class CustomLyricsRestoreTransactionTest {
             backupEntry(appleMusicId = 3L, fileId = "lyrics_cc") to ttmlBytes(),
         )
 
-        val result = transaction(events) { events += "publish"; false }.merge(current, streamBackup(backup, files))
+        val result = transaction(events) { events += "publish"; false }
+            .merge(current, CustomLyricsRestorePolicy.OVERWRITE, streamBackup(backup, files))
 
         assertEquals(CustomLyricsRestoreResult.Failed("无法发布歌词映射"), result)
         assertEquals(
@@ -109,11 +210,101 @@ class CustomLyricsRestoreTransactionTest {
         val current = CustomLyricsManifest(listOf(existingEntry(appleMusicId = 1L, fileId = "lyrics_a")))
 
         val result = transaction(events) { events += "publish"; true }
-            .merge(current, streamBackup(CustomLyricsBackup(CustomLyricsManifest.empty()), emptyMap()))
+            .merge(current, CustomLyricsRestorePolicy.OVERWRITE, streamBackup(CustomLyricsBackup(CustomLyricsManifest.empty()), emptyMap()))
 
         assertTrue(result is CustomLyricsRestoreResult.Restored)
         assertEquals(current, (result as CustomLyricsRestoreResult.Restored).manifest)
         assertTrue(events.isEmpty())
+    }
+
+    @Test
+    fun `an empty backup manifest with stray files written before decode cleans them up`() {
+        val events = mutableListOf<String>()
+        val current = CustomLyricsManifest(listOf(existingEntry(appleMusicId = 1L, fileId = "lyrics_a")))
+
+        val result = transaction(events) { events += "publish"; true }
+            .merge(current, CustomLyricsRestorePolicy.OVERWRITE) { onFile ->
+                onFile("lyrics_bb", ttmlBytes())
+                onFile("lyrics_cc", ttmlBytes())
+                CustomLyricsBackupDecodeResult.Decoded(CustomLyricsBackup(CustomLyricsManifest.empty()))
+            }
+
+        assertTrue(result is CustomLyricsRestoreResult.Restored)
+        assertEquals(current, (result as CustomLyricsRestoreResult.Restored).manifest)
+        assertEquals(
+            listOf(
+                "write:lyrics_new1",
+                "write:lyrics_new2",
+                "delete:lyrics_new1",
+                "delete:lyrics_new2",
+            ),
+            events,
+        )
+    }
+
+    @Test
+    fun `a write failure with an empty backup manifest fails and rolls back`() {
+        val events = mutableListOf<String>()
+        val current = CustomLyricsManifest(listOf(existingEntry(appleMusicId = 1L, fileId = "lyrics_a")))
+
+        val result = transaction(
+            events,
+            write = { fileId, _ ->
+                events += "write:$fileId"
+                fileId != "lyrics_new2"
+            },
+        ) { events += "publish"; true }
+            .merge(current, CustomLyricsRestorePolicy.OVERWRITE) { onFile ->
+                onFile("lyrics_bb", ttmlBytes())
+                onFile("lyrics_cc", ttmlBytes())
+                CustomLyricsBackupDecodeResult.Decoded(CustomLyricsBackup(CustomLyricsManifest.empty()))
+            }
+
+        assertEquals(CustomLyricsRestoreResult.Failed("无法写入共享歌词文件"), result)
+        assertEquals(
+            listOf(
+                "write:lyrics_new1",
+                "write:lyrics_new2",
+                "delete:lyrics_new2",
+                "delete:lyrics_new1",
+            ),
+            events,
+        )
+    }
+
+    @Test
+    fun `a backup manifest with duplicate apple music ids fails and rolls back`() {
+        val events = mutableListOf<String>()
+        val declared = CustomLyricsBackup(
+            CustomLyricsManifest(
+                listOf(
+                    backupEntry(2L, "lyrics_bb"),
+                    backupEntry(2L, "lyrics_cc"),
+                    backupEntry(3L, "lyrics_dd"),
+                ),
+            ),
+        )
+
+        val result = transaction(events) { events += "publish"; true }
+            .merge(CustomLyricsManifest.empty(), CustomLyricsRestorePolicy.OVERWRITE) { onFile ->
+                onFile("lyrics_bb", ttmlBytes())
+                onFile("lyrics_cc", ttmlBytes())
+                onFile("lyrics_dd", ttmlBytes())
+                CustomLyricsBackupDecodeResult.Decoded(declared)
+            }
+
+        assertEquals(CustomLyricsRestoreResult.Failed("备份条目重复"), result)
+        assertEquals(
+            listOf(
+                "write:lyrics_new1",
+                "write:lyrics_new2",
+                "write:lyrics_new3",
+                "delete:lyrics_new1",
+                "delete:lyrics_new2",
+                "delete:lyrics_new3",
+            ),
+            events,
+        )
     }
 
     @Test
@@ -130,7 +321,7 @@ class CustomLyricsRestoreTransactionTest {
             events += "publish"
             published = manifest
             true
-        }.merge(current, streamBackup(backup, files))
+        }.merge(current, CustomLyricsRestorePolicy.OVERWRITE, streamBackup(backup, files))
 
         assertTrue(result is CustomLyricsRestoreResult.Restored)
         assertEquals(41, (result as CustomLyricsRestoreResult.Restored).manifest.entries.size)
@@ -196,7 +387,7 @@ class CustomLyricsRestoreTransactionTest {
         val (backup, files) = backup(backupEntry(appleMusicId = 3L, fileId = "lyrics_cc") to ttmlBytes())
 
         val result = transaction(events, fileIdFactory = { "bad file id!" }) { events += "publish"; true }
-            .merge(CustomLyricsManifest.empty(), streamBackup(backup, files))
+            .merge(CustomLyricsManifest.empty(), CustomLyricsRestorePolicy.OVERWRITE, streamBackup(backup, files))
 
         assertEquals(CustomLyricsRestoreResult.Failed("无法生成歌词文件 ID"), result)
         assertTrue(events.isEmpty())
@@ -208,7 +399,7 @@ class CustomLyricsRestoreTransactionTest {
         val (backup, files) = backup(backupEntry(appleMusicId = 3L, fileId = "lyrics_cc") to ttmlBytes())
 
         val result = transaction(events, fileIdFactory = { "lyrics_taken" }) { events += "publish"; true }
-            .merge(CustomLyricsManifest(listOf(existingEntry(1L, "lyrics_taken"))), streamBackup(backup, files))
+            .merge(CustomLyricsManifest(listOf(existingEntry(1L, "lyrics_taken"))), CustomLyricsRestorePolicy.OVERWRITE, streamBackup(backup, files))
 
         assertEquals(CustomLyricsRestoreResult.Failed("无法生成唯一歌词文件 ID"), result)
         assertTrue(events.isEmpty())
