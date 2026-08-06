@@ -604,20 +604,6 @@ class SettingsActivity : Activity() {
                 setTextColor(palette.onSurfaceVariant)
                 setPadding(dp(16), dp(4), dp(16), dp(12))
             })
-            if (manifest.entries.isNotEmpty()) {
-                addView(
-                    customLyricsSearchInput(writable),
-                    LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        dp(44),
-                    ).apply {
-                        marginStart = dp(16)
-                        marginEnd = dp(16)
-                        bottomMargin = dp(6)
-                    },
-                )
-                addView(customLyricsEntriesRegion(writable))
-            }
             addView(LinearLayout(this@SettingsActivity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding(dp(12), 0, dp(12), dp(12))
@@ -639,6 +625,20 @@ class SettingsActivity : Activity() {
                     LinearLayout.LayoutParams(0, dp(48), 1f),
                 )
             })
+            if (manifest.entries.isNotEmpty()) {
+                addView(
+                    customLyricsSearchInput(writable),
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        dp(44),
+                    ).apply {
+                        marginStart = dp(16)
+                        marginEnd = dp(16)
+                        bottomMargin = dp(6)
+                    },
+                )
+                addView(customLyricsEntriesRegion(writable))
+            }
         }
 
     private fun customLyricsSearchInput(writable: Boolean): View =

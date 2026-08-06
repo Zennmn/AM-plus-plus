@@ -54,6 +54,25 @@ class CustomLyricsListPageStructuralRegressionTest {
     }
 
     @Test
+    fun `places add and backup actions above the search input`() {
+        val activity = projectFile("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
+        val card = activity.substringAfter("private fun customLyricsCard(")
+            .substringBefore("private fun customLyricsSearchInput(")
+
+        val searchIndex = card.indexOf("customLyricsSearchInput(writable)")
+        assertTrue("search input call must exist", searchIndex >= 0)
+        val entriesGate = card.indexOf("if (manifest.entries.isNotEmpty())")
+        assertTrue("entries gate must exist", entriesGate >= 0)
+        for (label in listOf("添加歌词", "备份歌词", "恢复备份")) {
+            val actionIndex = card.indexOf(label)
+            assertTrue("$label action must exist", actionIndex >= 0)
+            assertTrue("$label action must precede the search input", actionIndex < searchIndex)
+            assertTrue("$label action must remain outside the entries gate", actionIndex < entriesGate)
+        }
+        assertTrue("search input must remain inside the entries gate", entriesGate < searchIndex)
+    }
+
+    @Test
     fun `keeps empty and remote unavailable semantics with a no match state`() {
         val activity = projectFile("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
 
