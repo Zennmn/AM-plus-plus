@@ -32,10 +32,6 @@ internal class LyricBlurRenderer {
             .toList()
             .forEach(::clear)
         targets.forEach { (view, target) ->
-            if (target <= 0f) {
-                clear(view)
-                return@forEach
-            }
             val state = transitions[view]
             val current = state?.radiusAt(now) ?: 0f
             if (state != null && state.targetRadius == target) return@forEach
@@ -88,6 +84,7 @@ internal class LyricBlurRenderer {
     private fun renderFrame(nowMs: Long) {
         var needsAnotherFrame = false
         transitions.forEach { (view, state) ->
+            if (state.startRadius == state.targetRadius) return@forEach
             val radius = state.radiusAt(nowMs)
             val quantized = BidirectionalBlurPolicy.quantize(radius)
             if (quantized != state.appliedRadius) {
@@ -98,7 +95,6 @@ internal class LyricBlurRenderer {
                 needsAnotherFrame = true
             } else {
                 state.startRadius = state.targetRadius
-                state.startedAtMs = nowMs
             }
         }
         if (needsAnotherFrame) scheduleFrame()

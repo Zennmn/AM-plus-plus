@@ -59,12 +59,40 @@ class FutureLyricBlurStructuralRegressionTest {
     }
 
     @Test
-    fun `highlighted rows clear immediately while nonzero blur still animates`() {
-        val compactRenderer = rendererSource.replace(Regex("\\s+"), " ")
+    fun `highlighted rows transition to zero radius instead of clearing immediately`() {
+        val animateToBody = rendererSource
+            .substringAfter("fun animateTo(")
+            .substringBefore("fun applyImmediately(")
+        val compactBody = animateToBody.replace(Regex("\\s+"), " ")
 
-        assertTrue(compactRenderer.contains("if (target <= 0f) { clear(view) return@forEach }"))
-        assertTrue(rendererSource.contains("Transition("))
-        assertTrue(rendererSource.contains("scheduleFrame()"))
+        assertFalse("animateTo must not clear target views directly", compactBody.contains("clear("))
+        assertFalse("animateTo must not special-case zero targets", compactBody.contains("target <= 0f"))
+        assertTrue("zero targets still build a Transition through the shared path", compactBody.contains("targetRadius = target"))
+        assertTrue("transitions are driven by the shared frame callback", rendererSource.contains("scheduleFrame()"))
+    }
+
+    @Test
+    fun `settled transitions converge without rewinding timing or re-arming frames`() {
+        val renderFrameBody = rendererSource
+            .substringAfter("private fun renderFrame(")
+            .substringBefore("private fun applyRadius(")
+        val compactBody = renderFrameBody.replace(Regex("\\s+"), " ")
+
+        assertTrue("completion must converge startRadius onto targetRadius", compactBody.contains("state.startRadius = state.targetRadius"))
+        assertFalse("completion must not rewind startedAtMs", compactBody.contains("startedAtMs = nowMs"))
+        assertTrue("stable transitions must be skipped so they cannot re-arm the frame", compactBody.contains("state.startRadius == state.targetRadius"))
+        assertTrue("frames are only re-armed while a transition is unfinished", compactBody.contains("if (needsAnotherFrame) scheduleFrame()"))
+    }
+
+    @Test
+    fun `applyRadius settles a zero quantized radius onto a null render effect`() {
+        val applyRadiusBody = rendererSource
+            .substringAfter("private fun applyRadius(")
+            .substringBefore("private fun scheduleFrame(")
+        val compactBody = applyRadiusBody.replace(Regex("\\s+"), " ")
+
+        assertTrue("a settled zero radius must map to a null effect", compactBody.contains("if (quantized == 0) { null }"))
+        assertTrue("the resolved effect must reach the view", compactBody.contains("view.setRenderEffect(effect)"))
     }
 
     @Test
