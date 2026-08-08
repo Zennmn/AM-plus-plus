@@ -198,9 +198,22 @@ class AmllTtmlFormatConverterTest {
 
         val result = AmllTtmlFormatConverter.toAppleFormat(several)
 
-        assertEquals(1, Regex("<text for=\"L1\">").findAll(result.ttml).count())
-        assertTrue(result.ttml.contains("<text for=\"L1\">ZH1</text>"))
-        assertTrue(result.ttml.contains("<text for=\"L1\">ROMA1</text>"))
+        // Matching each whole track proves exactly one text survived per kind;
+        // `<text for="L1">` itself appears twice, once per track.
+        assertTrue(
+            result.ttml.contains(
+                "<translations><translation xml:lang=\"zh-Hans\">" +
+                    "<text for=\"L1\">ZH1</text>" +
+                    "</translation></translations>",
+            ),
+        )
+        assertTrue(
+            result.ttml.contains(
+                "<transliterations><transliteration xml:lang=\"ko-Latn\">" +
+                    "<text for=\"L1\">ROMA1</text>" +
+                    "</transliteration></transliterations>",
+            ),
+        )
         assertFalse(result.ttml.contains("EN1"))
         assertFalse(result.ttml.contains("ROMA2"))
     }
@@ -307,13 +320,19 @@ class AmllTtmlFormatConverterTest {
     fun `malformed and empty input never throws`() {
         assertEquals("", AmllTtmlFormatConverter.toAppleFormat("").ttml)
         assertEquals("plain text", AmllTtmlFormatConverter.toAppleFormat("plain text").ttml)
-        assertFalse(AmllTtmlFormatConverter.toAppleFormat("<tt><body>").converted)
         assertFalse(AmllTtmlFormatConverter.toAppleFormat("<unclosed attr=\"").converted)
-        assertFalse(
-            AmllTtmlFormatConverter.toAppleFormat(
-                "<tt><head><metadata/></head><body><p itunes:key=\"L1\">",
-            ).converted,
-        )
+        // A truncated document still has its root declared, but no track is
+        // invented from lines the scanner could not close.
+        listOf(
+            "<tt><body>",
+            "<tt><head><metadata/></head><body><p itunes:key=\"L1\">",
+        ).forEach { malformed ->
+            val result = AmllTtmlFormatConverter.toAppleFormat(malformed)
+
+            assertFalse(result.ttml.contains("<iTunesMetadata"))
+            assertTrue(result.ttml.startsWith("<tt "))
+            assertTrue(result.ttml.contains("""xml:lang="ko""""))
+        }
     }
 
     @Test

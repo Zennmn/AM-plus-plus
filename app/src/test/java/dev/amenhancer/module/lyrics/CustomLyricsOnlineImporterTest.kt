@@ -21,9 +21,10 @@ class CustomLyricsOnlineImporterTest {
         val result = importer.importAmll(42L)
 
         assertEquals(42L, requestedId)
+        assertTrue(result is CustomLyricsOnlineImportResult.Imported)
         assertEquals(
-            CustomLyricsOnlineImportResult.Imported(ttml, CustomLyricsSources.AMLL),
-            result,
+            CustomLyricsSources.AMLL,
+            (result as CustomLyricsOnlineImportResult.Imported).source,
         )
     }
 
@@ -111,8 +112,16 @@ class CustomLyricsOnlineImporterTest {
 
     @Test
     fun `apple formatted amll payloads are imported unchanged`() {
+        // Already carries its tracks in the head, so the converter leaves it be.
+        val appleFormat = """
+            <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" itunes:timing="Word" xml:lang="ko">
+            <head><metadata><iTunesMetadata xmlns="http://music.apple.com/lyric-ttml-internal">
+            <translations><translation xml:lang="zh-Hans"><text for="L1">T1</text></translation></translations>
+            </iTunesMetadata></metadata></head>
+            <body><div><p begin="0.0" end="1.0" itunes:key="L1"><span begin="0.0" end="1.0">aa</span></p></div></body></tt>
+        """.trimIndent()
         val importer = CustomLyricsOnlineImporter(
-            fetchAmll = { ttml },
+            fetchAmll = { appleFormat },
             fetchAmLyrics = { error("must not fetch AM-Lyrics") },
             fetchNeteaseYrc = { error("must not fetch NetEase") },
         )
@@ -121,7 +130,7 @@ class CustomLyricsOnlineImporterTest {
 
         assertEquals(
             CustomLyricsOnlineImportResult.Imported(
-                ttml,
+                appleFormat,
                 CustomLyricsSources.AMLL,
                 reformatted = false,
             ),
