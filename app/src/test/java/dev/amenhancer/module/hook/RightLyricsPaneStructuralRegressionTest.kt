@@ -99,13 +99,18 @@ class RightLyricsPaneStructuralRegressionTest {
         assertTrue(paneSource.contains("\"showAsDropDown\""))
         assertTrue(paneSource.contains("View::class.java"))
         assertTrue(paneSource.contains("Int::class.javaPrimitiveType"))
+        assertTrue(
+            Regex(
+                """getDeclaredMethod\(\s*"showAsDropDown",\s*View::class.java,\s*Int::class.javaPrimitiveType,\s*Int::class.javaPrimitiveType,\s*Int::class.javaPrimitiveType""",
+            ).containsMatchIn(paneSource),
+        )
         assertTrue(paneSource.contains("ModernXposedRuntime.hookMethod(showAsDropDown"))
         assertTrue(paneSource.contains("override fun beforeHookedMethod"))
         assertTrue(paneSource.contains("shiftTranslationsPopupOffset(param)"))
         assertTrue(paneSource.contains("contentView.id != popupMenuId"))
         assertTrue(paneSource.contains("contentView.measure("))
         assertTrue(paneSource.contains("View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)"))
-        assertTrue(paneSource.contains("popupHeight + if (overlapAnchor) 0 else anchor.height"))
+        assertTrue(paneSource.contains("measureResult.isFailure"))
         assertTrue(paneSource.contains("popup.overlapAnchor"))
         assertTrue(paneSource.contains("if (overlapAnchor) 0 else anchor.height"))
         assertTrue(paneSource.contains("param.args[2]"))

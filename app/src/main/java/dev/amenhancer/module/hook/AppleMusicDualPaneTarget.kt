@@ -189,11 +189,15 @@ private object RightLyricsPaneLayout {
  * controls strip hidden the lyrics sheet reaches the bottom edge, so the
  * stock popup would open below the visible sheet and clip black. This
  * framework hook shifts only the popup's own y offset by the popup's own
- * measured height plus the anchor button's height, so the popup's bottom edge
- * lands on the button's top edge; the anchor view, ConstraintLayout, lyrics
- * metrics and bottom-bar boundary are never touched. Matching is strict
- * (popup content id + lyrics-sheet ancestor + tablet predicate), so every
- * other PopupWindow in the target process passes through unchanged.
+ * measured height plus the anchor button's height (unless overlapAnchor is
+ * set, in which case the framework already counts the anchor), so the popup's
+ * bottom edge lands on the button's top edge; the anchor view,
+ * ConstraintLayout, lyrics metrics and bottom-bar boundary are never touched.
+ * Matching is strict (popup content id + lyrics-sheet ancestor + tablet
+ * predicate), so every other PopupWindow in the target process passes through
+ * unchanged. The four-argument showAsDropDown is hooked because the one- and
+ * three-argument overloads both delegate to it, so one hook covers every
+ * entry point without double-shifting.
  */
 private object TranslationsPopupOffsetHook {
     private const val TRANSLATIONS_POPUP_MENU = "translations_popup_menu"
@@ -215,6 +219,7 @@ private object TranslationsPopupOffsetHook {
             val showAsDropDown = android.widget.PopupWindow::class.java.getDeclaredMethod(
                 "showAsDropDown",
                 View::class.java,
+                Int::class.javaPrimitiveType,
                 Int::class.javaPrimitiveType,
                 Int::class.javaPrimitiveType,
             )
@@ -248,12 +253,24 @@ private object TranslationsPopupOffsetHook {
             sparseDebug("translations popup offset skipped: lyrics sheet ancestor missing")
             return
         }
-        contentView.measure(
-            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
-            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
-        )
+        val measureResult = runCatching {
+            contentView.measure(
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            )
+        }
+        if (measureResult.isFailure) {
+            sparseDebug("translations popup offset skipped: contentView measure failed")
+            return
+        }
         val popupHeight = contentView.measuredHeight
-        if (popupHeight <= 0 || anchor.height <= 0) return
+        if (popupHeight <= 0 || anchor.height <= 0) {
+            sparseDebug(
+                "translations popup offset skipped: popupHeight=" + popupHeight +
+                    " anchorHeight=" + anchor.height,
+            )
+            return
+        }
         val originalYOffset = param.args[2] as? Int ?: return
         val overlapAnchor = runCatching { popup.overlapAnchor }.getOrDefault(false)
         val shiftAmount = popupHeight + if (overlapAnchor) 0 else anchor.height
