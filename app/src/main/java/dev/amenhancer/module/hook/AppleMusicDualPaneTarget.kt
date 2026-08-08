@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -19,6 +20,7 @@ import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 import java.lang.ref.WeakReference
 import java.util.WeakHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.roundToInt
 
 /**
@@ -46,6 +48,7 @@ internal object DualPaneResourceHook {
             DualPaneShell.installImmediately(root)
         }
         hookTabletLandscapeLyricsSheet()
+        TranslationsPopupOffsetHook.install()
         // The modified package changes `lyrics_line_text_size` only in its
         // w640dp resource table. Hook the two layouts that actually reference
         // that dimension so normal and karaoke lyrics receive the same 35sp
@@ -177,6 +180,120 @@ private object RightLyricsPaneLayout {
         val field = findField(gradients.javaClass, fieldName)
             ?: error("AlphaGradientFrameLayout.$fieldName was unavailable")
         field.setBoolean(gradients, enabled)
+    }
+}
+
+/**
+ * Apple shows the translations popup synchronously from the button onClick as
+ * PopupWindow.showAsDropDown(anchor, x, y). With the dual-pane landscape
+ * controls strip hidden the lyrics sheet reaches the bottom edge, so the
+ * stock popup would open below the visible sheet and clip black. This
+ * framework hook shifts only the popup's own y offset by the popup's own
+ * measured height plus the anchor button's height, so the popup's bottom edge
+ * lands on the button's top edge; the anchor view, ConstraintLayout, lyrics
+ * metrics and bottom-bar boundary are never touched. Matching is strict
+ * (popup content id + lyrics-sheet ancestor + tablet predicate), so every
+ * other PopupWindow in the target process passes through unchanged.
+ */
+private object TranslationsPopupOffsetHook {
+    private const val TRANSLATIONS_POPUP_MENU = "translations_popup_menu"
+    private const val CONTROLS = "controls"
+    private const val RECYCLER_VIEW_GRADIENTS = "recycler_view_gradients"
+    private const val SPARSE_DEBUG_INTERVAL_MS = 60_000L
+
+    private val installed = AtomicBoolean(false)
+    @Volatile
+    private var lastDebugUptime = 0L
+
+    /**
+     * Idempotent: DualPaneResourceHook.install may run more than once, and a
+     * framework hook failure must never take dual-pane down with it.
+     */
+    fun install() {
+        if (!installed.compareAndSet(false, true)) return
+        runCatching {
+            val showAsDropDown = android.widget.PopupWindow::class.java.getDeclaredMethod(
+                "showAsDropDown",
+                View::class.java,
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+            )
+            ModernXposedRuntime.hookMethod(showAsDropDown, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: XC_MethodHook.MethodHookParam) {
+                    shiftTranslationsPopupOffset(param)
+                }
+            })
+            debug("translations popup offset hook installed")
+        }.onFailure {
+            debug("translations popup offset hook registration failed: $it")
+        }
+    }
+
+    private fun shiftTranslationsPopupOffset(param: XC_MethodHook.MethodHookParam) {
+        val popup = param.thisObject as? android.widget.PopupWindow ?: return
+        val anchor = param.args.firstOrNull() as? View ?: return
+        if (!TabletModeQualifier.isEligible(anchor.context)) return
+        val resources = anchor.resources
+        val popupMenuId = resources.getIdentifier(
+            TRANSLATIONS_POPUP_MENU,
+            "id",
+            ModuleConstants.TARGET_PACKAGE,
+        ).takeIf { it != 0 } ?: run {
+            sparseDebug("translations popup offset skipped: id/translations_popup_menu missing")
+            return
+        }
+        val contentView = runCatching { popup.contentView }.getOrNull() ?: return
+        if (contentView.id != popupMenuId) return
+        if (findLyricsSheetRoot(anchor, resources) == null) {
+            sparseDebug("translations popup offset skipped: lyrics sheet ancestor missing")
+            return
+        }
+        contentView.measure(
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+        )
+        val popupHeight = contentView.measuredHeight
+        if (popupHeight <= 0 || anchor.height <= 0) return
+        val originalYOffset = param.args[2] as? Int ?: return
+        val overlapAnchor = runCatching { popup.overlapAnchor }.getOrDefault(false)
+        val shiftAmount = popupHeight + if (overlapAnchor) 0 else anchor.height
+        val shiftedYOffset = originalYOffset - shiftAmount
+        param.args[2] = shiftedYOffset
+        sparseDebug(
+            "translations popup yOffset shifted from " + originalYOffset + " to " + shiftedYOffset +
+                " popupHeight=" + popupHeight + " anchorHeight=" + anchor.height,
+        )
+    }
+
+    /**
+     * The first ancestor containing both the hidden controls container and
+     * the recycler gradients is the landscape lyrics sheet root; the gate
+     * keeps the shift on popups anchored inside the lyrics sheet only.
+     */
+    private fun findLyricsSheetRoot(anchor: View, resources: android.content.res.Resources): View? {
+        val controlsId = resources.getIdentifier(CONTROLS, "id", ModuleConstants.TARGET_PACKAGE)
+            .takeIf { it != 0 } ?: return null
+        val gradientsId = resources.getIdentifier(RECYCLER_VIEW_GRADIENTS, "id", ModuleConstants.TARGET_PACKAGE)
+            .takeIf { it != 0 } ?: return null
+        var candidate = anchor.parent as? View
+        while (candidate != null) {
+            if (
+                candidate.findViewById<View>(controlsId) != null &&
+                candidate.findViewById<View>(gradientsId) != null
+            ) {
+                return candidate
+            }
+            candidate = candidate.parent as? View
+        }
+        return null
+    }
+
+    /** The framework hook runs for every popup; keep diagnostics sparse. */
+    private fun sparseDebug(message: String) {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastDebugUptime < SPARSE_DEBUG_INTERVAL_MS) return
+        lastDebugUptime = now
+        debug(message)
     }
 }
 

@@ -20,6 +20,10 @@ class RightLyricsPaneStructuralRegressionTest {
             ?: error("AppleMusicDualPaneTarget.kt was not found from the unit-test working directory")
     }
     private val compactSource: String by lazy { source.replace(Regex("\\s+"), " ") }
+    private val paneSource: String by lazy {
+        source.substringAfter("private object RightLyricsPaneLayout")
+            .substringBefore("internal data class AlphaGradientEdgeFieldProfile")
+    }
 
     @Test
     fun `mirrors the modified right lyrics sheet resource at its inflation boundary`() {
@@ -76,5 +80,75 @@ class RightLyricsPaneStructuralRegressionTest {
         assertTrue(source.contains("LyricsLayoutFieldProfiles.resolve(fragment.javaClass)"))
         assertTrue(source.contains("profile.synchronizedMetrics.first()"))
         assertTrue(source.contains("RightLyricsPaneLayout.reapplyVerticalGradientEdges(gradients)"))
+    }
+
+    @Test
+    fun `keeps controls gone through the hide helper without an invisible candidate`() {
+        assertTrue(paneSource.contains("hide(root, resources, CONTROLS)"))
+        assertTrue(paneSource.contains("private fun hide(root: View, resources: android.content.res.Resources, name: String)"))
+        assertTrue(paneSource.contains("visibility = View.GONE"))
+        assertFalse(paneSource.contains("INVISIBLE"))
+        assertFalse(paneSource.contains("visibility: Int"))
+    }
+
+    @Test
+    fun `offsets the translations popup through the framework showAsDropDown hook`() {
+        assertTrue(paneSource.contains("TRANSLATIONS_POPUP_MENU = \"translations_popup_menu\""))
+        assertTrue(source.contains("TranslationsPopupOffsetHook.install()"))
+        assertTrue(paneSource.contains("PopupWindow::class.java.getDeclaredMethod("))
+        assertTrue(paneSource.contains("\"showAsDropDown\""))
+        assertTrue(paneSource.contains("View::class.java"))
+        assertTrue(paneSource.contains("Int::class.javaPrimitiveType"))
+        assertTrue(paneSource.contains("ModernXposedRuntime.hookMethod(showAsDropDown"))
+        assertTrue(paneSource.contains("override fun beforeHookedMethod"))
+        assertTrue(paneSource.contains("shiftTranslationsPopupOffset(param)"))
+        assertTrue(paneSource.contains("contentView.id != popupMenuId"))
+        assertTrue(paneSource.contains("contentView.measure("))
+        assertTrue(paneSource.contains("View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)"))
+        assertTrue(paneSource.contains("popupHeight + if (overlapAnchor) 0 else anchor.height"))
+        assertTrue(paneSource.contains("popup.overlapAnchor"))
+        assertTrue(paneSource.contains("if (overlapAnchor) 0 else anchor.height"))
+        assertTrue(paneSource.contains("param.args[2]"))
+        assertFalse(paneSource.contains("PLAYER_CONTROLS_HEIGHT_PERCENT"))
+        assertFalse(paneSource.contains("sheetHeight"))
+        assertFalse(paneSource.contains("TypedValue"))
+    }
+
+    @Test
+    fun `matches only a popup anchored inside the landscape lyrics sheet`() {
+        assertTrue(paneSource.contains("findLyricsSheetRoot(anchor, resources)"))
+        assertTrue(paneSource.contains("CONTROLS"))
+        assertTrue(paneSource.contains("RECYCLER_VIEW_GRADIENTS"))
+        assertTrue(paneSource.contains("candidate.findViewById<View>(controlsId) != null"))
+        assertTrue(paneSource.contains("candidate.findViewById<View>(gradientsId) != null"))
+        assertTrue(paneSource.contains("candidate = candidate.parent as? View"))
+        assertTrue(paneSource.contains("TabletModeQualifier.isEligible(anchor.context)"))
+    }
+
+    @Test
+    fun `never translates the translations button to reposition the popup`() {
+        assertFalse(paneSource.contains("setOnTouchListener"))
+        assertFalse(paneSource.contains("MotionEvent"))
+        assertFalse(paneSource.contains("ACTION_UP"))
+        assertFalse(paneSource.contains("translationY"))
+        assertFalse(paneSource.contains("installTranslationsButtonOffset"))
+        assertFalse(paneSource.contains("popupOffset"))
+        assertFalse(source.contains("import android.view.MotionEvent"))
+    }
+
+    @Test
+    fun `registers the popup hook once and never disables dual pane on failure`() {
+        assertTrue(paneSource.contains("compareAndSet(false, true)"))
+        assertTrue(paneSource.contains("runCatching"))
+        assertTrue(paneSource.contains("translations popup offset hook registration failed"))
+        assertTrue(paneSource.contains("hide(root, resources, CONTROLS)"))
+    }
+
+    @Test
+    fun `fails open when the popup or anchor has no measured height`() {
+        assertTrue(paneSource.contains("popupHeight <= 0"))
+        assertTrue(paneSource.contains("anchor.height <= 0"))
+        assertTrue(paneSource.contains("translations popup offset skipped"))
+        assertFalse(paneSource.contains("0.345f"))
     }
 }
