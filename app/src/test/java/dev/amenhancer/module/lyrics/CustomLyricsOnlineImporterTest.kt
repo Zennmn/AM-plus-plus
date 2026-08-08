@@ -105,7 +105,11 @@ class CustomLyricsOnlineImporterTest {
         assertFalse(imported.ttml.substringAfter("<body").contains("ttm:role=\"x-translation\""))
         assertTrue(imported.ttml.substringBefore('>').contains("""itunes:timing="Word""""))
         assertTrue(imported.ttml.substringBefore('>').contains("""xml:lang="ko""""))
-        assertTrue(imported.ttml.contains("<translation xml:lang=\"zh-Hans\"><text for=\"L1\">T1</text>"))
+        assertTrue(
+            imported.ttml.contains(
+                "<translation type=\"subtitle\" xml:lang=\"zh-Hans\"><text for=\"L1\">T1</text>",
+            ),
+        )
         assertTrue(imported.ttml.contains("<transliteration xml:lang=\"ko-Latn\"><text for=\"L1\">R1</text>"))
         assertTrue(TtmlInputPolicy.isAcceptable(imported.ttml))
     }

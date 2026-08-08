@@ -23,7 +23,7 @@ internal data class TtmlFormatConversion(
  *
  * ```
  * <iTunesMetadata xmlns="http://music.apple.com/lyric-ttml-internal">
- *   <translations><translation xml:lang="zh-Hans"><text for="L1">…</text></translation></translations>
+ *   <translations><translation type="subtitle" xml:lang="zh-Hans"><text for="L1">…</text></translation></translations>
  *   <transliterations><transliteration xml:lang="ko-Latn"><text for="L1">…</text></transliteration></transliterations>
  * </iTunesMetadata>
  * ```
@@ -71,6 +71,9 @@ internal object AmllTtmlFormatConverter {
     private const val LYRIC_LANGUAGE = "ko"
     private const val TRANSLATION_LANGUAGE = "zh-Hans"
     private const val TRANSLITERATION_LANGUAGE = "ko-Latn"
+
+    /** How Apple labels a translation meant to be shown under the lyric. */
+    private const val TRANSLATION_TYPE = "subtitle"
 
     private val EMPTY_DEFAULT_NAMESPACE = Regex("""\s+xmlns\s*=\s*(?:""|'')""")
     private val ROLE_ATTRIBUTE = attributePattern("ttm:role")
@@ -274,7 +277,7 @@ internal object AmllTtmlFormatConverter {
         translations: List<TrackEntry>,
         transliterations: List<TrackEntry>,
     ): String = buildString {
-        appendTrack(translations, "translations", "translation", TRANSLATION_LANGUAGE)
+        appendTrack(translations, "translations", "translation", TRANSLATION_LANGUAGE, TRANSLATION_TYPE)
         appendTrack(transliterations, "transliterations", "transliteration", TRANSLITERATION_LANGUAGE)
     }
 
@@ -283,10 +286,13 @@ internal object AmllTtmlFormatConverter {
         container: String,
         item: String,
         language: String,
+        type: String? = null,
     ) {
         if (entries.isEmpty()) return
         append('<').append(container).append('>')
-        append('<').append(item).append(" xml:lang=\"").append(language).append("\">")
+        append('<').append(item)
+        if (type != null) append(" type=\"").append(type).append('"')
+        append(" xml:lang=\"").append(language).append("\">")
         entries.forEach { entry ->
             append("<text for=\"").append(entry.key).append("\">")
             append(entry.text)

@@ -36,7 +36,7 @@ class AmllTtmlFormatConverterTest {
         )
         assertTrue(
             result.ttml.contains(
-                "<translations><translation xml:lang=\"zh-Hans\">" +
+                "<translations><translation type=\"subtitle\" xml:lang=\"zh-Hans\">" +
                     "<text for=\"L1\">T1</text><text for=\"L2\">T2</text>" +
                     "</translation></translations>",
             ),
@@ -265,7 +265,7 @@ class AmllTtmlFormatConverterTest {
         // `<text for="L1">` itself appears twice, once per track.
         assertTrue(
             result.ttml.contains(
-                "<translations><translation xml:lang=\"zh-Hans\">" +
+                "<translations><translation type=\"subtitle\" xml:lang=\"zh-Hans\">" +
                     "<text for=\"L1\">ZH1</text>" +
                     "</translation></translations>",
             ),
@@ -336,7 +336,7 @@ class AmllTtmlFormatConverterTest {
         assertTrue(
             result.ttml.contains(
                 "<iTunesMetadata xmlns=\"http://music.apple.com/lyric-ttml-internal\">" +
-                    "<translations><translation xml:lang=\"zh-Hans\">" +
+                    "<translations><translation type=\"subtitle\" xml:lang=\"zh-Hans\">" +
                     "<text for=\"L1\">T1</text></translation></translations>",
             ),
         )
