@@ -6,6 +6,8 @@ internal sealed interface CustomLyricsOnlineImportResult {
     data class Imported(
         val ttml: String,
         val source: String,
+        /** True when the AMLL TTML format was rewritten into the Apple Music format. */
+        val reformatted: Boolean = false,
     ) : CustomLyricsOnlineImportResult
 
     data class Failed(val message: String) : CustomLyricsOnlineImportResult
@@ -19,10 +21,17 @@ internal class CustomLyricsOnlineImporter(
 ) {
     fun importAmll(appleMusicId: Long): CustomLyricsOnlineImportResult {
         if (appleMusicId <= 0L) return CustomLyricsOnlineImportResult.Failed("Apple Music ID 必须是正整数")
-        val ttml = runCatching { fetchAmll(appleMusicId) }.getOrNull()
-            ?.takeIf(TtmlInputPolicy::isAcceptable)
+        val fetched = runCatching { fetchAmll(appleMusicId) }.getOrNull()
             ?: return CustomLyricsOnlineImportResult.Failed("AMLL 未找到可用 TTML")
-        return CustomLyricsOnlineImportResult.Imported(ttml, CustomLyricsSources.AMLL)
+        // AMLL serves its own TTML format; reformat it before Apple's parser sees it.
+        val conversion = AmllTtmlFormatConverter.toAppleFormat(fetched)
+        val ttml = conversion.ttml.takeIf(TtmlInputPolicy::isAcceptable)
+            ?: return CustomLyricsOnlineImportResult.Failed("AMLL 未找到可用 TTML")
+        return CustomLyricsOnlineImportResult.Imported(
+            ttml = ttml,
+            source = CustomLyricsSources.AMLL,
+            reformatted = conversion.converted,
+        )
     }
 
     fun importAmLyrics(appleMusicId: Long): CustomLyricsOnlineImportResult {

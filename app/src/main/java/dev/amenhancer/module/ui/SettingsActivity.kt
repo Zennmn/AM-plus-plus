@@ -1118,7 +1118,11 @@ class SettingsActivity : Activity() {
                 is CustomLyricsOnlineImportResult.Imported -> {
                     ttmlInput.setText(result.ttml)
                     onImported(result.source)
-                    toast("已导入 ${customLyricsSourceName(result.source)} 歌词，请确认后保存")
+                    val reformatNote =
+                        if (result.reformatted) "，已自动转为 Apple Music 格式" else ""
+                    toast(
+                        "已导入 ${customLyricsSourceName(result.source)} 歌词$reformatNote，请确认后保存",
+                    )
                 }
                 is CustomLyricsOnlineImportResult.Failed -> toast(result.message)
             }

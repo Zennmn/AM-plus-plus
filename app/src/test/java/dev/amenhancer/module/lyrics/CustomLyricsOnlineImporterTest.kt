@@ -2,6 +2,7 @@ package dev.amenhancer.module.lyrics
 
 import dev.amenhancer.module.model.CustomLyricsSources
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -73,5 +74,51 @@ class CustomLyricsOnlineImporterTest {
 
         assertTrue(importer.importAmLyrics(0L) is CustomLyricsOnlineImportResult.Failed)
         assertTrue(importer.importAmLyrics(42L) is CustomLyricsOnlineImportResult.Failed)
+    }
+
+    @Test
+    fun `amll formatted lyrics are reformatted into the apple music format on import`() {
+        val amllFormat = """
+            <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+            <head><metadata xmlns=""><ttm:agent type="person" xml:id="v1"/></metadata></head>
+            <body dur="00:03.000"><div xmlns="" begin="00:01.000" end="00:03.000">
+            <p begin="00:01.000" end="00:03.000" ttm:agent="v1" itunes:key="L1">
+            <span begin="00:01.000" end="00:03.000">word</span></p></div></body></tt>
+        """.trimIndent()
+        val importer = CustomLyricsOnlineImporter(
+            fetchAmll = { amllFormat },
+            fetchAmLyrics = { error("must not fetch AM-Lyrics") },
+            fetchNeteaseYrc = { error("must not fetch NetEase") },
+        )
+
+        val result = importer.importAmll(42L)
+
+        assertTrue(result is CustomLyricsOnlineImportResult.Imported)
+        val imported = result as CustomLyricsOnlineImportResult.Imported
+        assertTrue(imported.reformatted)
+        assertEquals(CustomLyricsSources.AMLL, imported.source)
+        assertFalse(imported.ttml.contains("""xmlns=""""))
+        assertTrue(imported.ttml.contains("""itunes:timing="Word""""))
+        assertTrue(TtmlInputPolicy.isAcceptable(imported.ttml))
+    }
+
+    @Test
+    fun `apple formatted amll payloads are imported unchanged`() {
+        val importer = CustomLyricsOnlineImporter(
+            fetchAmll = { ttml },
+            fetchAmLyrics = { error("must not fetch AM-Lyrics") },
+            fetchNeteaseYrc = { error("must not fetch NetEase") },
+        )
+
+        val result = importer.importAmll(42L)
+
+        assertEquals(
+            CustomLyricsOnlineImportResult.Imported(
+                ttml,
+                CustomLyricsSources.AMLL,
+                reformatted = false,
+            ),
+            result,
+        )
     }
 }
