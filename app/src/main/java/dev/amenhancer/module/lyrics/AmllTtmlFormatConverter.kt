@@ -31,8 +31,17 @@ internal data class TtmlFormatConversion(
  * A `<text>` carries whatever the source span held, so a line-by-line track
  * stays plain text and a word-by-word track keeps its timed `<span>`s.
  * Auxiliary spans nested in a background vocal (`ttm:role="x-bg"`) move to the
- * same `<text>` wrapped in an `x-bg` span, which is how Apple expresses a
- * background translation.
+ * same `<text>` wrapped in an `x-bg` span and in parentheses, which is how
+ * Apple sets a background translation apart from the line it accompanies.
+ *
+ * AMLL already writes an `<iTunesMetadata>` of its own to carry
+ * `<songwriters>`, so the tracks join that element ahead of what it holds
+ * rather than opening a second one beside it.
+ *
+ * The background vocal left in the body is rewritten too. Its `begin` / `end`
+ * go, because Apple reads the vocal's extent from its own syllables, and a
+ * vocal starting ahead of the first lyric syllable moves to the front of the
+ * line, because Apple places the highlight in document order.
  *
  * The language tags are pinned rather than carried over: Android Apple Music's
  * TTML parser only renders a translation and a transliteration together when
@@ -67,22 +76,33 @@ internal object AmllTtmlFormatConverter {
     private val ROLE_ATTRIBUTE = attributePattern("ttm:role")
     private val LANGUAGE_ATTRIBUTE = attributePattern("xml:lang")
     private val KEY_ATTRIBUTE = attributePattern("itunes:key")
+    private val BEGIN_ATTRIBUTE_VALUE = attributePattern("begin")
     private val TIMING_ATTRIBUTE_VALUE = attributePattern("itunes:timing")
     private val ITUNES_DECLARATION = Regex("""\sxmlns:itunes\s*=""")
     private val BEGIN_ATTRIBUTE = Regex("""\sbegin\s*=""")
+    private val SPAN_TIMING =
+        Regex("""\s(?:begin|end)\s*=\s*"[^"]*"|\s(?:begin|end)\s*=\s*'[^']*'""")
+    private val PARENTHESIZED = Regex("""^\s*[(（].*[)）]\s*$""", RegexOption.DOT_MATCHES_ALL)
+
+    private val AUXILIARY_ROLES = setOf(ROLE_TRANSLATION, ROLE_ROMAN, ROLE_BACKGROUND)
 
     private fun attributePattern(name: String) =
         Regex("""\s${Regex.escape(name)}\s*=\s*"([^"]*)"|\s${Regex.escape(name)}\s*=\s*'([^']*)'""")
 
     fun toAppleFormat(ttml: String): TtmlFormatConversion {
         if (ttml.isEmpty()) return TtmlFormatConversion(ttml, false)
-        // A head `<iTunesMetadata>` means the document is already in the Apple
-        // Music format; re-tagging it would risk duplicating its tracks.
-        if (nextElement(ttml, "iTunesMetadata", 0) != null) return TtmlFormatConversion(ttml, false)
+        // A declared track means the auxiliary spans already moved to the head,
+        // and migrating again would duplicate them. An `<iTunesMetadata>` on its
+        // own is no such signal: AMLL writes one to carry `<songwriters>`.
+        if (declaresTracks(ttml)) return TtmlFormatConversion(ttml, false)
         val migrated = migrateAuxiliaryTracks(ttml)
         val result = normalizeTags(migrated, wordTimed = hasTimedSpan(migrated))
         return TtmlFormatConversion(result, result != ttml)
     }
+
+    private fun declaresTracks(ttml: String) =
+        nextElement(ttml, "translations", 0) != null ||
+            nextElement(ttml, "transliterations", 0) != null
 
     /** Moves inline `x-translation` / `x-roman` spans into a head `<iTunesMetadata>`. */
     private fun migrateAuxiliaryTracks(ttml: String): String {
@@ -102,13 +122,32 @@ internal object AmllTtmlFormatConverter {
 
         if (translations.isEmpty() && transliterations.isEmpty()) return ttml
 
-        val block = buildITunesMetadata(translations, transliterations)
-        edits += if (metadata.selfClosing) {
-            Edit(metadata.start, metadata.end, "<metadata${metadata.attributes}>$block</metadata>")
-        } else {
-            Edit(metadata.contentEnd, metadata.contentEnd, block)
-        }
+        edits += declareTracks(ttml, metadata, buildTracks(translations, transliterations))
         return applyEdits(ttml, edits)
+    }
+
+    /**
+     * Places the tracks in the head, joining the `<iTunesMetadata>` AMLL already
+     * wrote for `<songwriters>` — ahead of what it holds, the order Apple uses —
+     * rather than opening a second one beside it.
+     */
+    private fun declareTracks(ttml: String, metadata: Element, tracks: String): Edit {
+        val container = nextElement(ttml, "iTunesMetadata", metadata.start)
+            ?.takeIf { it.end <= metadata.contentEnd }
+        return when {
+            container == null && metadata.selfClosing -> Edit(
+                metadata.start,
+                metadata.end,
+                "<metadata${metadata.attributes}>${wrapTracks(tracks)}</metadata>",
+            )
+            container == null -> Edit(metadata.contentEnd, metadata.contentEnd, wrapTracks(tracks))
+            container.selfClosing -> Edit(
+                container.start,
+                container.end,
+                "<iTunesMetadata${container.attributes}>$tracks</iTunesMetadata>",
+            )
+            else -> Edit(container.contentStart, container.contentStart, tracks)
+        }
     }
 
     private fun collectLine(
@@ -126,7 +165,8 @@ internal object AmllTtmlFormatConverter {
         var backgroundTranslation: String? = null
         var backgroundRoman: String? = null
 
-        childElements(ttml, line).forEach { child ->
+        val children = childElements(ttml, line)
+        children.forEach { child ->
             when (attribute(child.attributes, ROLE_ATTRIBUTE)) {
                 ROLE_TRANSLATION -> {
                     if (translation == null) translation = content(ttml, child)
@@ -136,19 +176,24 @@ internal object AmllTtmlFormatConverter {
                     if (roman == null) roman = content(ttml, child)
                     edits += removal(ttml, child, line.contentStart)
                 }
-                ROLE_BACKGROUND -> childElements(ttml, child).forEach { nested ->
-                    when (attribute(nested.attributes, ROLE_ATTRIBUTE)) {
-                        ROLE_TRANSLATION -> {
-                            if (backgroundTranslation == null) {
-                                backgroundTranslation = content(ttml, nested)
+                ROLE_BACKGROUND -> {
+                    val nested = childElements(ttml, child)
+                    val removals = mutableListOf<Edit>()
+                    nested.forEach { span ->
+                        when (attribute(span.attributes, ROLE_ATTRIBUTE)) {
+                            ROLE_TRANSLATION -> {
+                                if (backgroundTranslation == null) {
+                                    backgroundTranslation = content(ttml, span)
+                                }
+                                removals += removal(ttml, span, child.contentStart)
                             }
-                            edits += removal(ttml, nested, child.contentStart)
-                        }
-                        ROLE_ROMAN -> {
-                            if (backgroundRoman == null) backgroundRoman = content(ttml, nested)
-                            edits += removal(ttml, nested, child.contentStart)
+                            ROLE_ROMAN -> {
+                                if (backgroundRoman == null) backgroundRoman = content(ttml, span)
+                                removals += removal(ttml, span, child.contentStart)
+                            }
                         }
                     }
+                    edits += backgroundEdits(ttml, line, children, child, nested, removals)
                 }
             }
         }
@@ -157,26 +202,78 @@ internal object AmllTtmlFormatConverter {
         trackText(roman, backgroundRoman)?.let { transliterations += TrackEntry(key, it) }
     }
 
+    /**
+     * Rewrites the background vocal that stays in the body: its `begin` / `end`
+     * go, because Apple reads the vocal's extent from its syllables, and a vocal
+     * starting ahead of the lyrics moves to the front of the line, because Apple
+     * places the highlight in document order.
+     */
+    private fun backgroundEdits(
+        ttml: String,
+        line: Element,
+        siblings: List<Element>,
+        background: Element,
+        nested: List<Element>,
+        auxiliaryRemovals: List<Edit>,
+    ): List<Edit> {
+        // Without syllables to read the extent from, the attributes are the only
+        // timing the vocal has, so they stay and it keeps its place.
+        val syllable = firstSyllableBegin(ttml, nested) ?: return auxiliaryRemovals
+
+        val openTag = ttml.substring(background.start, background.contentStart)
+        val rewrite = auxiliaryRemovals +
+            Edit(background.start, background.contentStart, SPAN_TIMING.replace(openTag, ""))
+        val lyric = firstSyllableBegin(ttml, siblings)
+        if (siblings.firstOrNull() === background || lyric == null || syllable >= lyric) return rewrite
+
+        return listOf(
+            Edit(line.contentStart, line.contentStart, render(ttml, background.start, background.end, rewrite)),
+            removal(ttml, background, line.contentStart),
+        )
+    }
+
+    /** Begin time of the first timed lyric span among [candidates], if any. */
+    private fun firstSyllableBegin(ttml: String, candidates: List<Element>): Double? =
+        candidates.asSequence()
+            .filter { attribute(it.attributes, ROLE_ATTRIBUTE) !in AUXILIARY_ROLES }
+            .mapNotNull { clockSeconds(attribute(it.attributes, BEGIN_ATTRIBUTE_VALUE)) }
+            .firstOrNull()
+
+    /** Seconds in a clock value such as `3:02.550`, or `null` when unreadable. */
+    private fun clockSeconds(value: String?): Double? {
+        val parts = value?.split(':')?.takeIf { it.size in 1..3 } ?: return null
+        var seconds = 0.0
+        parts.forEach { part ->
+            seconds = seconds * 60 + (part.toDoubleOrNull() ?: return null)
+        }
+        return seconds
+    }
+
     private fun trackText(main: String?, background: String?): String? {
         if (main == null && background == null) return null
         return buildString {
             append(main.orEmpty())
             if (background != null) {
                 append("<span ttm:role=\"").append(ROLE_BACKGROUND).append("\">")
-                append(background)
+                append(parenthesized(background))
                 append("</span>")
             }
         }
     }
 
-    private fun buildITunesMetadata(
+    /** Apple parenthesizes a background track; AMLL leaves that to the reader. */
+    private fun parenthesized(text: String) =
+        if (PARENTHESIZED.matches(text)) text else "($text)"
+
+    private fun wrapTracks(tracks: String) =
+        "<iTunesMetadata xmlns=\"$ITUNES_NAMESPACE\">$tracks</iTunesMetadata>"
+
+    private fun buildTracks(
         translations: List<TrackEntry>,
         transliterations: List<TrackEntry>,
     ): String = buildString {
-        append("<iTunesMetadata xmlns=\"").append(ITUNES_NAMESPACE).append("\">")
         appendTrack(translations, "translations", "translation", TRANSLATION_LANGUAGE)
         appendTrack(transliterations, "transliterations", "transliteration", TRANSLITERATION_LANGUAGE)
-        append("</iTunesMetadata>")
     }
 
     private fun StringBuilder.appendTrack(
@@ -288,19 +385,21 @@ internal object AmllTtmlFormatConverter {
         return false
     }
 
-    private fun applyEdits(ttml: String, edits: List<Edit>): String {
-        if (edits.isEmpty()) return ttml
-        return buildString(ttml.length) {
-            var cursor = 0
+    private fun applyEdits(ttml: String, edits: List<Edit>): String =
+        if (edits.isEmpty()) ttml else render(ttml, 0, ttml.length, edits)
+
+    /** [ttml] between [from] and [to], with every edit falling inside applied. */
+    private fun render(ttml: String, from: Int, to: Int, edits: List<Edit>): String =
+        buildString(to - from) {
+            var cursor = from
             edits.sortedBy { it.start }.forEach { edit ->
-                if (edit.start < cursor) return@forEach
+                if (edit.start < cursor || edit.end > to) return@forEach
                 append(ttml, cursor, edit.start)
                 append(edit.replacement)
                 cursor = edit.end
             }
-            append(ttml, cursor, ttml.length)
+            append(ttml, cursor, to)
         }
-    }
 
     private fun attribute(attributes: String, pattern: Regex): String? {
         val match = pattern.find(attributes) ?: return null

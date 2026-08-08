@@ -154,13 +154,76 @@ class AmllTtmlFormatConverterTest {
 
         assertTrue(
             result.ttml.contains(
-                "<text for=\"L1\">T1<span ttm:role=\"x-bg\">BT1</span></text>",
+                "<text for=\"L1\">T1<span ttm:role=\"x-bg\">(BT1)</span></text>",
             ),
         )
         // The background vocal itself stays in the body, without its translation.
         val body = result.ttml.substringAfter("<body")
         assertTrue(body.contains("<span ttm:role=\"x-bg\"><span begin=\"1.0\" end=\"2.0\">(bb)</span></span>"))
         assertFalse(body.contains("BT1"))
+    }
+
+    @Test
+    fun `a background translation already parenthesized is not wrapped twice`() {
+        val parenthesized = """
+            <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+            <head><metadata xmlns=""/></head>
+            <body><div xmlns=""><p begin="0.0" end="2.0" itunes:key="L1">
+            <span begin="0.0" end="1.0">aa</span>
+            <span ttm:role="x-bg"><span begin="1.0" end="2.0">(bb)</span>
+            <span ttm:role="x-translation">（已加括号）</span></span>
+            </p></div></body></tt>
+        """.trimIndent()
+
+        val result = AmllTtmlFormatConverter.toAppleFormat(parenthesized)
+
+        assertTrue(
+            result.ttml.contains("<span ttm:role=\"x-bg\">（已加括号）</span></text>"),
+        )
+    }
+
+    @Test
+    fun `a background vocal loses the timing apple reads from its syllables`() {
+        val timedBackground = """
+            <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+            <head><metadata xmlns=""/></head>
+            <body><div xmlns=""><p begin="0.0" end="2.0" itunes:key="L1">
+            <span begin="0.0" end="1.0">aa</span>
+            <span ttm:role="x-bg" begin="1.0" end="2.0"><span begin="1.0" end="2.0">(bb)</span></span>
+            </p></div></body></tt>
+        """.trimIndent()
+
+        val result = AmllTtmlFormatConverter.toAppleFormat(timedBackground)
+        val body = result.ttml.substringAfter("<body")
+
+        assertTrue(
+            body.contains("<span ttm:role=\"x-bg\"><span begin=\"1.0\" end=\"2.0\">(bb)</span></span>"),
+        )
+    }
+
+    @Test
+    fun `a background vocal starting before the lyrics moves to the front of the line`() {
+        val leadingBackground = """
+            <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+            <head><metadata xmlns=""/></head>
+            <body><div xmlns=""><p begin="1.0" end="3.0" itunes:key="L1">
+            <span begin="2.0" end="3.0">aa</span>
+            <span ttm:role="x-bg" begin="1.0" end="2.0"><span begin="1.0" end="2.0">(bb)</span>
+            <span ttm:role="x-translation">BT</span></span>
+            </p></div></body></tt>
+        """.trimIndent()
+
+        val result = AmllTtmlFormatConverter.toAppleFormat(leadingBackground)
+        val body = result.ttml.substringAfter("<body")
+
+        assertTrue(
+            body.contains(
+                "itunes:key=\"L1\">" +
+                    "<span ttm:role=\"x-bg\"><span begin=\"1.0\" end=\"2.0\">(bb)</span></span>",
+            ),
+        )
+        assertTrue(body.indexOf("x-bg") < body.indexOf(">aa<"))
+        assertEquals(1, Regex("""x-bg""").findAll(body).count())
     }
 
     @Test
@@ -178,7 +241,7 @@ class AmllTtmlFormatConverterTest {
         val result = AmllTtmlFormatConverter.toAppleFormat(backgroundOnly)
 
         assertTrue(
-            result.ttml.contains("<text for=\"L9\"><span ttm:role=\"x-bg\">BT</span></text>"),
+            result.ttml.contains("<text for=\"L9\"><span ttm:role=\"x-bg\">(BT)</span></text>"),
         )
     }
 
@@ -236,7 +299,7 @@ class AmllTtmlFormatConverterTest {
     }
 
     @Test
-    fun `a document already declaring itunes metadata is left alone`() {
+    fun `a document already declaring auxiliary tracks is left alone`() {
         val appleFormat = """
             <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
             <head><metadata><iTunesMetadata xmlns="http://music.apple.com/lyric-ttml-internal">
@@ -249,6 +312,35 @@ class AmllTtmlFormatConverterTest {
 
         assertFalse(result.converted)
         assertEquals(appleFormat, result.ttml)
+    }
+
+    @Test
+    fun `an itunes metadata carrying only songwriters is still migrated into`() {
+        // AMLL writes this element itself, so it is no sign of the Apple format.
+        val songwritersOnly = """
+            <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+            <head><metadata xmlns=""><iTunesMetadata xmlns="http://music.apple.com/lyric-ttml-internal">
+            <songwriters><songwriter>Someone</songwriter></songwriters>
+            </iTunesMetadata></metadata></head>
+            <body><div xmlns=""><p begin="0.0" end="1.0" itunes:key="L1">
+            <span begin="0.0" end="1.0">aa</span>
+            <span ttm:role="x-translation" xml:lang="zh-CN">T1</span>
+            </p></div></body></tt>
+        """.trimIndent()
+
+        val result = AmllTtmlFormatConverter.toAppleFormat(songwritersOnly)
+
+        assertTrue(result.converted)
+        // One container, with the tracks ahead of the songwriters Apple lists last.
+        assertEquals(1, Regex("""<iTunesMetadata""").findAll(result.ttml).count())
+        assertTrue(
+            result.ttml.contains(
+                "<iTunesMetadata xmlns=\"http://music.apple.com/lyric-ttml-internal\">" +
+                    "<translations><translation xml:lang=\"zh-Hans\">" +
+                    "<text for=\"L1\">T1</text></translation></translations>",
+            ),
+        )
+        assertTrue(result.ttml.indexOf("<translations>") < result.ttml.indexOf("<songwriters>"))
     }
 
     @Test
