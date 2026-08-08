@@ -97,7 +97,7 @@ class CustomLyricsOnlineImporterTest {
         val imported = result as CustomLyricsOnlineImportResult.Imported
         assertTrue(imported.reformatted)
         assertEquals(CustomLyricsSources.AMLL, imported.source)
-        assertFalse(imported.ttml.contains("""xmlns=""""))
+        assertFalse(imported.ttml.contains("xmlns=\"\""))
         assertTrue(imported.ttml.contains("""itunes:timing="Word""""))
         assertTrue(TtmlInputPolicy.isAcceptable(imported.ttml))
     }

@@ -23,7 +23,7 @@ class AmllTtmlFormatConverterTest {
 
         assertTrue(result.converted)
         assertFalse(result.ttml.contains("""<metadata xmlns="">"""))
-        assertFalse(result.ttml.contains("""xmlns=""""))
+        assertFalse(result.ttml.contains("xmlns=\"\""))
         assertTrue(result.ttml.contains("<metadata>"))
         assertTrue(result.ttml.contains("""<div begin="00:01.000""""))
     }
@@ -55,7 +55,7 @@ class AmllTtmlFormatConverterTest {
 
         assertTrue(result.converted)
         assertFalse(result.ttml.contains("itunes:timing"))
-        assertFalse(result.ttml.contains("""xmlns=""""))
+        assertFalse(result.ttml.contains("xmlns=\"\""))
     }
 
     @Test
