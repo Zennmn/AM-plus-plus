@@ -254,6 +254,7 @@ internal enum class TargetSymbolId {
     SONG_INFO_NATIVE,
     TTML_PARSER_NATIVE,
     LYRICS_CURRENT_ITEM_FIELD,
+    LYRICS_ITEM_UPDATE_METHOD,
     PLAYER_METADATA_HUB,
     METADATA_TO_ITEM_CONVERTER,
     LYRICS_AVAILABILITY_OWNER,
@@ -292,6 +293,7 @@ private object AppleMusicProfiles {
         exactMethods = mapOf(
             TargetSymbolId.PLAYER_ACTIVITY_CREATE_STACKED_NAVIGATION_HOLDER to "k1",
             TargetSymbolId.PLAYER_ACTIVITY_ROOT to "n0",
+            TargetSymbolId.LYRICS_ITEM_UPDATE_METHOD to "o2",
         ),
         exactFields = mapOf(
             TargetSymbolId.PLAYER_ACTIVITY_BEHAVIOR_FIELD to "c1",
@@ -330,6 +332,7 @@ private object AppleMusicProfiles {
         exactMethods = mapOf(
             TargetSymbolId.PLAYER_ACTIVITY_CREATE_STACKED_NAVIGATION_HOLDER to "j1",
             TargetSymbolId.PLAYER_ACTIVITY_ROOT to "l1",
+            TargetSymbolId.LYRICS_ITEM_UPDATE_METHOD to "o2",
         ),
         exactFields = mapOf(
             TargetSymbolId.PLAYER_ACTIVITY_BEHAVIOR_FIELD to "c1",
@@ -619,6 +622,26 @@ internal object AppleMusicSymbols {
         profileOwner = TargetSymbolId.LYRICS_FRAGMENT,
         fallbackOwner = { it.endsWith(".PlayerLyricsViewFragment") },
         contract = ::isLyricsInstallMethod,
+    )
+
+    /**
+     * PlayerLyricsViewFragment.o2(v3.v, BaseContentItem, flags$c) — the
+     * natural-transition item update entry point. The contract requires the
+     * exact name "o2", the verified v3.v and BaseContentItem parameter types,
+     * and a flags holder declared as a member of the fragment's immediate
+     * superclass whose only boolean fields are exactly {a, b, c}; Apple's own
+     * item-changed signal is the flags holder's `a` field. A version whose
+     * o2 shape differs resolves Missing or Ambiguous instead of silently
+     * selecting an unrelated method.
+     */
+    val LyricsItemUpdateMethod = methodSymbol(
+        id = "lyrics-item-update-method",
+        profileOwner = TargetSymbolId.LYRICS_FRAGMENT,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
+        exactMethodId = TargetSymbolId.LYRICS_ITEM_UPDATE_METHOD,
+        fallbackOwner = { it.endsWith(".PlayerLyricsViewFragment") },
+        contract = ::isLyricsItemUpdateMethod,
+        structuralContract = ::isLyricsItemUpdateMethod,
     )
 
     val PlayerMetadataPublishMethod = TargetSymbolKey(
@@ -1001,6 +1024,34 @@ private fun isLyricsInstallMethod(method: Method): Boolean =
         method.parameterTypes[0].name.endsWith(
             ".ttml.javanative.model.SongInfo\$SongInfoPtr",
         )
+
+/**
+ * The verified o2 contract: exact name, void return, the v3.v metadata type,
+ * the BaseContentItem current item, and a flags holder declared as a member
+ * of the fragment's immediate superclass whose non-static boolean fields are
+ * exactly {a, b, c}. Both verified profiles (6.5.0 `e$c`, 6.5.1 `d$c`) carry
+ * that exact shape, so the contract can never silently select an unrelated
+ * three-argument method.
+ */
+private fun isLyricsItemUpdateMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "o2" &&
+        method.returnType == Void.TYPE &&
+        method.parameterTypes.size == 3 &&
+        method.parameterTypes[0].name == "v3.v" &&
+        method.parameterTypes[1].name == "com.apple.android.music.model.BaseContentItem" &&
+        isLyricsItemUpdateFlagsType(method.parameterTypes[2], method.declaringClass)
+
+private fun isLyricsItemUpdateFlagsType(flagsType: Class<*>, fragmentType: Class<*>): Boolean {
+    val base = fragmentType.superclass ?: return false
+    if (flagsType.declaringClass != base) return false
+    if (base.declaredClasses.none { it == flagsType }) return false
+    val booleanFields = flagsType.declaredFields
+        .filter { !Modifier.isStatic(it.modifiers) && it.type == java.lang.Boolean.TYPE }
+        .map(Field::getName)
+        .toSet()
+    return booleanFields == setOf("a", "b", "c")
+}
 
 private fun isPlayerMetadataPublishMethod(method: Method): Boolean =
     !Modifier.isStatic(method.modifiers) &&

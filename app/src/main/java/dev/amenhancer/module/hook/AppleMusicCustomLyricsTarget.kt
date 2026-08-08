@@ -98,16 +98,20 @@ internal class AppleMusicCustomLyricsTarget(
             ),
             logger = ModernXposedRuntime::log,
         )
+        val fragmentUsable = fragmentIsAddedPredicate(installMethod.declaringClass)
         readyReapply = CustomLyricsReadyReapply(
             installMethod = installMethod,
             seam = seam,
             readyReplacementFor = session::readyReplacementFor,
-            isFragmentUsable = fragmentIsAddedPredicate(installMethod.declaringClass),
+            isFragmentUsable = fragmentUsable,
+            currentSong = currentSong,
             logger = ModernXposedRuntime::log,
         )
+        val itemUpdateContext = LyricsItemUpdateContext()
         val hooked = runCatching {
             ModernXposedRuntime.hookMethod(installMethod, object : ModernMethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
+                    itemUpdateContext.markAppleInvokedI2()
                     runCatching {
                         if (!acceptsLyricsInstallArguments(param.args, ptrClass)) return@runCatching
                         val original = param.args[0]
@@ -157,6 +161,62 @@ internal class AppleMusicCustomLyricsTarget(
                 "PlayerLyricsViewFragment.I2 could not be hooked; ${installMethodResolution.summary}",
             )
         }
+        val itemUpdateResolution = symbols.resolve(AppleMusicSymbols.LyricsItemUpdateMethod)
+        val itemUpdateMethod = itemUpdateResolution.valueOrNull()
+        if (itemUpdateMethod != null) {
+            val coordinator = runCatching {
+                LyricsItemUpdateCoordinator(
+                    installMethod = installMethod,
+                    flags = ItemUpdateFlags(itemUpdateMethod.parameterTypes[2]),
+                    seam = seam,
+                    readyReplacementFor = session::readyReplacementFor,
+                    isTracking = session::isTracking,
+                    isFragmentUsable = fragmentUsable,
+                    readyReapply = readyReapply,
+                    logger = ModernXposedRuntime::log,
+                )
+            }.getOrNull()
+            if (coordinator != null) {
+                val itemUpdateHooked = runCatching {
+                    ModernXposedRuntime.hookMethod(itemUpdateMethod, object : ModernMethodHook() {
+                        override fun beforeHookedMethod(param: MethodHookParam) {
+                            itemUpdateContext.enterO2()
+                        }
+
+                        override fun afterHookedMethod(param: MethodHookParam) {
+                            try {
+                                val fragment = param.thisObject
+                                val appleInvokedI2 = itemUpdateContext.appleInvokedI2DuringO2()
+                                val flagsHolder = param.args.getOrNull(2)
+                                itemUpdateContext.reentering {
+                                    runCatching {
+                                        fragment?.let { currentFragment ->
+                                            coordinator.onItemUpdate(
+                                                fragment = currentFragment,
+                                                flagsHolder = flagsHolder,
+                                                appleInvokedI2 = appleInvokedI2,
+                                            )
+                                        }
+                                    }.onFailure { error ->
+                                        ModernXposedRuntime.log(
+                                            "custom lyrics item update hook failed: $error",
+                                        )
+                                    }
+                                }
+                            } finally {
+                                itemUpdateContext.exitO2()
+                            }
+                        }
+                    })
+                }.isSuccess
+                if (!itemUpdateHooked) {
+                    ModernXposedRuntime.log(
+                        "PlayerLyricsViewFragment.o2 could not be hooked; " +
+                            itemUpdateResolution.summary,
+                    )
+                }
+            }
+        }
         val availabilityResolution = symbols.resolve(AppleMusicSymbols.LyricsAvailabilityPredicate)
         val availabilityMethod = availabilityResolution.valueOrNull()
         val availabilityHooked = availabilityMethod != null && runCatching {
@@ -200,6 +260,7 @@ internal class AppleMusicCustomLyricsTarget(
                 listOf(
                     installMethodResolution.summary,
                     availabilityResolution.summary,
+                    itemUpdateResolution.summary,
                     ptrResolution.summary,
                     nativeResolution.summary,
                     parserResolution.summary,

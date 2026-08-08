@@ -466,6 +466,129 @@ class TargetSymbolsTest {
     }
 
     @Test
+    fun `650 profile resolves the exact o2 item update method without scanning dex`() {
+        val fragmentName = "com.apple.android.music.player.fragment.PlayerLyricsViewFragment"
+        val source = FakeTargetClassSource(
+            classes = mapOf(fragmentName to ItemUpdateFragmentFixture650::class.java),
+        )
+        val resolver = IndexedTargetSymbolResolver(
+            build = TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.0", 1580L),
+            source = source,
+        )
+
+        val resolution = resolver.resolve(AppleMusicSymbols.LyricsItemUpdateMethod)
+
+        assertTrue(resolution is TargetResolution.Found)
+        val found = resolution as TargetResolution.Found
+        assertEquals("o2", found.value.name)
+        assertEquals(SymbolMatch.VERSION_PROFILE, found.match)
+        assertEquals("apple-music-6.5.0-1580", found.profileId)
+        assertEquals(3, found.value.parameterTypes.size)
+        assertEquals(
+            ItemUpdateFlagsBaseFixture650.c::class.java,
+            found.value.parameterTypes[2],
+        )
+        assertEquals(0, source.classNameReads)
+    }
+
+    @Test
+    fun `651 profile resolves the migrated o2 item update method without scanning dex`() {
+        val fragmentName = "com.apple.android.music.player.fragment.PlayerLyricsViewFragment"
+        val source = FakeTargetClassSource(
+            classes = mapOf(fragmentName to ItemUpdateFragmentFixture651::class.java),
+        )
+        val resolver = IndexedTargetSymbolResolver(
+            build = TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.1", 1583L),
+            source = source,
+        )
+
+        val resolution = resolver.resolve(AppleMusicSymbols.LyricsItemUpdateMethod)
+
+        assertTrue(resolution is TargetResolution.Found)
+        val found = resolution as TargetResolution.Found
+        assertEquals("o2", found.value.name)
+        assertEquals(SymbolMatch.VERSION_PROFILE, found.match)
+        assertEquals("apple-music-6.5.1-1583", found.profileId)
+        assertEquals(0, source.classNameReads)
+    }
+
+    @Test
+    fun `structural fallback never selects an o2 without the verified flags contract`() {
+        val source = FakeTargetClassSource(
+            names = listOf(
+                "com.apple.android.music.player.fragment.PlayerLyricsViewFragment",
+            ),
+            classes = mapOf(
+                "com.apple.android.music.player.fragment.PlayerLyricsViewFragment" to
+                    BrokenItemUpdateFlagsFragmentFixture::class.java,
+            ),
+        )
+        val resolver = IndexedTargetSymbolResolver(TargetBuild.UNKNOWN, source)
+
+        val resolution = resolver.resolve(AppleMusicSymbols.LyricsItemUpdateMethod)
+
+        assertTrue(resolution is TargetResolution.Missing)
+    }
+
+    @Test
+    fun `structural fallback resolves an exact o2 when the profile is unknown`() {
+        val source = FakeTargetClassSource(
+            names = listOf(
+                "com.apple.android.music.player.fragment.PlayerLyricsViewFragment",
+            ),
+            classes = mapOf(
+                "com.apple.android.music.player.fragment.PlayerLyricsViewFragment" to
+                    ItemUpdateFragmentFixture650::class.java,
+            ),
+        )
+        val resolver = IndexedTargetSymbolResolver(TargetBuild.UNKNOWN, source)
+
+        val resolution = resolver.resolve(AppleMusicSymbols.LyricsItemUpdateMethod)
+
+        assertTrue(resolution is TargetResolution.Found)
+        assertEquals("o2", (resolution as TargetResolution.Found).value.name)
+        assertEquals(SymbolMatch.STRUCTURAL_FALLBACK, resolution.match)
+    }
+
+    @Test
+    fun `two same-shaped o2 fragments resolve ambiguous instead of silently choosing`() {
+        val source = FakeTargetClassSource(
+            names = listOf(
+                "com.apple.android.music.player.fragment.PlayerLyricsViewFragment",
+                "com.apple.android.music.player2.PlayerLyricsViewFragment",
+            ),
+            classes = mapOf(
+                "com.apple.android.music.player.fragment.PlayerLyricsViewFragment" to
+                    ItemUpdateFragmentFixture650::class.java,
+                "com.apple.android.music.player2.PlayerLyricsViewFragment" to
+                    ItemUpdateFragmentFixture651::class.java,
+            ),
+        )
+        val resolver = IndexedTargetSymbolResolver(TargetBuild.UNKNOWN, source)
+
+        val resolution = resolver.resolve(AppleMusicSymbols.LyricsItemUpdateMethod)
+
+        assertTrue(resolution is TargetResolution.Ambiguous)
+        assertEquals(2, (resolution as TargetResolution.Ambiguous).candidates.size)
+    }
+
+    @Test
+    fun `a fragment without the o2 item update contract stays missing under the profile`() {
+        val fragmentName = "com.apple.android.music.player.fragment.PlayerLyricsViewFragment"
+        val source = FakeTargetClassSource(
+            classes = mapOf(fragmentName to LyricsInstallFixture::class.java),
+        )
+        val resolver = IndexedTargetSymbolResolver(
+            build = TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.0", 1580L),
+            source = source,
+        )
+
+        val resolution = resolver.resolve(AppleMusicSymbols.LyricsItemUpdateMethod)
+
+        assertTrue(resolution is TargetResolution.Missing)
+    }
+
+    @Test
     fun `650 profile resolves the player metadata identity funnel`() {
         val source = FakeTargetClassSource(
             classes = mapOf(
@@ -1054,6 +1177,55 @@ private class LyricsInstallFixture {
 private class LyricsR2OnlyFixture {
     @Suppress("UNUSED_PARAMETER")
     fun R2(ptr: SongInfo.SongInfoPtr) = Unit
+}
+
+private open class ItemUpdateFlagsBaseFixture650 {
+    class c {
+        @JvmField
+        var a: Boolean = false
+
+        @JvmField
+        var b: Boolean = false
+
+        @JvmField
+        var c: Boolean = false
+    }
+}
+
+private class ItemUpdateFragmentFixture650 : ItemUpdateFlagsBaseFixture650() {
+    @Suppress("UNUSED_PARAMETER")
+    fun o2(metadata: v3.v, item: BaseContentItem, flags: ItemUpdateFlagsBaseFixture650.c) = Unit
+}
+
+private open class ItemUpdateFlagsBaseFixture651 {
+    class c {
+        @JvmField
+        var a: Boolean = false
+
+        @JvmField
+        var b: Boolean = false
+
+        @JvmField
+        var c: Boolean = false
+    }
+}
+
+private class ItemUpdateFragmentFixture651 : ItemUpdateFlagsBaseFixture651() {
+    @Suppress("UNUSED_PARAMETER")
+    fun o2(metadata: v3.v, item: BaseContentItem, flags: ItemUpdateFlagsBaseFixture651.c) = Unit
+}
+
+/** Same binary fragment name and o2 name but a flags holder without the exact field set. */
+private open class BrokenItemUpdateFlagsBaseFixture {
+    class c {
+        @JvmField
+        var a: Boolean = false
+    }
+}
+
+private class BrokenItemUpdateFlagsFragmentFixture : BrokenItemUpdateFlagsBaseFixture() {
+    @Suppress("UNUSED_PARAMETER")
+    fun o2(metadata: v3.v, item: BaseContentItem, flags: BrokenItemUpdateFlagsBaseFixture.c) = Unit
 }
 
 private class PlayerMetadataHubFixture {

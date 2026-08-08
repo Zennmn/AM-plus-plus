@@ -10,8 +10,16 @@ import java.lang.reflect.Method
  * background session publishes the replacement pointer and this ledger is
  * invoked, every still-live waiting entry for that ID is consumed and I2 is
  * re-entered with the ready replacement — but only while the same fragment
- * is still usable, still reports the same Apple Music ID, and the
- * replacement is still ready.
+ * is still usable, the replacement is still ready, and the fragment still
+ * reports the same Apple Music ID. The ready replacement is confirmed before
+ * any identity read or rebind, so a stale fragment is never rebound for an
+ * ID whose replacement is no longer ready. A fragment that still reports the
+ * previous song may then be rebound to the exact published current item,
+ * using the same recently-current identity guard as the I2 hook, so an
+ * I2(null) entry recorded while the new song's mapping was still preparing
+ * can still be applied; when the replacement is missing or any guard fails,
+ * the fragment identity is left untouched and the entry is dropped with the
+ * native pointer staying installed.
  *
  * The ledger is keyed by fragment identity, never equals, so a replacement
  * fragment with equal state can never be confused with the recorded one.
@@ -28,6 +36,7 @@ internal class CustomLyricsReadyReapply(
     private val seam: CurrentItemIdentitySeam,
     private val readyReplacementFor: (Long) -> Any?,
     private val isFragmentUsable: (Any) -> Boolean,
+    private val currentSong: CurrentSongIdentityCache,
     private val logger: (String) -> Unit,
 ) {
     /**
@@ -89,13 +98,41 @@ internal class CustomLyricsReadyReapply(
         for (fragment in waiting) {
             try {
                 if (!isFragmentUsable(fragment)) continue
-                if (seam.currentItemAdamIdOf(fragment) != appleMusicId) continue
                 val replacement = readyReplacementFor(appleMusicId) ?: continue
+                val fragmentAdamId = seam.currentItemAdamIdOf(fragment)
+                var rebound = false
+                if (fragmentAdamId != appleMusicId) {
+                    rebound = rebindStaleFragmentToCurrent(fragment, fragmentAdamId, appleMusicId)
+                    if (!rebound) continue
+                }
                 installMethod.invoke(fragment, replacement)
             } catch (error: Throwable) {
                 logger("custom lyrics ready-late re-entry failed: $error")
             }
         }
+    }
+
+    /**
+     * Rebinds a stale lyrics fragment to the exact published current item
+     * before ready-late re-entry. Called only after the ready replacement has
+     * been confirmed and with the already-read [fragmentAdamId], so no second
+     * identity reflection is needed. The fragment is rebound only when the
+     * verified current song is exactly [appleMusicId] and the fragment's
+     * stale identity was itself recently observed as current — the same
+     * identity guard the I2 hook applies — and the exact current item can be
+     * bound; otherwise the fragment identity is left untouched, the entry is
+     * dropped and the native pointer stays.
+     */
+    private fun rebindStaleFragmentToCurrent(
+        fragment: Any,
+        fragmentAdamId: Long?,
+        appleMusicId: Long,
+    ): Boolean {
+        val published = currentSong.current() ?: return false
+        val publishedAdamId = published.details.appleMusicId
+        if (publishedAdamId != appleMusicId) return false
+        if (!currentSong.canRebind(fragmentAdamId, publishedAdamId)) return false
+        return seam.bindCurrentItemOf(fragment, published.item)
     }
 
     /** Removes entries whose fragment has been collected. Must hold [pending]. */

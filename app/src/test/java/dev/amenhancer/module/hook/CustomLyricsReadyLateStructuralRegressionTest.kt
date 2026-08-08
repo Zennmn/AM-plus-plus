@@ -55,7 +55,12 @@ class CustomLyricsReadyLateStructuralRegressionTest {
         assertTrue(reapply.contains("synchronized(pending)"))
         assertTrue(reapply.contains("iterator.remove()"))
         assertTrue(reapply.contains("installMethod.invoke(fragment, replacement)"))
-        assertTrue(reapply.contains("seam.currentItemAdamIdOf(fragment) != appleMusicId"))
+        assertTrue(reapply.contains("val fragmentAdamId = seam.currentItemAdamIdOf(fragment)"))
+        assertTrue(reapply.contains("fragmentAdamId != appleMusicId"))
+        assertTrue(
+            reapply.indexOf("val replacement = readyReplacementFor(appleMusicId)") <
+                reapply.indexOf("val fragmentAdamId = seam.currentItemAdamIdOf(fragment)"),
+        )
         assertTrue(reapply.contains("fun dismiss(fragment: Any)"))
         assertTrue(reapply.contains("shouldRecordReadyLateMiss"))
         assertFalse(reapply.contains("IdentityHashMap<Any, Long>"))

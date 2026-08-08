@@ -1,5 +1,6 @@
 package dev.amenhancer.module.hook
 
+import dev.amenhancer.module.CurrentSongDetails
 import java.lang.ref.WeakReference
 import java.lang.reflect.Field
 import java.lang.reflect.Method
@@ -59,7 +60,7 @@ class CustomLyricsReadyReapplyTest {
     }
 
     @Test
-    fun `a changed song on the same fragment skips the stale re-entry`() {
+    fun `a changed song on the same fragment skips re-entry without verified current identity`() {
         val fragment = LyricsFragment(LyricsItem("42"))
         val pointer = Any()
         val (reapply, _) = reapply(fragment, ready = { pointer })
@@ -70,6 +71,81 @@ class CustomLyricsReadyReapplyTest {
 
         assertNull(fragment.installed)
         assertEquals(0, fragment.installs)
+    }
+
+    @Test
+    fun `ready late publish rebinds a stale fragment to the exact current item before re-entry`() {
+        val currentItem = LyricsItem("77")
+        val fragment = LyricsFragment(LyricsItem("42"))
+        val pointer = Any()
+        val cache = CurrentSongIdentityCache().apply {
+            publish(LyricsItem("42"), CurrentSongDetails(42L))
+            publish(currentItem, CurrentSongDetails(77L))
+        }
+        val (reapply, _) = reapply(fragment, ready = { pointer }, cache = cache)
+
+        reapply.recordMiss(fragment, 77L)
+        reapply.onReplacementPublished(77L)
+
+        assertTrue(fragment.c === currentItem)
+        assertSame(pointer, fragment.installed)
+        assertEquals(1, fragment.installs)
+    }
+
+    @Test
+    fun `ready late publish never rebinds a stale fragment when the replacement is no longer ready`() {
+        val currentItem = LyricsItem("77")
+        val fragment = LyricsFragment(LyricsItem("42"))
+        val cache = CurrentSongIdentityCache().apply {
+            publish(LyricsItem("42"), CurrentSongDetails(42L))
+            publish(currentItem, CurrentSongDetails(77L))
+        }
+        val (reapply, _) = reapply(fragment, cache = cache)
+
+        reapply.recordMiss(fragment, 77L)
+        reapply.onReplacementPublished(77L)
+
+        assertNull(fragment.installed)
+        assertEquals(0, fragment.installs)
+        assertEquals("42", fragment.c?.getId())
+    }
+
+    @Test
+    fun `ready late publish never rebinds from an identity that was not recently current`() {
+        val currentItem = LyricsItem("77")
+        val fragment = LyricsFragment(LyricsItem("999"))
+        val pointer = Any()
+        val cache = CurrentSongIdentityCache().apply {
+            publish(LyricsItem("42"), CurrentSongDetails(42L))
+            publish(currentItem, CurrentSongDetails(77L))
+        }
+        val (reapply, _) = reapply(fragment, ready = { pointer }, cache = cache)
+
+        reapply.recordMiss(fragment, 77L)
+        reapply.onReplacementPublished(77L)
+
+        assertNull(fragment.installed)
+        assertEquals(0, fragment.installs)
+        assertEquals("999", fragment.c?.getId())
+    }
+
+    @Test
+    fun `ready late publish never rebinds when the current song moved past the ready id`() {
+        val fragment = LyricsFragment(LyricsItem("42"))
+        val pointer = Any()
+        val cache = CurrentSongIdentityCache().apply {
+            publish(LyricsItem("42"), CurrentSongDetails(42L))
+            publish(LyricsItem("77"), CurrentSongDetails(77L))
+            publish(LyricsItem("99"), CurrentSongDetails(99L))
+        }
+        val (reapply, _) = reapply(fragment, ready = { pointer }, cache = cache)
+
+        reapply.recordMiss(fragment, 77L)
+        reapply.onReplacementPublished(77L)
+
+        assertNull(fragment.installed)
+        assertEquals(0, fragment.installs)
+        assertEquals("42", fragment.c?.getId())
     }
 
     @Test
@@ -281,6 +357,7 @@ class CustomLyricsReadyReapplyTest {
         fragment: Any,
         ready: (Long) -> Any? = { null },
         usable: (Any) -> Boolean = { true },
+        cache: CurrentSongIdentityCache = CurrentSongIdentityCache(),
     ): Pair<CustomLyricsReadyReapply, MutableList<String>> {
         val logs = mutableListOf<String>()
         val fragmentClass = fragment.javaClass
@@ -297,6 +374,7 @@ class CustomLyricsReadyReapplyTest {
             seam = seam,
             readyReplacementFor = ready,
             isFragmentUsable = usable,
+            currentSong = cache,
             logger = { logs += it },
         ) to logs
     }
