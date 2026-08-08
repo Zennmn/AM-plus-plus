@@ -120,7 +120,9 @@ internal object AmllTtmlFormatConverter {
             collectLine(ttml, line, key, translations, transliterations, edits)
         }
 
-        if (translations.isEmpty() && transliterations.isEmpty()) return ttml
+        // A line may carry a background vocal and no auxiliary text at all, and
+        // that vocal still needs its body rewrite even though no track follows.
+        if (translations.isEmpty() && transliterations.isEmpty()) return applyEdits(ttml, edits)
 
         edits += declareTracks(ttml, metadata, buildTracks(translations, transliterations))
         return applyEdits(ttml, edits)
