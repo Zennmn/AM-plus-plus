@@ -34,6 +34,15 @@ internal data class TtmlFormatConversion(
  * same `<text>` wrapped in an `x-bg` span and in parentheses, which is how
  * Apple sets a background translation apart from the line it accompanies.
  *
+ * A track that is written lists every keyed line, not just the translated ones:
+ * Android Apple Music walks the entries alongside the lines instead of
+ * resolving `for`, so a line skipped there shifts every later translation onto
+ * the wrong lyric — and a track with holes in it is rejected outright. A line
+ * the source left untranslated therefore holds a single space, and a line
+ * translated only in its background vocal opens with that same space ahead of
+ * the `x-bg` span. A track no line contributed to is left out altogether
+ * rather than written as a column of spaces.
+ *
  * AMLL already writes an `<iTunesMetadata>` of its own to carry
  * `<songwriters>`, so the tracks join that element ahead of what it holds
  * rather than opening a second one beside it.
@@ -74,6 +83,9 @@ internal object AmllTtmlFormatConverter {
 
     /** How Apple labels a translation meant to be shown under the lyric. */
     private const val TRANSLATION_TYPE = "subtitle"
+
+    /** Stands in for a line the track has no text for, keeping the entry there. */
+    private const val ABSENT_TEXT = " "
 
     private val EMPTY_DEFAULT_NAMESPACE = Regex("""\s+xmlns\s*=\s*(?:""|'')""")
     private val ROLE_ATTRIBUTE = attributePattern("ttm:role")
@@ -123,9 +135,14 @@ internal object AmllTtmlFormatConverter {
             collectLine(ttml, line, key, translations, transliterations, edits)
         }
 
-        // A line may carry a background vocal and no auxiliary text at all, and
-        // that vocal still needs its body rewrite even though no track follows.
-        if (translations.isEmpty() && transliterations.isEmpty()) return applyEdits(ttml, edits)
+        // Every keyed line contributes an entry, so a line the source left
+        // untranslated still holds its place; whether any entry carries text
+        // decides if the track is written at all. The edits are applied either
+        // way, because a line may carry a background vocal that needs its body
+        // rewrite even when no track follows.
+        if (translations.none(TrackEntry::hasText) && transliterations.none(TrackEntry::hasText)) {
+            return applyEdits(ttml, edits)
+        }
 
         edits += declareTracks(ttml, metadata, buildTracks(translations, transliterations))
         return applyEdits(ttml, edits)
@@ -164,7 +181,8 @@ internal object AmllTtmlFormatConverter {
         edits: MutableList<Edit>,
     ) {
         // Only one track of each kind survives the parser constraint, so the
-        // first translation and first romanization of the line are kept.
+        // first translation and first romanization of the line are kept. An
+        // empty span is no translation, so a later non-empty one still counts.
         var translation: String? = null
         var roman: String? = null
         var backgroundTranslation: String? = null
@@ -174,11 +192,11 @@ internal object AmllTtmlFormatConverter {
         children.forEach { child ->
             when (attribute(child.attributes, ROLE_ATTRIBUTE)) {
                 ROLE_TRANSLATION -> {
-                    if (translation == null) translation = content(ttml, child)
+                    if (translation == null) translation = auxiliaryText(ttml, child)
                     edits += removal(ttml, child, line.contentStart)
                 }
                 ROLE_ROMAN -> {
-                    if (roman == null) roman = content(ttml, child)
+                    if (roman == null) roman = auxiliaryText(ttml, child)
                     edits += removal(ttml, child, line.contentStart)
                 }
                 ROLE_BACKGROUND -> {
@@ -188,12 +206,14 @@ internal object AmllTtmlFormatConverter {
                         when (attribute(span.attributes, ROLE_ATTRIBUTE)) {
                             ROLE_TRANSLATION -> {
                                 if (backgroundTranslation == null) {
-                                    backgroundTranslation = content(ttml, span)
+                                    backgroundTranslation = auxiliaryText(ttml, span)
                                 }
                                 removals += removal(ttml, span, child.contentStart)
                             }
                             ROLE_ROMAN -> {
-                                if (backgroundRoman == null) backgroundRoman = content(ttml, span)
+                                if (backgroundRoman == null) {
+                                    backgroundRoman = auxiliaryText(ttml, span)
+                                }
                                 removals += removal(ttml, span, child.contentStart)
                             }
                         }
@@ -203,8 +223,8 @@ internal object AmllTtmlFormatConverter {
             }
         }
 
-        trackText(translation, backgroundTranslation)?.let { translations += TrackEntry(key, it) }
-        trackText(roman, backgroundRoman)?.let { transliterations += TrackEntry(key, it) }
+        translations += TrackEntry(key, translation, backgroundTranslation)
+        transliterations += TrackEntry(key, roman, backgroundRoman)
     }
 
     /**
@@ -254,16 +274,18 @@ internal object AmllTtmlFormatConverter {
         return seconds
     }
 
-    private fun trackText(main: String?, background: String?): String? {
-        if (main == null && background == null) return null
-        return buildString {
-            append(main.orEmpty())
-            if (background != null) {
-                append("<span ttm:role=\"").append(ROLE_BACKGROUND).append("\">")
-                append(parenthesized(background))
-                append("</span>")
-            }
-        }
+    /**
+     * The body of one `<text>`: the line's own text, then its background one
+     * wrapped in an `x-bg` span. A line without text of its own still opens
+     * with [ABSENT_TEXT], both to keep an entry per line and because Apple
+     * reads what precedes the `x-bg` span as the main translation.
+     */
+    private fun StringBuilder.appendEntryText(entry: TrackEntry) {
+        append(entry.main ?: ABSENT_TEXT)
+        val background = entry.background ?: return
+        append("<span ttm:role=\"").append(ROLE_BACKGROUND).append("\">")
+        append(parenthesized(background))
+        append("</span>")
     }
 
     /** Apple parenthesizes a background track; AMLL leaves that to the reader. */
@@ -288,19 +310,25 @@ internal object AmllTtmlFormatConverter {
         language: String,
         type: String? = null,
     ) {
-        if (entries.isEmpty()) return
+        // Nothing to say for this kind at all, so the track is not opened —
+        // rather than opened over a column of placeholders.
+        if (entries.none(TrackEntry::hasText)) return
         append('<').append(container).append('>')
         append('<').append(item)
         if (type != null) append(" type=\"").append(type).append('"')
         append(" xml:lang=\"").append(language).append("\">")
         entries.forEach { entry ->
             append("<text for=\"").append(entry.key).append("\">")
-            append(entry.text)
+            appendEntryText(entry)
             append("</text>")
         }
         append("</").append(item).append('>')
         append("</").append(container).append('>')
     }
+
+    /** A span's content, or `null` when it holds nothing worth carrying over. */
+    private fun auxiliaryText(ttml: String, element: Element): String? =
+        content(ttml, element).takeIf(String::isNotBlank)
 
     private fun content(ttml: String, element: Element): String =
         if (element.selfClosing) "" else ttml.substring(element.contentStart, element.contentEnd)
@@ -418,7 +446,18 @@ internal object AmllTtmlFormatConverter {
 
     private data class Edit(val start: Int, val end: Int, val replacement: String)
 
-    private data class TrackEntry(val key: String, val text: String)
+    /**
+     * One line's place in a track. Both texts are `null` when the line said
+     * nothing of this kind, which still earns it a placeholder entry as long as
+     * some other line spoke up.
+     */
+    private data class TrackEntry(
+        val key: String,
+        val main: String?,
+        val background: String?,
+    ) {
+        val hasText get() = main != null || background != null
+    }
 
     private data class Element(
         val attributes: String,

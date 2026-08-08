@@ -227,7 +227,7 @@ class AmllTtmlFormatConverterTest {
     }
 
     @Test
-    fun `a background only auxiliary track yields a text with just the x-bg span`() {
+    fun `a line translated only in its background opens with the placeholder`() {
         val backgroundOnly = """
             <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
             <head><metadata xmlns=""/></head>
@@ -240,8 +240,123 @@ class AmllTtmlFormatConverterTest {
 
         val result = AmllTtmlFormatConverter.toAppleFormat(backgroundOnly)
 
+        // The space stands in for the main translation the line never had, so
+        // Apple does not read the background one as belonging to the line.
         assertTrue(
-            result.ttml.contains("<text for=\"L9\"><span ttm:role=\"x-bg\">(BT)</span></text>"),
+            result.ttml.contains("<text for=\"L9\"> <span ttm:role=\"x-bg\">(BT)</span></text>"),
+        )
+    }
+
+    @Test
+    fun `a line the source left untranslated still holds its place in the track`() {
+        val gapped = """
+            <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+            <head><metadata xmlns=""/></head>
+            <body><div xmlns="">
+            <p begin="0.0" end="1.0" itunes:key="L1">
+            <span begin="0.0" end="1.0">aa</span>
+            <span ttm:role="x-translation" xml:lang="zh-CN">T1</span>
+            </p>
+            <p begin="1.0" end="2.0" itunes:key="L2">
+            <span begin="1.0" end="2.0">bb</span>
+            </p>
+            <p begin="2.0" end="3.0" itunes:key="L3">
+            <span begin="2.0" end="3.0">cc</span>
+            <span ttm:role="x-translation" xml:lang="zh-CN">T3</span>
+            </p></div></body></tt>
+        """.trimIndent()
+
+        val result = AmllTtmlFormatConverter.toAppleFormat(gapped)
+
+        // Without the L2 placeholder Android Apple Music reads T3 onto L2 and
+        // gives up on the lyrics entirely.
+        assertTrue(
+            result.ttml.contains(
+                "<translations><translation type=\"subtitle\" xml:lang=\"zh-Hans\">" +
+                    "<text for=\"L1\">T1</text>" +
+                    "<text for=\"L2\"> </text>" +
+                    "<text for=\"L3\">T3</text>" +
+                    "</translation></translations>",
+            ),
+        )
+    }
+
+    @Test
+    fun `an empty translation span counts as no translation`() {
+        val blank = """
+            <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+            <head><metadata xmlns=""/></head>
+            <body><div xmlns="">
+            <p begin="0.0" end="1.0" itunes:key="L1">
+            <span begin="0.0" end="1.0">aa</span>
+            <span ttm:role="x-translation" xml:lang="zh-CN"></span>
+            </p>
+            <p begin="1.0" end="2.0" itunes:key="L2">
+            <span begin="1.0" end="2.0">bb</span>
+            <span ttm:role="x-translation" xml:lang="zh-CN">T2</span>
+            </p></div></body></tt>
+        """.trimIndent()
+
+        val result = AmllTtmlFormatConverter.toAppleFormat(blank)
+
+        assertTrue(
+            result.ttml.contains("<text for=\"L1\"> </text><text for=\"L2\">T2</text>"),
+        )
+        // The emptied span leaves the body all the same.
+        assertFalse(result.ttml.substringAfter("<body").contains("x-translation"))
+    }
+
+    @Test
+    fun `a lyric with no translation at all gets no translations track`() {
+        val romanOnly = """
+            <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+            <head><metadata xmlns=""/></head>
+            <body><div xmlns="">
+            <p begin="0.0" end="1.0" itunes:key="L1">
+            <span begin="0.0" end="1.0">aa</span>
+            <span ttm:role="x-roman">R1</span>
+            </p>
+            <p begin="1.0" end="2.0" itunes:key="L2">
+            <span begin="1.0" end="2.0">bb</span>
+            </p></div></body></tt>
+        """.trimIndent()
+
+        val result = AmllTtmlFormatConverter.toAppleFormat(romanOnly)
+
+        assertFalse(result.ttml.contains("<translations>"))
+        // The kind that was spoken for still lists every line.
+        assertTrue(
+            result.ttml.contains(
+                "<transliterations><transliteration xml:lang=\"ko-Latn\">" +
+                    "<text for=\"L1\">R1</text><text for=\"L2\"> </text>" +
+                    "</transliteration></transliterations>",
+            ),
+        )
+    }
+
+    @Test
+    fun `a background translation alone still fills the track for every line`() {
+        val backgroundOnlyLine = """
+            <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+            <head><metadata xmlns=""/></head>
+            <body><div xmlns="">
+            <p begin="0.0" end="2.0" itunes:key="L1">
+            <span begin="0.0" end="1.0">aa</span>
+            <span ttm:role="x-bg"><span begin="1.0" end="2.0">(bb)</span>
+            <span ttm:role="x-translation">BT</span></span>
+            </p>
+            <p begin="2.0" end="3.0" itunes:key="L2">
+            <span begin="2.0" end="3.0">cc</span>
+            </p></div></body></tt>
+        """.trimIndent()
+
+        val result = AmllTtmlFormatConverter.toAppleFormat(backgroundOnlyLine)
+
+        assertTrue(
+            result.ttml.contains(
+                "<text for=\"L1\"> <span ttm:role=\"x-bg\">(BT)</span></text>" +
+                    "<text for=\"L2\"> </text>",
+            ),
         )
     }
 
