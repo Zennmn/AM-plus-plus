@@ -6,37 +6,215 @@ internal data class TtmlFormatConversion(
 )
 
 /**
- * Rewrites the AMLL TTML format into the Apple Music format that
- * `TTMLParser$TTMLParserNative.songInfoFromTTML` parses.
+ * Rewrites the AMLL TTML format into the Apple Music format.
  *
- * Two structural differences separate the formats:
+ * The formats differ in where auxiliary tracks live. AMLL keeps translation and
+ * romanization inline in every lyric line:
  *
- * 1. AMLL serializes `<metadata>` and `<div>` with `xmlns=""`, which drops the
- *    whole lyric subtree out of the TTML namespace and leaves Apple's parser
- *    with no lines. Dropping the override restores the inherited namespace.
- * 2. AMLL omits `itunes:timing` on the root, so a document carrying timed
- *    `<span>`s is marked `Word` explicitly rather than left to auto-detection.
+ * ```
+ * <p itunes:key="L1"> ...word spans...
+ *   <span ttm:role="x-translation" xml:lang="zh-CN">…</span>
+ *   <span ttm:role="x-roman">…</span>
+ * </p>
+ * ```
+ *
+ * Apple Music instead declares them once in the head, linked back to each line
+ * through `itunes:key`, and leaves the body carrying only lyrics:
+ *
+ * ```
+ * <iTunesMetadata xmlns="http://music.apple.com/lyric-ttml-internal">
+ *   <translations><translation xml:lang="zh-Hans"><text for="L1">…</text></translation></translations>
+ *   <transliterations><transliteration xml:lang="ko-Latn"><text for="L1">…</text></transliteration></transliterations>
+ * </iTunesMetadata>
+ * ```
+ *
+ * A `<text>` carries whatever the source span held, so a line-by-line track
+ * stays plain text and a word-by-word track keeps its timed `<span>`s.
+ * Auxiliary spans nested in a background vocal (`ttm:role="x-bg"`) move to the
+ * same `<text>` wrapped in an `x-bg` span, which is how Apple expresses a
+ * background translation.
+ *
+ * The language tags are pinned rather than carried over: Android Apple Music's
+ * TTML parser only renders a translation and a transliteration together when
+ * the lyrics are Korean, so the root is marked `ko`, translations `zh-Hans` and
+ * transliterations `ko-Latn`. Because only one track of each kind survives that
+ * constraint, the first translation and the first romanization of each line win.
+ *
+ * The root also gets the `itunes:timing` Apple expects — `Word` when the body
+ * carries timed syllables, `Line` otherwise.
+ *
+ * AMLL additionally serializes `<metadata>` and `<div>` with `xmlns=""`, which
+ * drops the lyric subtree out of the TTML namespace and leaves Apple's parser
+ * with no lines; the override is removed.
  *
  * The rewrite is textual on purpose: whitespace between `<span>` tags carries
- * word separation in word-by-word lyrics, and a DOM round-trip would not
- * preserve it. Only markup is examined; text nodes are copied verbatim.
+ * word separation, and a DOM round-trip would not preserve it. Only markup is
+ * examined; lyric text nodes are copied verbatim.
  */
 internal object AmllTtmlFormatConverter {
 
     private const val ITUNES_NAMESPACE = "http://music.apple.com/lyric-ttml-internal"
+    private const val ROLE_TRANSLATION = "x-translation"
+    private const val ROLE_ROMAN = "x-roman"
+    private const val ROLE_BACKGROUND = "x-bg"
+
+    /** Pinned so Apple Music on Android renders both auxiliary tracks. */
+    private const val LYRIC_LANGUAGE = "ko"
+    private const val TRANSLATION_LANGUAGE = "zh-Hans"
+    private const val TRANSLITERATION_LANGUAGE = "ko-Latn"
 
     private val EMPTY_DEFAULT_NAMESPACE = Regex("""\s+xmlns\s*=\s*(?:""|'')""")
-    private val TIMING_ATTRIBUTE = Regex("""\situnes:timing\s*=""")
+    private val ROLE_ATTRIBUTE = attributePattern("ttm:role")
+    private val LANGUAGE_ATTRIBUTE = attributePattern("xml:lang")
+    private val KEY_ATTRIBUTE = attributePattern("itunes:key")
+    private val TIMING_ATTRIBUTE_VALUE = attributePattern("itunes:timing")
     private val ITUNES_DECLARATION = Regex("""\sxmlns:itunes\s*=""")
     private val BEGIN_ATTRIBUTE = Regex("""\sbegin\s*=""")
 
+    private fun attributePattern(name: String) =
+        Regex("""\s${Regex.escape(name)}\s*=\s*"([^"]*)"|\s${Regex.escape(name)}\s*=\s*'([^']*)'""")
+
     fun toAppleFormat(ttml: String): TtmlFormatConversion {
         if (ttml.isEmpty()) return TtmlFormatConversion(ttml, false)
-        val markWordTiming = hasTimedSpan(ttml)
+        // A head `<iTunesMetadata>` means the document is already in the Apple
+        // Music format; re-tagging it would risk duplicating its tracks.
+        if (nextElement(ttml, "iTunesMetadata", 0) != null) return TtmlFormatConversion(ttml, false)
+        val migrated = migrateAuxiliaryTracks(ttml)
+        val result = normalizeTags(migrated, wordTimed = hasTimedSpan(migrated))
+        return TtmlFormatConversion(result, result != ttml)
+    }
+
+    /** Moves inline `x-translation` / `x-roman` spans into a head `<iTunesMetadata>`. */
+    private fun migrateAuxiliaryTracks(ttml: String): String {
+        val metadata = nextElement(ttml, "metadata", 0) ?: return ttml
+
+        val translations = mutableListOf<TrackEntry>()
+        val transliterations = mutableListOf<TrackEntry>()
+        val edits = mutableListOf<Edit>()
+
+        var cursor = metadata.end
+        while (true) {
+            val line = nextElement(ttml, "p", cursor) ?: break
+            cursor = line.end
+            val key = attribute(line.attributes, KEY_ATTRIBUTE) ?: continue
+            collectLine(ttml, line, key, translations, transliterations, edits)
+        }
+
+        if (translations.isEmpty() && transliterations.isEmpty()) return ttml
+
+        val block = buildITunesMetadata(translations, transliterations)
+        edits += if (metadata.selfClosing) {
+            Edit(metadata.start, metadata.end, "<metadata${metadata.attributes}>$block</metadata>")
+        } else {
+            Edit(metadata.contentEnd, metadata.contentEnd, block)
+        }
+        return applyEdits(ttml, edits)
+    }
+
+    private fun collectLine(
+        ttml: String,
+        line: Element,
+        key: String,
+        translations: MutableList<TrackEntry>,
+        transliterations: MutableList<TrackEntry>,
+        edits: MutableList<Edit>,
+    ) {
+        // Only one track of each kind survives the parser constraint, so the
+        // first translation and first romanization of the line are kept.
+        var translation: String? = null
+        var roman: String? = null
+        var backgroundTranslation: String? = null
+        var backgroundRoman: String? = null
+
+        childElements(ttml, line).forEach { child ->
+            when (attribute(child.attributes, ROLE_ATTRIBUTE)) {
+                ROLE_TRANSLATION -> {
+                    if (translation == null) translation = content(ttml, child)
+                    edits += removal(ttml, child, line.contentStart)
+                }
+                ROLE_ROMAN -> {
+                    if (roman == null) roman = content(ttml, child)
+                    edits += removal(ttml, child, line.contentStart)
+                }
+                ROLE_BACKGROUND -> childElements(ttml, child).forEach { nested ->
+                    when (attribute(nested.attributes, ROLE_ATTRIBUTE)) {
+                        ROLE_TRANSLATION -> {
+                            if (backgroundTranslation == null) {
+                                backgroundTranslation = content(ttml, nested)
+                            }
+                            edits += removal(ttml, nested, child.contentStart)
+                        }
+                        ROLE_ROMAN -> {
+                            if (backgroundRoman == null) backgroundRoman = content(ttml, nested)
+                            edits += removal(ttml, nested, child.contentStart)
+                        }
+                    }
+                }
+            }
+        }
+
+        trackText(translation, backgroundTranslation)?.let { translations += TrackEntry(key, it) }
+        trackText(roman, backgroundRoman)?.let { transliterations += TrackEntry(key, it) }
+    }
+
+    private fun trackText(main: String?, background: String?): String? {
+        if (main == null && background == null) return null
+        return buildString {
+            append(main.orEmpty())
+            if (background != null) {
+                append("<span ttm:role=\"").append(ROLE_BACKGROUND).append("\">")
+                append(background)
+                append("</span>")
+            }
+        }
+    }
+
+    private fun buildITunesMetadata(
+        translations: List<TrackEntry>,
+        transliterations: List<TrackEntry>,
+    ): String = buildString {
+        append("<iTunesMetadata xmlns=\"").append(ITUNES_NAMESPACE).append("\">")
+        appendTrack(translations, "translations", "translation", TRANSLATION_LANGUAGE)
+        appendTrack(transliterations, "transliterations", "transliteration", TRANSLITERATION_LANGUAGE)
+        append("</iTunesMetadata>")
+    }
+
+    private fun StringBuilder.appendTrack(
+        entries: List<TrackEntry>,
+        container: String,
+        item: String,
+        language: String,
+    ) {
+        if (entries.isEmpty()) return
+        append('<').append(container).append('>')
+        append('<').append(item).append(" xml:lang=\"").append(language).append("\">")
+        entries.forEach { entry ->
+            append("<text for=\"").append(entry.key).append("\">")
+            append(entry.text)
+            append("</text>")
+        }
+        append("</").append(item).append('>')
+        append("</").append(container).append('>')
+    }
+
+    private fun content(ttml: String, element: Element): String =
+        if (element.selfClosing) "" else ttml.substring(element.contentStart, element.contentEnd)
+
+    /** Deletes the auxiliary span together with the whitespace that preceded it. */
+    private fun removal(ttml: String, element: Element, lowerBound: Int): Edit {
+        var start = element.start
+        while (start > lowerBound && ttml[start - 1].isWhitespace()) start -= 1
+        return Edit(start, element.end, "")
+    }
+
+    /**
+     * Declares the timing mode and lyric language on the root and drops the
+     * empty default namespace override from every other element.
+     */
+    private fun normalizeTags(ttml: String, wordTimed: Boolean): String {
         val output = StringBuilder(ttml.length)
         var index = 0
         var rootSeen = false
-        var changed = false
         while (index < ttml.length) {
             val open = ttml.indexOf('<', index)
             if (open < 0) {
@@ -56,38 +234,36 @@ internal object AmllTtmlFormatConverter {
                 break
             }
             val tag = ttml.substring(open, end + 1)
-            val rewritten = when {
-                !rootSeen && isElement(tag, "tt") -> {
-                    rootSeen = true
-                    if (markWordTiming) withWordTiming(tag) else tag
-                }
-                rootSeen -> withoutEmptyDefaultNamespace(tag)
-                else -> tag
-            }
-            if (rewritten != tag) changed = true
-            output.append(rewritten)
+            output.append(
+                when {
+                    !rootSeen && isElement(ttml, open, "tt") -> {
+                        rootSeen = true
+                        withRootAttributes(tag, wordTimed)
+                    }
+                    tag.startsWith("</") -> tag
+                    else -> EMPTY_DEFAULT_NAMESPACE.replace(tag, "")
+                },
+            )
             index = end + 1
         }
-        return if (changed) {
-            TtmlFormatConversion(output.toString(), true)
-        } else {
-            TtmlFormatConversion(ttml, false)
-        }
+        return output.toString()
     }
 
-    private fun withoutEmptyDefaultNamespace(tag: String): String =
-        if (tag.startsWith("</")) tag else EMPTY_DEFAULT_NAMESPACE.replace(tag, "")
-
-    private fun withWordTiming(tag: String): String {
-        if (TIMING_ATTRIBUTE.containsMatchIn(tag)) return tag
+    private fun withRootAttributes(tag: String, wordTimed: Boolean): String {
+        val insertAt = if (tag.endsWith("/>")) tag.length - 2 else tag.length - 1
+        // Both attributes are authoritative here, so any inherited value is
+        // dropped before the pinned one is appended.
+        var head = tag.substring(0, insertAt)
+        head = LANGUAGE_ATTRIBUTE.replace(head, "")
+        head = TIMING_ATTRIBUTE_VALUE.replace(head, "")
         val additions = buildString {
-            if (!ITUNES_DECLARATION.containsMatchIn(tag)) {
+            if (!ITUNES_DECLARATION.containsMatchIn(head)) {
                 append(" xmlns:itunes=\"").append(ITUNES_NAMESPACE).append('"')
             }
-            append(" itunes:timing=\"Word\"")
+            append(" itunes:timing=\"").append(if (wordTimed) "Word" else "Line").append('"')
+            append(" xml:lang=\"").append(LYRIC_LANGUAGE).append('"')
         }
-        val insertAt = if (tag.endsWith("/>")) tag.length - 2 else tag.length - 1
-        return tag.substring(0, insertAt).trimEnd() + additions + tag.substring(insertAt)
+        return head.trimEnd() + additions + tag.substring(insertAt)
     }
 
     private fun hasTimedSpan(text: String): Boolean {
@@ -102,11 +278,136 @@ internal object AmllTtmlFormatConverter {
             }
             val end = tagEnd(text, open)
             if (end < 0) return false
-            val tag = text.substring(open, end + 1)
-            if (isElement(tag, "span") && BEGIN_ATTRIBUTE.containsMatchIn(tag)) return true
+            if (isElement(text, open, "span") &&
+                BEGIN_ATTRIBUTE.containsMatchIn(text.substring(open, end + 1))
+            ) {
+                return true
+            }
             index = end + 1
         }
         return false
+    }
+
+    private fun applyEdits(ttml: String, edits: List<Edit>): String {
+        if (edits.isEmpty()) return ttml
+        return buildString(ttml.length) {
+            var cursor = 0
+            edits.sortedBy { it.start }.forEach { edit ->
+                if (edit.start < cursor) return@forEach
+                append(ttml, cursor, edit.start)
+                append(edit.replacement)
+                cursor = edit.end
+            }
+            append(ttml, cursor, ttml.length)
+        }
+    }
+
+    private fun attribute(attributes: String, pattern: Regex): String? {
+        val match = pattern.find(attributes) ?: return null
+        return if (match.groups[1] != null) match.groupValues[1] else match.groupValues[2]
+    }
+
+    // --- Minimal XML element scanning -------------------------------------
+
+    private data class Edit(val start: Int, val end: Int, val replacement: String)
+
+    private data class TrackEntry(val key: String, val text: String)
+
+    private data class Element(
+        val attributes: String,
+        val start: Int,
+        val contentStart: Int,
+        val contentEnd: Int,
+        val end: Int,
+        val selfClosing: Boolean,
+    )
+
+    /** The next `name` element at or after [from], or `null` when there is none. */
+    private fun nextElement(text: String, name: String, from: Int): Element? {
+        var index = from
+        while (index < text.length) {
+            val open = text.indexOf('<', index)
+            if (open < 0) return null
+            val literal = literalEnd(text, open)
+            if (literal > 0) {
+                index = literal
+                continue
+            }
+            val end = tagEnd(text, open)
+            if (end < 0) return null
+            if (isElement(text, open, name)) return parseElement(text, name, open, end)
+            index = end + 1
+        }
+        return null
+    }
+
+    private fun parseElement(text: String, name: String, open: Int, tagEnd: Int): Element? {
+        val selfClosing = text[tagEnd - 1] == '/'
+        val attributesEnd = if (selfClosing) tagEnd - 1 else tagEnd
+        val attributes = text.substring(open + 1 + name.length, attributesEnd)
+        if (selfClosing) {
+            return Element(attributes, open, tagEnd + 1, tagEnd + 1, tagEnd + 1, true)
+        }
+        var depth = 1
+        var index = tagEnd + 1
+        while (index < text.length) {
+            val open2 = text.indexOf('<', index)
+            if (open2 < 0) return null
+            val literal = literalEnd(text, open2)
+            if (literal > 0) {
+                index = literal
+                continue
+            }
+            val end2 = tagEnd(text, open2)
+            if (end2 < 0) return null
+            if (isCloseTag(text, open2, name)) {
+                depth -= 1
+                if (depth == 0) {
+                    return Element(attributes, open, tagEnd + 1, open2, end2 + 1, false)
+                }
+            } else if (isElement(text, open2, name) && text[end2 - 1] != '/') {
+                depth += 1
+            }
+            index = end2 + 1
+        }
+        return null
+    }
+
+    /** Direct child elements of [parent], in document order. */
+    private fun childElements(text: String, parent: Element): List<Element> {
+        val children = mutableListOf<Element>()
+        var index = parent.contentStart
+        while (index < parent.contentEnd) {
+            val open = text.indexOf('<', index)
+            if (open < 0 || open >= parent.contentEnd) break
+            val literal = literalEnd(text, open)
+            if (literal > 0) {
+                index = literal
+                continue
+            }
+            val end = tagEnd(text, open)
+            if (end < 0) break
+            val name = elementName(text, open, end)
+            val child = name?.let { parseElement(text, it, open, end) }
+            if (child == null) {
+                index = end + 1
+                continue
+            }
+            children += child
+            index = child.end
+        }
+        return children
+    }
+
+    private fun elementName(text: String, open: Int, tagEnd: Int): String? {
+        if (text.startsWith("</", open)) return null
+        var index = open + 1
+        while (index < tagEnd) {
+            val character = text[index]
+            if (character.isWhitespace() || character == '/' || character == '>') break
+            index += 1
+        }
+        return text.substring(open + 1, index).takeIf(String::isNotEmpty)
     }
 
     /** Exclusive end of a comment, CDATA section or processing instruction. */
@@ -137,10 +438,16 @@ internal object AmllTtmlFormatConverter {
         return -1
     }
 
-    private fun isElement(tag: String, name: String): Boolean {
-        if (!tag.startsWith("<")) return false
-        if (!tag.regionMatches(1, name, 0, name.length, ignoreCase = true)) return false
-        val next = tag.getOrNull(1 + name.length) ?: return false
+    private fun isElement(text: String, open: Int, name: String): Boolean {
+        if (!text.regionMatches(open + 1, name, 0, name.length, ignoreCase = true)) return false
+        val next = text.getOrNull(open + 1 + name.length) ?: return false
         return next == '>' || next == '/' || next.isWhitespace()
+    }
+
+    private fun isCloseTag(text: String, open: Int, name: String): Boolean {
+        if (!text.startsWith("</", open)) return false
+        if (!text.regionMatches(open + 2, name, 0, name.length, ignoreCase = true)) return false
+        val next = text.getOrNull(open + 2 + name.length) ?: return false
+        return next == '>' || next.isWhitespace()
     }
 }

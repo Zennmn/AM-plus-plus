@@ -83,7 +83,10 @@ class CustomLyricsOnlineImporterTest {
             <head><metadata xmlns=""><ttm:agent type="person" xml:id="v1"/></metadata></head>
             <body dur="00:03.000"><div xmlns="" begin="00:01.000" end="00:03.000">
             <p begin="00:01.000" end="00:03.000" ttm:agent="v1" itunes:key="L1">
-            <span begin="00:01.000" end="00:03.000">word</span></p></div></body></tt>
+            <span begin="00:01.000" end="00:03.000">aa</span>
+            <span ttm:role="x-translation" xml:lang="zh-CN">T1</span>
+            <span ttm:role="x-roman">R1</span>
+            </p></div></body></tt>
         """.trimIndent()
         val importer = CustomLyricsOnlineImporter(
             fetchAmll = { amllFormat },
@@ -98,7 +101,11 @@ class CustomLyricsOnlineImporterTest {
         assertTrue(imported.reformatted)
         assertEquals(CustomLyricsSources.AMLL, imported.source)
         assertFalse(imported.ttml.contains("xmlns=\"\""))
-        assertTrue(imported.ttml.contains("""itunes:timing="Word""""))
+        assertFalse(imported.ttml.substringAfter("<body").contains("ttm:role=\"x-translation\""))
+        assertTrue(imported.ttml.substringBefore('>').contains("""itunes:timing="Word""""))
+        assertTrue(imported.ttml.substringBefore('>').contains("""xml:lang="ko""""))
+        assertTrue(imported.ttml.contains("<translation xml:lang=\"zh-Hans\"><text for=\"L1\">T1</text>"))
+        assertTrue(imported.ttml.contains("<transliteration xml:lang=\"ko-Latn\"><text for=\"L1\">R1</text>"))
         assertTrue(TtmlInputPolicy.isAcceptable(imported.ttml))
     }
 
