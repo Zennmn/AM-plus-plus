@@ -47,6 +47,13 @@ internal data class TtmlFormatConversion(
  * `<songwriters>`, so the tracks join that element ahead of what it holds
  * rather than opening a second one beside it.
  *
+ * A file can arrive half in each format — an Apple transliteration declared in
+ * the head beside translations still inline, which is what AMLL serves for a
+ * song whose romanization came from Apple. Each kind is therefore judged on its
+ * own: a kind the head declares keeps its inline spans where they are, because
+ * migrating it again would duplicate the track, and a kind found only inline is
+ * migrated as usual and joins the tracks already there.
+ *
  * The background vocal left in the body is rewritten too. Its `begin` / `end`
  * go, because Apple reads the vocal's extent from its own syllables, and a
  * vocal starting ahead of the first lyric syllable moves to the front of the
@@ -106,21 +113,50 @@ internal object AmllTtmlFormatConverter {
 
     fun toAppleFormat(ttml: String): TtmlFormatConversion {
         if (ttml.isEmpty()) return TtmlFormatConversion(ttml, false)
-        // A declared track means the auxiliary spans already moved to the head,
-        // and migrating again would duplicate them. An `<iTunesMetadata>` on its
+        // Judged per kind, so a head that already declares one track does not
+        // hide the other kind still sitting inline. An `<iTunesMetadata>` on its
         // own is no such signal: AMLL writes one to carry `<songwriters>`.
-        if (declaresTracks(ttml)) return TtmlFormatConversion(ttml, false)
-        val migrated = migrateAuxiliaryTracks(ttml)
+        val declared = declaredTracks(ttml)
+        // The head already speaks for every kind the body carries, so this is
+        // Apple's own document and nothing, the root included, is rewritten.
+        if (declared.any && !hasUndeclaredInlineTrack(ttml, declared)) {
+            return TtmlFormatConversion(ttml, false)
+        }
+        val migrated = migrateAuxiliaryTracks(ttml, declared)
         val result = normalizeTags(migrated, wordTimed = hasTimedSpan(migrated))
         return TtmlFormatConversion(result, result != ttml)
     }
 
-    private fun declaresTracks(ttml: String) =
-        nextElement(ttml, "translations", 0) != null ||
-            nextElement(ttml, "transliterations", 0) != null
+    private fun declaredTracks(ttml: String) = DeclaredTracks(
+        translations = nextElement(ttml, "translations", 0) != null,
+        transliterations = nextElement(ttml, "transliterations", 0) != null,
+    )
+
+    /** True when the body still carries a kind the head leaves undeclared. */
+    private fun hasUndeclaredInlineTrack(ttml: String, declared: DeclaredTracks): Boolean {
+        val body = nextElement(ttml, "body", 0) ?: return false
+        var index = body.contentStart
+        while (index < body.contentEnd) {
+            val open = ttml.indexOf('<', index)
+            if (open < 0 || open >= body.contentEnd) return false
+            val literal = literalEnd(ttml, open)
+            if (literal > 0) {
+                index = literal
+                continue
+            }
+            val end = tagEnd(ttml, open)
+            if (end < 0) return false
+            when (attribute(ttml.substring(open, end + 1), ROLE_ATTRIBUTE)) {
+                ROLE_TRANSLATION -> if (!declared.translations) return true
+                ROLE_ROMAN -> if (!declared.transliterations) return true
+            }
+            index = end + 1
+        }
+        return false
+    }
 
     /** Moves inline `x-translation` / `x-roman` spans into a head `<iTunesMetadata>`. */
-    private fun migrateAuxiliaryTracks(ttml: String): String {
+    private fun migrateAuxiliaryTracks(ttml: String, declared: DeclaredTracks): String {
         val metadata = nextElement(ttml, "metadata", 0) ?: return ttml
 
         val translations = mutableListOf<TrackEntry>()
@@ -132,7 +168,7 @@ internal object AmllTtmlFormatConverter {
             val line = nextElement(ttml, "p", cursor) ?: break
             cursor = line.end
             val key = attribute(line.attributes, KEY_ATTRIBUTE) ?: continue
-            collectLine(ttml, line, key, translations, transliterations, edits)
+            collectLine(ttml, line, key, declared, translations, transliterations, edits)
         }
 
         // Every keyed line contributes an entry, so a line the source left
@@ -176,6 +212,7 @@ internal object AmllTtmlFormatConverter {
         ttml: String,
         line: Element,
         key: String,
+        declared: DeclaredTracks,
         translations: MutableList<TrackEntry>,
         transliterations: MutableList<TrackEntry>,
         edits: MutableList<Edit>,
@@ -191,11 +228,11 @@ internal object AmllTtmlFormatConverter {
         val children = childElements(ttml, line)
         children.forEach { child ->
             when (attribute(child.attributes, ROLE_ATTRIBUTE)) {
-                ROLE_TRANSLATION -> {
+                ROLE_TRANSLATION -> if (!declared.translations) {
                     if (translation == null) translation = auxiliaryText(ttml, child)
                     edits += removal(ttml, child, line.contentStart)
                 }
-                ROLE_ROMAN -> {
+                ROLE_ROMAN -> if (!declared.transliterations) {
                     if (roman == null) roman = auxiliaryText(ttml, child)
                     edits += removal(ttml, child, line.contentStart)
                 }
@@ -204,13 +241,13 @@ internal object AmllTtmlFormatConverter {
                     val removals = mutableListOf<Edit>()
                     nested.forEach { span ->
                         when (attribute(span.attributes, ROLE_ATTRIBUTE)) {
-                            ROLE_TRANSLATION -> {
+                            ROLE_TRANSLATION -> if (!declared.translations) {
                                 if (backgroundTranslation == null) {
                                     backgroundTranslation = auxiliaryText(ttml, span)
                                 }
                                 removals += removal(ttml, span, child.contentStart)
                             }
-                            ROLE_ROMAN -> {
+                            ROLE_ROMAN -> if (!declared.transliterations) {
                                 if (backgroundRoman == null) {
                                     backgroundRoman = auxiliaryText(ttml, span)
                                 }
@@ -445,6 +482,14 @@ internal object AmllTtmlFormatConverter {
     // --- Minimal XML element scanning -------------------------------------
 
     private data class Edit(val start: Int, val end: Int, val replacement: String)
+
+    /** Which auxiliary kinds the head already carries, so they are not moved twice. */
+    private data class DeclaredTracks(
+        val translations: Boolean,
+        val transliterations: Boolean,
+    ) {
+        val any get() = translations || transliterations
+    }
 
     /**
      * One line's place in a track. Both texts are `null` when the line said

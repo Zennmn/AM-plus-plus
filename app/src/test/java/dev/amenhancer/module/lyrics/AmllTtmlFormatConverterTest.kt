@@ -429,6 +429,82 @@ class AmllTtmlFormatConverterTest {
         assertEquals(appleFormat, result.ttml)
     }
 
+    /** An Apple transliteration in the head, translations still inline as AMLL. */
+    private val mixedFormat = """
+        <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" xmlns:itunes="http://music.apple.com/lyric-ttml-internal" itunes:timing="Word">
+        <head><metadata><iTunesMetadata xmlns="http://music.apple.com/lyric-ttml-internal">
+        <transliterations><transliteration><text for="L1"><span begin="0.0" end="1.0">ro</span></text><text for="L2"><span begin="1.0" end="2.0">ma</span></text></transliteration></transliterations>
+        </iTunesMetadata></metadata></head>
+        <body><div>
+        <p begin="0.0" end="1.0" itunes:key="L1"><span begin="0.0" end="1.0">aa</span>
+        <span ttm:role="x-translation" xml:lang="zh-CN">T1</span></p>
+        <p begin="1.0" end="2.0" itunes:key="L2"><span begin="1.0" end="2.0">bb</span>
+        <span ttm:role="x-translation" xml:lang="zh-CN">T2</span></p>
+        </div></body></tt>
+    """.trimIndent()
+
+    @Test
+    fun `inline translations still migrate beside a declared transliteration track`() {
+        val result = AmllTtmlFormatConverter.toAppleFormat(mixedFormat)
+
+        assertTrue(result.converted)
+        assertTrue(
+            result.ttml.contains(
+                "<translations><translation type=\"subtitle\" xml:lang=\"zh-Hans\">" +
+                    "<text for=\"L1\">T1</text><text for=\"L2\">T2</text>" +
+                    "</translation></translations>",
+            ),
+        )
+        assertFalse(result.ttml.substringAfter("<body").contains("x-translation"))
+        assertTrue(result.ttml.substringBefore('>').contains("""xml:lang="ko""""))
+    }
+
+    @Test
+    fun `the declared transliteration track is neither duplicated nor rewritten`() {
+        val result = AmllTtmlFormatConverter.toAppleFormat(mixedFormat)
+
+        assertEquals(1, Regex("""<iTunesMetadata""").findAll(result.ttml).count())
+        assertEquals(1, Regex("""<transliterations>""").findAll(result.ttml).count())
+        // Apple lists translations first, and the track it already had is intact.
+        assertTrue(result.ttml.indexOf("<translations>") < result.ttml.indexOf("<transliterations>"))
+        assertTrue(
+            result.ttml.contains(
+                "<transliterations><transliteration><text for=\"L1\">" +
+                    "<span begin=\"0.0\" end=\"1.0\">ro</span></text>",
+            ),
+        )
+        assertTrue(TtmlInputPolicy.isAcceptable(result.ttml))
+    }
+
+    @Test
+    fun `a declared kind keeps its inline spans rather than migrating twice`() {
+        val declaredAndInline = """
+            <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+            <head><metadata><iTunesMetadata xmlns="http://music.apple.com/lyric-ttml-internal">
+            <transliterations><transliteration><text for="L1">ro</text></transliteration></transliterations>
+            </iTunesMetadata></metadata></head>
+            <body><div><p begin="0.0" end="1.0" itunes:key="L1"><span begin="0.0" end="1.0">aa</span>
+            <span ttm:role="x-roman">R1</span>
+            <span ttm:role="x-translation">T1</span></p></div></body></tt>
+        """.trimIndent()
+
+        val result = AmllTtmlFormatConverter.toAppleFormat(declaredAndInline)
+
+        assertEquals(1, Regex("""<transliterations>""").findAll(result.ttml).count())
+        assertFalse(result.ttml.contains("<text for=\"L1\">R1</text>"))
+        assertTrue(result.ttml.substringAfter("<body").contains("<span ttm:role=\"x-roman\">R1</span>"))
+        assertTrue(result.ttml.contains("<text for=\"L1\">T1</text>"))
+    }
+
+    @Test
+    fun `the mixed rewrite is idempotent`() {
+        val once = AmllTtmlFormatConverter.toAppleFormat(mixedFormat)
+        val twice = AmllTtmlFormatConverter.toAppleFormat(once.ttml)
+
+        assertFalse(twice.converted)
+        assertEquals(once.ttml, twice.ttml)
+    }
+
     @Test
     fun `an itunes metadata carrying only songwriters is still migrated into`() {
         // AMLL writes this element itself, so it is no sign of the Apple format.
