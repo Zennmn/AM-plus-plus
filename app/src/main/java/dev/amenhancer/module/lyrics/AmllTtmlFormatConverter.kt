@@ -8,20 +8,13 @@ internal data class TtmlFormatConversion(
 /**
  * Rewrites the AMLL TTML format into the Apple Music format.
  *
- * The formats differ in where auxiliary tracks live. AMLL keeps translation and
- * romanization inline in every lyric line:
+ * The formats differ in where the translation and romanization tracks live.
+ * AMLL keeps them inline in every lyric line; Apple declares them once in the
+ * head, linked back through `itunes:key`, and leaves the body carrying lyrics:
  *
  * ```
- * <p itunes:key="L1"> ...word spans...
- *   <span ttm:role="x-translation" xml:lang="zh-CN">…</span>
- *   <span ttm:role="x-roman">…</span>
- * </p>
- * ```
+ * <p itunes:key="L1"> …word spans… <span ttm:role="x-translation">…</span></p>
  *
- * Apple Music instead declares them once in the head, linked back to each line
- * through `itunes:key`, and leaves the body carrying only lyrics:
- *
- * ```
  * <iTunesMetadata xmlns="http://music.apple.com/lyric-ttml-internal">
  *   <translations><translation type="subtitle" xml:lang="zh-Hans"><text for="L1">…</text></translation></translations>
  *   <transliterations><transliteration xml:lang="ko-Latn"><text for="L1">…</text></transliteration></transliterations>
@@ -29,48 +22,38 @@ internal data class TtmlFormatConversion(
  * ```
  *
  * A `<text>` carries whatever the source span held, so a line-by-line track
- * stays plain text and a word-by-word track keeps its timed `<span>`s.
- * Auxiliary spans nested in a background vocal (`ttm:role="x-bg"`) move to the
- * same `<text>` wrapped in an `x-bg` span and in parentheses, which is how
- * Apple sets a background translation apart from the line it accompanies.
+ * stays plain text and a word-by-word one keeps its timed `<span>`s. Spans
+ * nested in a background vocal (`ttm:role="x-bg"`) join the same `<text>`,
+ * wrapped in an `x-bg` span and in parentheses, which is how Apple sets a
+ * background translation apart from the line it accompanies.
  *
- * A track that is written lists every keyed line, not just the translated ones:
- * Android Apple Music walks the entries alongside the lines instead of
- * resolving `for`, so a line skipped there shifts every later translation onto
- * the wrong lyric — and a track with holes in it is rejected outright. A line
- * the source left untranslated therefore holds a single space, and a line
- * translated only in its background vocal opens with that same space ahead of
- * the `x-bg` span. A track no line contributed to is left out altogether
- * rather than written as a column of spaces.
+ * A track that is written lists every keyed line: Android Apple Music walks the
+ * entries alongside the lines instead of resolving `for`, so a line skipped
+ * there shifts every later entry onto the wrong lyric — and a track with holes
+ * is rejected outright. An untranslated line therefore holds a single space, and
+ * a line translated only in its background opens with that same space ahead of
+ * the `x-bg` span. A track no line contributed to is left out altogether.
  *
- * AMLL already writes an `<iTunesMetadata>` of its own to carry
- * `<songwriters>`, so the tracks join that element ahead of what it holds
- * rather than opening a second one beside it.
+ * The tracks join the `<iTunesMetadata>` AMLL writes for `<songwriters>`, ahead
+ * of what it holds, rather than opening a second one beside it. A file can also
+ * arrive half in each format — an Apple transliteration in the head beside
+ * translations still inline — so each kind is judged on its own: a kind the head
+ * declares keeps its inline spans, because migrating it again would duplicate
+ * the track.
  *
- * A file can arrive half in each format — an Apple transliteration declared in
- * the head beside translations still inline, which is what AMLL serves for a
- * song whose romanization came from Apple. Each kind is therefore judged on its
- * own: a kind the head declares keeps its inline spans where they are, because
- * migrating it again would duplicate the track, and a kind found only inline is
- * migrated as usual and joins the tracks already there.
+ * The background vocal left in the body loses its `begin` / `end`, because Apple
+ * reads the vocal's extent from its own syllables, and moves to the front of the
+ * line when it starts ahead of the first lyric syllable, because Apple places
+ * the highlight in document order.
  *
- * The background vocal left in the body is rewritten too. Its `begin` / `end`
- * go, because Apple reads the vocal's extent from its own syllables, and a
- * vocal starting ahead of the first lyric syllable moves to the front of the
- * line, because Apple places the highlight in document order.
- *
- * The language tags are pinned rather than carried over: Android Apple Music's
- * TTML parser only renders a translation and a transliteration together when
- * the lyrics are Korean, so the root is marked `ko`, translations `zh-Hans` and
- * transliterations `ko-Latn`. Because only one track of each kind survives that
- * constraint, the first translation and the first romanization of each line win.
- *
- * The root also gets the `itunes:timing` Apple expects — `Word` when the body
- * carries timed syllables, `Line` otherwise.
- *
- * AMLL additionally serializes `<metadata>` and `<div>` with `xmlns=""`, which
- * drops the lyric subtree out of the TTML namespace and leaves Apple's parser
- * with no lines; the override is removed.
+ * The root is pinned rather than carried over. Android's TTML parser renders a
+ * translation and a transliteration together only when the lyrics are Korean, so
+ * the root is marked `ko`, translations `zh-Hans` and transliterations `ko-Latn`;
+ * because only one track of each kind survives that constraint, the first
+ * translation and first romanization of each line win. The root also gets the
+ * `itunes:timing` Apple expects — `Word` when the body carries timed syllables,
+ * `Line` otherwise. AMLL's `xmlns=""` on `<metadata>` and `<div>` goes too: it
+ * drops the lyric subtree out of the TTML namespace, leaving Apple no lines.
  *
  * The rewrite is textual on purpose: whitespace between `<span>` tags carries
  * word separation, and a DOM round-trip would not preserve it. Only markup is
