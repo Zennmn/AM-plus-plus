@@ -83,8 +83,7 @@ internal object AmllTtmlFormatConverter {
     private val KEY_ATTRIBUTE = attributePattern("itunes:key")
     private val BEGIN_ATTRIBUTE_VALUE = attributePattern("begin")
     private val TIMING_ATTRIBUTE_VALUE = attributePattern("itunes:timing")
-    private val ITUNES_DECLARATION = Regex("""\sxmlns:itunes\s*=""")
-    private val BEGIN_ATTRIBUTE = Regex("""\sbegin\s*=""")
+    private val ITUNES_DECLARATION = attributePattern("xmlns:itunes")
     private val SPAN_TIMING =
         Regex("""\s(?:begin|end)\s*=\s*"[^"]*"|\s(?:begin|end)\s*=\s*'[^']*'""")
     private val PARENTHESIZED = Regex("""^\s*[(（].*[)）]\s*$""", RegexOption.DOT_MATCHES_ALL)
@@ -106,7 +105,11 @@ internal object AmllTtmlFormatConverter {
             return TtmlFormatConversion(ttml, false)
         }
         val migrated = migrateAuxiliaryTracks(ttml, declared)
-        val result = normalizeTags(migrated, wordTimed = hasTimedSpan(migrated))
+        val body = nextElement(migrated, "body", 0)
+        val result = normalizeTags(
+            migrated,
+            wordTimed = body != null && hasTimedSpan(migrated, body),
+        )
         return TtmlFormatConversion(result, result != ttml)
     }
 
@@ -163,7 +166,12 @@ internal object AmllTtmlFormatConverter {
             return applyEdits(ttml, edits)
         }
 
-        edits += declareTracks(ttml, metadata, buildTracks(translations, transliterations))
+        edits += declareTracks(
+            ttml,
+            metadata,
+            buildTracks(translations, transliterations),
+            declared,
+        )
         return applyEdits(ttml, edits)
     }
 
@@ -172,7 +180,12 @@ internal object AmllTtmlFormatConverter {
      * wrote for `<songwriters>` — ahead of what it holds, the order Apple uses —
      * rather than opening a second one beside it.
      */
-    private fun declareTracks(ttml: String, metadata: Element, tracks: String): Edit {
+    private fun declareTracks(
+        ttml: String,
+        metadata: Element,
+        tracks: String,
+        declared: DeclaredTracks,
+    ): Edit {
         val container = nextElement(ttml, "iTunesMetadata", metadata.start)
             ?.takeIf { it.end <= metadata.contentEnd }
         return when {
@@ -187,7 +200,20 @@ internal object AmllTtmlFormatConverter {
                 container.end,
                 "<iTunesMetadata${container.attributes}>$tracks</iTunesMetadata>",
             )
-            else -> Edit(container.contentStart, container.contentStart, tracks)
+            else -> {
+                // A newly migrated transliteration belongs after a translations
+                // track that was already present. Every other new track starts
+                // at the front, where buildTracks keeps Apple's kind order.
+                val insertAt = if (declared.translations && !declared.transliterations) {
+                    nextElement(ttml, "translations", container.contentStart)
+                        ?.takeIf { it.end <= container.contentEnd }
+                        ?.end
+                        ?: container.contentStart
+                } else {
+                    container.contentStart
+                }
+                Edit(insertAt, insertAt, tracks)
+            }
         }
     }
 
@@ -284,9 +310,10 @@ internal object AmllTtmlFormatConverter {
             .mapNotNull { clockSeconds(attribute(it.attributes, BEGIN_ATTRIBUTE_VALUE)) }
             .firstOrNull()
 
-    /** Seconds in a clock value such as `3:02.550`, or `null` when unreadable. */
+    /** Seconds in `3:02.550` or AMLL's offset form `1.5s`; null when unreadable. */
     private fun clockSeconds(value: String?): Double? {
-        val parts = value?.split(':')?.takeIf { it.size in 1..3 } ?: return null
+        val clock = value?.let { if (':' in it) it else it.removeSuffix("s") } ?: return null
+        val parts = clock.split(':').takeIf { it.size in 1..3 } ?: return null
         var seconds = 0.0
         parts.forEach { part ->
             seconds = seconds * 60 + (part.toDoubleOrNull() ?: return null)
@@ -419,11 +446,11 @@ internal object AmllTtmlFormatConverter {
         return head.trimEnd() + additions + tag.substring(insertAt)
     }
 
-    private fun hasTimedSpan(text: String): Boolean {
-        var index = 0
-        while (index < text.length) {
+    private fun hasTimedSpan(text: String, body: Element): Boolean {
+        var index = body.contentStart
+        while (index < body.contentEnd) {
             val open = text.indexOf('<', index)
-            if (open < 0) return false
+            if (open < 0 || open >= body.contentEnd) return false
             val literal = literalEnd(text, open)
             if (literal > 0) {
                 index = literal
@@ -432,7 +459,7 @@ internal object AmllTtmlFormatConverter {
             val end = tagEnd(text, open)
             if (end < 0) return false
             if (isElement(text, open, "span") &&
-                BEGIN_ATTRIBUTE.containsMatchIn(text.substring(open, end + 1))
+                attribute(text.substring(open, end + 1), BEGIN_ATTRIBUTE_VALUE) != null
             ) {
                 return true
             }

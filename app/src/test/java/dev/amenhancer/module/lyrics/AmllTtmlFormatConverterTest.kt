@@ -624,4 +624,100 @@ class AmllTtmlFormatConverterTest {
 
         assertTrue(TtmlInputPolicy.isAcceptable(result.ttml))
     }
+
+    @Test
+    fun `a single quoted itunes namespace declaration is retained without duplication`() {
+        val singleQuotedNamespace = """
+            <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" xmlns:itunes='http://music.apple.com/lyric-ttml-internal'>
+            <head><metadata xmlns=""/></head>
+            <body><div xmlns=""><p begin="0.0" end="1.0" itunes:key="L1">
+            <span begin="0.0" end="1.0">aa</span>
+            <span ttm:role="x-translation">T1</span>
+            </p></div></body></tt>
+        """.trimIndent()
+
+        val result = AmllTtmlFormatConverter.toAppleFormat(singleQuotedNamespace)
+        val root = result.ttml.substringBefore('>')
+
+        assertTrue(result.converted)
+        assertEquals(1, Regex("""xmlns:itunes\s*=""").findAll(root).count())
+        assertTrue(root.contains("xmlns:itunes='http://music.apple.com/lyric-ttml-internal'"))
+    }
+
+    @Test
+    fun `a body syllable with a single quoted begin sets word timing`() {
+        val singleQuotedBegin = """
+            <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+            <head><metadata xmlns=""/></head>
+            <body><div xmlns=""><p begin="0.0" end="1.0" itunes:key="L1">
+            <span begin='0.0' end='1.0'>aa</span>
+            </p></div></body></tt>
+        """.trimIndent()
+
+        val result = AmllTtmlFormatConverter.toAppleFormat(singleQuotedBegin)
+        val root = result.ttml.substringBefore('>')
+
+        assertTrue(result.converted)
+        assertTrue(root.contains("itunes:timing=\"Word\""))
+    }
+
+    @Test
+    fun `seconds suffix background timing is stripped and an early background moves first`() {
+        val secondsBackground = """
+            <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+            <head><metadata xmlns=""/></head>
+            <body><div xmlns=""><p begin="0s" end="2s" itunes:key="L1">
+            <span begin="1s" end="2s">aa</span>
+            <span ttm:role="x-bg" begin="0.5s" end="1s"><span begin="0.5s" end="1s">(bb)</span>
+            <span ttm:role="x-translation">BT</span></span>
+            </p></div></body></tt>
+        """.trimIndent()
+
+        val result = AmllTtmlFormatConverter.toAppleFormat(secondsBackground)
+        val body = result.ttml.substringAfter("<body")
+
+        assertTrue(body.contains("<span ttm:role=\"x-bg\"><span begin=\"0.5s\" end=\"1s\">(bb)</span></span>"))
+        assertTrue(body.indexOf("x-bg") < body.indexOf(">aa<"))
+        assertFalse(body.contains("<span ttm:role=\"x-bg\" begin=\"0.5s\" end=\"1s\">"))
+        assertEquals(1, Regex("""x-bg""").findAll(body).count())
+    }
+
+    @Test
+    fun `timed spans only in a migrated head track keep a line timed body`() {
+        val timedHeadLineBody = """
+            <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+            <head><metadata><iTunesMetadata xmlns="http://music.apple.com/lyric-ttml-internal">
+            <transliterations><transliteration><text for="L1"><span begin="0.0" end="1.0">ro</span></text></transliteration></transliterations>
+            </iTunesMetadata></metadata></head>
+            <body><div><p begin="0.0" end="1.0" itunes:key="L1">
+            aa <span ttm:role="x-translation">T1</span>
+            </p></div></body></tt>
+        """.trimIndent()
+
+        val result = AmllTtmlFormatConverter.toAppleFormat(timedHeadLineBody)
+        val root = result.ttml.substringBefore('>')
+
+        assertTrue(result.converted)
+        assertTrue(root.contains("itunes:timing=\"Line\""))
+    }
+
+    @Test
+    fun `existing translations stay before migrated inline romanization`() {
+        val translationsHeadRomanBody = """
+            <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+            <head><metadata><iTunesMetadata xmlns="http://music.apple.com/lyric-ttml-internal">
+            <translations><translation type="subtitle" xml:lang="zh-Hans"><text for="L1">T1</text></translation></translations>
+            </iTunesMetadata></metadata></head>
+            <body><div><p begin="0.0" end="1.0" itunes:key="L1">
+            <span begin="0.0" end="1.0">aa</span>
+            <span ttm:role="x-roman">R1</span>
+            </p></div></body></tt>
+        """.trimIndent()
+
+        val result = AmllTtmlFormatConverter.toAppleFormat(translationsHeadRomanBody)
+
+        assertTrue(result.converted)
+        assertTrue(result.ttml.indexOf("<translations>") < result.ttml.indexOf("<transliterations>"))
+        assertTrue(result.ttml.contains("<text for=\"L1\">R1</text>"))
+    }
 }
