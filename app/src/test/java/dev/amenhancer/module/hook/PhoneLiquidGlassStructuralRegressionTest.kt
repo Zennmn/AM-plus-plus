@@ -20,18 +20,17 @@ class PhoneLiquidGlassStructuralRegressionTest {
         ?: error("$relativePath was not found from the unit-test working directory")
 
     @Test
-    fun `persists and transports an independent phone liquid glass setting`() {
+    fun `persists the setting while keeping its embedded entry removed`() {
         val models = source("dev/amenhancer/module/model/ModuleModels.kt")
-        val store = source("dev/amenhancer/module/config/ConfigStore.kt")
+        val session = source("dev/amenhancer/module/config/EmbeddedConfigurationSession.kt")
         val schema = source("dev/amenhancer/module/config/ModuleSettingsSchema.kt")
         val client = source("dev/amenhancer/module/config/TargetConfigClient.kt")
-        val application = source("dev/amenhancer/module/ModuleApplication.kt")
-        val settings = source("dev/amenhancer/module/ui/SettingsActivity.kt")
+        val storage = source("dev/amenhancer/module/config/HostPrivateEmbeddedStorage.kt")
+        val settings = source("dev/amenhancer/module/ui/EmbeddedSettingsHost.kt")
 
         assertTrue(models.contains("val phoneLiquidGlassEnabled: Boolean = false"))
-        assertTrue(store.contains("ModuleSettingsSchema.encodeOrdinarySettings(settings)"))
-        assertTrue(store.contains("ModuleSettingsSchema.encodeFontManifest(manifest)"))
-        assertFalse(store.contains("lyrics_font_"))
+        assertTrue(session.contains("ModuleSettingsSchema.encodeOrdinarySettings(settings)"))
+        assertTrue(session.contains("ModuleSettingsSchema.encodeFontManifest(manifest)"))
         listOf(
             "lyrics_font_enabled",
             "lyrics_font_file_id",
@@ -40,11 +39,10 @@ class PhoneLiquidGlassStructuralRegressionTest {
             "lyrics_font_sha256",
         ).forEach { key -> assertTrue(schema.contains("\"$key\"")) }
         assertTrue(schema.contains("\"phone_liquid_glass_enabled\""))
-        assertTrue(application.contains("getRemotePreferences(ModuleConstants.REMOTE_PREFERENCES_GROUP)"))
-        assertTrue(client.contains("ModuleSettingsSchema.decode(preferences.all)"))
-        assertTrue(settings.contains("title = \"手机液态玻璃底栏\""))
-        assertTrue(settings.contains("badge = \"WIP\""))
-        assertTrue(settings.contains("store.settings().copy(phoneLiquidGlassEnabled = it)"))
+        assertTrue(storage.contains("ampp-embedded-settings"))
+        assertTrue(client.contains("valuesProvider"))
+        assertFalse(settings.contains("手机 Liquid Glass"))
+        assertFalse(settings.contains("phoneLiquidGlassEnabled = phoneLiquidGlass.isChecked"))
     }
 
     @Test

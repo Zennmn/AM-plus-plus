@@ -8,13 +8,13 @@ import org.junit.Test
 
 class LyricsTypefaceStructuralRegressionTest {
     @Test
-    fun `uses the remote file and not a provider or base64 preferences`() {
-        val importer = source("../font/SafFontImporter.kt")
+    fun `uses the host private descriptor and not a provider or base64 preferences`() {
+        val importer = source("../config/HostPrivateEmbeddedStorage.kt")
         val entry = source("HookEntry.kt")
         val runtime = source("LyricsTypefaceSession.kt")
 
-        assertTrue(importer.contains("openRemoteFile"))
-        assertTrue(entry.contains("openRemoteFile(name)"))
+        assertTrue(importer.contains("openFileDescriptor"))
+        assertTrue(entry.contains("HostPrivateEmbeddedStorage"))
         assertFalse(importer.contains("takePersistableUriPermission"))
         assertFalse(importer.contains("Base64"))
         assertFalse(importer.contains("uri.toString()"))

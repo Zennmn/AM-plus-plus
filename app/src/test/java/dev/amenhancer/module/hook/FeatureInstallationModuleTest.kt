@@ -123,6 +123,63 @@ class FeatureInstallationModuleTest {
     }
 
     @Test
+    fun `embedded install registers resources and installs immediately without application observer`() {
+        val events = mutableListOf<String>()
+        val module = FeatureInstallationModule(
+            plans = listOf(
+                plan("dual", events, "dual resources"),
+                plan("font", events, "font resources"),
+            ),
+            installLayoutInflationHooks = { events += "layout hooks" },
+            registerApplicationCreated = { _, _, _ -> events += "application observer" },
+            reportHealth = { _, health -> events += "report ${health.feature}" },
+            reportError = { message, _ -> events += "error $message" },
+        )
+
+        val session = module.installNow(config()) { context("6.5.1 (1583)") }
+
+        assertEquals(
+            listOf(
+                "dual resources",
+                "font resources",
+                "layout hooks",
+                "install dual",
+                "report dual",
+                "install font",
+                "report font",
+            ),
+            events,
+        )
+        assertEquals(FeatureInstallationPhase.COMPLETE, session.snapshot().phase)
+        assertSame(session, module.installNow(config()) { context("unexpected") })
+    }
+
+    @Test
+    fun `embedded context failure does not publish a poisoned active session`() {
+        var resourceRegistrations = 0
+        val module = FeatureInstallationModule(
+            plans = listOf(
+                FeatureInstallationPlan(
+                    feature = feature("feature", FeatureInstallResult.active("installed")),
+                    registerResources = { resourceRegistrations += 1 },
+                ),
+            ),
+            installLayoutInflationHooks = {},
+            registerApplicationCreated = { _, _, _ -> },
+            reportHealth = { _, _ -> },
+            reportError = { _, _ -> },
+        )
+
+        assertThrows(IllegalStateException::class.java) {
+            module.installNow(config()) { error("context failed") }
+        }
+        val recovered = module.installNow(config()) { context("6.5.1 (1583)") }
+
+        assertEquals(FeatureInstallationPhase.COMPLETE, recovered.snapshot().phase)
+        assertEquals(2, resourceRegistrations)
+    }
+
+    @Test
     fun `resource failure preserves propagation and stops later installation stages`() {
         val events = mutableListOf<String>()
         val module = FeatureInstallationModule(

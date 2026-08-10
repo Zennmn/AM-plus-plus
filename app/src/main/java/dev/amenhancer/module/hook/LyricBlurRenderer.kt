@@ -1,3 +1,5 @@
+@file:Suppress("NewApi")
+
 package dev.amenhancer.module.hook
 
 import android.annotation.TargetApi

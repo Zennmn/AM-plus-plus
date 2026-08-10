@@ -6,11 +6,33 @@ import dev.amenhancer.module.hook.ModernXposedRuntime
 import dev.amenhancer.module.model.CustomLyricsManifest
 import dev.amenhancer.module.model.FeatureHealth
 import dev.amenhancer.module.model.ModuleSettings
+import java.io.InputStream
 
-class TargetConfigClient(
-    private val preferences: SharedPreferences,
-    private val remoteFileOpener: ((String) -> ParcelFileDescriptor)? = null,
+class TargetConfigClient private constructor(
+    private val valuesProvider: () -> Map<String, *>,
+    private val fileOpener: ((String) -> InputStream)?,
+    private val remoteFileOpener: ((String) -> ParcelFileDescriptor)?,
 ) {
+    constructor(
+        preferences: SharedPreferences,
+        remoteFileOpener: ((String) -> ParcelFileDescriptor)? = null,
+    ) : this(
+        valuesProvider = preferences::getAll,
+        fileOpener = remoteFileOpener?.let { opener ->
+            { name -> ParcelFileDescriptor.AutoCloseInputStream(opener(name)) }
+        },
+        remoteFileOpener = remoteFileOpener,
+    )
+
+    internal constructor(reader: ConfigurationReader) : this(
+        valuesProvider = reader::values,
+        fileOpener = { name -> reader.openFile(name) ?: error("Configuration file is unavailable: $name") },
+        remoteFileOpener = { name ->
+            reader.openFileDescriptor(name)
+                ?: error("Configuration file descriptor is unavailable: $name")
+        },
+    )
+
     @Volatile
     private var cachedIndex: CachedIndex? = null
 
@@ -18,11 +40,11 @@ class TargetConfigClient(
         active = this
     }
     /** Ordinary feature settings only; never opens the potentially large lyrics index. */
-    fun settings(): ModuleSettings = ModuleSettingsSchema.decode(preferences.all)
+    fun settings(): ModuleSettings = ModuleSettingsSchema.decode(valuesProvider())
 
     /** Background custom-lyrics index read. */
     fun customLyricsManifest(): CustomLyricsManifest {
-        val values = preferences.all
+        val values = valuesProvider()
         val pointer = ModuleSettingsSchema.decodeIndexPointer(values)
         val key = IndexCacheKey(
             pointer = pointer,
@@ -34,13 +56,19 @@ class TargetConfigClient(
         )
         cachedIndex?.takeIf { it.key == key }?.let { return it.manifest }
         val state = CustomLyricsIndexRepository.state(values) { fileId ->
-            remoteFileOpener?.invoke(fileId)?.let { ParcelFileDescriptor.AutoCloseInputStream(it) }
+            runCatching { fileOpener?.invoke(fileId) }.getOrNull()
         }
         if (state.canCommit) cachedIndex = CachedIndex(key, state.manifest)
         return state.manifest
     }
 
     fun openRemoteFile(name: String): ParcelFileDescriptor? =
+        runCatching { remoteFileOpener?.invoke(name) }.getOrNull()
+
+    fun openFile(name: String): InputStream? =
+        runCatching { fileOpener?.invoke(name) }.getOrNull()
+
+    fun openFileDescriptor(name: String): ParcelFileDescriptor? =
         runCatching { remoteFileOpener?.invoke(name) }.getOrNull()
 
     fun reportHealth(health: FeatureHealth) {

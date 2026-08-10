@@ -20,28 +20,27 @@ class LibxposedApi102StructuralRegressionTest {
             .joinToString("\n") { it.readText() }
 
         assertTrue(build.contains("io.github.libxposed:api:102.0.0"))
-        assertTrue(build.contains("io.github.libxposed:service:102.0.0"))
+        assertTrue(build.contains("compileOnly(\"io.github.libxposed:service:102.0.0\")"))
         assertTrue(properties.contains("targetApiVersion=102"))
         assertTrue(entry.contains("dev.amenhancer.module.hook.HookEntry"))
         assertFalse(production.contains("de.robv.android.xposed"))
     }
 
     @Test
-    fun `uses remote preferences and runtime layout inflation replacement`() {
-        val application = projectFile("app/src/main/java/dev/amenhancer/module/ModuleApplication.kt")
+    fun `uses host private embedded storage and runtime layout inflation replacement`() {
+        val storage = projectFile("app/src/main/java/dev/amenhancer/module/config/HostPrivateEmbeddedStorage.kt")
         val target = projectFile("app/src/main/java/dev/amenhancer/module/config/TargetConfigClient.kt")
         val entry = projectFile("app/src/main/java/dev/amenhancer/module/hook/HookEntry.kt")
         val layouts = projectFile("app/src/main/java/dev/amenhancer/module/hook/LayoutInflationRegistry.kt")
 
-        assertTrue(application.contains("XposedServiceHelper.registerListener(this)"))
-        assertTrue(application.contains("XposedService.PROP_CAP_REMOTE"))
-        assertTrue(application.contains("service = service"))
-        assertTrue(target.contains("ModuleSettingsSchema.decode(preferences.all)"))
-        assertTrue(target.contains("openRemoteFile"))
+        assertTrue(storage.contains("ampp-embedded-settings"))
+        assertTrue(storage.contains("ampp-embedded-files"))
+        assertTrue(target.contains("ConfigurationReader"))
+        assertTrue(target.contains("openFileDescriptor"))
         assertFalse(target.contains("contentResolver"))
         assertTrue(entry.contains("class HookEntry : XposedModule()"))
-        assertTrue(entry.contains("openRemoteFile(name)"))
-        assertTrue(entry.contains("frameworkProperties.and(PROP_CAP_REMOTE)"))
+        assertTrue(entry.contains("EmbeddedConfigurationSession"))
+        assertFalse(entry.contains("frameworkProperties.and(PROP_CAP_REMOTE)"))
         assertTrue(layouts.contains("LayoutInflater::class.java.getDeclaredMethod"))
         assertTrue(layouts.contains("XmlPullParser::class.java"))
         assertTrue(layouts.contains("getResourceEntryName(resourceId)"))

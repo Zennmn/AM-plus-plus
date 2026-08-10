@@ -2,6 +2,7 @@ package dev.amenhancer.module.hook
 
 import android.annotation.SuppressLint
 import android.app.Application
+import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -151,6 +152,7 @@ internal class AppleMusicCurrentSongIdentityTarget(
     private val application: Application,
     private val symbols: TargetSymbolResolver,
     private val cache: CurrentSongIdentityCache,
+    private val registerRequestResponder: Boolean = true,
 ) : CurrentSongIdentityTarget {
     override fun install(): TargetCapabilityInstall {
         val installMethodResolution = symbols.resolve(AppleMusicSymbols.LyricsInstallMethod)
@@ -195,7 +197,7 @@ internal class AppleMusicCurrentSongIdentityTarget(
                 "Player metadata publish method could not be hooked; ${metadataPublishResolution.summary}",
             )
         }
-        if (!CurrentSongIdentityRequestResponder(
+        if (registerRequestResponder && !CurrentSongIdentityRequestResponder(
                 application = application,
                 cache = cache,
                 logger = ModernXposedRuntime::log,
@@ -207,7 +209,11 @@ internal class AppleMusicCurrentSongIdentityTarget(
             )
         }
         return TargetCapabilityInstall.Active(
-            "Current song identity request responder installed; " +
+            if (registerRequestResponder) {
+                "Current song identity request responder installed; "
+            } else {
+                "Current song identity cache installed for embedded settings; "
+            } +
                 listOfNotNull(
                     installMethodResolution.summary,
                     metadataPublishResolution.summary,

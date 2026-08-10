@@ -77,7 +77,8 @@ android {
 
 dependencies {
     compileOnly("io.github.libxposed:api:102.0.0")
-    implementation("io.github.libxposed:service:102.0.0")
+    compileOnly("io.github.libxposed:service:102.0.0")
+    testCompileOnly("io.github.libxposed:service:102.0.0")
     implementation("com.github.Dimezis:BlurView:version-3.2.0")
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.24")
     testImplementation("junit:junit:4.13.2")
