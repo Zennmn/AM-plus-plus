@@ -79,6 +79,43 @@ class CustomLyricsListStateTest {
     }
 
     @Test
+    fun `groups adjacent github ids into one compact row and searches every id`() {
+        val first = entry(100L, "Song").copy(
+            fileId = "github-100",
+            sha256 = "same-sha",
+            source = CustomLyricsSources.AM_LYRICS,
+        )
+        val second = first.copy(appleMusicId = 200L, fileId = "github-200")
+        val state = CustomLyricsListState()
+
+        state.update(listOf(first, second))
+
+        assertEquals(1, state.totalCount)
+        assertEquals(1, state.visibleCount)
+        assertEquals(listOf(100L, 200L), state.visibleGroups.single().appleMusicIds)
+        state.setQuery("200")
+        assertEquals(1, state.totalCount)
+        assertEquals(100L, state.visibleEntries.single().appleMusicId)
+    }
+
+    @Test
+    fun `does not merge github rows separated by another row`() {
+        val first = entry(100L, "Song").copy(
+            fileId = "github-100",
+            sha256 = "same-sha",
+            source = CustomLyricsSources.AM_LYRICS,
+        )
+        val separator = entry(101L, "Other")
+        val second = first.copy(appleMusicId = 200L, fileId = "github-200")
+        val state = CustomLyricsListState()
+
+        state.update(listOf(first, separator, second))
+
+        assertEquals(3, state.totalCount)
+        assertEquals(listOf(100L, 101L, 200L), state.visibleEntries.map { it.appleMusicId })
+    }
+
+    @Test
     fun `search empties and then recovers the window when cleared`() {
         val state = CustomLyricsListState()
         state.update(numbered(1000))

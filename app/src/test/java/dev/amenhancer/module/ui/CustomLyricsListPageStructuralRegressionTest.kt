@@ -26,8 +26,8 @@ class CustomLyricsListPageStructuralRegressionTest {
                     "        )",
             ),
         )
-        assertTrue(activity.contains("state.visibleEntries.forEach"))
-        assertTrue(activity.contains("customLyricsEntryRow(entry, writable)"))
+        assertTrue(activity.contains("state.visibleGroups.forEach"))
+        assertTrue(activity.contains("customLyricsEntryRow(group, writable)"))
         assertFalse(activity.contains("manifest.entries.forEach"))
         assertTrue(state.contains("DEFAULT_PAGE_SIZE = 50"))
         assertTrue(state.contains("visibleEntries"))

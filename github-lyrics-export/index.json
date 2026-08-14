@@ -1,0 +1,428 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "appleMusicId": 1445840922,
+      "displayName": "Good Life - OneRepublic",
+      "path": "am-lyrics/1445840922.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 30436,
+      "sha256": "6a454e988327b8bf6a470cd6361d3c999b50e37d7252ec36625e7c491372014b"
+    },
+    {
+      "appleMusicId": 1609445854,
+      "displayName": "みずいろの雨 - 八神纯子",
+      "path": "am-lyrics/1609445854.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 18218,
+      "sha256": "786f2d8464233b2061b00bb7464c58df829d8f7555378fa7f56c9ea2dc68dd9a"
+    },
+    {
+      "appleMusicId": 1682332990,
+      "displayName": "Lonely In Tokyo (Japanese version) - MIREI",
+      "path": "am-lyrics/1682332990.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 26792,
+      "sha256": "e0977065b2ee72053a405f7b46a031197b56dda03c32d9d9545583b13a48d399"
+    },
+    {
+      "appleMusicId": 1716254220,
+      "displayName": "Biri-Biri - YOASOBI",
+      "path": "am-lyrics/1716254220.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 36765,
+      "sha256": "889239881f4df395e814e0d1251b7f105ccac3f2a83e3f53ce1d6a6cfa7b8774"
+    },
+    {
+      "appleMusicId": 1633319441,
+      "displayName": "God-Ish - Will Stetson",
+      "path": "am-lyrics/1633319441.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 47307,
+      "sha256": "588b5e1f791ab5ecb6706e521a57d7480442720a149bd3aff99a7854deb2e090"
+    },
+    {
+      "appleMusicId": 1540623213,
+      "displayName": "Blind Curve - Rainych",
+      "path": "am-lyrics/1540623213.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 20519,
+      "sha256": "097444e12b47ad1510b46e204340abbe0d3c216ef349bf14f543b9d04eec3be5"
+    },
+    {
+      "appleMusicId": 1413543583,
+      "displayName": "易燃易爆炸 - 陈粒",
+      "path": "am-lyrics/1413543583.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 18787,
+      "sha256": "44b1b9540e3539ebb403e34a731b896d61c7182de87bf7cf3c567aa5257054e0"
+    },
+    {
+      "appleMusicId": 1413542873,
+      "displayName": "如也 - 陈粒",
+      "path": "am-lyrics/1413542873.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 14401,
+      "sha256": "0a2a8105cfc44555879b9b8f7e903101d208983f0a4a8af2eca2c5ba73175ea7"
+    },
+    {
+      "appleMusicId": 1538281340,
+      "displayName": "First Heart Break - MIREI",
+      "path": "am-lyrics/1538281340.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 31097,
+      "sha256": "a37d94d82865bff8f9d6b208a11ef4d2f42276079da596a9b998b9444e7d1c80"
+    },
+    {
+      "appleMusicId": 1555193623,
+      "displayName": "春夏秋冬 reprise - MIREI",
+      "path": "am-lyrics/1555193623.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 53632,
+      "sha256": "b9aecfebd252e0635a8d8f93c7db3b8bfe210cb1b9fac147b2e73337ff882b80"
+    },
+    {
+      "appleMusicId": 1538281338,
+      "displayName": "願い〜あの頃のキミへ〜 - MIREI",
+      "path": "am-lyrics/1538281338.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 54810,
+      "sha256": "4c97d81e64576c384d9ec3d17a22940b240d9487fa560c21e9232719f7eae27d"
+    },
+    {
+      "appleMusicId": 1158609134,
+      "displayName": "world.execute (me) ; - Mili",
+      "path": "am-lyrics/1158609134.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 31091,
+      "sha256": "3fa028cb1361278946baa90e8e2bfab0012a964d50b3ff8fe8d03a6832b1bec0"
+    },
+    {
+      "appleMusicId": 1556607963,
+      "displayName": "RIDE ON TIME - Rainych & evening cinema",
+      "path": "am-lyrics/1556607963.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 22855,
+      "sha256": "edf97aaabe1e6a5fa3438a86383ed2993f1e8bc70999ec8e0a86f24c2287833a"
+    },
+    {
+      "appleMusicId": 1609932617,
+      "displayName": "悪魔の子 - ヒグチアイ",
+      "path": "am-lyrics/1609932617.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 27194,
+      "sha256": "d0f8113f00d88755a568ac1116a0d7aa58749df92f181b01f8d51a53e8e9d56e"
+    },
+    {
+      "appleMusicId": 1723221649,
+      "displayName": "Red Moon - Lil Uzi Vert",
+      "path": "am-lyrics/1723221649.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 25016,
+      "sha256": "82b874570354e6c11c635167eb8e1a90d0cae214307313b07fdf4462a8d81baf"
+    },
+    {
+      "appleMusicId": 1538137547,
+      "displayName": "Mela! - 緑黄色社会",
+      "path": "am-lyrics/1538137547.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 29825,
+      "sha256": "c563510a06459ed335f882a3607bdffdafa7a4226a4b72870c1ff81c99b0ee66"
+    },
+    {
+      "appleMusicId": 1531658816,
+      "displayName": "Daimeiwakusei. - MIREI",
+      "path": "am-lyrics/1531658816.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 32125,
+      "sha256": "d11bbda0dbd361a4b9bb19ff9f8c11c41b64818d2a4b29959e685f53adb65f1e"
+    },
+    {
+      "appleMusicId": 1778233191,
+      "displayName": "New me - YOASOBI",
+      "path": "am-lyrics/1778233191.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 33400,
+      "sha256": "df8d37cfef77a7e286a8432ad2042a49664eafac6ae34679aa7222f34e50087e"
+    },
+    {
+      "appleMusicId": 1725802551,
+      "displayName": "Kawakiwoameku - Minami",
+      "path": "am-lyrics/1725802551.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 38947,
+      "sha256": "a35dee9cec6915896af6bde505c50d1f57df062b7153f3bdef2d2c739b6b6d99"
+    },
+    {
+      "appleMusicId": 1537404923,
+      "displayName": "SAYONARAベイベー - Miliyah",
+      "path": "am-lyrics/1537404923.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 41582,
+      "sha256": "a70a6344986f31206cc4543fb9192d058e3c3e832b4a2f3f7e99f0522f70aebb"
+    },
+    {
+      "appleMusicId": 7335408332109193189,
+      "displayName": "神のまにまに - 初音ミク/鏡音リン/GUMI/れるりり",
+      "path": "am-lyrics/7335408332109193189.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 38107,
+      "sha256": "062013b650150b7abcdb0f472b9737f9cb82eadcc4d7f8b17d63982a55690fff"
+    },
+    {
+      "appleMusicId": 1659746896,
+      "displayName": "Novocaine - GenriX, CORBAL & Shiloh Dynasty",
+      "path": "am-lyrics/1659746896.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 19026,
+      "sha256": "0fabf45d5681c6419a1b3b1c3df9f8bc17e7526cd8738b6738c1d592ec5a30c3"
+    },
+    {
+      "appleMusicId": 1706433971,
+      "displayName": "Counting Stars (2023 Version) - OneRepublic",
+      "path": "am-lyrics/1706433971.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 33753,
+      "sha256": "8e2fab687794b5c878427d3f94a4bb5a6ba36f83cb8982c26611d99a17a021fc"
+    },
+    {
+      "appleMusicId": 1440827791,
+      "displayName": "Gasoline - Halsey",
+      "path": "am-lyrics/1440827791.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 18064,
+      "sha256": "8c7cdfa0b3af1a19a1a47477416fa7722c9105d661745ba426cf0470e21d2db5"
+    },
+    {
+      "appleMusicId": 1756859961,
+      "displayName": "Ivory Tower (feat. SennaRin) - 泽野弘之",
+      "path": "am-lyrics/1756859961.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 28653,
+      "sha256": "6782679910a5ba2ce9942d9e6a3b52e9783d985e16de81c0b3b36b87b027f1c4"
+    },
+    {
+      "appleMusicId": 1505586937,
+      "displayName": "Say So (Japanese Version) - Rainych",
+      "path": "am-lyrics/1505586937.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 33610,
+      "sha256": "e1a5260d841f87f3ab93d0e188a7d73c3a09c508cc8379561dd72cc2a826a930"
+    },
+    {
+      "appleMusicId": 1559300640,
+      "displayName": "Circus Minimus - Jvzel & Neon Haze",
+      "path": "am-lyrics/1559300640.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 28241,
+      "sha256": "d9e10ca3213a5f8b76c6eec3b4c7843b9aa48debb9dbb58d9d3e0af3dd2934a7"
+    },
+    {
+      "appleMusicId": 1537779205,
+      "displayName": "ユキコイ - MIREI",
+      "path": "am-lyrics/1537779205.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 26262,
+      "sha256": "e4ff99951f50d4d7ddf8149f7b7566705427d0a116bcb7dc1300068dde1a353e"
+    },
+    {
+      "appleMusicId": 29276049,
+      "displayName": "This Fffire - Franz Ferdinand",
+      "path": "am-lyrics/29276049.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 17453,
+      "sha256": "c1b71639dd6d5d49d5699e0937feed3e17301bc292a3763a427d78abe5ffea60"
+    },
+    {
+      "appleMusicId": 1713845737,
+      "displayName": "Blank Space (Taylor's Version) - Taylor Swift",
+      "path": "am-lyrics/1713845737.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 38934,
+      "sha256": "54346cfa09a608d24723a1666fd0f8858d4217f244396a96c9822012d3146e4b"
+    },
+    {
+      "appleMusicId": 1464108341,
+      "displayName": "Kan Saete Kuyashiiwa - ZUTOMAYO",
+      "path": "am-lyrics/1464108341.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 40575,
+      "sha256": "9bbf2c152aa2c146756a60a602561aec8377a6a634c563460a40abfe7b9332ed"
+    },
+    {
+      "appleMusicId": 1522244028,
+      "displayName": "Milabo - ZUTOMAYO",
+      "path": "am-lyrics/1522244028.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 43727,
+      "sha256": "42eece0520bd70ac652bc90078ae4ad85f0bb89bacdba018c79c3d47ad8e4133"
+    },
+    {
+      "appleMusicId": 1538283046,
+      "displayName": "Lie - MIREI",
+      "path": "am-lyrics/1538283046.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 25592,
+      "sha256": "40181684d6449709f7f14fd2ddf117bbfc018b35fda08618e2d93fc8f29d43ce"
+    },
+    {
+      "appleMusicId": 1770242100,
+      "displayName": "Truth in Lies - ZUTOMAYO",
+      "path": "am-lyrics/1770242100.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 44127,
+      "sha256": "b01e2fd19f53e9391083ebcf49bf5845cb9680bf7a50c18b5c0f2eab4dbbfbb5"
+    },
+    {
+      "appleMusicId": 1469306713,
+      "displayName": "Dancing With Your Ghost - Sasha Alex Sloan",
+      "path": "am-lyrics/1469306713.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 17252,
+      "sha256": "3071b2fcad264baca542968c6d1a43344f61da6157a04c6e9958a4a564d5ed69"
+    },
+    {
+      "appleMusicId": 1649264715,
+      "displayName": "Time Left - ZUTOMAYO",
+      "path": "am-lyrics/1649264715.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 47749,
+      "sha256": "908ea6ffba684f31ac63875d563e21a7331ea19d57856c3aa61af1a4d2ece72f"
+    },
+    {
+      "appleMusicId": 1729853627,
+      "displayName": "Humanoid - ZUTOMAYO",
+      "path": "am-lyrics/1729853627.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 47714,
+      "sha256": "ccf0b1f619b3a086ede87d7615bbd5cb8400bf65ff12ee898dbacee84d6c8e78"
+    },
+    {
+      "appleMusicId": 1538281341,
+      "displayName": "Goodbye My Love - MIREI",
+      "path": "am-lyrics/1538281341.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 28923,
+      "sha256": "9819dbd21d98eecf423578f3c87fed7d2da32562cda50405965ff1e607cd1836"
+    },
+    {
+      "appleMusicId": 1745488818,
+      "displayName": "Hai Yorokonde - Kocchi No Kento",
+      "path": "am-lyrics/1745488818.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 37448,
+      "sha256": "30b9b96228c60256ba4a8bd3fcda9b8e88544af38c40815ea5a171bd7e0c21bb"
+    },
+    {
+      "appleMusicId": 1729853527,
+      "displayName": "Kira Killer (feat. Mori Calliope) - ZUTOMAYO",
+      "path": "am-lyrics/1729853527.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 57870,
+      "sha256": "298b05a548b4600628506acc231f93bec2c61d182308b21e04fe1f796cec230e"
+    },
+    {
+      "appleMusicId": 1440862988,
+      "displayName": "Feel Again - OneRepublic",
+      "path": "am-lyrics/1440862988.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 23181,
+      "sha256": "b1599aa32ea54e1dfa3b7d66b8a1f173e75d631a53956fdb1190df1cb5fbfb9c"
+    },
+    {
+      "appleMusicId": 1858846444,
+      "displayName": "Mayonaka No Door ~Stay with Me - Miki Matsubara",
+      "path": "am-lyrics/1858846444.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 27916,
+      "sha256": "ab87cea5b60001e724bc610e969533eb2bf6e87fbc7424074f9c2c77a09afeeb"
+    },
+    {
+      "appleMusicId": 1631321136,
+      "displayName": "earth meal - asmi",
+      "path": "am-lyrics/1631321136.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 41731,
+      "sha256": "6e8ce54c6d86411d76dcc142a3af400c8d19c3ab70dc62616beda7eca6902afe"
+    },
+    {
+      "appleMusicId": 1458638381,
+      "displayName": "Old Town Road (feat. Billy Ray Cyrus) [Remix] - Lil Nas X",
+      "path": "am-lyrics/1458638381.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 22391,
+      "sha256": "f27b9eb9996f96d000968e1df9fcd1d8b9e09efcf933b0373bbed2d269b6e16b"
+    },
+    {
+      "appleMusicId": 1617908915,
+      "displayName": "Lonely - Imagine Dragons",
+      "path": "am-lyrics/1617908915.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 35176,
+      "sha256": "688d02fcc5a9c74c09ebd77bfa248edd4a20e03ef9856e81252fbb8afb46e760"
+    },
+    {
+      "appleMusicId": 1440134010,
+      "displayName": "Byoushinwo Kamu - ZUTOMAYO",
+      "path": "am-lyrics/1440134010.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 36431,
+      "sha256": "ab257acc024089e418fbc353a727a13f559a970d00051bba1c8986da385e834e"
+    },
+    {
+      "appleMusicId": 1879820931,
+      "displayName": "I’m So Sorry - Imagine Dragons",
+      "path": "am-lyrics/1879820931.ttml",
+      "source": "manual",
+      "enabled": true,
+      "sizeBytes": 24223,
+      "sha256": "ede5c4980b5fe03cc491f5a5347ee2920a1413903d439217cabe3b76fff74083"
+    }
+  ]
+}

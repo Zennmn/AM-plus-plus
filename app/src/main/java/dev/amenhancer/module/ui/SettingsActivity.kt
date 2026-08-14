@@ -1,5 +1,6 @@
 package dev.amenhancer.module.ui
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
@@ -36,21 +37,25 @@ import dev.amenhancer.module.config.ConfigStore
 import dev.amenhancer.module.font.FontImportResult
 import dev.amenhancer.module.font.SafFontImporter
 import dev.amenhancer.module.hook.AmLyricsClient
+import dev.amenhancer.module.hook.AmLyricsIndexEntry
 import dev.amenhancer.module.hook.AmllTtmlClient
 import dev.amenhancer.module.hook.HttpLyricTransport
 import dev.amenhancer.module.hook.NeteaseLyricClient
-import dev.amenhancer.module.lyrics.CustomLyricsDraft
+import dev.amenhancer.module.lyrics.CustomLyricsBatchSaveResult
 import dev.amenhancer.module.lyrics.CustomLyricsBackupResult
 import dev.amenhancer.module.lyrics.CustomLyricsFilePolicy
 import dev.amenhancer.module.lyrics.CustomLyricsFileReader
 import dev.amenhancer.module.lyrics.CustomLyricsInspection
 import dev.amenhancer.module.lyrics.CustomLyricsManager
+import dev.amenhancer.module.lyrics.CustomLyricsMultiIdDraft
 import dev.amenhancer.module.lyrics.CustomLyricsMutationResult
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImportResult
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImporter
 import dev.amenhancer.module.lyrics.CustomLyricsRestoreResult
 import dev.amenhancer.module.lyrics.CustomLyricsRestorePolicy
-import dev.amenhancer.module.lyrics.CustomLyricsSaveResult
+import dev.amenhancer.module.lyrics.CustomLyricsSyncLoadResult
+import dev.amenhancer.module.lyrics.CustomLyricsSyncPlanEntry
+import dev.amenhancer.module.lyrics.CustomLyricsSyncResult
 import dev.amenhancer.module.model.CustomLyricsEntry
 import dev.amenhancer.module.model.CustomLyricsManifest
 import dev.amenhancer.module.model.CustomLyricsSources
@@ -58,6 +63,7 @@ import dev.amenhancer.module.model.LyricsFontManifest
 import dev.amenhancer.module.model.ModuleSettings
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 internal object BlurRadiusSeekBarPersistencePolicy {
     fun shouldPersistProgressChange(fromUser: Boolean, trackingTouch: Boolean): Boolean =
@@ -130,6 +136,7 @@ class SettingsActivity : Activity() {
         super.onSaveInstanceState(outState)
     }
 
+    @SuppressLint("GestureBackNavigation")
     @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
     override fun onBackPressed() {
         if (currentPage == SettingsPage.CUSTOM_LYRICS) {
@@ -618,6 +625,16 @@ class SettingsActivity : Activity() {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding(dp(12), 0, dp(12), dp(12))
                 addView(
+                    fontActionButton("同步 GitHub 源", writable) {
+                        syncCustomLyricsFromGitHub()
+                    },
+                    LinearLayout.LayoutParams(0, dp(48), 1f),
+                )
+            })
+            addView(LinearLayout(this@SettingsActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(dp(12), 0, dp(12), dp(12))
+                addView(
                     fontActionButton("备份歌词", writable) { chooseCustomLyricsBackupDestination() },
                     LinearLayout.LayoutParams(0, dp(48), 1f),
                 )
@@ -684,8 +701,8 @@ class SettingsActivity : Activity() {
             })
             return
         }
-        state.visibleEntries.forEach { entry ->
-            region.addView(customLyricsEntryRow(entry, writable))
+        state.visibleGroups.forEach { group ->
+            region.addView(customLyricsEntryRow(group, writable))
             region.addView(insetDivider())
         }
         region.addView(TextView(this).apply {
@@ -825,7 +842,7 @@ class SettingsActivity : Activity() {
         artist?.takeIf(String::isNotBlank),
     ).joinToString(" - ").takeIf(String::isNotBlank)
 
-    private fun customLyricsEntryRow(entry: CustomLyricsEntry, writable: Boolean): View =
+    private fun customLyricsEntryRow(group: CustomLyricsUiGroup, writable: Boolean): View =
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(12), dp(12), dp(12))
@@ -836,26 +853,27 @@ class SettingsActivity : Activity() {
                 addView(LinearLayout(this@SettingsActivity).apply {
                     orientation = LinearLayout.VERTICAL
                     addView(TextView(this@SettingsActivity).apply {
-                        text = entry.displayName
+                        text = group.primary.displayName
                         textSize = 16f
                         setTextColor(palette.onSurface)
                         typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
                     })
                     addView(TextView(this@SettingsActivity).apply {
-                        text = "${entry.appleMusicId} · ${customLyricsSourceName(entry.source)}"
+                        text = "主 ID：${group.primary.appleMusicId} · 共 ${group.entries.size} 个 ID · " +
+                            customLyricsSourceName(group.primary.source)
                         textSize = 13f
                         setTextColor(palette.onSurfaceVariant)
                         setPadding(0, dp(3), 0, 0)
                     })
                 }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                 addView(Switch(this@SettingsActivity).apply {
-                    isChecked = entry.enabled
+                    isChecked = group.allEnabled
                     isEnabled = writable
-                    contentDescription = "${entry.displayName} 自定义歌词开关"
+                    contentDescription = "${group.primary.displayName} 自定义歌词开关"
                     thumbTintList = switchThumbColors()
                     trackTintList = switchTrackColors()
                     setOnCheckedChangeListener { _, checked ->
-                        setCustomLyricsEnabled(entry.appleMusicId, checked)
+                        setCustomLyricsEnabled(group.appleMusicIds, checked)
                     }
                 }, LinearLayout.LayoutParams(dp(64), dp(48)))
             })
@@ -863,34 +881,33 @@ class SettingsActivity : Activity() {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding(0, dp(8), 0, 0)
                 addView(
-                    fontActionButton("编辑", writable) { showCustomLyricsEditor(entry) },
+                    fontActionButton("编辑", writable) { showCustomLyricsEditor(group) },
                     LinearLayout.LayoutParams(0, dp(44), 1f),
                 )
                 addView(spacer(8), LinearLayout.LayoutParams(dp(8), dp(1)))
                 addView(
-                    fontActionButton("删除", writable) { confirmDeleteCustomLyrics(entry) },
+                    fontActionButton("删除", writable) { confirmDeleteCustomLyrics(group) },
                     LinearLayout.LayoutParams(0, dp(44), 1f),
                 )
             })
         }
 
     private fun showCustomLyricsEditor(
-        existing: CustomLyricsEntry? = null,
+        existing: CustomLyricsUiGroup? = null,
         initialTtml: String = "",
     ) {
-        var source = existing?.source ?: CustomLyricsSources.MANUAL
+        var source = existing?.primary?.source ?: CustomLyricsSources.MANUAL
         val form = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(8), dp(20), 0)
         }
         val appleMusicId = lyricEditorInput(
             hint = "Apple Music ID",
-            initial = existing?.appleMusicId?.toString().orEmpty(),
-            numeric = true,
+            initial = existing?.appleMusicIds?.let(CustomLyricsIdParser::format).orEmpty(),
         )
         val displayName = lyricEditorInput(
             hint = "显示名称（可选）",
-            initial = existing?.displayName.orEmpty(),
+            initial = existing?.primary?.displayName.orEmpty(),
         )
         val neteaseId = lyricEditorInput(hint = "网易云歌曲 ID（仅网易云导入时需要）", numeric = true)
         val ttml = lyricEditorInput(
@@ -969,9 +986,9 @@ class SettingsActivity : Activity() {
             addView(dialogActionButton("获取 ID") { requestCurrentSongId(appleMusicId, displayName) })
             addView(dialogActionButton("取消") { dialog.dismiss() })
             addView(dialogActionButton("保存") save@{
-                val id = parsePositiveId(appleMusicId.text.toString())
-                if (id == null) {
-                    appleMusicId.error = "请输入正整数 Apple Music ID"
+                val ids = CustomLyricsIdParser.parse(appleMusicId.text.toString())
+                if (ids == null) {
+                    appleMusicId.error = "请输入一个或多个正整数 Apple Music ID（用逗号分隔）"
                     return@save
                 }
                 val rawTtml = ttml.text.toString()
@@ -980,14 +997,12 @@ class SettingsActivity : Activity() {
                     return@save
                 }
                 saveCustomLyrics(
-                    draft = CustomLyricsDraft(
-                        appleMusicId = id,
-                        displayName = displayName.text.toString(),
-                        ttml = rawTtml,
-                        source = source,
-                        enabled = existing?.enabled ?: true,
-                    ),
-                    replacingAppleMusicId = existing?.appleMusicId,
+                    appleMusicIds = ids,
+                    replacingAppleMusicIds = existing?.appleMusicIds.orEmpty(),
+                    displayName = displayName.text.toString(),
+                    ttml = rawTtml,
+                    source = source,
+                    enabled = existing?.primary?.enabled ?: true,
                     dialog = dialog,
                 )
             })
@@ -1001,7 +1016,7 @@ class SettingsActivity : Activity() {
             .setView(dialogContent)
             .create()
         dialog.setOnShowListener {
-            existing?.let { entry -> loadExistingCustomTtml(entry, ttml) }
+            existing?.primary?.let { entry -> loadExistingCustomTtml(entry, ttml) }
         }
         dialog.setOnDismissListener { currentSongIdentityRequester.cancel() }
         dialog.show()
@@ -1054,14 +1069,97 @@ class SettingsActivity : Activity() {
         fetchNeteaseYrc = NeteaseLyricClient(HttpLyricTransport())::fetchYrc,
     )
 
+    private fun syncCustomLyricsFromGitHub() {
+        if (!ModuleApplication.serviceSnapshot.isRemoteFileAvailable) {
+            toast("libxposed remote file 服务不可用")
+            return
+        }
+        val cancelled = AtomicBoolean(false)
+        val progress = TextView(this).apply {
+            text = "正在读取 GitHub 索引…"
+            textSize = 15f
+            setTextColor(palette.onSurface)
+            setPadding(dp(24), dp(8), dp(24), dp(8))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("同步 GitHub 源")
+            .setView(progress)
+            .setNegativeButton("取消") { _, _ -> cancelled.set(true) }
+            .create()
+        dialog.setOnCancelListener { cancelled.set(true) }
+        dialog.setCanceledOnTouchOutside(false)
+        dialog.show()
+
+        backgroundExecutor.execute {
+            val result = runCatching {
+                val client = AmLyricsClient(HttpLyricTransport())
+                val index = client.fetchIndex()
+                    ?: return@runCatching CustomLyricsSyncResult.Failed(
+                        "GitHub 索引无效或读取失败",
+                    )
+                val enabledEntries = index.entries.filter(AmLyricsIndexEntry::enabled)
+                val plan = enabledEntries.map { entry ->
+                    CustomLyricsSyncPlanEntry(
+                        key = entry.path,
+                        appleMusicIds = entry.allAppleMusicIds,
+                        displayName = entry.displayName,
+                    )
+                }
+                val entriesByPath = enabledEntries.associateBy(AmLyricsIndexEntry::path)
+                CustomLyricsManager(ModuleApplication.serviceSnapshot, store).syncFromGitHub(
+                    plan = plan,
+                    loadTtml = { source ->
+                        if (cancelled.get()) {
+                            CustomLyricsSyncLoadResult.Cancelled
+                        } else {
+                            val entry = entriesByPath[source.key]
+                            if (entry == null) {
+                                CustomLyricsSyncLoadResult.Failed("GitHub 索引条目已变化")
+                            } else {
+                                client.fetchTtml(entry)?.let(CustomLyricsSyncLoadResult::Loaded)
+                                    ?: CustomLyricsSyncLoadResult.Failed(
+                                        "下载 GitHub 歌词失败：${source.displayName}",
+                                    )
+                            }
+                        }
+                    },
+                    isCancelled = cancelled::get,
+                    onProgress = { update ->
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed && !cancelled.get()) {
+                                progress.text = "正在同步 ${update.processedEntries} / " +
+                                    "${update.totalEntries} 首（已映射 ${update.importedIds + update.overwrittenIds} 个 ID）"
+                            }
+                        }
+                    },
+                )
+            }.getOrElse { error ->
+                CustomLyricsSyncResult.Failed("同步 GitHub 源失败：${error.message.orEmpty()}")
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (dialog.isShowing) dialog.dismiss()
+                when (result) {
+                    is CustomLyricsSyncResult.Synced -> toast(
+                        "GitHub 同步完成：新增 ${result.importedIds} 个 ID，覆盖 " +
+                            "${result.overwrittenIds} 个 ID，保留 ${result.preservedIds} 个本地 ID",
+                    )
+                    CustomLyricsSyncResult.Cancelled -> toast("GitHub 同步已取消")
+                    is CustomLyricsSyncResult.Failed -> toast(result.message)
+                }
+                if (result is CustomLyricsSyncResult.Synced) render()
+            }
+        }
+    }
+
     private fun importFromAmll(
         appleMusicIdInput: EditText,
         ttmlInput: EditText,
         onImported: (String) -> Unit,
     ) {
-        val appleMusicId = parsePositiveId(appleMusicIdInput.text.toString())
+        val appleMusicId = CustomLyricsIdParser.parsePrimary(appleMusicIdInput.text.toString())
         if (appleMusicId == null) {
-            appleMusicIdInput.error = "请输入正整数 Apple Music ID"
+            appleMusicIdInput.error = "请输入一个或多个正整数 Apple Music ID（用逗号分隔）"
             return
         }
         backgroundExecutor.execute {
@@ -1075,9 +1173,9 @@ class SettingsActivity : Activity() {
         ttmlInput: EditText,
         onImported: (String) -> Unit,
     ) {
-        val appleMusicId = parsePositiveId(appleMusicIdInput.text.toString())
+        val appleMusicId = CustomLyricsIdParser.parsePrimary(appleMusicIdInput.text.toString())
         if (appleMusicId == null) {
-            appleMusicIdInput.error = "请输入正整数 Apple Music ID"
+            appleMusicIdInput.error = "请输入一个或多个正整数 Apple Music ID（用逗号分隔）"
             return
         }
         backgroundExecutor.execute {
@@ -1189,8 +1287,12 @@ class SettingsActivity : Activity() {
     }
 
     private fun saveCustomLyrics(
-        draft: CustomLyricsDraft,
-        replacingAppleMusicId: Long?,
+        appleMusicIds: List<Long>,
+        replacingAppleMusicIds: List<Long>,
+        displayName: String,
+        ttml: String,
+        source: String,
+        enabled: Boolean,
         dialog: AlertDialog,
     ) {
         val snapshot = ModuleApplication.serviceSnapshot
@@ -1199,25 +1301,34 @@ class SettingsActivity : Activity() {
             return
         }
         backgroundExecutor.execute {
-            val result = CustomLyricsManager(snapshot, store).save(draft, replacingAppleMusicId)
+            val result = CustomLyricsManager(snapshot, store).saveMany(
+                draft = CustomLyricsMultiIdDraft(
+                    appleMusicIds = appleMusicIds,
+                    displayName = displayName,
+                    ttml = ttml,
+                    source = source,
+                    enabled = enabled,
+                ),
+                replacingAppleMusicIds = replacingAppleMusicIds,
+            )
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 when (result) {
-                    is CustomLyricsSaveResult.Saved -> {
+                    is CustomLyricsBatchSaveResult.Saved -> {
                         dialog.dismiss()
                         render()
                         toast("歌词映射已保存，重开 Apple Music 后生效")
                     }
-                    is CustomLyricsSaveResult.Failed -> toast(result.message)
+                    is CustomLyricsBatchSaveResult.Failed -> toast(result.message)
                 }
             }
         }
     }
 
-    private fun setCustomLyricsEnabled(appleMusicId: Long, enabled: Boolean) {
+    private fun setCustomLyricsEnabled(appleMusicIds: List<Long>, enabled: Boolean) {
         val snapshot = ModuleApplication.serviceSnapshot
         backgroundExecutor.execute {
-            val result = CustomLyricsManager(snapshot, store).setEnabled(appleMusicId, enabled)
+            val result = CustomLyricsManager(snapshot, store).setEnabled(appleMusicIds, enabled)
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 render()
@@ -1226,15 +1337,15 @@ class SettingsActivity : Activity() {
         }
     }
 
-    private fun confirmDeleteCustomLyrics(entry: CustomLyricsEntry) {
+    private fun confirmDeleteCustomLyrics(group: CustomLyricsUiGroup) {
         AlertDialog.Builder(this)
             .setTitle("删除自定义歌词")
-            .setMessage("删除“${entry.displayName}”的 TTML 映射？")
+            .setMessage("删除“${group.primary.displayName}”及其 ${group.entries.size} 个 Apple Music ID 的 TTML 映射？")
             .setNegativeButton("取消", null)
             .setPositiveButton("删除") { _, _ ->
                 val snapshot = ModuleApplication.serviceSnapshot
                 backgroundExecutor.execute {
-                    val result = CustomLyricsManager(snapshot, store).delete(entry.appleMusicId)
+                    val result = CustomLyricsManager(snapshot, store).delete(group.appleMusicIds)
                     runOnUiThread {
                         if (isFinishing || isDestroyed) return@runOnUiThread
                         render()

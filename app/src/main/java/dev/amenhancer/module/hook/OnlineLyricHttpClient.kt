@@ -1,12 +1,15 @@
 package dev.amenhancer.module.hook
 
-import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 
 /** Network surface used by the lyric clients; faked in unit tests. */
 internal interface LyricHttpTransport {
     fun get(url: String): String?
+
+    /** Raw response bytes for callers that must verify remote size and hash. */
+    fun getBytes(url: String): ByteArray? = get(url)?.toByteArray(Charsets.UTF_8)
+
     fun postForm(
         url: String,
         body: String,
@@ -26,25 +29,28 @@ internal class HttpLyricTransport(
     private val maxResponseBytes: Int = DEFAULT_MAX_RESPONSE_BYTES,
 ) : LyricHttpTransport {
 
-    override fun get(url: String): String? = request(method = "GET", url = url, body = null)
+    override fun get(url: String): String? =
+        getBytes(url)?.toString(Charsets.UTF_8)
+
+    override fun getBytes(url: String): ByteArray? = requestBytes(method = "GET", url = url, body = null)
 
     override fun postForm(
         url: String,
         body: String,
         extraHeaders: Map<String, String>,
-    ): String? = request(
+    ): String? = requestBytes(
         method = "POST",
         url = url,
         body = body,
         extraHeaders = extraHeaders + FORM_HEADERS,
-    )
+    )?.toString(Charsets.UTF_8)
 
-    private fun request(
+    private fun requestBytes(
         method: String,
         url: String,
         body: String?,
         extraHeaders: Map<String, String> = emptyMap(),
-    ): String? = runCatching {
+    ): ByteArray? = runCatching {
         val connection = URL(url).openConnection() as HttpURLConnection
         try {
             connection.requestMethod = method
@@ -67,7 +73,7 @@ internal class HttpLyricTransport(
         }
     }.getOrNull()
 
-    private fun readBounded(connection: HttpURLConnection): String? {
+    private fun readBounded(connection: HttpURLConnection): ByteArray? {
         val buffer = java.io.ByteArrayOutputStream()
         connection.inputStream.use { input ->
             val chunk = ByteArray(8192)
@@ -78,7 +84,7 @@ internal class HttpLyricTransport(
             }
         }
         if (buffer.size() >= maxResponseBytes) return null
-        return buffer.toString(Charsets.UTF_8.name())
+        return buffer.toByteArray()
     }
 
     companion object {

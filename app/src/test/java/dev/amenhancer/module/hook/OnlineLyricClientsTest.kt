@@ -58,17 +58,22 @@ class OnlineLyricClientsTest {
 
     @Test
     fun `am lyrics client resolves an id and encodes the indexed path`() {
+        val ttml = "<tt><body><p><span>lyrics</span></p></body></tt>"
+        val sha256 = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(ttml.toByteArray(Charsets.UTF_8))
+            .joinToString(separator = "") { byte -> "%02x".format(byte) }
         val index = """
             {"version":1,"layout":"artist-title-id","entries":[
               {"appleMusicId":1609445854,"enabled":true,
-               "path":"am-lyrics/八神纯子 - みずいろの雨 - 1609445854.ttml"}
+               "path":"am-lyrics/八神纯子 - みずいろの雨 - 1609445854.ttml",
+               "sizeBytes":${ttml.toByteArray(Charsets.UTF_8).size},"sha256":"$sha256"}
             ]}
         """.trimIndent()
         val transport = FakeTransport(
-            getResults = mutableListOf(index, "<tt>lyrics</tt>"),
+            getResults = mutableListOf(index, ttml),
         )
 
-        assertEquals("<tt>lyrics</tt>", AmLyricsClient(transport).fetch(1609445854L))
+        assertEquals(ttml, AmLyricsClient(transport).fetch(1609445854L))
         assertEquals(
             listOf(
                 "https://raw.githubusercontent.com/Zennmn/am-lyrics/main/index.json",
@@ -82,15 +87,84 @@ class OnlineLyricClientsTest {
     }
 
     @Test
+    fun `am lyrics client resolves alternate ids including a long numeric string`() {
+        val ttml = "<tt><body><p><span>lyrics</span></p></body></tt>"
+        val bytes = ttml.toByteArray(Charsets.UTF_8)
+        val sha256 = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(bytes)
+            .joinToString(separator = "") { byte -> "%02x".format(byte) }
+        val index = """
+            {"version":1,"layout":"artist-title-id","entries":[
+              {"appleMusicId":42,"alternateIds":["7335408332109193189",84],
+               "displayName":"Song","enabled":true,"path":"am-lyrics/42.ttml",
+               "sizeBytes":${bytes.size},"sha256":"$sha256"}
+            ]}
+        """.trimIndent()
+        val transport = FakeTransport(getResults = mutableListOf(index, ttml))
+
+        assertEquals(ttml, AmLyricsClient(transport).fetch(7_335_408_332_109_193_189L))
+        assertEquals(
+            listOf(
+                AmLyricsClient.AM_LYRICS_INDEX_URL,
+                "https://raw.githubusercontent.com/Zennmn/am-lyrics/main/am-lyrics/42.ttml",
+            ),
+            transport.getUrls,
+        )
+    }
+
+    @Test
+    fun `am lyrics client preserves a bare 19 digit primary id`() {
+        val ttml = "<tt><body><p><span>lyrics</span></p></body></tt>"
+        val bytes = ttml.toByteArray(Charsets.UTF_8)
+        val sha256 = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(bytes)
+            .joinToString(separator = "") { byte -> "%02x".format(byte) }
+        val primaryId = 7_335_408_332_109_193_189L
+        val index = """
+            {"version":1,"layout":"artist-title-id","entries":[
+              {"appleMusicId":7335408332109193189,"enabled":true,
+               "path":"am-lyrics/7335408332109193189.ttml",
+               "sizeBytes":${bytes.size},"sha256":"$sha256"}
+            ]}
+        """.trimIndent()
+        val transport = FakeTransport(getResults = mutableListOf(index, ttml))
+
+        assertEquals(ttml, AmLyricsClient(transport).fetch(primaryId))
+    }
+
+    @Test
+    fun `am lyrics client rejects a downloaded file whose size or hash differs`() {
+        val index = """
+            {"version":1,"layout":"artist-title-id","entries":[
+              {"appleMusicId":42,"enabled":true,"path":"am-lyrics/42.ttml",
+               "sizeBytes":4,"sha256":"0000000000000000000000000000000000000000000000000000000000000000"}
+            ]}
+        """.trimIndent()
+        val transport = FakeTransport(getResults = mutableListOf(index, "<tt>wrong</tt>"))
+
+        assertNull(AmLyricsClient(transport).fetch(42L))
+        assertEquals(2, transport.getUrls.size)
+    }
+
+    @Test
     fun `am lyrics client fails open for missing ids and malformed paths`() {
+        val ttml = "<tt><body><p><span>lyrics</span></p></body></tt>"
+        val bytes = ttml.toByteArray(Charsets.UTF_8)
+        val sha256 = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(bytes)
+            .joinToString(separator = "") { byte -> "%02x".format(byte) }
         val missing = FakeTransport(
-            getResult = """{"entries":[{"appleMusicId":42,"path":"am-lyrics/42.ttml"}]}""",
+            getResult = """{"version":1,"layout":"artist-title-id","entries":[
+                {"appleMusicId":42,"path":"am-lyrics/42.ttml","sizeBytes":${bytes.size},"sha256":"$sha256"}
+            ]}""",
         )
         assertNull(AmLyricsClient(missing).fetch(43L))
         assertEquals(listOf(AmLyricsClient.AM_LYRICS_INDEX_URL), missing.getUrls)
 
         val malformed = FakeTransport(
-            getResult = """{"entries":[{"appleMusicId":42,"path":"../outside.ttml"}]}""",
+            getResult = """{"version":1,"layout":"artist-title-id","entries":[
+                {"appleMusicId":42,"path":"am-lyrics/../outside.ttml","sizeBytes":${bytes.size},"sha256":"$sha256"}
+            ]}""",
         )
         assertNull(AmLyricsClient(malformed).fetch(42L))
         assertEquals(listOf(AmLyricsClient.AM_LYRICS_INDEX_URL), malformed.getUrls)
@@ -103,7 +177,10 @@ class OnlineLyricClientsTest {
         assertEquals(listOf(AmLyricsClient.AM_LYRICS_INDEX_URL), malformed.getUrls)
 
         val disabled = FakeTransport(
-            getResult = """{"entries":[{"appleMusicId":42,"enabled":false,"path":"am-lyrics/42.ttml"}]}""",
+            getResult = """{"version":1,"layout":"artist-title-id","entries":[
+                {"appleMusicId":42,"enabled":false,"path":"am-lyrics/42.ttml",
+                 "sizeBytes":1,"sha256":"0000000000000000000000000000000000000000000000000000000000000000"}
+            ]}""",
         )
         assertNull(AmLyricsClient(disabled).fetch(42L))
         assertEquals(listOf(AmLyricsClient.AM_LYRICS_INDEX_URL), disabled.getUrls)

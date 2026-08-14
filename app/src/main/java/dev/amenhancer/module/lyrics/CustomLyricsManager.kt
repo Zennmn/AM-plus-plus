@@ -8,6 +8,7 @@ import dev.amenhancer.module.config.CustomLyricsIndexCommitResult
 import dev.amenhancer.module.config.CustomLyricsIndexRepository
 import dev.amenhancer.module.config.CustomLyricsIndexState
 import dev.amenhancer.module.config.CustomLyricsManifestPolicy
+import dev.amenhancer.module.model.CustomLyricsEntry
 import dev.amenhancer.module.model.CustomLyricsManifest
 import java.io.InputStream
 import java.io.OutputStream
@@ -58,32 +59,68 @@ internal class CustomLyricsManager(
         ).upsert(state.manifest, draft, replacingAppleMusicId)
     }
 
-    fun setEnabled(appleMusicId: Long, enabled: Boolean): CustomLyricsMutationResult = synchronized(mutationLock) {
+    fun saveMany(
+        draft: CustomLyricsMultiIdDraft,
+        replacingAppleMusicIds: List<Long> = emptyList(),
+    ): CustomLyricsBatchSaveResult = synchronized(mutationLock) {
+        if (!isWritable()) return CustomLyricsBatchSaveResult.Failed("libxposed remote file 服务不可用")
+        val state = configStore.indexState(snapshot)
+        return CustomLyricsImportTransaction(
+            fileIdFactory = ::newFileId,
+            writeRemoteFile = ::writeRemoteFile,
+            publishManifest = { manifest -> commitIndex(state, manifest) },
+            deleteRemoteFile = { fileId ->
+                if (ModuleApplication.isCurrentSnapshot(snapshot)) snapshot.deleteRemoteFile(fileId)
+            },
+        ).upsertMany(state.manifest, draft, replacingAppleMusicIds)
+    }
+
+    fun setEnabled(appleMusicId: Long, enabled: Boolean): CustomLyricsMutationResult =
+        setEnabled(listOf(appleMusicId), enabled)
+
+    fun setEnabled(
+        appleMusicIds: List<Long>,
+        enabled: Boolean,
+    ): CustomLyricsMutationResult = synchronized(mutationLock) {
         mutate { manifest ->
-        var found = false
-        val entries = manifest.entries.map { entry ->
-            if (entry.appleMusicId == appleMusicId) {
-                found = true
-                entry.copy(enabled = enabled)
-            } else {
-                entry
+            val targetIds = appleMusicIds.toSet()
+            if (targetIds.isEmpty() || targetIds.any { it <= 0L }) return@mutate null
+            var found = 0
+            val entries = manifest.entries.map { entry ->
+                if (entry.appleMusicId in targetIds) {
+                    found += 1
+                    entry.copy(enabled = enabled)
+                } else {
+                    entry
+                }
             }
-        }
-            if (!found) null else CustomLyricsManifest(entries)
+            if (found != targetIds.size) null else CustomLyricsManifest(entries)
         }
     }
 
-    fun delete(appleMusicId: Long): CustomLyricsMutationResult = synchronized(mutationLock) {
+    fun delete(appleMusicId: Long): CustomLyricsMutationResult = delete(listOf(appleMusicId))
+
+    fun delete(appleMusicIds: List<Long>): CustomLyricsMutationResult = synchronized(mutationLock) {
         if (!isWritable()) return CustomLyricsMutationResult.Failed("libxposed remote file 服务不可用")
         val state = configStore.indexState(snapshot)
-        val removed = state.manifest.entries.singleOrNull { it.appleMusicId == appleMusicId }
-            ?: return CustomLyricsMutationResult.Failed("歌词映射不存在")
+        val targetIds = appleMusicIds.toSet()
+        if (targetIds.isEmpty() || targetIds.any { it <= 0L }) {
+            return CustomLyricsMutationResult.Failed("歌词映射不存在")
+        }
+        val removed = state.manifest.entries.filter { it.appleMusicId in targetIds }
+        if (removed.size != targetIds.size) {
+            return CustomLyricsMutationResult.Failed("歌词映射不存在")
+        }
         val next = CustomLyricsManifestPolicy.sanitize(
-            CustomLyricsManifest(state.manifest.entries.filterNot { it.appleMusicId == appleMusicId }),
+            CustomLyricsManifest(state.manifest.entries.filterNot { it.appleMusicId in targetIds }),
         )
         if (commitIndex(state, next)) {
             if (ModuleApplication.isCurrentSnapshot(snapshot)) {
-                runCatching { snapshot.deleteRemoteFile(removed.fileId) }
+                val nextFileIds = next.entries.mapTo(mutableSetOf(), CustomLyricsEntry::fileId)
+                removed.map(CustomLyricsEntry::fileId)
+                    .filterNot(nextFileIds::contains)
+                    .distinct()
+                    .forEach { fileId -> runCatching { snapshot.deleteRemoteFile(fileId) } }
             }
             return CustomLyricsMutationResult.Updated(next)
         }
@@ -129,6 +166,38 @@ internal class CustomLyricsManager(
                 if (ModuleApplication.isCurrentSnapshot(snapshot)) snapshot.deleteRemoteFile(fileId)
             },
         ).merge(state.manifest, policy) { onFile -> CustomLyricsBackupCodec.decode(input, onFile) }
+    }
+
+    /**
+     * Synchronizes an enabled GitHub snapshot into the local index. The
+     * transaction owns merge/rollback semantics; this facade only binds it to
+     * the existing remote-file pointer and mutation lock.
+     */
+    fun syncFromGitHub(
+        plan: List<CustomLyricsSyncPlanEntry>,
+        loadTtml: (CustomLyricsSyncPlanEntry) -> CustomLyricsSyncLoadResult,
+        isCancelled: () -> Boolean = { false },
+        onProgress: (CustomLyricsSyncProgress) -> Unit = {},
+    ): CustomLyricsSyncResult = synchronized(mutationLock) {
+        if (!isWritable()) return CustomLyricsSyncResult.Failed("libxposed remote file 服务不可用")
+        val state = configStore.indexState(snapshot)
+        if (!state.canCommit) {
+            return CustomLyricsSyncResult.Failed("歌词索引文件不可读，无法同步")
+        }
+        CustomLyricsSyncTransaction(
+            fileIdFactory = ::newFileId,
+            writeRemoteFile = ::writeRemoteFile,
+            publishManifest = { manifest -> commitIndex(state, manifest) },
+            deleteRemoteFile = { fileId ->
+                if (ModuleApplication.isCurrentSnapshot(snapshot)) snapshot.deleteRemoteFile(fileId)
+            },
+        ).sync(
+            oldManifest = state.manifest,
+            plan = plan,
+            loadTtml = loadTtml,
+            isCancelled = isCancelled,
+            onProgress = onProgress,
+        )
     }
 
     private fun readRemoteFile(fileId: String): ByteArray? {

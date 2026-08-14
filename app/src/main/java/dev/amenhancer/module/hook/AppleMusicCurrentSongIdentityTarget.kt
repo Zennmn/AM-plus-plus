@@ -1,5 +1,6 @@
 package dev.amenhancer.module.hook
 
+import android.annotation.SuppressLint
 import android.app.Application
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -104,6 +105,7 @@ internal class CurrentSongIdentityRequestResponder(
         }
     }
 
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     fun register(): Boolean = runCatching {
         val filter = IntentFilter(CurrentSongIdentityProtocol.REQUEST_ACTION)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

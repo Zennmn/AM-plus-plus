@@ -1,13 +1,16 @@
 package dev.amenhancer.module.hook
 
+import android.annotation.TargetApi
 import android.graphics.RenderEffect
 import android.graphics.Shader
+import android.os.Build
 import android.os.SystemClock
 import android.view.Choreographer
 import android.view.View
 import java.util.WeakHashMap
 
 /** Drives every visible lyric row from one frame callback and one shared effect cache. */
+@TargetApi(Build.VERSION_CODES.S)
 internal class LyricBlurRenderer {
     private data class Transition(
         var startRadius: Float,

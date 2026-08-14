@@ -103,6 +103,64 @@ class CustomLyricsImportTransactionTest {
         assertTrue(events.isEmpty())
     }
 
+    @Test
+    fun `batch edit writes every id then publishes once and retires replaced file`() {
+        val events = mutableListOf<String>()
+        var nextFile = 0
+        var published = CustomLyricsManifest.empty()
+        val transaction = CustomLyricsImportTransaction(
+            fileIdFactory = { "lyrics_${++nextFile}" },
+            writeRemoteFile = { fileId, _ -> events += "write:$fileId"; true },
+            publishManifest = { manifest -> events += "publish"; published = manifest; true },
+            deleteRemoteFile = { fileId -> events += "delete:$fileId" },
+        )
+
+        val result = transaction.upsertMany(
+            oldManifest = CustomLyricsManifest(listOf(existingEntry())),
+            draft = multiDraft(listOf(42L, 84L)),
+            replacingAppleMusicIds = listOf(42L),
+        )
+
+        assertTrue(result is CustomLyricsBatchSaveResult.Saved)
+        assertEquals(listOf(42L, 84L), published.entries.map(CustomLyricsEntry::appleMusicId))
+        assertEquals(
+            listOf("write:lyrics_1", "write:lyrics_2", "publish", "delete:lyrics_old"),
+            events,
+        )
+    }
+
+    @Test
+    fun `batch write failure rolls back all generated files without publishing`() {
+        val events = mutableListOf<String>()
+        var nextFile = 0
+        var writes = 0
+        val transaction = CustomLyricsImportTransaction(
+            fileIdFactory = { "lyrics_${++nextFile}" },
+            writeRemoteFile = { fileId, _ ->
+                events += "write:$fileId"
+                writes++ == 0
+            },
+            publishManifest = { events += "publish"; true },
+            deleteRemoteFile = { fileId -> events += "delete:$fileId" },
+        )
+
+        val result = transaction.upsertMany(
+            oldManifest = CustomLyricsManifest.empty(),
+            draft = multiDraft(listOf(42L, 84L)),
+        )
+
+        assertEquals(CustomLyricsBatchSaveResult.Failed("无法写入共享歌词文件"), result)
+        assertEquals(
+            listOf(
+                "write:lyrics_1",
+                "write:lyrics_2",
+                "delete:lyrics_1",
+                "delete:lyrics_2",
+            ),
+            events,
+        )
+    }
+
     private fun transaction(
         events: MutableList<String>,
         publish: (CustomLyricsManifest) -> Boolean,
@@ -118,6 +176,13 @@ class CustomLyricsImportTransactionTest {
         appleMusicId: Long = 42L,
     ) = CustomLyricsDraft(
         appleMusicId = appleMusicId,
+        displayName = "Song",
+        ttml = ttml,
+        source = CustomLyricsSources.MANUAL,
+    )
+
+    private fun multiDraft(appleMusicIds: List<Long>) = CustomLyricsMultiIdDraft(
+        appleMusicIds = appleMusicIds,
         displayName = "Song",
         ttml = ttml,
         source = CustomLyricsSources.MANUAL,
