@@ -40,6 +40,8 @@ class EmbeddedSettingsEntryStructuralRegressionTest {
         val host = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsHost.kt")
 
         assertTrue(hook.contains("com.apple.android.music.settings.fragment.SettingsFragment"))
+        assertTrue(hook.contains("findPreferenceSetup"))
+        assertTrue(hook.contains("onSettingsPreferencesReady"))
         assertTrue(hook.contains("getDeclaredMethod(\"onResume\")"))
         assertTrue(hook.contains("onCreateView"))
         assertTrue(hook.contains("onViewCreated"))
@@ -49,6 +51,9 @@ class EmbeddedSettingsEntryStructuralRegressionTest {
         assertTrue(host.contains("val keyWasSet = runCatching"))
         assertTrue(host.contains("if (!installNativePreferenceClick(preferenceClass, preference, activity)) return false"))
         assertTrue(host.contains("): Boolean {"))
+        assertTrue(host.contains("scheduleSettingsOptionFallback"))
+        assertTrue(host.contains("scheduleNativePreferenceRefresh"))
+        assertTrue(host.contains("refreshNativePreferenceAdapter"))
     }
 
     @Test

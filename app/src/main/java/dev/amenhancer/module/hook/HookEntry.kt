@@ -21,6 +21,33 @@ import java.lang.reflect.Method
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal object EmbeddedSettingsFragmentMethodResolver {
+    /**
+     * Finds the host PreferenceFragment method that creates/binds its
+     * PreferenceScreen.  The fixed 6.5.1 build keeps the AndroidX owner but
+     * may rename the method; prefer the stable method name and otherwise
+     * accept only a unique void(Int) candidate in the AndroidX hierarchy.
+     */
+    fun findPreferenceSetup(type: Class<*>): Method? {
+        val candidates = buildList {
+            var current: Class<*>? = type
+            while (current != null) {
+                if (current.name.startsWith("androidx.preference.")) {
+                    runCatching {
+                        current.declaredMethods
+                            .filter { method ->
+                                method.parameterTypes.contentEquals(arrayOf(Int::class.javaPrimitiveType)) &&
+                                    method.returnType == Void.TYPE
+                            }
+                    }.getOrDefault(emptyList()).let(::addAll)
+                }
+                current = current.superclass
+            }
+        }.distinctBy(Method::toGenericString)
+
+        return candidates.firstOrNull { it.name == "setPreferences" }
+            ?: candidates.singleOrNull()
+    }
+
     fun findOnResume(type: Class<*>): Method? {
         var current: Class<*>? = type
         while (current != null) {
@@ -175,7 +202,11 @@ class HookEntry : XposedModule() {
         val settingsFragmentClass = runCatching {
             targetClassLoader.loadClass(SETTINGS_FRAGMENT_NAME)
         }.getOrNull() ?: return
+        val preferenceSetupMethod = EmbeddedSettingsFragmentMethodResolver.findPreferenceSetup(
+            settingsFragmentClass,
+        )
         val methods = listOfNotNull(
+            preferenceSetupMethod,
             EmbeddedSettingsFragmentMethodResolver.findOnResume(settingsFragmentClass),
             EmbeddedSettingsFragmentMethodResolver.findOnCreateView(settingsFragmentClass),
             EmbeddedSettingsFragmentMethodResolver.findOnViewCreated(settingsFragmentClass),
@@ -183,6 +214,7 @@ class HookEntry : XposedModule() {
         if (methods.isEmpty()) return
         if (!settingsFragmentHookInstalled.compareAndSet(false, true)) return
         var hooked = false
+        val preferenceSetupSignature = preferenceSetupMethod?.toGenericString()
         methods.forEach { method ->
             val installed = runCatching {
                 ModernXposedRuntime.hookMethod(method, object : ModernMethodHook() {
@@ -192,13 +224,15 @@ class HookEntry : XposedModule() {
                         val activity = runCatching {
                             ModernXposedRuntime.callMethod(fragment, "getActivity") as? Activity
                         }.getOrNull() ?: return
-                        when (method.name) {
-                            "onCreateView" -> host.onSettingsFragmentViewCreated(
+                        when {
+                            method.toGenericString() == preferenceSetupSignature ->
+                                host.onSettingsPreferencesReady(fragment, activity)
+                            method.name == "onCreateView" -> host.onSettingsFragmentViewCreated(
                                 fragment,
                                 activity,
                                 param.result as? View,
                             )
-                            "onViewCreated" -> host.onSettingsFragmentViewCreated(
+                            method.name == "onViewCreated" -> host.onSettingsFragmentViewCreated(
                                 fragment,
                                 activity,
                                 param.args.getOrNull(0) as? View,

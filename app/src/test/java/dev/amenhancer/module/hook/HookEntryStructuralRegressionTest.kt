@@ -71,4 +71,14 @@ class HookEntryStructuralRegressionTest {
             )?.declaringClass,
         )
     }
+
+    @Test
+    fun `installs the early preference setup seam before lifecycle fallbacks`() {
+        val source = projectFile("app/src/main/java/dev/amenhancer/module/hook/HookEntry.kt")
+
+        assertTrue(source.contains("findPreferenceSetup"))
+        assertTrue(source.contains("preferenceSetupMethod"))
+        assertTrue(source.contains("onSettingsPreferencesReady"))
+        assertTrue(source.contains("preferenceSetupSignature"))
+    }
 }

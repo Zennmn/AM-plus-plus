@@ -456,6 +456,32 @@ internal class EmbeddedSettingsHost private constructor(
      * native settings list; the View row remains a fallback for future host
      * layouts or when a repacker changes the Preference implementation.
      */
+    fun onSettingsPreferencesReady(fragment: Any, activity: Activity) {
+        if (!registered || activity.packageName != ModuleConstants.TARGET_PACKAGE) return
+        val activityId = activityKey(activity)
+        val previousActivity = activityReference?.get()
+        if (previousActivity !== activity) removeInjectedViews(previousActivity)
+        activityReference = WeakReference(activity)
+        activeActivityId = activityId
+        activeActivityRole = EmbeddedHostActivityRole.Settings
+        if (activityMatcher.isMainContentActivity(activity)) {
+            installMainContentLayoutObserver(activity)
+        }
+
+        val nativePreferenceAdded = runCatching {
+            injectNativeSettingsPreference(fragment, activity)
+        }.getOrDefault(false)
+        if (nativePreferenceAdded) {
+            nativePreferenceActivityIds.add(activityId)
+            nativePreferenceFragmentReference = WeakReference(fragment)
+            removeSettingsOption(activity)
+        } else {
+            nativePreferenceActivityIds.remove(activityId)
+            nativePreferenceFragmentReference = null
+            scheduleSettingsOptionFallback(activity, fragmentView(fragment))
+        }
+    }
+
     fun onSettingsFragmentResumed(fragment: Any, activity: Activity) {
         if (!registered || activity.packageName != ModuleConstants.TARGET_PACKAGE) return
         val activityId = activityKey(activity)
@@ -484,18 +510,18 @@ internal class EmbeddedSettingsHost private constructor(
                 nativePreferenceFragmentReference = WeakReference(fragment)
                 removeSettingsOption(activity)
             } else {
-                // The fixed host creates its RecyclerView before this late
-                // onResume callback. Keep a visible row fallback for this
-                // first late append; a native Preference added earlier is
-                // already rendered by the adapter.
-                nativePreferenceActivityIds.remove(activityId)
-                nativePreferenceFragmentReference = null
-                injectSettingsOptionIfNeeded(activity, fragmentView(fragment))
+                // The early setPreferences seam normally handles this. If a
+                // repacker binds before our hook, give the host one frame to
+                // refresh its adapter before falling back to an overlay row.
+                nativePreferenceActivityIds.add(activityId)
+                nativePreferenceFragmentReference = WeakReference(fragment)
+                removeSettingsOption(activity)
+                scheduleNativePreferenceRefresh(activity, fragmentView(fragment))
             }
         } else {
             nativePreferenceActivityIds.remove(activityId)
             nativePreferenceFragmentReference = null
-            injectSettingsOptionIfNeeded(activity, fragmentView(fragment))
+            scheduleSettingsOptionFallback(activity, fragmentView(fragment))
         }
     }
 
@@ -530,8 +556,9 @@ internal class EmbeddedSettingsHost private constructor(
             nativePreferenceActivityIds.add(activityId)
             nativePreferenceFragmentReference = WeakReference(fragment)
             removeSettingsOption(activity)
+            scheduleNativePreferenceRefresh(activity, view as? ViewGroup)
         } else {
-            injectSettingsOptionIfNeeded(activity, view as? ViewGroup)
+            scheduleSettingsOptionFallback(activity, view as? ViewGroup)
         }
         view?.post {
             if (registered && activityReference?.get() === activity) {
@@ -540,10 +567,38 @@ internal class EmbeddedSettingsHost private constructor(
                     nativePreferenceFragmentReference?.get() != null
                 ) {
                     removeSettingsOption(activity)
-                } else {
-                    injectSettingsOptionIfNeeded(activity, view as? ViewGroup)
                 }
             }
+        }
+    }
+
+    private fun scheduleSettingsOptionFallback(
+        activity: Activity,
+        preferredRoot: ViewGroup?,
+    ) {
+        mainHandler.postDelayed({
+            if (!registered || activityReference?.get() !== activity) return@postDelayed
+            if (!nativePreferenceActivityIds.contains(activityKey(activity))) {
+                nativePreferenceActivityIds.remove(activityKey(activity))
+                nativePreferenceFragmentReference = null
+                injectSettingsOptionIfNeeded(activity, preferredRoot)
+            }
+        }, NATIVE_PREFERENCE_FALLBACK_DELAY_MS)
+    }
+
+    private fun scheduleNativePreferenceRefresh(activity: Activity, root: ViewGroup?) {
+        mainHandler.postDelayed({
+            if (registered && activityReference?.get() === activity) {
+                refreshNativePreferenceAdapter(root)
+            }
+        }, NATIVE_PREFERENCE_FALLBACK_DELAY_MS)
+    }
+
+    private fun refreshNativePreferenceAdapter(root: ViewGroup?) {
+        val recycler = root?.let(::findRecyclerView) ?: return
+        runCatching {
+            val adapter = recycler.javaClass.getMethod("getAdapter").invoke(recycler) ?: return
+            adapter.javaClass.getMethod("notifyDataSetChanged").invoke(adapter)
         }
     }
 
@@ -760,6 +815,22 @@ internal class EmbeddedSettingsHost private constructor(
             if (view is ViewGroup && isRecyclerView(view)) {
                 return view.parent as? ViewGroup
             }
+            if (view is ViewGroup) {
+                for (index in 0 until view.childCount) {
+                    pending.addLast(view.getChildAt(index))
+                }
+            }
+        }
+        return null
+    }
+
+    private fun findRecyclerView(root: View): ViewGroup? {
+        val pending = ArrayDeque<View>()
+        pending.add(root)
+        var visited = 0
+        while (pending.isNotEmpty() && visited++ < 1024) {
+            val view = pending.removeFirst()
+            if (view is ViewGroup && isRecyclerView(view)) return view
             if (view is ViewGroup) {
                 for (index in 0 until view.childCount) {
                     pending.addLast(view.getChildAt(index))
@@ -2186,6 +2257,7 @@ internal class EmbeddedSettingsHost private constructor(
         const val FLOATING_BUTTON_TAG = "ampp_embedded_settings_button"
         const val SETTINGS_OPTION_TAG = "ampp_embedded_settings_option"
         const val NATIVE_SETTINGS_PREFERENCE_KEY = "ampp_embedded_settings_preference"
+        private const val NATIVE_PREFERENCE_FALLBACK_DELAY_MS = 220L
 
         fun install(
             application: Application,
