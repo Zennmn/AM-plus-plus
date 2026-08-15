@@ -19,7 +19,7 @@ internal class AppleMusicLyricsTypefaceTarget(
                 return TargetCapabilityInstall.Degraded("Lyrics font was disabled before target installation")
             is LyricsTypefacePreparation.Failed ->
                 return TargetCapabilityInstall.Degraded(preparation.message)
-            // Loading returns immediately; the 16 MiB read and Typeface parse
+            // Loading returns immediately; the font read and Typeface parse
             // happen on the session's background thread, and every observed
             // lyric root is re-applied once the load completes.
             LyricsTypefacePreparation.Ready, LyricsTypefacePreparation.Loading -> Unit

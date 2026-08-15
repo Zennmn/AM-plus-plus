@@ -26,8 +26,6 @@ internal class SafFontImporter(
         val bytes = try {
             appContext.contentResolver.openInputStream(uri)?.use(FontFilePolicy::readBounded)
                 ?: return FontImportResult.Failed("Unable to read selected font")
-        } catch (_: FontFilePolicy.FontSizeLimitExceeded) {
-            return FontImportResult.Failed("Font exceeds 16 MiB")
         } catch (_: Throwable) {
             return FontImportResult.Failed("Unable to read selected font")
         }

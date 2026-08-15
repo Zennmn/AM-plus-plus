@@ -57,8 +57,8 @@ internal sealed interface LyricsTypefacePreparation {
  *   layout-inflation callbacks; it never touches the remote file.
  * - [prepare] runs on the main thread (Application.onCreate install). It
  *   decides enabled/disabled and then starts a one-shot background load on a
- *   single daemon thread; the up-to-16 MiB read, SHA-256 and Typeface parse
- *   never run on the main thread.
+ *   single daemon thread; the font read, SHA-256 and Typeface parse never run
+ *   on the main thread.
  * - The background load transitions [LyricsTypefaceLoadController] under its
  *   own lock and, on success, posts a main-thread re-application of every
  *   lyric root/recycler observed while loading.
@@ -275,9 +275,6 @@ internal class LyricsTypefaceSession {
                         headerSize += copied
                     }
                     size += count
-                    if (size > FontFilePolicy.MAX_FONT_SIZE_BYTES) {
-                        return@use VerifyResult.Permanent("Remote font exceeds 16 MiB")
-                    }
                     digest.update(buffer, 0, count)
                 }
                 when {
