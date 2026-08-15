@@ -126,6 +126,7 @@ internal class CatalogMissBackfillCoordinator(
         }
         if (batch.isEmpty()) return
 
+        val capturedIds = LinkedHashSet<String>()
         runCatching {
             val requested = batch.toHashSet()
             val cache = cacheProvider()
@@ -133,15 +134,23 @@ internal class CatalogMissBackfillCoordinator(
                 val id = LibraryRefreshHost.readString(entity, "getId") ?: return@forEach
                 if (id !in requested) return@forEach
                 cache.captureCatalogMetadataForId(id, entity, "songs")
+                capturedIds += id
             }
         }.onSuccess {
             synchronized(lock) {
                 batch.forEach { id ->
                     inFlight -= id
-                    retryable -= id
-                    completed += id
-                    while (completed.size > MAX_COMPLETED_IDS) {
-                        completed.remove(completed.first())
+                    if (id in capturedIds) {
+                        retryable -= id
+                        completed += id
+                        while (completed.size > MAX_COMPLETED_IDS) {
+                            completed.remove(completed.first())
+                        }
+                    } else {
+                        // A successful lookup may still omit requested IDs.
+                        // Keep those IDs retryable instead of treating the
+                        // whole batch as captured.
+                        rememberRetryableLocked(id)
                     }
                 }
             }

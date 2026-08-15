@@ -2,7 +2,6 @@ package dev.amenhancer.module.hook
 
 import android.app.Application
 import java.lang.reflect.Method
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Corrects only titles for which Apple already supplied a catalog relation.
@@ -31,8 +30,12 @@ internal class AppleMusicTitleCorrectionTarget(
 
     /** Prevent our reflective getter calls from re-entering this target. */
     private val callbackGuard: ThreadLocal<Boolean> = ThreadLocal.withInitial { false }
-    /** Only the artist row created by the current action sheet may use artist-id semantics. */
-    private val actionSheetArtistIds = ConcurrentHashMap.newKeySet<String>()
+    /**
+     * Only the artist row created by an action sheet may use artist-id
+     * semantics.  Responses can be concurrent or late, so this is not reset
+     * when a new sheet opens; each matching response consumes its own id.
+     */
+    private val actionSheetArtistIds = ActionSheetArtistIdTracker()
 
     /**
      * Attributes are bound as one object: title, artist and album share a
@@ -654,8 +657,10 @@ internal class AppleMusicTitleCorrectionTarget(
                 runGuarded {
                     val playbackItem = param.args.getOrNull(0)
                     val collectionView = param.args.getOrNull(1)
-                    val artistId = param.args.getOrNull(2) as? String
-                    artistId?.takeIf(String::isNotBlank)?.let(actionSheetArtistIds::add)
+                    val artistId = (param.args.getOrNull(2) as? String)
+                        ?.trim()
+                        ?.takeIf(String::isNotEmpty)
+                    actionSheetArtistIds.record(artistId)
                     // AMTool resolves artist/title with the playback item's id,
                     // but resolves the collection name with getCollectionId().
                     // Keep that identity split when both objects are supplied.
@@ -677,9 +682,14 @@ internal class AppleMusicTitleCorrectionTarget(
                     runGuarded {
                         val map = param.args.firstOrNull() as? Map<*, *> ?: return@runGuarded
                         map.entries.forEach { (key, value) ->
-                            if (value == null) return@forEach
                             val keyId = key?.toString()
-                            if (keyId == null || keyId !in actionSheetArtistIds) return@forEach
+                                ?.trim()
+                                ?.takeIf(String::isNotEmpty)
+                            // Consume before touching the value or attempting
+                            // correction so null/blank/failed rows cannot
+                            // leave a stale id for a later response.
+                            if (keyId == null || !actionSheetArtistIds.consume(keyId)) return@forEach
+                            if (value == null) return@forEach
                             val raw = callString(value, "getTitle") ?: return@forEach
                             titleCache.correctedArtistById(keyId, raw)
                                 ?.let { corrected -> callSetter(value, "setTitle", corrected) }

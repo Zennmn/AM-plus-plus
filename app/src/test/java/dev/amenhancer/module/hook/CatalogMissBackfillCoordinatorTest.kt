@@ -181,6 +181,83 @@ class CatalogMissBackfillCoordinatorTest {
         assertEquals(2, attempts)
     }
 
+    @Test
+    fun `partial lookup keeps omitted id retryable for a later miss`() {
+        val idA = "song-partial-a"
+        val idB = "song-partial-b"
+        val entityA = TestCatalogSong(idA, "部分歌曲 A")
+        val entityB = TestCatalogSong(idB, "部分歌曲 B")
+        val requests = mutableListOf<List<String>>()
+        val scheduler = RecordingCatalogMissScheduler()
+        var firstLookup = true
+        val coordinator = CatalogMissBackfillCoordinator(
+            cache = testCache(),
+            lookup = CatalogSongLookup { ids ->
+                requests += ids.toList()
+                if (firstLookup) {
+                    firstLookup = false
+                    listOf(entityA)
+                } else {
+                    listOf(entityB)
+                }
+            },
+            scheduler = scheduler,
+        )
+
+        coordinator.enqueue(idA)
+        coordinator.enqueue(idB)
+        scheduler.runAll()
+
+        assertEquals(listOf(listOf(idA, idB)), requests)
+        assertEquals(1, coordinator.capturedCount)
+        assertEquals(1, coordinator.retryableCount)
+
+        coordinator.enqueue(idB)
+        scheduler.runAll()
+
+        assertEquals(listOf(listOf(idA, idB), listOf(idB)), requests)
+        assertEquals(2, coordinator.capturedCount)
+        assertEquals(0, coordinator.retryableCount)
+    }
+
+    @Test
+    fun `empty lookup keeps every requested id retryable`() {
+        val idA = "song-empty-a"
+        val idB = "song-empty-b"
+        val entityB = TestCatalogSong(idB, "空结果后歌曲 B")
+        val requests = mutableListOf<List<String>>()
+        val scheduler = RecordingCatalogMissScheduler()
+        var firstLookup = true
+        val coordinator = CatalogMissBackfillCoordinator(
+            cache = testCache(),
+            lookup = CatalogSongLookup { ids ->
+                requests += ids.toList()
+                if (firstLookup) {
+                    firstLookup = false
+                    emptyList()
+                } else {
+                    listOf(entityB)
+                }
+            },
+            scheduler = scheduler,
+        )
+
+        coordinator.enqueue(idA)
+        coordinator.enqueue(idB)
+        scheduler.runAll()
+
+        assertEquals(listOf(listOf(idA, idB)), requests)
+        assertEquals(0, coordinator.capturedCount)
+        assertEquals(2, coordinator.retryableCount)
+
+        coordinator.enqueue(idB)
+        scheduler.runAll()
+
+        assertEquals(listOf(listOf(idA, idB), listOf(idB)), requests)
+        assertEquals(1, coordinator.capturedCount)
+        assertEquals(1, coordinator.retryableCount)
+    }
+
     private fun testCache(): CatalogTitleCache = CatalogTitleCache(
         CoordinatorTestApplication(inMemoryPreferences(linkedMapOf())),
         "zh-CN",
