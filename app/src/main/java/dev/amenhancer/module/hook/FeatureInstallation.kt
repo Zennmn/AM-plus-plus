@@ -27,7 +27,6 @@ internal object FeatureInstallation {
         module.install(config, targetClassLoader)
     }
 }
-
 internal class FeatureInstallationModule(
     private val plans: List<FeatureInstallationPlan>,
     private val installLayoutInflationHooks: () -> Unit,
@@ -215,6 +214,9 @@ private fun productionFeatureInstallationModule(): FeatureInstallationModule {
                 registerResources = lyricsTypefaceSession::registerResources,
             ),
             FeatureInstallationPlan(feature = CurrentSongIdentityFeature()),
+            FeatureInstallationPlan(feature = LibraryRefreshFeature()),
+            FeatureInstallationPlan(feature = TitleCorrectionFeature()),
+            FeatureInstallationPlan(feature = CatalogLanguageFeature()),
             FeatureInstallationPlan(feature = CustomLyricsFeature()),
         ),
         installLayoutInflationHooks = LayoutInflationRegistry::install,

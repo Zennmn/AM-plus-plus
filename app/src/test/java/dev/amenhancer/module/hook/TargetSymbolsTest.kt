@@ -17,6 +17,48 @@ import org.junit.Test
 
 class TargetSymbolsTest {
     @Test
+    fun `media library symbols resolve the singleton refresh reason and ready seam structurally`() {
+        val source = FakeTargetClassSource(
+            names = listOf(
+                "com.apple.android.medialibrary.library.MediaLibrary",
+                "com.apple.android.medialibrary.library.a",
+            ),
+            classes = mapOf(
+                "com.apple.android.medialibrary.library.MediaLibrary" to
+                    MediaLibraryFixture::class.java,
+                "com.apple.android.medialibrary.library.a" to
+                    MediaLibraryImplementationFixture::class.java,
+            ),
+        )
+        val resolver = IndexedTargetSymbolResolver(TargetBuild.UNKNOWN, source)
+
+        val type = resolver.resolve(AppleMusicSymbols.MediaLibraryType)
+        val singleton = resolver.resolve(AppleMusicSymbols.MediaLibrarySingletonMethod)
+        val update = resolver.resolve(AppleMusicSymbols.MediaLibraryUpdateMethod)
+        val ready = resolver.resolve(AppleMusicSymbols.MediaLibraryReadyMethod)
+
+        assertTrue(type is TargetResolution.Found)
+        assertTrue(singleton is TargetResolution.Found)
+        assertTrue(update is TargetResolution.Found)
+        assertTrue(ready is TargetResolution.Found)
+        assertEquals("W", (singleton as TargetResolution.Found).value.name)
+        assertEquals("r0", (update as TargetResolution.Found).value.name)
+        assertEquals("isReady", (ready as TargetResolution.Found).value.name)
+        assertEquals(SymbolMatch.STRUCTURAL_FALLBACK, (update as TargetResolution.Found).match)
+    }
+
+    @Test
+    fun `title correction policy rejects blank or equal catalog values`() {
+        assertTrue(TitleCorrectionPolicy.usable("English", "中文"))
+        assertTrue(!TitleCorrectionPolicy.usable("", "中文"))
+        assertTrue(!TitleCorrectionPolicy.usable("Same", "Same"))
+        assertEquals(
+            "catalog-title:zh-CN:42",
+            TitleCorrectionPolicy.cacheKey("zh-CN", "42"),
+        )
+    }
+
+    @Test
     fun `650 profile resolves exact symbol without enumerating dex names`() {
         val source = FakeTargetClassSource(classes = mapOf("Hd.b" to ProfileFixture::class.java))
         val resolver = IndexedTargetSymbolResolver(
@@ -1165,7 +1207,6 @@ class TargetSymbolsTest {
         identity = { type: Class<*> -> type.name },
     )
 }
-
 private class LyricsInstallFixture {
     @Suppress("UNUSED_PARAMETER")
     fun I2(ptr: SongInfo.SongInfoPtr) = Unit
@@ -1481,3 +1522,24 @@ private class ProfileSessionProcessor {
 }
 private class FirstFixture
 private class SecondFixture
+
+private interface MediaLibraryFixture {
+    fun isReady(): Boolean
+}
+
+private enum class RefreshReasonFixture {
+    UserInitiatedPoll,
+    PeriodicPoll,
+}
+
+private class MediaLibraryImplementationFixture : MediaLibraryFixture {
+    companion object {
+        @JvmStatic
+        fun W(): MediaLibraryFixture = MediaLibraryImplementationFixture()
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    fun r0(reason: RefreshReasonFixture): Any = Unit
+
+    override fun isReady(): Boolean = true
+}

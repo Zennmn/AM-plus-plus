@@ -107,6 +107,8 @@ class OrdinarySettingsWritePolicyTest {
                 "future_blur_enabled" to false,
                 "navigation_compensation_enabled" to false,
                 "lyric_blur_radius_offset_px" to 6,
+                "title_correction_enabled" to false,
+                "title_correction_target_language" to "tr-TR",
                 "custom_lyrics_enabled" to false,
                 "schema_version" to ModuleConstants.CONFIG_SCHEMA_VERSION,
             ),

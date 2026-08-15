@@ -26,6 +26,15 @@ internal object ModuleSettingsSchema {
                 ModuleSettings.MIN_LYRIC_BLUR_RADIUS_OFFSET_PX,
                 ModuleSettings.MAX_LYRIC_BLUR_RADIUS_OFFSET_PX,
             ) ?: 0,
+        titleCorrectionEnabled = values.boolean(
+            KEY_TITLE_CORRECTION_ENABLED,
+            default = false,
+        ),
+        titleCorrectionTargetLanguage = if (values.containsKey(KEY_TITLE_CORRECTION_TARGET_LANGUAGE)) {
+            CatalogLanguagePolicy.normalize(values.string(KEY_TITLE_CORRECTION_TARGET_LANGUAGE))
+        } else {
+            CatalogLanguagePolicy.DEFAULT_TARGET_LANGUAGE
+        },
         customLyricsEnabled = values.boolean(
             KEY_CUSTOM_LYRICS_ENABLED,
             default = values.boolean(KEY_LEGACY_ONLINE_LYRIC_REPLACEMENT, default = false),
@@ -57,6 +66,10 @@ internal object ModuleSettingsSchema {
             KEY_LYRIC_BLUR_RADIUS_OFFSET to settings.lyricBlurRadiusOffsetPx.coerceIn(
                 ModuleSettings.MIN_LYRIC_BLUR_RADIUS_OFFSET_PX,
                 ModuleSettings.MAX_LYRIC_BLUR_RADIUS_OFFSET_PX,
+            ),
+            KEY_TITLE_CORRECTION_ENABLED to settings.titleCorrectionEnabled,
+            KEY_TITLE_CORRECTION_TARGET_LANGUAGE to CatalogLanguagePolicy.normalize(
+                settings.titleCorrectionTargetLanguage,
             ),
             KEY_CUSTOM_LYRICS_ENABLED to settings.customLyricsEnabled,
         )
@@ -147,6 +160,10 @@ internal object ModuleSettingsSchema {
         storedValues: Map<String, *>,
         legacyValues: Map<String, *>,
     ): Map<String, Any>? {
+        // Deliberately no AMTool key migration here: AMTool 1.2's
+        // modify_locale / modify_locale_target_tag live in the private
+        // "module_settings" file of the separate com.mukapp.applemusictool
+        // app and are unreadable from AM++ (see AMTOOL_MODIFY_LOCALE_KEY).
         val storedVersion = storedValues.number(KEY_SCHEMA_VERSION)
         if (storedVersion != null && storedVersion >= ModuleConstants.CONFIG_SCHEMA_VERSION) return null
         val source = if (storedValues.hasSettingValue()) storedValues else legacyValues
@@ -167,6 +184,8 @@ internal object ModuleSettingsSchema {
         KEY_FUTURE_BLUR,
         KEY_NAVIGATION_COMPENSATION,
         KEY_LYRIC_BLUR_RADIUS_OFFSET,
+        KEY_TITLE_CORRECTION_ENABLED,
+        KEY_TITLE_CORRECTION_TARGET_LANGUAGE,
         KEY_CUSTOM_LYRICS_ENABLED,
         KEY_LEGACY_ONLINE_LYRIC_REPLACEMENT,
         KEY_FONT_ENABLED,
@@ -191,6 +210,8 @@ internal object ModuleSettingsSchema {
     private const val KEY_FUTURE_BLUR = "future_blur_enabled"
     private const val KEY_NAVIGATION_COMPENSATION = "navigation_compensation_enabled"
     private const val KEY_LYRIC_BLUR_RADIUS_OFFSET = "lyric_blur_radius_offset_px"
+    private const val KEY_TITLE_CORRECTION_ENABLED = "title_correction_enabled"
+    private const val KEY_TITLE_CORRECTION_TARGET_LANGUAGE = "title_correction_target_language"
     private const val KEY_CUSTOM_LYRICS_ENABLED = "custom_lyrics_enabled"
     private const val KEY_LEGACY_ONLINE_LYRIC_REPLACEMENT = "online_lyric_replacement_enabled"
     private const val KEY_FONT_ENABLED = "lyrics_font_enabled"
@@ -204,4 +225,21 @@ internal object ModuleSettingsSchema {
     private const val KEY_CUSTOM_LYRICS_INDEX_SHA256 = "custom_lyrics_index_sha256"
     private const val KEY_CUSTOM_LYRICS_INDEX_SIZE_BYTES = "custom_lyrics_index_size_bytes"
     private const val KEY_SCHEMA_VERSION = "schema_version"
+
+    /**
+     * AMTool 1.2's own config keys, verified from AMTool_1.2.apk: the
+     * `com.mukapp.applemusictool` module stores exactly `modify_locale` and
+     * `modify_locale_target_tag` in ITS private `module_settings`
+     * SharedPreferences and never writes them into the host's preferences.
+     *
+     * These constants are documentation only.  Android app-data isolation
+     * means neither the AM++ settings process nor the Apple Music hook
+     * process can open another package's private storage, so a real read
+     * migration is not implementable: [decode] ignores the keys, [encode]
+     * never emits them, and they must NOT be added to [settingKeys] — doing
+     * so would make an AMTool-owned key look like a migrated AM++ setting.
+     * A user moving from AMTool to AM++ re-enters the target language once.
+     */
+    internal const val AMTOOL_MODIFY_LOCALE_KEY = "modify_locale"
+    internal const val AMTOOL_MODIFY_LOCALE_TARGET_TAG_KEY = "modify_locale_target_tag"
 }

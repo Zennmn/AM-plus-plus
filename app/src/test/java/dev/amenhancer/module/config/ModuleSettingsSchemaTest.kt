@@ -4,6 +4,7 @@ import dev.amenhancer.module.ModuleConstants
 import dev.amenhancer.module.model.CustomLyricsManifest
 import dev.amenhancer.module.model.ModuleSettings
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -18,6 +19,7 @@ class ModuleSettingsSchemaTest {
                 futureBlurEnabled = true,
                 navigationCompensationEnabled = false,
                 lyricBlurRadiusOffsetPx = 0,
+                titleCorrectionEnabled = false,
                 schemaVersion = ModuleConstants.CONFIG_SCHEMA_VERSION,
             ),
             ModuleSettingsSchema.decode(emptyMap<String, Any?>()),
@@ -45,6 +47,8 @@ class ModuleSettingsSchemaTest {
                 "future_blur_enabled" to false,
                 "navigation_compensation_enabled" to false,
                 "lyric_blur_radius_offset_px" to 6,
+                "title_correction_enabled" to false,
+                "title_correction_target_language" to "tr-TR",
                 "custom_lyrics_enabled" to false,
                 "lyrics_font_enabled" to false,
                 "lyrics_font_file_id" to "",
@@ -76,6 +80,8 @@ class ModuleSettingsSchemaTest {
                 "future_blur_enabled" to true,
                 "navigation_compensation_enabled" to false,
                 "lyric_blur_radius_offset_px" to 0,
+                "title_correction_enabled" to false,
+                "title_correction_target_language" to "tr-TR",
                 "custom_lyrics_enabled" to false,
                 "lyrics_font_enabled" to false,
                 "lyrics_font_file_id" to "",
@@ -137,6 +143,7 @@ class ModuleSettingsSchemaTest {
                 futureBlurEnabled = false,
                 navigationCompensationEnabled = false,
                 lyricBlurRadiusOffsetPx = 0,
+                titleCorrectionEnabled = false,
                 schemaVersion = ModuleConstants.CONFIG_SCHEMA_VERSION,
             ),
             decoded,
@@ -189,6 +196,37 @@ class ModuleSettingsSchemaTest {
         assertEquals(
             true,
             ModuleSettingsSchema.decode(encoded).customLyricsEnabled,
+        )
+    }
+
+    @Test
+    fun `title correction defaults off and round trips`() {
+        assertEquals(
+            false,
+            ModuleSettingsSchema.decode(emptyMap<String, Any?>()).titleCorrectionEnabled,
+        )
+        val encoded = ModuleSettingsSchema.encodeOrdinarySettings(
+            ModuleSettings(titleCorrectionEnabled = true),
+        )
+        assertEquals(true, encoded["title_correction_enabled"])
+        assertEquals(true, ModuleSettingsSchema.decode(encoded).titleCorrectionEnabled)
+    }
+
+    @Test
+    fun `target language normalizes and invalid values fall back to automatic`() {
+        val encoded = ModuleSettingsSchema.encodeOrdinarySettings(
+            ModuleSettings(titleCorrectionTargetLanguage = "tr_TR"),
+        )
+        assertEquals("tr-TR", encoded["title_correction_target_language"])
+        assertEquals(
+            "tr-TR",
+            ModuleSettingsSchema.decode(encoded).titleCorrectionTargetLanguage,
+        )
+        assertEquals(
+            "",
+            ModuleSettingsSchema.decode(
+                mapOf("title_correction_target_language" to "not a language"),
+            ).titleCorrectionTargetLanguage,
         )
     }
 
@@ -281,5 +319,38 @@ class ModuleSettingsSchemaTest {
             listOf(42L),
             ModuleSettingsSchema.decodeLegacyCustomLyricsManifest(values).entries.map { it.appleMusicId },
         )
+    }
+
+    @Test
+    fun `AMTool module settings keys are documented but never migrated or decoded`() {
+        assertEquals("modify_locale", ModuleSettingsSchema.AMTOOL_MODIFY_LOCALE_KEY)
+        assertEquals(
+            "modify_locale_target_tag",
+            ModuleSettingsSchema.AMTOOL_MODIFY_LOCALE_TARGET_TAG_KEY,
+        )
+
+        val decoded = ModuleSettingsSchema.decode(
+            mapOf(
+                "modify_locale" to true,
+                "modify_locale_target_tag" to "zh-CN",
+            ),
+        )
+        assertEquals(false, decoded.titleCorrectionEnabled)
+        assertEquals("tr-TR", decoded.titleCorrectionTargetLanguage)
+
+        val encoded = ModuleSettingsSchema.encodeOrdinarySettings(decoded)
+        assertFalse(encoded.containsKey("modify_locale"))
+        assertFalse(encoded.containsKey("modify_locale_target_tag"))
+
+        val upgraded = ModuleSettingsSchema.upgrade(
+            storedValues = mapOf(
+                "modify_locale" to true,
+                "modify_locale_target_tag" to "zh-CN",
+            ),
+            legacyValues = emptyMap<String, Any?>(),
+        )
+        assertFalse(upgraded!!.containsKey("modify_locale"))
+        assertFalse(upgraded.containsKey("modify_locale_target_tag"))
+        assertEquals("tr-TR", upgraded["title_correction_target_language"])
     }
 }

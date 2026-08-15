@@ -6,6 +6,7 @@ import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 import java.util.IdentityHashMap
+import java.util.Locale
 
 internal data class TargetBuild(
     val packageName: String,
@@ -19,7 +20,6 @@ internal data class TargetBuild(
         val UNKNOWN = TargetBuild(ModuleConstants.TARGET_PACKAGE, "", -1)
     }
 }
-
 internal enum class SymbolMatch {
     VERSION_PROFILE,
     STABLE_NAME,
@@ -258,6 +258,9 @@ internal enum class TargetSymbolId {
     PLAYER_METADATA_HUB,
     METADATA_TO_ITEM_CONVERTER,
     LYRICS_AVAILABILITY_OWNER,
+    MEDIA_ENTITY_TO_SONG_CONVERTER,
+    STORE_FRONT_LANGUAGE_ARRAY_OWNER,
+    STORE_FRONT_LANGUAGE_ARRAY_METHOD,
 }
 
 private object AppleMusicProfiles {
@@ -289,11 +292,14 @@ private object AppleMusicProfiles {
             TargetSymbolId.PLAYER_METADATA_HUB to "com.apple.android.music.player.f",
             TargetSymbolId.METADATA_TO_ITEM_CONVERTER to "com.apple.android.music.player.P",
             TargetSymbolId.LYRICS_AVAILABILITY_OWNER to "com.apple.android.music.player.d1",
+            TargetSymbolId.MEDIA_ENTITY_TO_SONG_CONVERTER to "y8.B",
+            TargetSymbolId.STORE_FRONT_LANGUAGE_ARRAY_OWNER to "J5.a",
         ),
         exactMethods = mapOf(
             TargetSymbolId.PLAYER_ACTIVITY_CREATE_STACKED_NAVIGATION_HOLDER to "k1",
             TargetSymbolId.PLAYER_ACTIVITY_ROOT to "n0",
             TargetSymbolId.LYRICS_ITEM_UPDATE_METHOD to "o2",
+            TargetSymbolId.STORE_FRONT_LANGUAGE_ARRAY_METHOD to "b",
         ),
         exactFields = mapOf(
             TargetSymbolId.PLAYER_ACTIVITY_BEHAVIOR_FIELD to "c1",
@@ -328,11 +334,14 @@ private object AppleMusicProfiles {
             TargetSymbolId.PLAYER_METADATA_HUB to "com.apple.android.music.player.f",
             TargetSymbolId.METADATA_TO_ITEM_CONVERTER to "com.apple.android.music.player.O",
             TargetSymbolId.LYRICS_AVAILABILITY_OWNER to "com.apple.android.music.player.e1",
+            TargetSymbolId.MEDIA_ENTITY_TO_SONG_CONVERTER to "y8.B",
+            TargetSymbolId.STORE_FRONT_LANGUAGE_ARRAY_OWNER to "J5.a",
         ),
         exactMethods = mapOf(
             TargetSymbolId.PLAYER_ACTIVITY_CREATE_STACKED_NAVIGATION_HOLDER to "j1",
             TargetSymbolId.PLAYER_ACTIVITY_ROOT to "l1",
             TargetSymbolId.LYRICS_ITEM_UPDATE_METHOD to "o2",
+            TargetSymbolId.STORE_FRONT_LANGUAGE_ARRAY_METHOD to "b",
         ),
         exactFields = mapOf(
             TargetSymbolId.PLAYER_ACTIVITY_BEHAVIOR_FIELD to "c1",
@@ -740,6 +749,889 @@ internal object AppleMusicSymbols {
         identity = ::fieldIdentity,
     )
 
+    /** Stable public seam; the implementation class and its singleton remain obfuscated. */
+    val MediaLibraryType = classSymbol(
+        id = "media-library-type",
+        stableName = "com.apple.android.medialibrary.library.MediaLibrary",
+        fallbackName = { it == "com.apple.android.medialibrary.library.MediaLibrary" },
+        contract = { it.isInterface },
+    )
+
+    /** Finds the implementation's no-argument singleton accessor (W() in 6.5.1). */
+    val MediaLibrarySingletonMethod = TargetSymbolKey(
+        id = "media-library-singleton-method",
+        stableCandidates = {
+            val mediaLibrary = load("com.apple.android.medialibrary.library.MediaLibrary")
+                ?: return@TargetSymbolKey emptyList()
+            classes(
+                namePredicate = { it.startsWith("com.apple.android.medialibrary.library.") },
+                contract = { candidate ->
+                    !candidate.isInterface && mediaLibrary.isAssignableFrom(candidate)
+                },
+            ).flatMap { candidate ->
+                candidate.declaredMethods.filter { method ->
+                    Modifier.isStatic(method.modifiers) &&
+                        method.parameterCount == 0 &&
+                        mediaLibrary.isAssignableFrom(method.returnType)
+                }
+            }.distinctBy(::methodIdentity)
+        },
+        structuralCandidates = {
+            val mediaLibrary = load("com.apple.android.medialibrary.library.MediaLibrary")
+                ?: return@TargetSymbolKey emptyList()
+            classes(
+                namePredicate = { it.startsWith("com.apple.android.medialibrary.library.") },
+                contract = { candidate ->
+                    !candidate.isInterface && mediaLibrary.isAssignableFrom(candidate)
+                },
+            ).flatMap { candidate ->
+                candidate.declaredMethods.filter { method ->
+                    Modifier.isStatic(method.modifiers) &&
+                        method.parameterCount == 0 &&
+                        mediaLibrary.isAssignableFrom(method.returnType)
+                }
+            }.distinctBy(::methodIdentity)
+        },
+        identity = ::methodIdentity,
+    )
+
+    /** MediaLibrary.r0(MediaLibrary$g) in 6.5.1; the name is deliberately not pinned. */
+    val MediaLibraryUpdateMethod = TargetSymbolKey(
+        id = "media-library-update-method",
+        structuralCandidates = {
+            mediaLibraryImplementationMethods(::isMediaLibraryUpdateMethod)
+        },
+        identity = ::methodIdentity,
+    )
+
+    /** Stable query seam used by AMTool to enumerate songs after a poll. */
+    val MediaLibraryItemsQueryMethod = TargetSymbolKey(
+        id = "media-library-items-query-method",
+        stableCandidates = {
+            load("com.apple.android.medialibrary.library.MediaLibrary")
+                ?.declaredMethods
+                ?.filter(::isMediaLibraryItemsQueryMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("com.apple.android.medialibrary.library.MediaLibrary")
+                ?.declaredMethods
+                ?.filter(::isMediaLibraryItemsQueryMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /** Stable query seam used by AMTool to enumerate albums after a poll. */
+    val MediaLibraryAlbumsQueryMethod = TargetSymbolKey(
+        id = "media-library-albums-query-method",
+        stableCandidates = {
+            load("com.apple.android.medialibrary.library.MediaLibrary")
+                ?.declaredMethods
+                ?.filter(::isMediaLibraryAlbumsQueryMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("com.apple.android.medialibrary.library.MediaLibrary")
+                ?.declaredMethods
+                ?.filter(::isMediaLibraryAlbumsQueryMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    private fun TargetClassIndex.mediaLibraryImplementationMethods(
+        contract: (Method) -> Boolean,
+    ): List<Method> {
+        val mediaLibrary = load("com.apple.android.medialibrary.library.MediaLibrary")
+            ?: return emptyList()
+        return classes(
+            namePredicate = { it.startsWith("com.apple.android.medialibrary.library.") },
+            contract = { candidate ->
+                !candidate.isInterface && mediaLibrary.isAssignableFrom(candidate)
+            },
+        ).flatMap { candidate ->
+            candidate.declaredMethods.filter { method ->
+                runCatching { contract(method) }.getOrDefault(false)
+            }
+        }.distinctBy(::methodIdentity)
+    }
+
+    val MediaLibraryReadyMethod = TargetSymbolKey(
+        id = "media-library-ready-method",
+        stableCandidates = {
+            load("com.apple.android.medialibrary.library.MediaLibrary")
+                ?.declaredMethods
+                ?.filter(::isMediaLibraryReadyMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("com.apple.android.medialibrary.library.MediaLibrary")
+                ?.declaredMethods
+                ?.filter(::isMediaLibraryReadyMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /** Stable interface seam used to reach Apple's native catalog refresh after polling. */
+    val MediaLibraryNativePointerMethod = TargetSymbolKey(
+        id = "media-library-native-pointer-method",
+        stableCandidates = {
+            load("com.apple.android.medialibrary.library.MediaLibrary")
+                ?.declaredMethods
+                ?.filter(::isMediaLibraryNativePointerMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("com.apple.android.medialibrary.library.MediaLibrary")
+                ?.declaredMethods
+                ?.filter(::isMediaLibraryNativePointerMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    val MediaLibraryNativeCatalogRefreshMethod = TargetSymbolKey(
+        id = "media-library-native-catalog-refresh-method",
+        stableCandidates = {
+            load("com.apple.android.medialibrary.javanative.medialibrary.library.SVMediaLibrary\$SVMediaLibraryNative")
+                ?.declaredMethods
+                ?.filter(::isMediaLibraryNativeCatalogRefreshMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("com.apple.android.medialibrary.javanative.medialibrary.library.SVMediaLibrary\$SVMediaLibraryNative")
+                ?.declaredMethods
+                ?.filter(::isMediaLibraryNativeCatalogRefreshMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    val ConfigurationStoreStoreFrontLanguageMethod = TargetSymbolKey(
+        id = "configuration-store-storefront-language-method",
+        stableCandidates = {
+            load("com.apple.android.music.storeapi.stores.ConfigurationStore")
+                ?.declaredMethods
+                ?.filter(::isConfigurationStoreStoreFrontLanguageMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            methods(
+                { it.startsWith("com.apple.android.music.storeapi.stores.") },
+                ::isConfigurationStoreStoreFrontLanguageMethod,
+            )
+        },
+        identity = ::methodIdentity,
+    )
+
+    /** Stable StoreApi seam used by AMTool to replace the Accept-Language header. */
+    val StoreApiHeadersSetMethod = TargetSymbolKey(
+        id = "store-api-headers-set-method",
+        stableCandidates = {
+            load("com.apple.android.music.storeapi.modelprivate.Headers")
+                ?.declaredMethods
+                ?.filter(::isStoreApiHeadersSetMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("com.apple.android.music.storeapi.modelprivate.Headers")
+                ?.declaredMethods
+                ?.filter(::isStoreApiHeadersSetMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /**
+     * The Catalog lookup path also receives a request map; patch its explicit
+     * language header on the concrete repository implementation.
+     *
+     * `MediaApiRepository` only declares this suspend method.  Hooking that
+     * interface declaration is rejected by the runtime, while the host's
+     * `MediaApiRepositoryImpl` owns the executable body.  Keep the interface
+     * out of both candidate sets so a missing or changed implementation
+     * degrades to Missing instead of installing an abstract hook.
+     */
+    val MediaApiRepositoryGetEntitiesWithIdsMethod = TargetSymbolKey(
+        id = "media-api-repository-get-entities-with-ids-method",
+        stableCandidates = {
+            load("com.apple.android.music.mediaapi.repository.MediaApiRepositoryImpl")
+                ?.takeUnless { it.isInterface }
+                ?.declaredMethods
+                ?.filter(::isMediaApiRepositoryGetEntitiesWithIdsMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("com.apple.android.music.mediaapi.repository.MediaApiRepositoryImpl")
+                ?.takeUnless { it.isInterface }
+                ?.declaredMethods
+                ?.filter(::isMediaApiRepositoryGetEntitiesWithIdsMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /**
+     * Invocation-only variant of the Catalog seam.  AMTool reflects the
+     * stable `MediaApiRepository` interface Method and invokes it on the
+     * Holder's concrete instance; this Method must not be reused as an
+     * executable Hook target because the interface declaration is abstract.
+     */
+    val MediaApiRepositoryGetEntitiesWithIdsInvocationMethod = TargetSymbolKey(
+        id = "media-api-repository-get-entities-with-ids-invocation-method",
+        stableCandidates = {
+            load("com.apple.android.music.mediaapi.repository.MediaApiRepository")
+                ?.declaredMethods
+                ?.filter(::isMediaApiRepositoryGetEntitiesWithIdsInvocationMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("com.apple.android.music.mediaapi.repository.MediaApiRepository")
+                ?.declaredMethods
+                ?.filter(::isMediaApiRepositoryGetEntitiesWithIdsInvocationMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /** AMTool ia(27) `languageMethod`: `J5.a.b(Context): String[]`. */
+    val StoreFrontLanguageArrayMethod = methodSymbol(
+        id = "store-front-language-array-method",
+        profileOwner = TargetSymbolId.STORE_FRONT_LANGUAGE_ARRAY_OWNER,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
+        exactMethodId = TargetSymbolId.STORE_FRONT_LANGUAGE_ARRAY_METHOD,
+        fallbackOwner = ::isObfuscatedTopLevelClass,
+        contract = ::isStoreFrontLanguageArrayMethod,
+    )
+
+    /**
+     * AMTool ia(28) "iCloud Accept-Language helper": an interface method that
+     * derives the Accept-Language value from `Locale.getDefault()`.  The
+     * DexKit rule anchors on the method body; reflection only sees the
+     * interface signature, so the symbol degrades to missing on renamed
+     * surfaces without touching the other language hooks.
+     */
+    val ICloudAcceptLanguageHelperMethod = TargetSymbolKey(
+        id = "icloud-accept-language-helper-method",
+        structuralCandidates = {
+            methods(
+                { it.contains("icloud", ignoreCase = true) },
+                ::isICloudAcceptLanguageHelperMethod,
+            )
+        },
+        identity = ::methodIdentity,
+    )
+
+    /** AMTool ia(29) "StoreApi header map helper": map returned with Accept-Language. */
+    val StoreApiHeaderMapMethod = TargetSymbolKey(
+        id = "store-api-header-map-method",
+        structuralCandidates = {
+            methods(
+                { it.startsWith("com.apple.android.music.storeapi.") },
+                ::isStoreApiHeaderMapMethod,
+            )
+        },
+        identity = ::methodIdentity,
+    )
+
+    /**
+     * Apple Music 6.5.1's actual commerce request seam.  The method is
+     * private on `commerce.jsinterface.ITunes`, so broad StoreApi map scans
+     * never see it; keep this exact resolver separate and fail-open.
+     */
+    val ITunesGetHeadersMapMethod = TargetSymbolKey(
+        id = "itunes-get-headers-map-method",
+        stableCandidates = {
+            load("com.apple.android.music.commerce.jsinterface.ITunes")
+                ?.declaredMethods
+                ?.filter(::isITunesGetHeadersMapMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("com.apple.android.music.commerce.jsinterface.ITunes")
+                ?.declaredMethods
+                ?.filter(::isITunesGetHeadersMapMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /**
+     * AMTool's 6.5.1 `locale-header-map` seam: the obfuscated static
+     * `ma.c.a(aa.d): Map` helper whose body builds the request header map.
+     * The exact class/method identity is pinned for the supported host; a
+     * missing class simply leaves this one seam disabled.
+     */
+    val LocaleHeaderMapMethod = TargetSymbolKey(
+        id = "locale-header-map-method",
+        stableCandidates = {
+            load("ma.c")
+                ?.declaredMethods
+                ?.filter(::isLocaleHeaderMapMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("ma.c")
+                ?.declaredMethods
+                ?.filter(::isLocaleHeaderMapMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /**
+     * AMTool ia(26) "MediaApi language param choke": on Apple Music 6.5.1
+     * this is the static `s8.F.c0(Map): LinkedHashMap` helper.  Keep the
+     * older package-shaped fallback for hosts that expose a non-obfuscated
+     * equivalent, but prefer the pinned 6.5.1 identity whenever available.
+     */
+    val MediaApiLanguageParamMethod = TargetSymbolKey(
+        id = "media-api-language-param-method",
+        stableCandidates = {
+            load("s8.F")
+                ?.declaredMethods
+                ?.filter(::isMediaApiLanguageParamMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            methods(
+                { it.startsWith("com.apple.android.music.mediaapi.") },
+                ::isMediaApiLanguageParamMethod,
+            )
+        },
+        identity = ::methodIdentity,
+    )
+
+    /**
+     * AMTool's Store lookup seam (ot.java case 9): `Request.Builder.setParam
+     * (String, String)` returning the builder.  The signature is confirmed by
+     * the report; the injection behavior it drives is only partially
+     * confirmed, so the hook stays conservative and fails open.
+     */
+    val StoreLookupSetParamMethod = TargetSymbolKey(
+        id = "store-lookup-set-param-method",
+        stableCandidates = {
+            load("com.apple.android.music.storeapi.modelprivate.Request\$Builder")
+                ?.declaredMethods
+                ?.filter(::isStoreLookupSetParamMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("com.apple.android.music.storeapi.modelprivate.Request\$Builder")
+                ?.declaredMethods
+                ?.filter(::isStoreLookupSetParamMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    val MediaEntityType = classSymbol(
+        id = "media-entity-type",
+        stableName = "com.apple.android.music.mediaapi.models.MediaEntity",
+        fallbackName = { it == "com.apple.android.music.mediaapi.models.MediaEntity" },
+        contract = { !it.isInterface },
+    )
+
+    val MediaEntityGetTitleMethod = TargetSymbolKey(
+        id = "media-entity-get-title-method",
+        stableCandidates = {
+            load("com.apple.android.music.mediaapi.models.MediaEntity")
+                ?.declaredMethods
+                ?.filter(::isMediaEntityGetTitleMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("com.apple.android.music.mediaapi.models.MediaEntity")
+                ?.declaredMethods
+                ?.filter(::isMediaEntityGetTitleMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    val MediaEntityGetAttributesMethod = TargetSymbolKey(
+        id = "media-entity-get-attributes-method",
+        stableCandidates = {
+            load("com.apple.android.music.mediaapi.models.MediaEntity")
+                ?.declaredMethods
+                ?.filter(::isMediaEntityGetAttributesMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("com.apple.android.music.mediaapi.models.MediaEntity")
+                ?.declaredMethods
+                ?.filter(::isMediaEntityGetAttributesMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    val MediaEntityToCollectionItemViewMethod = TargetSymbolKey(
+        id = "media-entity-to-collection-item-view-method",
+        stableCandidates = {
+            load("com.apple.android.music.mediaapi.models.MediaEntity")
+                ?.declaredMethods
+                ?.filter(::isMediaEntityToCollectionItemViewMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("com.apple.android.music.mediaapi.models.MediaEntity")
+                ?.declaredMethods
+                ?.filter(::isMediaEntityToCollectionItemViewMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /**
+     * AMTool also hooks the concrete two-argument conversion overrides on
+     * catalog Song and Album.  A call through the override does not dispatch
+     * through MediaEntity's one-argument convenience method.
+     */
+    val SongToCollectionItemViewMethod = TargetSymbolKey(
+        id = "song-to-collection-item-view-method",
+        stableCandidates = {
+            load("com.apple.android.music.mediaapi.models.Song")
+                ?.declaredMethods
+                ?.filter(::isLibraryEntityToCollectionItemViewMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("com.apple.android.music.mediaapi.models.Song")
+                ?.declaredMethods
+                ?.filter(::isLibraryEntityToCollectionItemViewMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /** See [SongToCollectionItemViewMethod] for the concrete Album override. */
+    val AlbumToCollectionItemViewMethod = TargetSymbolKey(
+        id = "album-to-collection-item-view-method",
+        stableCandidates = {
+            load("com.apple.android.music.mediaapi.models.Album")
+                ?.declaredMethods
+                ?.filter(::isLibraryEntityToCollectionItemViewMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("com.apple.android.music.mediaapi.models.Album")
+                ?.declaredMethods
+                ?.filter(::isLibraryEntityToCollectionItemViewMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /**
+     * Apple Music 6.5.1's player display/update seam:
+     * `player.d1.y0(PlaybackItem, CollectionItemView, String, Context, View)`.
+     * The method has no return value and its owner is stable, so a missing or
+     * changed signature must leave this seam disabled instead of selecting a
+     * nearby obfuscated five-argument method.
+     */
+    val PlayerActionSheetMethod = TargetSymbolKey(
+        id = "player-action-sheet-method",
+        stableCandidates = {
+            load("com.apple.android.music.player.d1")
+                ?.declaredMethods
+                ?.filter(::isPlayerPlaybackItemViewUpdateMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("com.apple.android.music.player.d1")
+                ?.declaredMethods
+                ?.filter(::isPlayerPlaybackItemViewUpdateMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /** Applies resolved action-sheet rows before they overwrite local titles. */
+    val PlayerActionSheetResponseApplyMethod = TargetSymbolKey(
+        id = "player-action-sheet-response-apply-method",
+        stableCandidates = {
+            load("com.apple.android.music.collection.mediaapi.fragment.G")
+                ?.declaredMethods
+                ?.filter(::isPlayerActionSheetResponseApplyMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("com.apple.android.music.collection.mediaapi.fragment.G")
+                ?.declaredMethods
+                ?.filter(::isPlayerActionSheetResponseApplyMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /**
+     * Native media-library conversion helper `v5.a.n(BasePlaybackItem,
+     * SVEntityNative$SVEntitySRef): void`.  This exact static method populates
+     * a playback model from a native entity; its parameter classes are part of
+     * the contract so unrelated `v5.a.n` overloads cannot be selected.
+     */
+    val NativeLibrarySongConverterMethod = TargetSymbolKey(
+        id = "native-library-song-converter-method",
+        stableCandidates = {
+            load("v5.a")
+                ?.declaredMethods
+                ?.filter(::isBasePlaybackItemNativeEntityPopulateMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("v5.a")
+                ?.declaredMethods
+                ?.filter(::isBasePlaybackItemNativeEntityPopulateMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /** Native media-library `SVEntitySRef -> model.Album` conversion helper. */
+    val NativeLibraryAlbumConverterMethod = TargetSymbolKey(
+        id = "native-library-album-converter-method",
+        stableCandidates = {
+            load("v5.a")
+                ?.declaredMethods
+                ?.filter(::isNativeEntityAlbumConverterMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("v5.a")
+                ?.declaredMethods
+                ?.filter(::isNativeEntityAlbumConverterMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /**
+     * The compact display title used by the player page and the now-playing
+     * bottom sheet. `mediaapi.models.Song` overrides it, so the base
+     * declaration and the override are separate symbols; both are hooked so
+     * virtual dispatch through either one is corrected.
+     */
+    val MediaEntityGetShortNameMethod = TargetSymbolKey(
+        id = "media-entity-get-short-name-method",
+        stableCandidates = {
+            load("com.apple.android.music.mediaapi.models.MediaEntity")
+                ?.declaredMethods
+                ?.filter(::isMediaEntityGetShortNameMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("com.apple.android.music.mediaapi.models.MediaEntity")
+                ?.declaredMethods
+                ?.filter(::isMediaEntityGetShortNameMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /** The `mediaapi.models.Song` override of `getShortName()`. */
+    val SongGetShortNameMethod = TargetSymbolKey(
+        id = "song-get-short-name-method",
+        stableCandidates = {
+            load("com.apple.android.music.mediaapi.models.Song")
+                ?.declaredMethods
+                ?.filter(::isMediaEntityGetShortNameMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("com.apple.android.music.mediaapi.models.Song")
+                ?.declaredMethods
+                ?.filter(::isMediaEntityGetShortNameMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /**
+     * AppleCurator and a few profile controllers call Attributes.getShortName
+     * directly instead of going through MediaEntity.getShortName.
+     */
+    val AttributesGetShortNameMethod = TargetSymbolKey(
+        id = "attributes-get-short-name-method",
+        stableCandidates = {
+            load(ATTRIBUTES_CLASS)
+                ?.declaredMethods
+                ?.filter(::isAttributesGetShortNameMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load(ATTRIBUTES_CLASS)
+                ?.declaredMethods
+                ?.filter(::isAttributesGetShortNameMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /** Direct Attributes.getName callers can bypass MediaEntity.getTitle(). */
+    val AttributesGetNameMethod = TargetSymbolKey(
+        id = "attributes-get-name-method",
+        stableCandidates = {
+            load(ATTRIBUTES_CLASS)
+                ?.declaredMethods
+                ?.filter(::isAttributesGetNameMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load(ATTRIBUTES_CLASS)
+                ?.declaredMethods
+                ?.filter(::isAttributesGetNameMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /** Verified Attributes accessors used by the artist/album metadata seam. */
+    val AttributesGetArtistNameMethod = TargetSymbolKey(
+        id = "attributes-get-artist-name-method",
+        stableCandidates = {
+            load(ATTRIBUTES_CLASS)
+                ?.declaredMethods
+                ?.filter(::isAttributesGetArtistNameMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load(ATTRIBUTES_CLASS)
+                ?.declaredMethods
+                ?.filter(::isAttributesGetArtistNameMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /**
+     * Attributes exposes the title used by several pages as an immutable
+     * `internals.Title` object.  AMTool reads `Title.getStringForDisplay()`;
+     * rewriting only `Attributes.getName()` therefore misses those pages.
+     */
+    val AttributesGetTitleMethod = TargetSymbolKey(
+        id = "attributes-get-title-method",
+        stableCandidates = {
+            load(ATTRIBUTES_CLASS)
+                ?.declaredMethods
+                ?.filter(::isAttributesGetTitleMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load(ATTRIBUTES_CLASS)
+                ?.declaredMethods
+                ?.filter(::isAttributesGetTitleMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /** Some detail/profile pages render the title-without-name object directly. */
+    val AttributesGetTitleWithoutNameMethod = TargetSymbolKey(
+        id = "attributes-get-title-without-name-method",
+        stableCandidates = {
+            load(ATTRIBUTES_CLASS)
+                ?.declaredMethods
+                ?.filter(::isAttributesGetTitleWithoutNameMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load(ATTRIBUTES_CLASS)
+                ?.declaredMethods
+                ?.filter(::isAttributesGetTitleWithoutNameMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /** The immutable Title object is what several pages finally render. */
+    val TitleGetStringForDisplayMethod = TargetSymbolKey(
+        id = "title-get-string-for-display-method",
+        stableCandidates = {
+            load(TITLE_CLASS)
+                ?.declaredMethods
+                ?.filter(::isTitleGetStringForDisplayMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load(TITLE_CLASS)
+                ?.declaredMethods
+                ?.filter(::isTitleGetStringForDisplayMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    val AttributesSetArtistNameMethod = TargetSymbolKey(
+        id = "attributes-set-artist-name-method",
+        stableCandidates = {
+            load(ATTRIBUTES_CLASS)
+                ?.declaredMethods
+                ?.filter(::isAttributesSetArtistNameMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load(ATTRIBUTES_CLASS)
+                ?.declaredMethods
+                ?.filter(::isAttributesSetArtistNameMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    val AttributesGetAlbumNameMethod = TargetSymbolKey(
+        id = "attributes-get-album-name-method",
+        stableCandidates = {
+            load(ATTRIBUTES_CLASS)
+                ?.declaredMethods
+                ?.filter(::isAttributesGetAlbumNameMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load(ATTRIBUTES_CLASS)
+                ?.declaredMethods
+                ?.filter(::isAttributesGetAlbumNameMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    val AttributesSetAlbumNameMethod = TargetSymbolKey(
+        id = "attributes-set-album-name-method",
+        stableCandidates = {
+            load(ATTRIBUTES_CLASS)
+                ?.declaredMethods
+                ?.filter(::isAttributesSetAlbumNameMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load(ATTRIBUTES_CLASS)
+                ?.declaredMethods
+                ?.filter(::isAttributesSetAlbumNameMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /**
+     * AMTool's "MediaEntity -> model.Song" hook: the static conversion that
+     * builds the `model.Song` bound by the now-playing bottom sheet. The
+     * class is obfuscated but verified as `y8.B` in both 6.5.0 and 6.5.1;
+     * the structural contract is the unique static
+     * `(mediaapi.models.Song, Bundle) -> model.Song` signature.
+     */
+    val MediaEntityToSongConverterMethod = TargetSymbolKey(
+        id = "media-entity-to-song-converter-method",
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
+        profileCandidates = { profile ->
+            runCatching {
+                profile?.exactClasses?.get(TargetSymbolId.MEDIA_ENTITY_TO_SONG_CONVERTER)
+                    ?.let(::load)
+                    ?.declaredMethods
+                    ?.filter(::isMediaEntityToSongConverterMethod)
+                    .orEmpty()
+            }.getOrDefault(emptyList())
+        },
+        structuralCandidates = {
+            methods(::isObfuscatedTopLevelClass, ::isMediaEntityToSongConverterMethod)
+        },
+        identity = ::methodIdentity,
+    )
+
+    /**
+     * AMTool's "Hook SearchSectionResultResponse.setData": the search
+     * response seam that carries `List<MediaEntity>` results into the search
+     * UI; each entry's display attributes are corrected from the catalog
+     * cache (and target-language search entities are captured into it).
+     */
+    val SearchSectionResultResponseSetDataMethod = TargetSymbolKey(
+        id = "search-section-result-response-set-data-method",
+        stableCandidates = {
+            load("com.apple.android.music.mediaapi.models.internals.SearchResultsResponse\$SearchSectionResultResponse")
+                ?.declaredMethods
+                ?.filter(::isSearchSectionResultResponseSetDataMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("com.apple.android.music.mediaapi.models.internals.SearchResultsResponse\$SearchSectionResultResponse")
+                ?.declaredMethods
+                ?.filter(::isSearchSectionResultResponseSetDataMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /**
+     * The two-argument library conversion overrides
+     * (`toCollectionItemView(Bundle, boolean)`) declared by LibrarySong and
+     * LibraryAlbum. The one-argument MediaEntity hook never fires for them
+     * because virtual dispatch resolves straight to these overrides.
+     */
+    val LibrarySongToCollectionItemViewMethod = TargetSymbolKey(
+        id = "library-song-to-collection-item-view-method",
+        stableCandidates = {
+            load("com.apple.android.music.mediaapi.models.LibrarySong")
+                ?.declaredMethods
+                ?.filter(::isLibraryEntityToCollectionItemViewMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("com.apple.android.music.mediaapi.models.LibrarySong")
+                ?.declaredMethods
+                ?.filter(::isLibraryEntityToCollectionItemViewMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /** See [LibrarySongToCollectionItemViewMethod]. */
+    val LibraryAlbumToCollectionItemViewMethod = TargetSymbolKey(
+        id = "library-album-to-collection-item-view-method",
+        stableCandidates = {
+            load("com.apple.android.music.mediaapi.models.LibraryAlbum")
+                ?.declaredMethods
+                ?.filter(::isLibraryEntityToCollectionItemViewMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("com.apple.android.music.mediaapi.models.LibraryAlbum")
+                ?.declaredMethods
+                ?.filter(::isLibraryEntityToCollectionItemViewMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    /**
+     * AMTool's "Hook StorePlatform": every StoreApi page response exposes
+     * its display items through this accessor as
+     * `Map<String, CollectionItemView>`; the views are corrected from the
+     * catalog cache without re-capturing their storefront titles.
+     */
+    val BaseStorePlatformResponseGetStorePlatformDataMethod = TargetSymbolKey(
+        id = "base-store-platform-response-get-store-platform-data-method",
+        stableCandidates = {
+            load("com.apple.android.music.model.BaseStorePlatformResponse")
+                ?.declaredMethods
+                ?.filter(::isBaseStorePlatformResponseGetStorePlatformDataMethod)
+                .orEmpty()
+        },
+        structuralCandidates = {
+            load("com.apple.android.music.model.BaseStorePlatformResponse")
+                ?.declaredMethods
+                ?.filter(::isBaseStorePlatformResponseGetStorePlatformDataMethod)
+                .orEmpty()
+        },
+        identity = ::methodIdentity,
+    )
+
+    private const val ATTRIBUTES_CLASS =
+        "com.apple.android.music.mediaapi.models.internals.Attributes"
+    private const val TITLE_CLASS =
+        "com.apple.android.music.mediaapi.models.internals.Title"
+
 }
 
 private fun classSymbol(
@@ -1099,6 +1991,297 @@ private fun isTtmlSongInfoFromTtml(method: Method): Boolean =
         method.name == "songInfoFromTTML" &&
         method.parameterTypes.contentEquals(arrayOf(String::class.java)) &&
         method.returnType.name.endsWith(".ttml.javanative.model.SongInfo\$SongInfoPtr")
+
+private fun isMediaLibraryUpdateMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.parameterCount == 1 &&
+        method.parameterTypes.single().isEnum &&
+        method.parameterTypes.single().enumConstants.orEmpty().any {
+            (it as? Enum<*>)?.name == "UserInitiatedPoll"
+        }
+
+private fun isMediaLibraryItemsQueryMethod(method: Method): Boolean =
+    isMediaLibraryQueryMethod(method, "g")
+
+private fun isMediaLibraryAlbumsQueryMethod(method: Method): Boolean =
+    isMediaLibraryQueryMethod(method, "y")
+
+private fun isMediaLibraryQueryMethod(method: Method, name: String): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == name &&
+        method.parameterTypes.singleOrNull()?.name == "G5.g" &&
+        method.returnType.name == "Vf.o"
+
+private fun isMediaLibraryReadyMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "isReady" &&
+        method.parameterCount == 0 &&
+        method.returnType == Boolean::class.javaPrimitiveType
+
+private fun isMediaLibraryNativePointerMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.parameterCount == 0 &&
+        method.returnType.name ==
+            "com.apple.android.medialibrary.javanative.medialibrary.library.SVMediaLibrary\$SVMediaLibraryPtr"
+
+private fun isMediaLibraryNativeCatalogRefreshMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "lookupAndRefreshCatalogItemsInLibrary" &&
+        method.parameterCount == 0 &&
+        method.returnType.name.endsWith("MediaErr\$MediaError")
+
+private fun isConfigurationStoreStoreFrontLanguageMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "storeFrontLanguageOrDefault" &&
+        method.parameterCount == 0 &&
+        method.returnType == String::class.java
+
+private fun isStoreApiHeadersSetMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "set" &&
+        method.parameterCount == 2 &&
+        method.parameterTypes[0] == String::class.java &&
+        method.parameterTypes[1].isAssignableFrom(String::class.java)
+
+private fun isStoreFrontLanguageArrayMethod(method: Method): Boolean =
+    Modifier.isStatic(method.modifiers) &&
+        method.parameterTypes.singleOrNull()?.name == "android.content.Context" &&
+        method.returnType == Array<String>::class.java &&
+        method.name == "b"
+
+private fun isICloudAcceptLanguageHelperMethod(method: Method): Boolean =
+    method.declaringClass.isInterface &&
+        method.declaringClass.name.lowercase(Locale.ROOT).contains(".icloud.") &&
+        !Modifier.isStatic(method.modifiers) &&
+        method.parameterCount == 0 &&
+        method.returnType == String::class.java &&
+        method.name.contains("language", ignoreCase = true)
+
+private fun isStoreApiHeaderMapMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        java.util.Map::class.java.isAssignableFrom(method.returnType) &&
+        method.name.contains("map", ignoreCase = true)
+
+private fun isITunesGetHeadersMapMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.declaringClass.name == "com.apple.android.music.commerce.jsinterface.ITunes" &&
+        method.name == "getHeadersMap" &&
+        method.parameterCount == 0 &&
+        java.util.Map::class.java.isAssignableFrom(method.returnType)
+
+private fun isLocaleHeaderMapMethod(method: Method): Boolean =
+    Modifier.isStatic(method.modifiers) &&
+        method.declaringClass.name == "ma.c" &&
+        method.name == "a" &&
+        method.parameterCount == 1 &&
+        method.parameterTypes.single().name == "aa.d" &&
+        java.util.Map::class.java.isAssignableFrom(method.returnType)
+
+private fun isMediaApiLanguageParamMethod(method: Method): Boolean =
+    (
+        Modifier.isStatic(method.modifiers) &&
+            method.declaringClass.name == "s8.F" &&
+            method.name == "c0" &&
+            method.parameterCount == 1 &&
+            java.util.Map::class.java.isAssignableFrom(method.parameterTypes.single()) &&
+            java.util.LinkedHashMap::class.java.isAssignableFrom(method.returnType)
+        ) || (
+        !Modifier.isStatic(method.modifiers) &&
+            java.util.Map::class.java.isAssignableFrom(method.returnType) &&
+            method.name.contains("language", ignoreCase = true)
+        )
+
+private fun isStoreLookupSetParamMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "setParam" &&
+        method.parameterTypes.contentEquals(arrayOf(String::class.java, String::class.java)) &&
+        method.returnType.name == "com.apple.android.music.storeapi.modelprivate.Request\$Builder"
+
+private fun isMediaApiRepositoryGetEntitiesWithIdsMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        !Modifier.isAbstract(method.modifiers) &&
+        method.name == "getEntitiesWithIds" &&
+        method.parameterTypes.map(Class<*>::getName) == listOf(
+        String::class.java.name,
+        "java.util.List",
+        "java.util.Map",
+        "kotlin.coroutines.Continuation",
+    ) &&
+        method.returnType == Any::class.java
+
+private fun isMediaApiRepositoryGetEntitiesWithIdsInvocationMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.declaringClass.isInterface &&
+        method.name == "getEntitiesWithIds" &&
+        method.parameterTypes.map(Class<*>::getName) == listOf(
+        String::class.java.name,
+        "java.util.List",
+        "java.util.Map",
+        "kotlin.coroutines.Continuation",
+    ) &&
+        method.returnType == Any::class.java
+
+private fun isMediaEntityGetTitleMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "getTitle" &&
+        method.parameterCount == 0 &&
+        method.returnType == String::class.java
+
+private fun isMediaEntityGetAttributesMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "getAttributes" &&
+        method.parameterCount == 0 &&
+        method.returnType != Void.TYPE
+
+private fun isAttributesGetShortNameMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "getShortName" &&
+        method.parameterCount == 0 &&
+        method.returnType == String::class.java
+
+private fun isMediaEntityToCollectionItemViewMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "toCollectionItemView" &&
+        method.parameterCount == 1 &&
+        method.parameterTypes.single().name == "android.os.Bundle" &&
+        method.returnType.name == "com.apple.android.music.model.CollectionItemView"
+
+private fun isPlayerPlaybackItemViewUpdateMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "y0" &&
+        method.parameterTypes.map(Class<*>::getName) == listOf(
+        "com.apple.android.music.model.PlaybackItem",
+        "com.apple.android.music.model.CollectionItemView",
+        String::class.java.name,
+        "android.content.Context",
+        "android.view.View",
+    ) &&
+        method.returnType == Void.TYPE
+
+private fun isPlayerActionSheetResponseApplyMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "accept" &&
+        method.parameterTypes.contentEquals(arrayOf(Any::class.java)) &&
+        method.returnType == Void.TYPE
+
+private fun isBasePlaybackItemNativeEntityPopulateMethod(method: Method): Boolean =
+    Modifier.isStatic(method.modifiers) &&
+        method.name == "n" &&
+        method.parameterTypes.map(Class<*>::getName) == listOf(
+        "com.apple.android.music.model.BasePlaybackItem",
+        "com.apple.android.medialibrary.javanative.medialibrary.svmodel.SVEntityNative\$SVEntitySRef",
+    ) &&
+        method.returnType == Void.TYPE
+
+private fun isNativeEntityAlbumConverterMethod(method: Method): Boolean =
+    Modifier.isStatic(method.modifiers) &&
+        method.name == "b" &&
+        method.parameterTypes.map(Class<*>::getName) == listOf(
+        "com.apple.android.medialibrary.javanative.medialibrary.svmodel.SVEntityNative\$SVEntitySRef",
+        Boolean::class.javaPrimitiveType!!.name,
+    ) &&
+        method.returnType.name == "com.apple.android.music.model.Album"
+
+private fun isMediaEntityGetShortNameMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "getShortName" &&
+        method.parameterCount == 0 &&
+        method.returnType == String::class.java
+
+private fun isAttributesGetArtistNameMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "getArtistName" &&
+        method.parameterCount == 0 &&
+        method.returnType == String::class.java
+
+private fun isAttributesGetNameMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "getName" &&
+        method.parameterCount == 0 &&
+        method.returnType == String::class.java
+
+private fun isAttributesGetTitleMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "getTitle" &&
+        method.parameterCount == 0 &&
+        method.returnType.name == "com.apple.android.music.mediaapi.models.internals.Title"
+
+private fun isAttributesGetTitleWithoutNameMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "getTitleWithoutName" &&
+        method.parameterCount == 0 &&
+        method.returnType.name == "com.apple.android.music.mediaapi.models.internals.Title"
+
+private fun isTitleGetStringForDisplayMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "getStringForDisplay" &&
+        method.parameterCount == 0 &&
+        method.returnType == String::class.java
+
+private fun isAttributesSetArtistNameMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "setArtistName" &&
+        method.parameterTypes.contentEquals(arrayOf(String::class.java)) &&
+        method.returnType == Void.TYPE
+
+private fun isAttributesGetAlbumNameMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "getAlbumName" &&
+        method.parameterCount == 0 &&
+        method.returnType == String::class.java
+
+private fun isAttributesSetAlbumNameMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "setAlbumName" &&
+        method.parameterTypes.contentEquals(arrayOf(String::class.java)) &&
+        method.returnType == Void.TYPE
+
+/**
+ * The verified AMTool "MediaEntity -> model.Song" converter shape
+ * (`y8.B.b(Song, Bundle)` in both 6.5.0 and 6.5.1). The static signature is
+ * specific enough that an unknown build can only produce a unique match or
+ * an explicit ambiguity, never a silent first pick.
+ */
+private fun isMediaEntityToSongConverterMethod(method: Method): Boolean =
+    Modifier.isStatic(method.modifiers) &&
+        method.parameterTypes.map(Class<*>::getName) == listOf(
+        "com.apple.android.music.mediaapi.models.Song",
+        "android.os.Bundle",
+    ) &&
+        method.returnType.name == "com.apple.android.music.model.Song"
+
+private fun isSearchSectionResultResponseSetDataMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "setData" &&
+        method.parameterCount == 1 &&
+        method.parameterTypes.single() == java.util.List::class.java &&
+        method.returnType == Void.TYPE
+
+/** The two-argument library conversion override (`toCollectionItemView(Bundle, Z)`). */
+private fun isLibraryEntityToCollectionItemViewMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "toCollectionItemView" &&
+        method.parameterTypes.contentEquals(
+            arrayOf(
+                android.os.Bundle::class.java,
+                Boolean::class.javaPrimitiveType,
+            ),
+        ) &&
+        method.returnType.name == "com.apple.android.music.model.CollectionItemView"
+
+private fun isBaseStorePlatformResponseGetStorePlatformDataMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "getStorePlatformData" &&
+        method.parameterCount == 0 &&
+        java.util.Map::class.java.isAssignableFrom(method.returnType)
+
+/** Obfuscated top-level classes such as `y8.B`, `Hd.b`, `J5.a` or `T8.a`. */
+internal fun isObfuscatedTopLevelClass(name: String): Boolean =
+    name.length == 4 &&
+        name[0].isLetterOrDigit() &&
+        name[1].isLetterOrDigit() &&
+        name[2] == '.' &&
+        name[3].isLetterOrDigit()
 
 private fun isLyricsCurrentItemField(field: Field): Boolean =
     !Modifier.isStatic(field.modifiers) &&

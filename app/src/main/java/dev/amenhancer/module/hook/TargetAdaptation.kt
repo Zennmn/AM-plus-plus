@@ -2,6 +2,7 @@ package dev.amenhancer.module.hook
 
 import android.app.Application
 import dev.amenhancer.module.config.TargetConfigClient
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * The complete target-specific seam used by feature hooks.
@@ -23,6 +24,15 @@ internal data class TargetAdaptation(
     val currentSongIdentity: CurrentSongIdentityTarget = CurrentSongIdentityTarget {
         TargetCapabilityInstall.Degraded("Current song identity target was not configured")
     },
+    val titleCorrection: TitleCorrectionTarget = TitleCorrectionTarget {
+        TargetCapabilityInstall.Degraded("Title correction target was not configured")
+    },
+    val catalogLanguage: CatalogLanguageTarget = CatalogLanguageTarget {
+        TargetCapabilityInstall.Degraded("Catalog language target was not configured")
+    },
+    val libraryRefresh: LibraryRefreshTarget = LibraryRefreshTarget {
+        TargetCapabilityInstall.Degraded("Library refresh target was not configured")
+    },
 ) {
     companion object {
         fun appleMusic(
@@ -37,6 +47,34 @@ internal data class TargetAdaptation(
                 source = ApkTargetClassSource(application, classLoader),
             )
             val currentSong = CurrentSongIdentityCache()
+            val settings = config.settings()
+            val catalogLookup = settings.titleCorrectionEnabled
+                .takeIf { it }
+                ?.let { AppleMusicCatalogEntityLookup(resolver, classLoader) }
+            val missCoordinator = AtomicReference<CatalogMissBackfillCoordinator?>()
+            // The title feature and manual catalog refresh must observe one
+            // cache, but its preference scan is deferred until the first title
+            // lookup or an explicit refresh (never Application.onCreate).
+            val titleCacheProvider = settings.titleCorrectionEnabled
+                .takeIf { it }
+                ?.let {
+                    CatalogTitleCacheProvider {
+                        CatalogTitleCache(
+                            application,
+                            settings.titleCorrectionTargetLanguage,
+                            CatalogTitleMissListener { id -> missCoordinator.get()?.enqueue(id) },
+                            observationScheduler = DefaultCatalogObservationScheduler,
+                        )
+                    }
+                }
+            if (titleCacheProvider != null && catalogLookup != null) {
+                missCoordinator.set(CatalogMissBackfillCoordinator(
+                    cacheProvider = titleCacheProvider::get,
+                    lookup = CatalogSongLookup { ids -> catalogLookup.lookup("songs", ids) },
+                    logger = ModernXposedRuntime::log,
+                ))
+                missCoordinator.get()?.prewarm()
+            }
             return TargetAdaptation(
                 identity = build.displayName,
                 dualPane = AppleMusicDualPaneTarget(resolver),
@@ -52,11 +90,28 @@ internal data class TargetAdaptation(
                     resolver,
                     currentSong,
                 ),
+                titleCorrection = AppleMusicTitleCorrectionTarget(
+                    application,
+                    resolver,
+                    settings.titleCorrectionTargetLanguage,
+                    cacheProvider = titleCacheProvider,
+                ),
+                catalogLanguage = AppleMusicCatalogLanguageTarget(
+                    resolver,
+                    settings.titleCorrectionTargetLanguage,
+                ),
+                libraryRefresh = AppleMusicLibraryRefreshTarget(
+                    application,
+                    resolver,
+                    classLoader,
+                    settings.titleCorrectionTargetLanguage.takeIf { settings.titleCorrectionEnabled }.orEmpty(),
+                    titleCacheProvider = titleCacheProvider,
+                    catalogLookup = catalogLookup,
+                ),
             )
         }
     }
 }
-
 internal fun interface DualPaneTarget {
     fun install(): TargetCapabilityInstall
 }

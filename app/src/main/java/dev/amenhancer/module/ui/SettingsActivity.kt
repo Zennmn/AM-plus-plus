@@ -25,15 +25,18 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import dev.amenhancer.module.ModuleApplication
+import dev.amenhancer.module.LibraryRefreshProtocol
 import dev.amenhancer.module.R
 import dev.amenhancer.module.XposedServiceSnapshot
 import dev.amenhancer.module.config.ConfigStore
+import dev.amenhancer.module.config.CatalogLanguagePolicy
 import dev.amenhancer.module.font.FontImportResult
 import dev.amenhancer.module.font.SafFontImporter
 import dev.amenhancer.module.hook.AmLyricsClient
@@ -69,7 +72,6 @@ internal object BlurRadiusSeekBarPersistencePolicy {
     fun shouldPersistProgressChange(fromUser: Boolean, trackingTouch: Boolean): Boolean =
         fromUser && !trackingTouch
 }
-
 private enum class SettingsPage {
     MAIN,
     CUSTOM_LYRICS,
@@ -82,6 +84,8 @@ class SettingsActivity : Activity() {
     private lateinit var settingsScroll: ScrollView
     private lateinit var palette: Palette
     private lateinit var currentSongIdentityRequester: CurrentSongIdentityRequester
+    private lateinit var libraryRefreshRequester: LibraryRefreshRequester
+    private var libraryRefreshDialog: AlertDialog? = null
     private lateinit var topBarTitle: TextView
     private lateinit var topBarBackButton: ImageView
     private val backgroundExecutor: ExecutorService get() = settingsExecutor
@@ -101,6 +105,7 @@ class SettingsActivity : Activity() {
         store = ConfigStore(this)
         launcherIconController = LauncherIconController(this)
         currentSongIdentityRequester = CurrentSongIdentityRequester(this)
+        libraryRefreshRequester = LibraryRefreshRequester(this)
         palette = Palette.resolve(this)
         awaitingCustomTtmlPickerResult = savedInstanceState?.getBoolean(
             STATE_AWAITING_CUSTOM_TTML_PICKER,
@@ -127,6 +132,7 @@ class SettingsActivity : Activity() {
 
     override fun onDestroy() {
         if (::currentSongIdentityRequester.isInitialized) currentSongIdentityRequester.cancel()
+        if (::libraryRefreshRequester.isInitialized) libraryRefreshRequester.cancel()
         super.onDestroy()
     }
 
@@ -416,8 +422,172 @@ class SettingsActivity : Activity() {
                 store.saveSettings(store.settings().copy(lyricBlurRadiusOffsetPx = offsetPx))
             })
             addView(insetDivider())
+            addView(settingRow(
+                title = "歌曲名显示修正",
+                summary = "将部分 Catalog 请求改为目标语言并回填标题 · 修改后重开 Apple Music",
+                checked = settings.titleCorrectionEnabled,
+                enabled = writable,
+            ) { enabled ->
+                store.saveSettings(store.settings().copy(titleCorrectionEnabled = enabled))
+            })
+            addView(insetDivider())
+            addView(actionRow(
+                title = "目标语言",
+                summary = CatalogLanguagePolicy.displayName(settings.titleCorrectionTargetLanguage),
+                enabled = writable,
+            ) { showTargetLanguagePicker() })
+            addView(insetDivider())
+            addView(actionRow(
+                title = "刷新资料库",
+                summary = "同步 Apple Music 资料库并刷新歌曲、专辑和歌手信息",
+                enabled = writable,
+            ) { requestLibraryRefresh() })
+            addView(insetDivider())
             addView(customLyricsNavigationRow(settings.customLyricsManifest))
         }
+
+    private fun actionRow(
+        title: String,
+        summary: String,
+        enabled: Boolean,
+        onClick: () -> Unit,
+    ): View = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        minimumHeight = dp(84)
+        isEnabled = enabled
+        isClickable = enabled
+        isFocusable = enabled
+        alpha = if (enabled) 1f else 0.58f
+        background = rippleDrawable()
+        setPadding(dp(16), dp(12), dp(14), dp(12))
+        addView(LinearLayout(this@SettingsActivity).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(TextView(this@SettingsActivity).apply {
+                text = title
+                textSize = 17f
+                setTextColor(palette.onSurface)
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            })
+            addView(TextView(this@SettingsActivity).apply {
+                text = summary
+                textSize = 13.5f
+                setTextColor(palette.onSurfaceVariant)
+                setPadding(0, dp(4), dp(8), 0)
+            })
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        addView(ImageView(this@SettingsActivity).apply {
+            setImageResource(R.drawable.ic_chevron_right)
+            imageTintList = ColorStateList.valueOf(palette.onSurfaceVariant)
+            contentDescription = null
+        }, LinearLayout.LayoutParams(dp(24), dp(24)))
+        setOnClickListener { if (enabled) onClick() }
+    }
+
+    private fun requestLibraryRefresh() {
+        if (!libraryRefreshRequester.request { result ->
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    libraryRefreshDialog?.takeIf { it.isShowing }?.dismiss()
+                    libraryRefreshDialog = null
+                    when (result.resultCode) {
+                        LibraryRefreshProtocol.RESULT_COMPLETED -> toast(
+                            result.message ?: "资料库刷新完成",
+                        )
+                        LibraryRefreshProtocol.RESULT_CANCELLED -> toast(
+                            result.message ?: "已停止刷新资料库",
+                        )
+                        else -> toast(result.message ?: "资料库刷新失败")
+                    }
+                }
+            }
+        ) {
+            toast("刷新资料库请求正在进行")
+            return
+        }
+        showLibraryRefreshProgress()
+    }
+
+    /** AMTool-style cancellable progress dialog while the target refreshes. */
+    private fun showLibraryRefreshProgress() {
+        val progress = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(20), dp(12), dp(20), dp(12))
+            addView(ProgressBar(this@SettingsActivity), LinearLayout.LayoutParams(dp(28), dp(28)))
+            addView(TextView(this@SettingsActivity).apply {
+                text = "正在刷新资料库，请稍候…"
+                textSize = 15f
+                setTextColor(palette.onSurface)
+                setPadding(dp(16), 0, 0, 0)
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("刷新资料库")
+            .setView(progress)
+            .setNegativeButton("停止") { _, _ -> stopLibraryRefresh() }
+            .create()
+        dialog.setOnCancelListener { stopLibraryRefresh() }
+        dialog.setCanceledOnTouchOutside(false)
+        libraryRefreshDialog = dialog
+        dialog.show()
+    }
+
+    private fun stopLibraryRefresh() {
+        libraryRefreshDialog?.takeIf { it.isShowing }?.dismiss()
+        libraryRefreshDialog = null
+        libraryRefreshRequester.cancel()
+        toast("已停止刷新资料库")
+    }
+
+    private fun showTargetLanguagePicker() {
+        val current = CatalogLanguagePolicy.normalize(store.settings().titleCorrectionTargetLanguage)
+        // AMTool 1.2 presets, verified from AMTool_1.2.apk; a stored custom tag
+        // leaves the list unchecked (selected = -1) and is kept as-is.
+        val tags = listOf("zh-CN", "zh-TW", "ja-JP", "en-US", "tr-TR")
+        val labels = tags.map { CatalogLanguagePolicy.displayName(it) }.toTypedArray()
+        val selected = tags.indexOf(current)
+        AlertDialog.Builder(this)
+            .setTitle("目标语言")
+            .setSingleChoiceItems(labels, selected) { dialog, which ->
+                saveTargetLanguage(tags[which])
+                dialog.dismiss()
+            }
+            .setNeutralButton("自定义") { _, _ -> showTargetLanguageEditor(current) }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun showTargetLanguageEditor(current: String) {
+        val input = EditText(this).apply {
+            hint = "例如 tr-TR"
+            inputType = InputType.TYPE_CLASS_TEXT
+            setText(current)
+            setSelectAllOnFocus(true)
+            setPadding(dp(24), dp(8), dp(24), 0)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("自定义目标语言")
+            .setMessage("请输入 BCP-47 语言标签（例如 zh-CN）；空值或非法值无法保存")
+            .setView(input)
+            .setNegativeButton("取消", null)
+            .setPositiveButton("保存") { _, _ ->
+                val raw = input.text?.toString().orEmpty()
+                if (!CatalogLanguagePolicy.isValid(raw)) {
+                    toast("目标语言格式无效，例如 tr-TR")
+                } else {
+                    saveTargetLanguage(raw)
+                }
+            }
+            .show()
+    }
+
+    private fun saveTargetLanguage(raw: String) {
+        val normalized = CatalogLanguagePolicy.normalize(raw)
+        store.saveSettings(store.settings().copy(titleCorrectionTargetLanguage = normalized))
+        toast("目标语言已设为 ${CatalogLanguagePolicy.displayName(normalized)}；重启 Apple Music 后刷新资料库")
+        render()
+    }
 
     private fun customLyricsNavigationRow(manifest: CustomLyricsManifest): View =
         LinearLayout(this).apply {

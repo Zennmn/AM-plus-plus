@@ -20,7 +20,7 @@ internal class ApkTargetClassSource internal constructor(
 
     override fun classNames(): List<String> = apkPaths.asSequence()
         .flatMap { path -> readEntries(path).asSequence() }
-        .filter { it.startsWith("com.apple.") }
+        .filter { it.startsWith("com.apple.") || isObfuscatedTopLevelClass(it) }
         .distinct()
         .sorted()
         .toList()

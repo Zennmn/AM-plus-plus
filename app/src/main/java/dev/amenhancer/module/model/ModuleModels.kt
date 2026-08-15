@@ -1,6 +1,7 @@
 package dev.amenhancer.module.model
 
 import dev.amenhancer.module.ModuleConstants
+import dev.amenhancer.module.config.CatalogLanguagePolicy
 
 data class ModuleSettings(
     val dualPaneEnabled: Boolean = true,
@@ -9,6 +10,9 @@ data class ModuleSettings(
     val futureBlurEnabled: Boolean = true,
     val navigationCompensationEnabled: Boolean = false,
     val lyricBlurRadiusOffsetPx: Int = 0,
+    val titleCorrectionEnabled: Boolean = false,
+    /** BCP-47 language used for Apple Music Catalog title lookups; AMTool defaults to Turkish. */
+    val titleCorrectionTargetLanguage: String = CatalogLanguagePolicy.DEFAULT_TARGET_LANGUAGE,
     val customLyricsEnabled: Boolean = false,
     val fontManifest: LyricsFontManifest = LyricsFontManifest.disabled(),
     val customLyricsManifest: CustomLyricsManifest = CustomLyricsManifest.empty(),
@@ -43,7 +47,6 @@ data class CustomLyricsEntry(
     val source: String,
     val enabled: Boolean = true,
 )
-
 /** Small index shared through remote preferences; TTML bodies stay in remote files. */
 data class CustomLyricsManifest(
     val entries: List<CustomLyricsEntry> = emptyList(),

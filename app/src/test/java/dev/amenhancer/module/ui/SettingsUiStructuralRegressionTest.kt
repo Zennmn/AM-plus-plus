@@ -154,6 +154,98 @@ class SettingsUiStructuralRegressionTest {
     }
 
     @Test
+    fun `exposes catalog title correction and a native library refresh action`() {
+        val activity = projectFile("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
+        val manifest = projectFile("app/src/main/AndroidManifest.xml")
+        val protocol = projectFile(
+            "app/src/main/java/dev/amenhancer/module/CurrentSongIdentityProtocol.kt",
+        )
+        val titleTarget = projectFile(
+            "app/src/main/java/dev/amenhancer/module/hook/AppleMusicTitleCorrectionTarget.kt",
+        )
+        val titlePolicy = projectFile(
+            "app/src/main/java/dev/amenhancer/module/hook/TitleCorrectionPolicy.kt",
+        )
+        val libraryTarget = projectFile(
+            "app/src/main/java/dev/amenhancer/module/hook/AppleMusicLibraryRefreshTarget.kt",
+        )
+        val symbols = projectFile(
+            "app/src/main/java/dev/amenhancer/module/hook/TargetSymbols.kt",
+        )
+
+        assertTrue(activity.contains("歌曲名显示修正"))
+        assertTrue(activity.contains("titleCorrectionEnabled"))
+        assertTrue(activity.contains("目标语言"))
+        assertTrue(activity.contains("titleCorrectionTargetLanguage"))
+        assertTrue(activity.contains("刷新资料库"))
+        assertTrue(activity.contains("requestLibraryRefresh()"))
+        assertTrue(protocol.contains("REQUEST_LIBRARY_REFRESH"))
+        assertTrue(manifest.contains("REQUEST_LIBRARY_REFRESH"))
+        assertTrue(titleTarget.contains("MediaEntityGetTitleMethod"))
+        assertTrue(titleTarget.contains("MediaEntityGetAttributesMethod"))
+        assertTrue(titleTarget.contains("MediaEntityToCollectionItemViewMethod"))
+        assertTrue(titlePolicy.contains("catalog-title:"))
+        assertTrue(titlePolicy.contains("catalog-schema"))
+        assertTrue(titlePolicy.contains("allowReplace"))
+        assertTrue(libraryTarget.contains("UserInitiatedPoll"))
+        assertTrue(libraryTarget.contains("update.invoke(library, updateReason)"))
+        assertTrue(libraryTarget.contains("RESULT_COMPLETED"))
+        assertTrue(symbols.contains("com.apple.android.medialibrary.library.MediaLibrary"))
+        assertTrue(symbols.contains("isMediaLibraryUpdateMethod"))
+        assertTrue(symbols.contains("lookupAndRefreshCatalogItemsInLibrary"))
+        assertTrue(symbols.contains("ConfigurationStoreStoreFrontLanguageMethod"))
+        assertTrue(symbols.contains("MediaApiRepositoryGetEntitiesWithIdsMethod"))
+    }
+
+    @Test
+    fun `target language presets match AMTool and stay reachable while correction is off`() {
+        val activity = projectFile("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
+
+        assertTrue(activity.contains("val tags = listOf(\"zh-CN\", \"zh-TW\", \"ja-JP\", \"en-US\", \"tr-TR\")"))
+        assertFalse(activity.contains("\"ko-KR\""))
+        assertFalse(activity.contains("\"de-DE\""))
+        assertFalse(activity.contains("\"fr-FR\""))
+        assertFalse(activity.contains("\"es-ES\""))
+        assertFalse(activity.contains("系统语言"))
+        assertFalse(activity.contains("coerceAtLeast"))
+
+        val targetLanguageRegion = activity.substringAfter("title = \"目标语言\"")
+            .substringBefore("title = \"刷新资料库\"")
+        assertTrue(targetLanguageRegion.contains("enabled = writable"))
+        assertFalse(targetLanguageRegion.contains("titleCorrectionEnabled"))
+    }
+
+    @Test
+    fun `custom target language input rejects empty and invalid values`() {
+        val activity = projectFile("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
+
+        assertTrue(activity.contains("CatalogLanguagePolicy.isValid(raw)"))
+        assertTrue(activity.contains("目标语言格式无效，例如 tr-TR"))
+        assertTrue(activity.contains("空值或非法值无法保存"))
+        assertFalse(activity.contains("留空表示使用 Apple Music 当前语言"))
+    }
+
+    @Test
+    fun `library refresh shows an AMTool style cancellable progress dialog`() {
+        val activity = projectFile("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
+        val requester = projectFile(
+            "app/src/main/java/dev/amenhancer/module/ui/LibraryRefreshRequester.kt",
+        )
+
+        assertTrue(activity.contains("ProgressBar(this@SettingsActivity)"))
+        assertTrue(activity.contains("正在刷新资料库，请稍候"))
+        assertTrue(activity.contains("setNegativeButton(\"停止\")"))
+        assertTrue(activity.contains("libraryRefreshRequester.cancel()"))
+        assertTrue(activity.contains("LibraryRefreshProtocol.RESULT_CANCELLED"))
+        assertTrue(activity.contains("已停止刷新资料库"))
+        assertTrue(activity.contains("libraryRefreshDialog?.takeIf { it.isShowing }?.dismiss()"))
+        assertTrue(activity.contains("setCanceledOnTouchOutside(false)"))
+        assertTrue(requester.contains("CANCEL_ACTION"))
+        assertTrue(requester.contains("RESULT_CANCELLED"))
+        assertFalse(requester.contains("SharedPreferences"))
+    }
+
+    @Test
     fun `moves custom lyrics management to a saved secondary page`() {
         val activity = projectFile("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
 
@@ -199,7 +291,7 @@ class SettingsUiStructuralRegressionTest {
         assertTrue(activity.contains("application/octet-stream"))
         assertTrue(activity.contains("CustomLyricsManager(snapshot, store).backup(output)"))
         assertTrue(activity.contains("CustomLyricsManager(snapshot, store).restore(input, policy)"))
-        assertFalse(activity.contains("setSingleChoiceItems("))
+        assertTrue(activity.contains("showTargetLanguagePicker()"))
         assertTrue(activity.contains("setNegativeButton(\"取消\", null)"))
         assertTrue(activity.contains("setNeutralButton(\"不覆盖\")"))
         assertTrue(activity.contains("setPositiveButton(\"覆盖\")"))
