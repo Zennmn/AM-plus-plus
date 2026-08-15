@@ -475,6 +475,11 @@ internal class EmbeddedSettingsHost private constructor(
             nativePreferenceActivityIds.add(activityId)
             nativePreferenceFragmentReference = WeakReference(fragment)
             removeSettingsOption(activity)
+            // The setPreferences seam can run after PreferenceFragmentCompat
+            // has already attached its RecyclerView adapter.  Always give
+            // that adapter a late refresh so a newly-added native row is
+            // reflected in the visible list.
+            scheduleNativePreferenceRefresh(activity, fragmentView(fragment))
         } else {
             nativePreferenceActivityIds.remove(activityId)
             nativePreferenceFragmentReference = null
@@ -500,24 +505,16 @@ internal class EmbeddedSettingsHost private constructor(
         }
         removeOverlay(activity)
 
-        val nativePreferenceWasReady = nativePreferenceActivityIds.contains(activityId)
         val nativePreferenceAdded = runCatching {
             injectNativeSettingsPreference(fragment, activity)
         }.getOrDefault(false)
         if (nativePreferenceAdded) {
-            if (nativePreferenceWasReady) {
-                nativePreferenceActivityIds.add(activityId)
-                nativePreferenceFragmentReference = WeakReference(fragment)
-                removeSettingsOption(activity)
-            } else {
-                // The early setPreferences seam normally handles this. If a
-                // repacker binds before our hook, give the host one frame to
-                // refresh its adapter before falling back to an overlay row.
-                nativePreferenceActivityIds.add(activityId)
-                nativePreferenceFragmentReference = WeakReference(fragment)
-                removeSettingsOption(activity)
-                scheduleNativePreferenceRefresh(activity, fragmentView(fragment))
-            }
+            nativePreferenceActivityIds.add(activityId)
+            nativePreferenceFragmentReference = WeakReference(fragment)
+            removeSettingsOption(activity)
+            // Refresh even when the early seam succeeded: on 6.5.1 the
+            // adapter may already have been attached when r1() is invoked.
+            scheduleNativePreferenceRefresh(activity, fragmentView(fragment))
         } else {
             nativePreferenceActivityIds.remove(activityId)
             nativePreferenceFragmentReference = null
@@ -849,7 +846,10 @@ internal class EmbeddedSettingsHost private constructor(
         )
         val key = NATIVE_SETTINGS_PREFERENCE_KEY
         val existing = runCatching {
-            ModernXposedRuntime.callMethod(fragment, "s0", key)
+            // AndroidX 6.5.1 maps PreferenceFragmentCompat.findPreference()
+            // to t0(String); s0 is a PreferenceGroup field, not a lookup
+            // method on the Fragment.
+            ModernXposedRuntime.callMethod(fragment, "t0", key)
         }.getOrNull()
         if (existing != null) {
             return hasNativePreferenceClick(preferenceClass, existing)
@@ -876,7 +876,10 @@ internal class EmbeddedSettingsHost private constructor(
         if (!installNativePreferenceClick(preferenceClass, preference, activity)) return false
 
         val screen = findNativePreferenceScreen(fragment) ?: return false
-        ModernXposedRuntime.callMethod(screen, "S", preference)
+        // AndroidX 6.5.1 maps PreferenceGroup.P() to addPreference(); S()
+        // is the corresponding remove path.  Calling S() makes the
+        // injection look successful while immediately removing the row.
+        ModernXposedRuntime.callMethod(screen, "P", preference)
         return true
     }
 
