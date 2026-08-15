@@ -76,6 +76,9 @@ class CatalogLanguagePolicyTest {
             "土耳其语（tr-TR）",
             CatalogLanguagePolicy.displayName("tr-TR", Locale.SIMPLIFIED_CHINESE),
         )
-        assertEquals("土耳其语（tr-TR）", CatalogLanguagePolicy.displayName(""))
+        assertEquals(
+            "土耳其语（tr-TR）",
+            CatalogLanguagePolicy.displayName("", Locale.SIMPLIFIED_CHINESE),
+        )
     }
 }
