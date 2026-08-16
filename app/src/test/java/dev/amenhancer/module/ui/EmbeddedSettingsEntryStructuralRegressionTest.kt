@@ -172,7 +172,7 @@ class EmbeddedSettingsEntryStructuralRegressionTest {
         assertTrue(host.contains("CustomLyricsOnlineImporter"))
         assertTrue(host.contains("importEmbeddedOnlineLyrics"))
         assertTrue(host.contains("source = source"))
-        assertTrue(host.contains("同步 GitHub 源"))
+        assertTrue(host.contains("GitHub 同步"))
         assertTrue(host.contains("controller.syncFromGitHub"))
     }
 
@@ -259,7 +259,6 @@ class EmbeddedSettingsEntryStructuralRegressionTest {
             "恢复原字体",
             "自定义歌词替换",
             "添加歌词",
-            "同步 GitHub 源",
             "备份歌词",
             "恢复备份",
             "搜索名称或 Apple Music ID",
@@ -270,6 +269,8 @@ class EmbeddedSettingsEntryStructuralRegressionTest {
             assertSourceContains(activity, "\"$title\"", "SettingsActivity item $title")
             assertSourceContains(host, "\"$title\"", "EmbeddedSettingsHost item $title")
         }
+        assertSourceContains(activity, "\"同步 GitHub 源\"", "SettingsActivity GitHub action")
+        assertSourceContains(host, "\"GitHub 同步\"", "EmbeddedSettingsHost GitHub action")
 
         assertSourceContains(
             activity,

@@ -12,6 +12,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorFilter
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.RectF
 import android.graphics.Typeface
@@ -84,31 +85,37 @@ internal enum class EmbeddedSettingsPage {
  * colours (notably Apple Music's blue) cannot leak into the injected UI.
  */
 private object EmbeddedSettingsPalette {
-    val softBackground: Int = Color.parseColor("#FDEEEE")
-    val softSurface: Int = Color.parseColor("#FCEBEC")
-    val primary: Int = Color.parseColor("#F45F6B")
-    val primaryPressed: Int = Color.parseColor("#F66A72")
-    val accent: Int = Color.parseColor("#B05B91")
-    val accentPressed: Int = Color.parseColor("#AC5A8E")
+    val softBackground: Int = Color.parseColor("#FBF4F6")
+    val softSurface: Int = Color.parseColor("#FAF3F5")
+    val primary: Int = Color.parseColor("#EE3B4F")
+    val primaryPressed: Int = Color.parseColor("#F65A6B")
+    val accent: Int = Color.parseColor("#A6537C")
+    val accentPressed: Int = Color.parseColor("#9D466E")
 
     val onSurface: Int = Color.rgb(48, 35, 42)
     val onSurfaceVariant: Int = Color.rgb(112, 89, 101)
-    val outline: Int = Color.rgb(235, 215, 222)
+    val outline: Int = Color.rgb(238, 233, 234)
     val disabledSurface: Int = Color.rgb(244, 237, 240)
     val disabledText: Int = Color.rgb(158, 140, 149)
-    val divider: Int = Color.rgb(238, 220, 227)
+    val divider: Int = Color.rgb(238, 233, 234)
+    val switchTrackOn: Int = Color.parseColor("#F497A1")
+    val switchTrackOff: Int = Color.parseColor("#D5D5D5")
 }
 
 /**
- * A host-safe fallback for the module logo.  Some Apple Music resource
- * loaders can resolve the module vector but drop its AAPT gradient attributes,
- * leaving only the pale square background.  Drawing this tiny mark directly
- * on Canvas keeps the title affordance visible in that case.
+ * A host-safe fallback for the module logo. Some Apple Music resource loaders
+ * resolve the module vector but drop its AAPT gradient attributes. Draw the
+ * same compact AM++ mark directly on Canvas instead of falling back to a
+ * misleading music-note glyph.
  */
 private class EmbeddedAmppFallbackDrawable : android.graphics.drawable.Drawable() {
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val markPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        typeface = Typeface.create("sans-serif-black", Typeface.NORMAL)
+        textAlign = Paint.Align.CENTER
+    }
+    private val plusPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = Typeface.create("sans-serif", Typeface.BOLD)
         textAlign = Paint.Align.CENTER
     }
     private var alphaValue = 255
@@ -128,26 +135,18 @@ private class EmbeddedAmppFallbackDrawable : android.graphics.drawable.Drawable(
         backgroundPaint.alpha = alphaValue
         canvas.drawRoundRect(outer, radius, radius, backgroundPaint)
 
-        val inset = size * 0.13f
-        val inner = RectF(
-            outer.left + inset,
-            outer.top + inset,
-            outer.right - inset,
-            outer.bottom - inset,
-        )
-        backgroundPaint.color = EmbeddedSettingsPalette.primary
-        backgroundPaint.alpha = alphaValue
-        canvas.drawRoundRect(inner, radius * 0.7f, radius * 0.7f, backgroundPaint)
-
-        markPaint.color = Color.WHITE
+        markPaint.color = EmbeddedSettingsPalette.primary
         markPaint.alpha = alphaValue
-        // Keep the fallback an icon rather than repeating the adjacent title.
-        // The real module vector is preferred; this glyph is only used when
-        // the host drops the vector's gradient artwork while loading it.
-        markPaint.textSize = size * 0.52f
+        markPaint.textSize = size * 0.46f
         val metrics = markPaint.fontMetrics
-        val baseline = inner.centerY() - (metrics.ascent + metrics.descent) / 2f
-        canvas.drawText("♫", inner.centerX(), baseline, markPaint)
+        val baseline = outer.centerY() - (metrics.ascent + metrics.descent) / 2f + size * 0.06f
+        canvas.drawText("A", outer.left + size * 0.32f, baseline, markPaint)
+        markPaint.color = EmbeddedSettingsPalette.accent
+        canvas.drawText("M", outer.left + size * 0.65f, baseline, markPaint)
+        plusPaint.color = EmbeddedSettingsPalette.primary
+        plusPaint.alpha = alphaValue
+        plusPaint.textSize = size * 0.14f
+        canvas.drawText("++", outer.right - size * 0.19f, outer.top + size * 0.24f, plusPaint)
     }
 
     override fun setAlpha(alpha: Int) {
@@ -158,6 +157,191 @@ private class EmbeddedAmppFallbackDrawable : android.graphics.drawable.Drawable(
     override fun setColorFilter(colorFilter: ColorFilter?) {
         backgroundPaint.colorFilter = colorFilter
         markPaint.colorFilter = colorFilter
+        plusPaint.colorFilter = colorFilter
+        invalidateSelf()
+    }
+
+    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+}
+
+/** Compact red music mark used by the current-song row in the reference UI. */
+private class EmbeddedMusicStatusDrawable : android.graphics.drawable.Drawable() {
+    private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val markPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        textAlign = Paint.Align.CENTER
+    }
+    private var alphaValue = 255
+
+    override fun draw(canvas: Canvas) {
+        val box = bounds
+        if (box.width() <= 0 || box.height() <= 0) return
+        val size = minOf(box.width(), box.height()).toFloat()
+        val outer = RectF(box.left.toFloat(), box.top.toFloat(), box.right.toFloat(), box.bottom.toFloat())
+        val radius = size * 0.18f
+        backgroundPaint.color = EmbeddedSettingsPalette.primary
+        backgroundPaint.alpha = alphaValue
+        canvas.drawRoundRect(outer, radius, radius, backgroundPaint)
+        markPaint.color = Color.WHITE
+        markPaint.alpha = alphaValue
+        markPaint.textSize = size * 0.58f
+        val metrics = markPaint.fontMetrics
+        val baseline = outer.centerY() - (metrics.ascent + metrics.descent) / 2f
+        canvas.drawText("♫", outer.centerX(), baseline, markPaint)
+    }
+
+    override fun setAlpha(alpha: Int) {
+        alphaValue = alpha.coerceIn(0, 255)
+        invalidateSelf()
+    }
+
+    override fun setColorFilter(colorFilter: ColorFilter?) {
+        backgroundPaint.colorFilter = colorFilter
+        markPaint.colorFilter = colorFilter
+        invalidateSelf()
+    }
+
+    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+}
+
+private enum class EmbeddedGlyphKind {
+    Music,
+    Exchange,
+    Github,
+    CloudBackup,
+    DocumentSearch,
+}
+
+/** Small host-independent glyphs for the reference actions and empty state. */
+private class EmbeddedGlyphDrawable(
+    private val kind: EmbeddedGlyphKind,
+    private val tint: Int,
+) : android.graphics.drawable.Drawable() {
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+    private var alphaValue = 255
+
+    override fun draw(canvas: Canvas) {
+        val box = bounds
+        if (box.width() <= 0 || box.height() <= 0) return
+        val size = minOf(box.width(), box.height()).toFloat()
+        val left = box.left.toFloat()
+        val top = box.top.toFloat()
+        val cx = left + box.width() / 2f
+        val cy = top + box.height() / 2f
+        fill.color = tint
+        fill.alpha = alphaValue
+        stroke.color = tint
+        stroke.alpha = alphaValue
+        stroke.strokeWidth = size * 0.08f
+        when (kind) {
+            EmbeddedGlyphKind.Music -> {
+                canvas.drawLine(cx + size * 0.1f, top + size * 0.2f, cx + size * 0.1f, top + size * 0.68f, stroke)
+                canvas.drawLine(cx + size * 0.1f, top + size * 0.2f, cx + size * 0.34f, top + size * 0.15f, stroke)
+                canvas.drawCircle(cx - size * 0.03f, top + size * 0.73f, size * 0.15f, fill)
+            }
+            EmbeddedGlyphKind.Exchange -> {
+                val y1 = cy - size * 0.15f
+                val y2 = cy + size * 0.15f
+                canvas.drawLine(left + size * 0.22f, y1, left + size * 0.72f, y1, stroke)
+                canvas.drawLine(left + size * 0.28f, y2, left + size * 0.78f, y2, stroke)
+                canvas.drawLine(left + size * 0.72f, y1, left + size * 0.56f, y1 - size * 0.14f, stroke)
+                canvas.drawLine(left + size * 0.72f, y1, left + size * 0.56f, y1 + size * 0.14f, stroke)
+                canvas.drawLine(left + size * 0.28f, y2, left + size * 0.44f, y2 - size * 0.14f, stroke)
+                canvas.drawLine(left + size * 0.28f, y2, left + size * 0.44f, y2 + size * 0.14f, stroke)
+            }
+            EmbeddedGlyphKind.Github -> {
+                val path = Path().apply {
+                    moveTo(cx - size * 0.3f, cy - size * 0.04f)
+                    lineTo(cx - size * 0.38f, cy - size * 0.34f)
+                    lineTo(cx - size * 0.12f, cy - size * 0.25f)
+                    cubicTo(cx - size * 0.04f, cy - size * 0.29f, cx + size * 0.04f, cy - size * 0.29f, cx + size * 0.12f, cy - size * 0.25f)
+                    lineTo(cx + size * 0.38f, cy - size * 0.34f)
+                    lineTo(cx + size * 0.3f, cy - size * 0.04f)
+                    cubicTo(cx + size * 0.36f, cy + size * 0.08f, cx + size * 0.28f, cy + size * 0.36f, cx, cy + size * 0.38f)
+                    cubicTo(cx - size * 0.28f, cy + size * 0.36f, cx - size * 0.36f, cy + size * 0.08f, cx - size * 0.3f, cy - size * 0.04f)
+                    close()
+                }
+                canvas.drawPath(path, fill)
+                fill.color = Color.WHITE
+                fill.alpha = alphaValue
+                canvas.drawCircle(cx - size * 0.1f, cy + size * 0.04f, size * 0.045f, fill)
+                canvas.drawCircle(cx + size * 0.1f, cy + size * 0.04f, size * 0.045f, fill)
+            }
+            EmbeddedGlyphKind.CloudBackup -> {
+                val cloud = RectF(
+                    left + size * 0.18f,
+                    top + size * 0.34f,
+                    left + size * 0.82f,
+                    top + size * 0.78f,
+                )
+                canvas.drawArc(cloud, 200f, 140f, false, stroke)
+                canvas.drawLine(left + size * 0.18f, top + size * 0.58f, left + size * 0.18f, top + size * 0.7f, stroke)
+                canvas.drawLine(left + size * 0.82f, top + size * 0.58f, left + size * 0.82f, top + size * 0.7f, stroke)
+                canvas.drawLine(cx, top + size * 0.18f, cx, top + size * 0.56f, stroke)
+                canvas.drawLine(cx - size * 0.13f, top + size * 0.34f, cx, top + size * 0.18f, stroke)
+                canvas.drawLine(cx + size * 0.13f, top + size * 0.34f, cx, top + size * 0.18f, stroke)
+            }
+            EmbeddedGlyphKind.DocumentSearch -> {
+                val document = RectF(
+                    left + size * 0.22f,
+                    top + size * 0.14f,
+                    left + size * 0.64f,
+                    top + size * 0.78f,
+                )
+                canvas.drawRoundRect(document, size * 0.04f, size * 0.04f, stroke)
+                canvas.drawLine(left + size * 0.48f, top + size * 0.14f, left + size * 0.64f, top + size * 0.3f, stroke)
+                canvas.drawCircle(left + size * 0.67f, top + size * 0.67f, size * 0.17f, stroke)
+                canvas.drawLine(left + size * 0.79f, top + size * 0.79f, left + size * 0.9f, top + size * 0.9f, stroke)
+            }
+        }
+    }
+
+    override fun setAlpha(alpha: Int) {
+        alphaValue = alpha.coerceIn(0, 255)
+        invalidateSelf()
+    }
+
+    override fun setColorFilter(colorFilter: ColorFilter?) {
+        fill.colorFilter = colorFilter
+        stroke.colorFilter = colorFilter
+        invalidateSelf()
+    }
+
+    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+}
+
+private class EmbeddedArrowFallbackDrawable : android.graphics.drawable.Drawable() {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.SQUARE
+        strokeJoin = Paint.Join.MITER
+        strokeWidth = 4f
+        color = EmbeddedSettingsPalette.primary
+    }
+
+    override fun draw(canvas: Canvas) {
+        val box = bounds
+        val left = box.left + box.width() * 0.28f
+        val right = box.left + box.width() * 0.72f
+        val center = box.top + box.height() * 0.5f
+        val tip = box.left + box.width() * 0.28f
+        canvas.drawLine(right, center, tip, center, paint)
+        canvas.drawLine(tip, center, box.left + box.width() * 0.48f, box.top + box.height() * 0.28f, paint)
+        canvas.drawLine(tip, center, box.left + box.width() * 0.48f, box.bottom - box.height() * 0.28f, paint)
+    }
+
+    override fun setAlpha(alpha: Int) {
+        paint.alpha = alpha.coerceIn(0, 255)
+        invalidateSelf()
+    }
+
+    override fun setColorFilter(colorFilter: ColorFilter?) {
+        paint.colorFilter = colorFilter
         invalidateSelf()
     }
 
@@ -1133,6 +1317,7 @@ internal class EmbeddedSettingsHost private constructor(
             return
         }
         var page = EmbeddedSettingsPage.MAIN
+        var dialogReady = false
         lateinit var dialog: AlertDialog
 
         val pageHost = LinearLayout(activity).apply {
@@ -1142,17 +1327,17 @@ internal class EmbeddedSettingsHost private constructor(
         val topBar = LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = dp(activity, 56)
+            minimumHeight = dp(activity, 64)
         }
-        val backButton = TextView(activity).apply {
-            text = "‹"
-            textSize = 34f
-            gravity = Gravity.CENTER
-            setTextColor(EmbeddedSettingsPalette.primary)
+        val backButton = ImageView(activity).apply {
+            setImageDrawable(loadEmbeddedArrowIcon(activity).also {
+                it.setTint(EmbeddedSettingsPalette.primary)
+            })
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
             contentDescription = "返回"
             isClickable = true
             isFocusable = true
-            setPadding(0, 0, dp(activity, 8), 0)
+            setPadding(dp(activity, 10), dp(activity, 10), dp(activity, 10), dp(activity, 10))
         }
         val moduleIcon = ImageView(activity).apply {
             setImageDrawable(loadEmbeddedModuleIcon(activity))
@@ -1183,15 +1368,15 @@ internal class EmbeddedSettingsHost private constructor(
             setPadding(dp(activity, 12), dp(activity, 8), dp(activity, 8), dp(activity, 8))
             contentDescription = "保存 AM++ 设置"
         }
-        topBar.addView(backButton, LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 52)))
+        topBar.addView(backButton, LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 64)))
         topBar.addView(moduleIcon, LinearLayout.LayoutParams(dp(activity, 44), dp(activity, 44)).apply {
             marginEnd = dp(activity, 6)
         })
         topBar.addView(pageTitle)
-        topBar.addView(saveButton, LinearLayout.LayoutParams(dp(activity, 64), dp(activity, 52)))
+        topBar.addView(saveButton, LinearLayout.LayoutParams(dp(activity, 64), dp(activity, 64)))
         pageHost.addView(topBar, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
-            dp(activity, 56),
+            dp(activity, 64),
         ))
         val pageContent = FrameLayout(activity)
         pageHost.addView(pageContent, LinearLayout.LayoutParams(
@@ -1213,6 +1398,13 @@ internal class EmbeddedSettingsHost private constructor(
             draft = next
             if (!controller.saveOrdinarySettings(next)) {
                 Toast.makeText(activity, "保存 AM++ 设置失败", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        fun syncBottomCloseButton() {
+            if (dialogReady && dialog.isShowing) {
+                dialog.getButton(AlertDialog.BUTTON_NEGATIVE).visibility =
+                    if (page == EmbeddedSettingsPage.MAIN) View.VISIBLE else View.GONE
             }
         }
 
@@ -1268,6 +1460,7 @@ internal class EmbeddedSettingsHost private constructor(
                     onClearFont = { runAsync(activity, controller::clearFont) },
                 )
             }
+            syncBottomCloseButton()
         }
 
         backButton.setOnClickListener {
@@ -1281,7 +1474,11 @@ internal class EmbeddedSettingsHost private constructor(
         saveButton.setOnClickListener { saveDraft(close = true) }
         val root = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
-            minimumHeight = (activity.resources.displayMetrics.heightPixels * 0.72f).toInt()
+            // The reference uses a nearly full-height panel on wide screens;
+            // keep a little more breathing room on phones without forcing the
+            // host dialog beyond the available window.
+            val heightFraction = if (isEmbeddedPhone(activity)) 0.78f else 0.86f
+            minimumHeight = (activity.resources.displayMetrics.heightPixels * heightFraction).toInt()
             addView(pageHost, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 0,
@@ -1292,6 +1489,10 @@ internal class EmbeddedSettingsHost private constructor(
             .setView(root)
             .setNegativeButton("关闭", null)
             .create()
+        dialog.setOnShowListener {
+            dialogReady = true
+            syncBottomCloseButton()
+        }
         val weakDialog = WeakReference<Dialog>(dialog)
         dialog.setOnDismissListener {
             if (dialogReference?.get() === weakDialog.get()) {
@@ -1319,12 +1520,14 @@ internal class EmbeddedSettingsHost private constructor(
     ) {
         parent.addView(embeddedStatusCard(activity, song))
         parent.addView(embeddedSpacer(activity, 16))
-        parent.addView(embeddedCard(activity, "功能") {
+        parent.addView(embeddedCard(activity, "功能", outlined = false) {
             addView(embeddedSettingRow(
                 activity,
                 "平板双栏播放器",
                 "仅在 Apple Music 判定为平板且横屏时启用",
                 settings.dualPaneEnabled,
+                iconRes = android.R.drawable.ic_menu_view,
+                iconTint = EmbeddedSettingsPalette.primary,
             ) { onSettingsChanged(settings.copy(dualPaneEnabled = it)) })
             addView(embeddedDivider(activity))
             addView(embeddedSettingRow(
@@ -1332,6 +1535,8 @@ internal class EmbeddedSettingsHost private constructor(
                 "平板底栏补偿",
                 "如果底栏显示异常开启该选项",
                 settings.navigationCompensationEnabled,
+                iconRes = android.R.drawable.ic_menu_sort_by_size,
+                iconTint = EmbeddedSettingsPalette.primary,
             ) { onSettingsChanged(settings.copy(navigationCompensationEnabled = it)) })
             addView(embeddedDivider(activity))
             addView(embeddedSettingRow(
@@ -1339,6 +1544,8 @@ internal class EmbeddedSettingsHost private constructor(
                 "平板禁用动态视频",
                 "平板横屏时禁用 Editorial Video",
                 settings.disableEditorialVideoOnTablet,
+                iconRes = android.R.drawable.ic_media_play,
+                iconTint = EmbeddedSettingsPalette.primary,
             ) { onSettingsChanged(settings.copy(disableEditorialVideoOnTablet = it)) })
             addView(embeddedDivider(activity))
             addView(embeddedSettingRow(
@@ -1347,6 +1554,8 @@ internal class EmbeddedSettingsHost private constructor(
                 "仅手机启用 · 更改后需强制停止并重开 Apple Music",
                 settings.phoneLiquidGlassEnabled,
                 badge = "WIP",
+                iconRes = android.R.drawable.ic_menu_gallery,
+                iconTint = EmbeddedSettingsPalette.accent,
             ) { onSettingsChanged(settings.copy(phoneLiquidGlassEnabled = it)) })
             addView(embeddedDivider(activity))
             addView(embeddedSettingRow(
@@ -1354,23 +1563,24 @@ internal class EmbeddedSettingsHost private constructor(
                 "双向歌词模糊",
                 "手动滚动停止 1 秒后恢复",
                 settings.futureBlurEnabled,
+                iconRes = android.R.drawable.ic_menu_edit,
+                iconTint = EmbeddedSettingsPalette.primary,
             ) { onSettingsChanged(settings.copy(futureBlurEnabled = it)) })
-            addView(embeddedDivider(activity))
-            addView(embeddedBlurRadiusRow(activity, settings.lyricBlurRadiusOffsetPx) {
-                onSettingsChanged(settings.copy(lyricBlurRadiusOffsetPx = it))
-            })
             addView(embeddedDivider(activity))
             addView(embeddedSettingRow(
                 activity,
                 "歌曲名显示修正",
                 "将部分 Catalog 请求改为目标语言并回填标题 · 修改后重开 Apple Music",
                 settings.titleCorrectionEnabled,
+                iconRes = android.R.drawable.ic_menu_edit,
+                iconTint = EmbeddedSettingsPalette.accent,
             ) { onSettingsChanged(settings.copy(titleCorrectionEnabled = it)) })
             addView(embeddedDivider(activity))
             addView(embeddedNavigationRow(
                 activity,
                 "目标语言",
                 CatalogLanguagePolicy.displayName(settings.titleCorrectionTargetLanguage),
+                iconRes = android.R.drawable.ic_menu_set_as,
             ) {
                 showEmbeddedTargetLanguagePicker(
                     activity = activity,
@@ -1387,15 +1597,23 @@ internal class EmbeddedSettingsHost private constructor(
                 activity,
                 "刷新资料库",
                 "触发 Apple Music 原生同步并补查歌曲名",
-                onRefreshLibrary,
+                iconRes = android.R.drawable.ic_popup_sync,
+                onClick = onRefreshLibrary,
             ))
             addView(embeddedDivider(activity))
             addView(embeddedNavigationRow(
                 activity,
                 "自定义歌词",
                 if (lyricsCount == 0) "添加和管理 Apple Music ID 歌词映射" else "已配置 $lyricsCount 首歌词",
-                onOpenCustomLyrics,
+                iconRes = android.R.drawable.ic_menu_edit,
+                onClick = onOpenCustomLyrics,
             ))
+        })
+        parent.addView(embeddedSpacer(activity, 12))
+        parent.addView(embeddedCard(activity, "高级设置") {
+            addView(embeddedBlurRadiusRow(activity, settings.lyricBlurRadiusOffsetPx) {
+                onSettingsChanged(settings.copy(lyricBlurRadiusOffsetPx = it))
+            })
         })
         parent.addView(embeddedSpacer(activity, 20))
         parent.addView(embeddedFontCard(
@@ -1429,89 +1647,147 @@ internal class EmbeddedSettingsHost private constructor(
         val entries = runCatching { controller.lyricsEntries() }.getOrDefault(emptyList())
         customLyricsListState.update(entries, customLyricsSearchQuery)
 
-        parent.addView(embeddedCard(activity, null) {
+        parent.addView(embeddedCard(activity, null, outlined = false) {
             addView(embeddedSettingRow(
                 activity,
                 "自定义歌词替换",
                 "按 Apple Music ID 注入 · 更改后重开 Apple Music 生效",
                 settings.customLyricsEnabled,
+                iconRes = android.R.drawable.ic_menu_revert,
+                iconDrawable = EmbeddedGlyphDrawable(
+                    EmbeddedGlyphKind.Exchange,
+                    EmbeddedSettingsPalette.accent,
+                ),
             ) { onSettingsChanged(settings.copy(customLyricsEnabled = it)) })
         })
-        parent.addView(embeddedSpacer(activity, 20))
+        parent.addView(embeddedSpacer(activity, 8))
 
-        val lyricsCard = embeddedCard(activity, "自定义歌词") {
-            addView(TextView(activity).apply {
-                text = when {
-                    entries.isEmpty() -> "按 Apple Music ID 手动添加 TTML；不会在播放时联网识歌"
-                    else -> "已配置 ${entries.size} 首；更改后重开 Apple Music 生效"
-                }
-                textSize = 13.5f
-                setTextColor(EmbeddedSettingsPalette.onSurfaceVariant)
-                setSingleLine(false)
-                setPadding(dp(activity, 16), dp(activity, 4), dp(activity, 16), dp(activity, 12))
-            }, matchWidthWrapContent())
+        parent.addView(embeddedDivider(activity))
+        parent.addView(embeddedSpacer(activity, 8))
+        parent.addView(embeddedCard(activity, null, outlined = false) {
+            addView(embeddedNavigationRow(
+                activity,
+                "自定义歌词",
+                if (entries.isEmpty()) {
+                    "添加和管理 Apple Music ID 歌词映射"
+                } else {
+                    "已配置 ${entries.size} 首；更改后重开 Apple Music 生效"
+                },
+                iconDrawable = EmbeddedGlyphDrawable(
+                    EmbeddedGlyphKind.Music,
+                    EmbeddedSettingsPalette.accent,
+                ),
+                iconTint = EmbeddedSettingsPalette.accent,
+                clickable = false,
+                onClick = {},
+            ))
+        })
+        parent.addView(embeddedSpacer(activity, 12))
 
-            addView(LinearLayout(activity).apply {
-                orientation = embeddedActionOrientation(activity)
-                setPadding(dp(activity, 12), 0, dp(activity, 12), dp(activity, 8))
-                addView(embeddedActionButton(activity, "添加歌词") {
-                    showLyricsEditor(activity, null as CustomLyricsUiGroup?, song)
-                }, embeddedActionButtonParams(activity))
-            }, matchWidthWrapContent())
+        val lyricsCard = embeddedCard(activity, null, outlined = false) {
 
             addView(LinearLayout(activity).apply {
                 orientation = embeddedActionOrientation(activity)
                 setPadding(dp(activity, 12), 0, dp(activity, 12), dp(activity, 12))
-                addView(embeddedActionButton(activity, "备份歌词") {
-                    launchSafPicker(activity, EmbeddedSafOperation.Backup, "application/zip")
-                }, embeddedActionButtonParams(activity))
+                addView(embeddedIconActionButton(
+                    activity,
+                    "添加歌词",
+                    android.R.drawable.ic_menu_add,
+                ) {
+                    showLyricsEditor(activity, null as CustomLyricsUiGroup?, song)
+                }, embeddedIconActionButtonParams(activity))
                 addView(embeddedActionSpacer(activity))
-                addView(embeddedActionButton(activity, "恢复备份") {
+                addView(embeddedIconActionButton(
+                    activity,
+                    "导入 TTML",
+                    android.R.drawable.ic_menu_upload,
+                ) {
                     launchSafPicker(
                         activity,
-                        EmbeddedSafOperation.RestoreOverwrite,
-                        "*/*",
-                        arrayOf(
-                            "application/zip",
-                            "application/x-zip-compressed",
-                            "application/octet-stream",
-                        ),
+                        EmbeddedSafOperation.Ttml,
+                        "application/xml",
+                        arrayOf("application/ttml+xml", "application/xml", "text/xml", "text/plain"),
                     )
-                }, embeddedActionButtonParams(activity))
+                }, embeddedIconActionButtonParams(activity))
+                addView(embeddedActionSpacer(activity))
+                addView(embeddedIconActionButton(
+                    activity,
+                    "GitHub 同步",
+                    EmbeddedGlyphDrawable(
+                        EmbeddedGlyphKind.Github,
+                        EmbeddedSettingsPalette.accent,
+                    ),
+                ) {
+                    syncEmbeddedGitHub(activity)
+                }, embeddedIconActionButtonParams(activity))
+                addView(embeddedActionSpacer(activity))
+                lateinit var backupRestoreButton: View
+                backupRestoreButton = embeddedIconActionButton(
+                    activity,
+                    "备份与恢复",
+                    EmbeddedGlyphDrawable(
+                        EmbeddedGlyphKind.CloudBackup,
+                        EmbeddedSettingsPalette.accent,
+                    ),
+                ) {
+                    showEmbeddedBackupRestoreMenu(activity, backupRestoreButton)
+                }
+                addView(backupRestoreButton, embeddedIconActionButtonParams(activity))
             }, matchWidthWrapContent())
-
-            addView(embeddedActionButton(activity, "同步 GitHub 源") {
-                syncEmbeddedGitHub(activity)
-            }, LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(activity, 48),
-            ).apply {
-                marginStart = dp(activity, 12)
-                marginEnd = dp(activity, 12)
-                bottomMargin = dp(activity, 12)
-            })
 
             val search = EditText(activity).apply {
                 hint = "搜索名称或 Apple Music ID"
                 textSize = 14f
                 isSingleLine = true
+                includeFontPadding = false
                 setText(customLyricsSearchQuery)
                 setPadding(dp(activity, 14), 0, dp(activity, 14), 0)
                 setTextColor(EmbeddedSettingsPalette.onSurface)
                 setHintTextColor(EmbeddedSettingsPalette.onSurfaceVariant)
+                background = null
+            }
+            addView(FrameLayout(activity).apply {
                 background = GradientDrawable().apply {
                     setColor(EmbeddedSettingsPalette.softBackground)
-                    cornerRadius = dp(activity, 12).toFloat()
+                    cornerRadius = dp(activity, 8).toFloat()
                 }
-            }
-            addView(search, LinearLayout.LayoutParams(
+                addView(ImageView(activity).apply {
+                    setImageResource(android.R.drawable.ic_menu_search)
+                    imageTintList = ColorStateList.valueOf(EmbeddedSettingsPalette.onSurfaceVariant)
+                    contentDescription = null
+                    setPadding(dp(activity, 14), dp(activity, 14), dp(activity, 10), dp(activity, 14))
+                }, FrameLayout.LayoutParams(dp(activity, 48), dp(activity, 48)))
+                search.setPadding(dp(activity, 48), 0, dp(activity, 14), 0)
+                addView(search, FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    dp(activity, 48),
+                ))
+            }, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(activity, 48),
+                dp(activity, 56),
             ).apply {
                 marginStart = dp(activity, 16)
                 marginEnd = dp(activity, 16)
-                bottomMargin = dp(activity, 6)
+                topMargin = dp(activity, 8)
+                bottomMargin = dp(activity, 14)
             })
+            addView(LinearLayout(activity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(dp(activity, 16), 0, dp(activity, 16), dp(activity, 8))
+                addView(TextView(activity).apply {
+                    text = "已配置"
+                    textSize = 14f
+                    setTextColor(EmbeddedSettingsPalette.accent)
+                    setTypeface(typeface, Typeface.BOLD)
+                }, LinearLayout.LayoutParams(0, dp(activity, 32), 1f))
+                addView(TextView(activity).apply {
+                    text = "${entries.size} 首"
+                    textSize = 14f
+                    gravity = Gravity.CENTER_VERTICAL or Gravity.END
+                    setTextColor(EmbeddedSettingsPalette.accent)
+                    setTypeface(typeface, Typeface.BOLD)
+                }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(activity, 32)))
+            }, matchWidthWrapContent())
             val entriesRegion = LinearLayout(activity).apply {
                 orientation = LinearLayout.VERTICAL
             }
@@ -1521,13 +1797,37 @@ internal class EmbeddedSettingsHost private constructor(
                 entriesRegion.removeAllViews()
                 val state = customLyricsListState
                 if (state.totalCount == 0) {
-                    entriesRegion.addView(TextView(activity).apply {
-                        text = if (entries.isEmpty()) "暂无自定义歌词" else "没有匹配的歌词"
-                        textSize = 13.5f
-                        setTextColor(EmbeddedSettingsPalette.onSurfaceVariant)
-                        setSingleLine(false)
-                        setPadding(dp(activity, 16), dp(activity, 8), dp(activity, 16), dp(activity, 12))
-                    })
+                    entriesRegion.addView(LinearLayout(activity).apply {
+                        orientation = LinearLayout.VERTICAL
+                        gravity = Gravity.CENTER_HORIZONTAL
+                        setPadding(dp(activity, 16), dp(activity, 42), dp(activity, 16), dp(activity, 48))
+                        addView(ImageView(activity).apply {
+                            setImageDrawable(
+                                EmbeddedGlyphDrawable(
+                                    EmbeddedGlyphKind.DocumentSearch,
+                                    EmbeddedSettingsPalette.disabledText,
+                                ),
+                            )
+                            contentDescription = null
+                            setPadding(dp(activity, 8), dp(activity, 8), dp(activity, 8), dp(activity, 8))
+                        }, LinearLayout.LayoutParams(dp(activity, 56), dp(activity, 56)))
+                        addView(TextView(activity).apply {
+                            text = if (entries.isEmpty()) "暂无自定义歌词" else "未找到匹配结果"
+                            textSize = 15f
+                            gravity = Gravity.CENTER
+                            setTextColor(EmbeddedSettingsPalette.onSurfaceVariant)
+                            setSingleLine(false)
+                            setPadding(0, dp(activity, 8), 0, 0)
+                        }, matchWidthWrapContent())
+                        addView(TextView(activity).apply {
+                            text = if (entries.isEmpty()) "添加歌词后会显示在这里" else "尝试更换关键词或检查 ID 是否正确"
+                            textSize = 12.5f
+                            gravity = Gravity.CENTER
+                            setTextColor(EmbeddedSettingsPalette.disabledText)
+                            setSingleLine(false)
+                            setPadding(0, dp(activity, 4), 0, 0)
+                        }, matchWidthWrapContent())
+                    }, matchWidthWrapContent())
                     return
                 }
                 val visibleGroups = state.visibleGroups
@@ -1575,7 +1875,12 @@ internal class EmbeddedSettingsHost private constructor(
         val entry = group.primary
         orientation = LinearLayout.VERTICAL
         setPadding(dp(activity, 16), dp(activity, 8), dp(activity, 12), dp(activity, 8))
-        minimumHeight = dp(activity, if (isEmbeddedPhone(activity)) 132 else 112)
+        minimumHeight = dp(activity, if (isEmbeddedPhone(activity)) 168 else 160)
+        background = GradientDrawable().apply {
+            setColor(Color.WHITE)
+            setStroke(dp(activity, 1), EmbeddedSettingsPalette.outline)
+            cornerRadius = dp(activity, 8).toFloat()
+        }
         val artist = song
             ?.takeIf { it.appleMusicId == entry.appleMusicId }
             ?.artist
@@ -1587,15 +1892,13 @@ internal class EmbeddedSettingsHost private constructor(
                 append(it)
                 append(" · ")
             }
-            append("Apple Music ID：")
+            append("AM ID: ")
             append(entry.appleMusicId)
             if (group.entries.size > 1) {
                 append(" · 共 ")
                 append(group.entries.size)
                 append(" 个 ID")
             }
-            append(" · ")
-            append(embeddedCustomLyricsSourceName(entry.source))
         }
         addView(LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1606,13 +1909,13 @@ internal class EmbeddedSettingsHost private constructor(
                     text = entry.displayName.ifBlank { entry.appleMusicId.toString() }
                     textSize = 16f
                     setTextColor(EmbeddedSettingsPalette.onSurface)
-                    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                    typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                     setSingleLine(false)
                     maxLines = 2
                 }, matchWidthWrapContent())
                 addView(TextView(activity).apply {
                     text = secondary
-                    textSize = 13f
+                    textSize = 14f
                     setTextColor(EmbeddedSettingsPalette.onSurfaceVariant)
                     setPadding(0, dp(activity, 3), 0, 0)
                     setSingleLine(false)
@@ -1630,36 +1933,38 @@ internal class EmbeddedSettingsHost private constructor(
                     runAsync(activity) { controller.setLyricsEnabled(group.appleMusicIds, checked) }
                 }
             }, LinearLayout.LayoutParams(dp(activity, 64), dp(activity, 48)))
-        }, matchWidthWrapContent())
-        addView(LinearLayout(activity).apply {
-            orientation = embeddedActionOrientation(activity)
-            setPadding(0, dp(activity, 4), 0, 0)
-            addView(embeddedActionButton(activity, "编辑") {
-                showLyricsEditor(activity, group, song)
-            }, embeddedActionButtonParams(activity))
-            addView(embeddedActionSpacer(activity))
-            addView(embeddedActionButton(activity, "删除") {
-                confirmEmbeddedLyricsDelete(activity, group)
-            }, embeddedActionButtonParams(activity))
             addView(TextView(activity).apply {
                 text = "⋮"
                 textSize = 24f
                 gravity = Gravity.CENTER
-                setTextColor(EmbeddedSettingsPalette.accent)
+                setTextColor(EmbeddedSettingsPalette.onSurfaceVariant)
                 contentDescription = "更多歌词操作"
                 isClickable = true
                 isFocusable = true
                 minimumHeight = dp(activity, 48)
-                background = GradientDrawable().apply {
-                    setColor(EmbeddedSettingsPalette.softSurface)
-                    cornerRadius = dp(activity, 12).toFloat()
-                }
                 setOnClickListener { showEmbeddedLyricsOverflowMenu(activity, group, song, this) }
-            }, if (isEmbeddedPhone(activity)) {
-                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 48))
-            } else {
-                LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 48))
-            })
+            }, LinearLayout.LayoutParams(dp(activity, 40), dp(activity, 48)))
+        }, matchWidthWrapContent())
+        addView(LinearLayout(activity).apply {
+            orientation = embeddedActionOrientation(activity)
+            setPadding(0, dp(activity, 4), 0, 0)
+            addView(embeddedEntryActionButton(
+                activity,
+                "编辑歌词",
+                android.R.drawable.ic_menu_edit,
+                EmbeddedSettingsPalette.accent,
+            ) {
+                showLyricsEditor(activity, group, song)
+            }, embeddedActionButtonParams(activity))
+            addView(embeddedActionSpacer(activity))
+            addView(embeddedEntryActionButton(
+                activity,
+                "删除",
+                android.R.drawable.ic_menu_delete,
+                EmbeddedSettingsPalette.primary,
+            ) {
+                confirmEmbeddedLyricsDelete(activity, group)
+            }, embeddedActionButtonParams(activity))
         }, matchWidthWrapContent())
     }
 
@@ -1861,15 +2166,46 @@ internal class EmbeddedSettingsHost private constructor(
 
     private fun embeddedStatusCard(activity: Activity, song: CurrentSongDetails?): View =
         embeddedCard(activity, null) {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(activity, 84)
+            setPadding(dp(activity, 16), dp(activity, 12), dp(activity, 12), dp(activity, 12))
+            addView(embeddedMusicIcon(activity), LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 48)))
+            addView(LinearLayout(activity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(TextView(activity).apply {
+                    text = song?.let {
+                        "当前歌曲：${it.title.orEmpty().ifBlank { "未知标题" }}"
+                    } ?: "当前歌曲：尚未捕获（播放一首歌后重试）"
+                    textSize = 16f
+                    setTextColor(EmbeddedSettingsPalette.onSurface)
+                    setTypeface(typeface, Typeface.BOLD)
+                    setSingleLine(false)
+                    maxLines = 2
+                }, matchWidthWrapContent())
+                addView(TextView(activity).apply {
+                    text = song?.let { "Apple Music ID：${it.appleMusicId}" } ?: "播放一首歌后显示 Apple Music ID"
+                    textSize = 13f
+                    setTextColor(EmbeddedSettingsPalette.onSurfaceVariant)
+                    setSingleLine(false)
+                    setPadding(0, dp(activity, 3), 0, 0)
+                }, matchWidthWrapContent())
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginStart = dp(activity, 14)
+            })
             addView(TextView(activity).apply {
-                text = song?.let {
-                    "当前歌曲：${it.title.orEmpty().ifBlank { "未知标题" }}\nApple Music ID：${it.appleMusicId}"
-                } ?: "当前歌曲：尚未捕获（播放一首歌后重试）"
-                textSize = 14f
-                setTextColor(EmbeddedSettingsPalette.onSurface)
-                setSingleLine(false)
-                setPadding(dp(activity, 16), dp(activity, 14), dp(activity, 16), dp(activity, 14))
-            }, matchWidthWrapContent())
+                text = "›"
+                textSize = 28f
+                gravity = Gravity.CENTER
+                setTextColor(EmbeddedSettingsPalette.onSurfaceVariant)
+            }, LinearLayout.LayoutParams(dp(activity, 32), dp(activity, 48)))
+        }
+
+    private fun embeddedMusicIcon(activity: Activity): View =
+        ImageView(activity).apply {
+            setImageDrawable(EmbeddedMusicStatusDrawable())
+            contentDescription = "当前歌曲"
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
         }
 
     private fun embeddedFontCard(
@@ -1913,15 +2249,16 @@ internal class EmbeddedSettingsHost private constructor(
     private fun embeddedCard(
         activity: Activity,
         title: String?,
+        outlined: Boolean = true,
         content: LinearLayout.() -> Unit,
     ): LinearLayout = LinearLayout(activity).apply {
         orientation = LinearLayout.VERTICAL
         background = GradientDrawable().apply {
-            setColor(EmbeddedSettingsPalette.softBackground)
-            setStroke(dp(activity, 1), EmbeddedSettingsPalette.outline)
-            cornerRadius = dp(activity, 18).toFloat()
+            setColor(if (outlined) Color.WHITE else Color.TRANSPARENT)
+            if (outlined) setStroke(dp(activity, 1), EmbeddedSettingsPalette.outline)
+            cornerRadius = dp(activity, 6).toFloat()
         }
-        elevation = dp(activity, 1).toFloat()
+        elevation = 0f
         title?.let { section -> addView(embeddedSectionLabel(activity, section)) }
         content()
     }
@@ -1972,12 +2309,18 @@ internal class EmbeddedSettingsHost private constructor(
         summary: String,
         checked: Boolean,
         badge: String? = null,
+        iconRes: Int = android.R.drawable.ic_menu_info_details,
+        iconTint: Int = EmbeddedSettingsPalette.accent,
+        iconDrawable: Drawable? = null,
         onChanged: (Boolean) -> Unit,
     ): View = LinearLayout(activity).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         minimumHeight = dp(activity, 76)
         setPadding(dp(activity, 16), dp(activity, 8), dp(activity, 12), dp(activity, 8))
+        addView(embeddedFeatureIcon(activity, iconDrawable ?: activity.getDrawable(iconRes), iconTint), LinearLayout.LayoutParams(dp(activity, 44), dp(activity, 44)).apply {
+            marginEnd = dp(activity, 16)
+        })
         val labels = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
             addView(LinearLayout(activity).apply {
@@ -1987,7 +2330,7 @@ internal class EmbeddedSettingsHost private constructor(
                     text = title
                     textSize = 16f
                     setTextColor(EmbeddedSettingsPalette.onSurface)
-                    setTypeface(typeface, Typeface.BOLD)
+                    setTypeface(typeface, Typeface.NORMAL)
                     setSingleLine(false)
                     maxLines = 2
                 }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
@@ -1997,7 +2340,7 @@ internal class EmbeddedSettingsHost private constructor(
             }, matchWidthWrapContent())
             addView(TextView(activity).apply {
                 text = summary
-                textSize = 12.5f
+                textSize = 13.5f
                 setTextColor(EmbeddedSettingsPalette.onSurfaceVariant)
                 setSingleLine(false)
                 maxLines = 3
@@ -2032,6 +2375,34 @@ internal class EmbeddedSettingsHost private constructor(
             ViewGroup.LayoutParams.WRAP_CONTENT,
         ).apply { marginStart = dp(activity, 8) }
     }
+
+    private fun embeddedFeatureIcon(activity: Activity, iconRes: Int): View =
+        embeddedFeatureIcon(activity, iconRes, EmbeddedSettingsPalette.accent)
+
+    private fun embeddedFeatureIcon(activity: Activity, iconRes: Int, iconTint: Int): View =
+        embeddedFeatureIcon(activity, activity.getDrawable(iconRes), iconTint)
+
+    private fun embeddedFeatureIcon(activity: Activity, icon: Drawable?, iconTint: Int): View =
+        FrameLayout(activity).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                setColor(EmbeddedSettingsPalette.softSurface)
+                cornerRadius = dp(activity, 10).toFloat()
+            }
+            addView(ImageView(activity).apply {
+                setImageDrawable(icon)
+                if (icon is EmbeddedGlyphDrawable) {
+                    imageTintList = null
+                } else {
+                    imageTintList = ColorStateList.valueOf(iconTint)
+                }
+                contentDescription = null
+                setPadding(dp(activity, 10), dp(activity, 10), dp(activity, 10), dp(activity, 10))
+            }, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ))
+        }
 
     private fun embeddedBlurRadiusRow(
         activity: Activity,
@@ -2133,29 +2504,36 @@ internal class EmbeddedSettingsHost private constructor(
         activity: Activity,
         title: String,
         summary: String,
+        iconRes: Int = android.R.drawable.ic_menu_info_details,
+        iconTint: Int = EmbeddedSettingsPalette.accent,
+        iconDrawable: Drawable? = null,
+        clickable: Boolean = true,
         onClick: () -> Unit,
     ): View = LinearLayout(activity).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         minimumHeight = dp(activity, 80)
-        isClickable = true
-        isFocusable = true
+        isClickable = clickable
+        isFocusable = clickable
         contentDescription = title
         setPadding(dp(activity, 16), dp(activity, 10), dp(activity, 14), dp(activity, 10))
-        setOnClickListener { onClick() }
+        if (clickable) setOnClickListener { onClick() }
+        addView(embeddedFeatureIcon(activity, iconDrawable ?: activity.getDrawable(iconRes), iconTint), LinearLayout.LayoutParams(dp(activity, 44), dp(activity, 44)).apply {
+            marginEnd = dp(activity, 16)
+        })
         addView(LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(activity).apply {
                 text = title
                 textSize = 16f
                 setTextColor(EmbeddedSettingsPalette.onSurface)
-                setTypeface(typeface, Typeface.BOLD)
+                setTypeface(typeface, Typeface.NORMAL)
                 setSingleLine(false)
                 maxLines = 2
             }, matchWidthWrapContent())
             addView(TextView(activity).apply {
                 text = summary
-                textSize = 12.5f
+                textSize = 13.5f
                 setTextColor(EmbeddedSettingsPalette.onSurfaceVariant)
                 setSingleLine(false)
                 maxLines = 3
@@ -2165,7 +2543,7 @@ internal class EmbeddedSettingsHost private constructor(
         addView(TextView(activity).apply {
             text = "›"
             textSize = 28f
-            setTextColor(EmbeddedSettingsPalette.accent)
+            setTextColor(EmbeddedSettingsPalette.onSurfaceVariant)
             gravity = Gravity.CENTER
             minimumHeight = dp(activity, 48)
         }, LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 48)))
@@ -2189,6 +2567,115 @@ internal class EmbeddedSettingsHost private constructor(
             cornerRadius = dp(activity, 12).toFloat()
         }
         setOnClickListener { if (enabled) onClick() }
+    }
+
+    private fun embeddedIconActionButton(
+        activity: Activity,
+        label: String,
+        iconRes: Int,
+        onClick: () -> Unit,
+    ): View = embeddedIconActionButton(activity, label, activity.getDrawable(iconRes), onClick)
+
+    private fun embeddedIconActionButton(
+        activity: Activity,
+        label: String,
+        icon: Drawable?,
+        onClick: () -> Unit,
+    ): View = LinearLayout(activity).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER
+        isClickable = true
+        isFocusable = true
+        minimumHeight = dp(activity, 64)
+        contentDescription = label
+        background = GradientDrawable().apply {
+            setColor(EmbeddedSettingsPalette.softSurface)
+            cornerRadius = dp(activity, 8).toFloat()
+        }
+        addView(ImageView(activity).apply {
+            setImageDrawable(icon)
+            imageTintList = if (icon is EmbeddedGlyphDrawable) {
+                null
+            } else {
+                ColorStateList.valueOf(EmbeddedSettingsPalette.accent)
+            }
+            contentDescription = null
+            setPadding(dp(activity, 2), dp(activity, 2), dp(activity, 2), dp(activity, 2))
+        }, LinearLayout.LayoutParams(dp(activity, 28), dp(activity, 28)))
+        addView(TextView(activity).apply {
+            text = label
+            textSize = 14f
+            gravity = Gravity.CENTER
+            setTextColor(EmbeddedSettingsPalette.accent)
+            setTypeface(typeface, Typeface.NORMAL)
+            setSingleLine(false)
+            maxLines = 2
+            setPadding(0, dp(activity, 2), 0, 0)
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        setOnClickListener { onClick() }
+    }
+
+    private fun embeddedEntryActionButton(
+        activity: Activity,
+        label: String,
+        iconRes: Int,
+        tint: Int,
+        onClick: () -> Unit,
+    ): View = LinearLayout(activity).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER
+        isClickable = true
+        isFocusable = true
+        contentDescription = label
+        background = GradientDrawable().apply {
+            setColor(EmbeddedSettingsPalette.softSurface)
+            cornerRadius = dp(activity, 8).toFloat()
+        }
+        addView(ImageView(activity).apply {
+            setImageResource(iconRes)
+            imageTintList = ColorStateList.valueOf(tint)
+            contentDescription = null
+        }, LinearLayout.LayoutParams(dp(activity, 24), dp(activity, 24)).apply {
+            marginEnd = dp(activity, 8)
+        })
+        addView(TextView(activity).apply {
+            text = label
+            textSize = 14f
+            setTextColor(tint)
+            setTypeface(typeface, Typeface.NORMAL)
+            gravity = Gravity.CENTER_VERTICAL
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(activity, 48)))
+        setOnClickListener { onClick() }
+    }
+
+    private fun embeddedIconActionButtonParams(activity: Activity): LinearLayout.LayoutParams =
+        if (isEmbeddedPhone(activity)) {
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 80))
+        } else {
+            LinearLayout.LayoutParams(0, dp(activity, 92), 1f)
+        }
+
+    private fun showEmbeddedBackupRestoreMenu(activity: Activity, anchor: View) {
+        PopupMenu(activity, anchor).apply {
+            menu.add("备份歌词").setOnMenuItemClickListener {
+                launchSafPicker(activity, EmbeddedSafOperation.Backup, "application/zip")
+                true
+            }
+            menu.add("恢复备份").setOnMenuItemClickListener {
+                launchSafPicker(
+                    activity,
+                    EmbeddedSafOperation.RestoreOverwrite,
+                    "*/*",
+                    arrayOf(
+                        "application/zip",
+                        "application/x-zip-compressed",
+                        "application/octet-stream",
+                    ),
+                )
+                true
+            }
+            show()
+        }
     }
 
     private fun embeddedActionSpacer(activity: Activity): View = View(activity).apply {
@@ -2979,6 +3466,22 @@ internal class EmbeddedSettingsHost private constructor(
             ?: EmbeddedAmppFallbackDrawable()
     }
 
+    private fun loadEmbeddedArrowIcon(context: Context): Drawable = sequenceOf(
+        ModuleConstants.MODULE_PACKAGE,
+        "${ModuleConstants.MODULE_PACKAGE}.debug",
+    ).mapNotNull { packageName ->
+        runCatching {
+            val moduleContext = context.createPackageContext(
+                packageName,
+                Context.CONTEXT_IGNORE_SECURITY,
+            )
+            moduleContext.resources.getDrawable(
+                dev.amenhancer.module.R.drawable.ic_arrow_back,
+                moduleContext.theme,
+            )
+        }.getOrNull()
+    }.firstOrNull() ?: EmbeddedArrowFallbackDrawable()
+
     /** Returns false for a transparent/missing-gradient vector resource. */
     private fun hasEmbeddedIconArtwork(drawable: Drawable): Boolean = runCatching {
         val size = 64
@@ -3026,7 +3529,7 @@ internal class EmbeddedSettingsHost private constructor(
             intArrayOf(android.R.attr.state_checked),
             intArrayOf(),
         ),
-        intArrayOf(EmbeddedSettingsPalette.primaryPressed, EmbeddedSettingsPalette.softSurface),
+        intArrayOf(EmbeddedSettingsPalette.switchTrackOn, EmbeddedSettingsPalette.switchTrackOff),
     )
 
     private fun activityKey(activity: Activity): String =
