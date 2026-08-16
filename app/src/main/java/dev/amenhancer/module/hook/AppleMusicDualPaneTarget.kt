@@ -420,6 +420,9 @@ internal class AppleMusicDualPaneTarget(
             activityRootResolution.valueOrNull(),
             behaviorFieldResolution.valueOrNull(),
         )
+        StaticCollapsedInterceptGuard.install(
+            behaviorFieldResolution.valueOrNull()?.declaringClass?.classLoader,
+        )
         val lyricsFragmentResolution = symbols.resolve(AppleMusicSymbols.LyricsFragment)
         val lyricsFragmentClass = lyricsFragmentResolution.valueOrNull()
         val lyricsChromeResolution = symbols.resolve(AppleMusicSymbols.LyricsChromeAnimate)
@@ -742,8 +745,14 @@ internal class AppleMusicDualPaneTarget(
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val requested = param.args.firstOrNull() as? Enum<*> ?: return
                     val controllerInstance = param.thisObject ?: return
-                    if (requested.name != LYRICS_STATE || stateFor(controllerInstance) == null) return
-                    param.result = null
+                    val state = stateFor(controllerInstance) ?: return
+                    if (!TabletModeQualifier.isEligible(state.root.context)) {
+                        state.root.setTag(R.id.am_enhancer_dual_pane_state, null)
+                        return
+                    }
+                    if (requested.name == LYRICS_STATE) {
+                        param.result = null
+                    }
                 }
             })
         ) {
@@ -753,9 +762,10 @@ internal class AppleMusicDualPaneTarget(
     }
 
     /**
-     * Return Apple Music's own phone holder before k1() can instantiate the
-     * tablet holder. The native object then owns slide interpolation, peek
-     * height, navigation translation, colors and system-bar transitions.
+     * Keep the native flat holder for the transformed landscape root. Only
+     * return the native stacked holder when the actual root is stacked; the
+     * holder owns slide interpolation, peek height, navigation translation,
+     * colors and system-bar transitions.
      */
     private fun installNativeStackedNavigationHolderHook(
         method: Method?,
@@ -807,6 +817,21 @@ internal class AppleMusicDualPaneTarget(
                         "id",
                         ModuleConstants.TARGET_PACKAGE,
                     )
+                    val flatRoot = if (flatRootId != 0) {
+                        root.findViewById<View>(flatRootId)
+                            ?: activity.findViewById<View>(flatRootId)
+                    } else {
+                        null
+                    }
+                    // 6.5.2 selects the flat holder whenever the
+                    // landscape resource exposes the flat root. Preserve
+                    // that native holder: it owns the full-player lifecycle.
+                    // The stacked holder is only valid for a real stacked
+                    // root, not for the transformed landscape flat layout.
+                    if (flatRoot != null) {
+                        debug("preserving native flat bottom navigation holder")
+                        return
+                    }
                     val navigationRoot = sequenceOf(stackedRootId, flatRootId)
                         .filter { it != 0 }
                         .mapNotNull(root::findViewById)
@@ -965,9 +990,7 @@ internal class AppleMusicDualPaneTarget(
                 System.identityHashCode(rootGroup) +
                 " attached=" + rootGroup.isAttachedToWindow,
         )
-        if (DualPaneShell.installImmediately(rootGroup) != null) {
-            attachLyricsPane(controller, rootGroup)
-        }
+        if (DualPaneShell.installImmediately(rootGroup) != null) attachLyricsPane(controller, rootGroup)
     }
 }
 
@@ -1022,7 +1045,7 @@ internal data class FlatPlayerBoundaryDecision(
 /**
  * Phase 109 settled visual compensation: expanded always settles at
  * translationY 0, a settled collapsed sheet settles at exactly
- * -navigationInset. The decision stays binary on `expanded` (sheetTop <=
+ * -tabsHeight. The decision stays binary on `expanded` (sheetTop <=
  * rootHeight / 2) on purpose: the collapsed peek geometry is owned by
  * Apple's holder and is not measurable here, so no continuous
  * sheetTop-to-collapsed mapping could be verified. It is applied as visual
@@ -1037,7 +1060,6 @@ internal object FlatPlayerBoundaryPolicy {
         sheetBottom: Int,
         tabsTop: Int,
         tabsHeight: Int,
-        navigationInset: Int,
         wasNavigationSpaceReserved: Boolean,
     ): FlatPlayerBoundaryDecision {
         require(rootHeight > 0) { "rootHeight must be positive" }
@@ -1049,11 +1071,11 @@ internal object FlatPlayerBoundaryPolicy {
         val reserveNavigationSpace = wasNavigationSpaceReserved || collapsedOverlap
         return FlatPlayerBoundaryDecision(
             reserveNavigationSpace = reserveNavigationSpace,
-            // Expanded is the settled zero; a reserved collapsed sheet
-            // settles at the negative navigation inset. The reservation
-            // latch makes the collapsed state sticky so the binary flip
-            // cannot oscillate around the midpoint.
-            translationY = if (!expanded && reserveNavigationSpace) -navigationInset else 0,
+            // Expanded is the settled zero; a reserved collapsed sheet must
+            // clear the complete tabs frame, not only its 16dp breathing
+            // space. The reservation latch makes the collapsed state sticky
+            // so the binary flip cannot oscillate around the midpoint.
+            translationY = if (!expanded && reserveNavigationSpace) -tabsHeight else 0,
             // Let the native holder own an expanded transition until the
             // collapsed geometry has established a navigation reservation.
             tabsVisible = !reserveNavigationSpace || !expanded,
@@ -1174,8 +1196,8 @@ private object ConstraintLayoutPane {
 
     /**
      * Mirrors the modified layout-land/bottom_navigation.xml by converting the
-     * stock flat resource tree into full-width stacked chrome. Apple Music's
-     * native StackedBottomNavigationHolder owns its peek height and transitions.
+     * stock flat resource tree into full-width tablet chrome. Apple Music's
+     * native bottom-navigation holder owns its peek height and transitions.
      */
     fun installLandscapeBottomNavigation(root: ViewGroup) {
         if (!TabletModeQualifier.isEligible(root.context)) {
@@ -1217,7 +1239,6 @@ private object ConstraintLayoutPane {
                 playerContainer,
                 tabsFrame,
                 tabsHeight,
-                (tabsHeight - menuHeight).coerceAtLeast(0),
             )
             installTabsDivider(tabsFrame, resources)
 
@@ -1380,7 +1401,6 @@ private object ConstraintLayoutPane {
         playerContainer: View,
         tabsFrame: View,
         tabsHeight: Int,
-        navigationInset: Int,
     ) {
         if (!FlatLandscapeWindowPolicy.shouldInstallBoundarySync(root.context)) return
         val sheetId = targetId(root.resources, PLAYER_SHEET_CONTAINER)
@@ -1419,12 +1439,10 @@ private object ConstraintLayoutPane {
                 sheetBottom = sheetTop + sheet.height,
                 tabsTop = tabsLocation[1] - rootTop,
                 tabsHeight = tabsHeight,
-                navigationInset = navigationInset,
                 wasNavigationSpaceReserved = reserveNavigationSpace,
             )
             reserveNavigationSpace = decision.reserveNavigationSpace
-            val desired = decision.translationY
-            val desiredTranslation = desired.toFloat()
+            val desiredTranslation = decision.translationY.toFloat()
             val translationChanged = playerContainer.translationY != desiredTranslation
             val desiredTabsVisibility = if (decision.tabsVisible) View.VISIBLE else View.INVISIBLE
             val tabsVisibilityChanged = tabsFrame.visibility != desiredTabsVisibility

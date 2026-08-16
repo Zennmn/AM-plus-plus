@@ -174,8 +174,8 @@ class DualPaneStructuralRegressionTest {
 
     @Test
     fun `limits flat player boundary sync to the compensation switch`() {
-        assertTrue(source.contains("tabsHeight - menuHeight"))
-        assertTrue(source.contains("navigationInset = navigationInset"))
+        assertTrue(source.contains("val tabsHeight = stackedTabsContainerHeight(root.context, menuHeight)"))
+        assertTrue(source.contains("translationY = if (!expanded && reserveNavigationSpace) -tabsHeight else 0"))
         assertTrue(source.contains("if (!FlatLandscapeWindowPolicy.shouldInstallBoundarySync(root.context)) return"))
         assertFalse(source.contains("display.getRealMetrics(metrics)"))
         assertFalse(source.contains("physicalWidthPx = metrics?.widthPixels ?: 0"))
@@ -184,7 +184,7 @@ class DualPaneStructuralRegressionTest {
         assertTrue(source.contains("sheet.getLocationInWindow(sheetLocation)"))
         assertTrue(source.contains("tabsFrame.getLocationInWindow(tabsLocation)"))
         assertTrue(source.contains("reserveNavigationSpace = decision.reserveNavigationSpace"))
-        assertTrue(source.contains("val desired = decision.translationY"))
+        assertTrue(source.contains("val desiredTranslation = decision.translationY.toFloat()"))
         assertTrue(source.contains("playerContainer.translationY = desiredTranslation"))
         assertFalse(source.contains("params.bottomMargin = desired"))
     }
@@ -195,7 +195,7 @@ class DualPaneStructuralRegressionTest {
         assertTrue(source.contains("sheet.viewTreeObserver.addOnPreDrawListener"))
         assertTrue(source.contains("removeOnPreDrawListener"))
         assertTrue(source.contains("sheet.addOnAttachStateChangeListener"))
-        assertTrue(source.contains("tabsHeight - menuHeight"))
+        assertTrue(source.contains("translationY = if (!expanded && reserveNavigationSpace) -tabsHeight else 0"))
         assertTrue(source.contains("val desiredTabsVisibility = if (decision.tabsVisible) View.VISIBLE else View.INVISIBLE"))
         assertTrue(source.contains("tabsFrame.visibility = desiredTabsVisibility"))
         assertFalse(source.contains("miniPlayerId"))
@@ -239,6 +239,28 @@ class DualPaneStructuralRegressionTest {
         assertFalse(synchronousInstallSource.contains("addOnAttachStateChangeListener"))
         assertFalse(synchronousInstallSource.contains("onViewAttachedToWindow"))
         assertTrue(source.contains("[AMENH-2]"))
+    }
+
+    @Test
+    fun `does not intercept lyrics after leaving tablet landscape`() {
+        assertTrue(source.contains("val state = stateFor(controllerInstance) ?: return"))
+        assertTrue(source.contains("if (!TabletModeQualifier.isEligible(state.root.context))"))
+        assertTrue(source.contains("state.root.setTag(R.id.am_enhancer_dual_pane_state, null)"))
+        assertTrue(source.contains("if (requested.name == LYRICS_STATE)"))
+    }
+
+    @Test
+    fun `leaves queue selection and player transitions to native Apple Music`() {
+        assertFalse(source.contains("QUEUE_STATE"))
+        assertFalse(source.contains("paneSwitchInProgress"))
+        assertFalse(source.contains("expandPlayerSheet"))
+    }
+
+    @Test
+    fun `preserves the flat holder for the landscape flat root`() {
+        assertTrue(source.contains("preserving native flat bottom navigation holder"))
+        assertTrue(source.contains("if (flatRoot != null)"))
+        assertTrue(source.contains("constructor.newInstance(activity, navigationRoot, behavior)"))
     }
 
     @Test
