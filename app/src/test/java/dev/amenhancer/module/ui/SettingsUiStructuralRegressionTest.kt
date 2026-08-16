@@ -180,7 +180,11 @@ class SettingsUiStructuralRegressionTest {
         assertTrue(activity.contains("刷新资料库"))
         assertTrue(activity.contains("requestLibraryRefresh()"))
         assertTrue(protocol.contains("REQUEST_LIBRARY_REFRESH"))
-        assertTrue(manifest.contains("REQUEST_LIBRARY_REFRESH"))
+        // The embedded artifact has no exported settings activity or
+        // cross-process request surface; the refresh action is still present
+        // in the in-host settings dialog and is wired through the shared
+        // current-process cache.
+        assertFalse(manifest.contains("REQUEST_LIBRARY_REFRESH"))
         assertTrue(titleTarget.contains("MediaEntityGetTitleMethod"))
         assertTrue(titleTarget.contains("MediaEntityGetAttributesMethod"))
         assertTrue(titleTarget.contains("MediaEntityToCollectionItemViewMethod"))

@@ -74,8 +74,6 @@ internal class EmbeddedRuntimeSettingsController(
         val bytes = try {
             appContext.contentResolver.openInputStream(uri)?.use(FontFilePolicy::readBounded)
                 ?: return EmbeddedActionResult.Failed("无法读取所选字体")
-        } catch (_: FontFilePolicy.FontSizeLimitExceeded) {
-            return EmbeddedActionResult.Failed("字体超过 16 MiB")
         } catch (_: Throwable) {
             return EmbeddedActionResult.Failed("无法读取所选字体")
         }
