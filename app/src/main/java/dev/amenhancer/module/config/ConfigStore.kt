@@ -138,6 +138,14 @@ class ConfigStore(context: Context) {
             }
         }
 
+        /**
+         * AM++'s own pre-remote configuration file, migrated once into the
+         * libxposed "settings" group when the service first binds.  Not to be
+         * confused with AMTool 1.2's similarly-named "module_settings" file,
+         * which belongs to the separate com.mukapp.applemusictool app and is
+         * unreadable here (see ModuleSettingsSchema.AMTOOL_MODIFY_LOCALE_KEY):
+         * no AMTool key migration exists.
+         */
         private const val LEGACY_PREFERENCES_NAME = "module-settings"
     }
 }
