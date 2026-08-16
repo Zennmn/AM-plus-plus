@@ -39,6 +39,7 @@ import dev.amenhancer.module.hook.HttpLyricTransport
 import dev.amenhancer.module.hook.ModernXposedRuntime
 import dev.amenhancer.module.hook.NeteaseLyricClient
 import dev.amenhancer.module.lyrics.CustomLyricsDraft
+import dev.amenhancer.module.lyrics.CustomLyricsMultiIdDraft
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImportResult
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImporter
 import dev.amenhancer.module.lyrics.CustomLyricsRestorePolicy
@@ -317,11 +318,21 @@ internal interface EmbeddedSettingsController {
     fun currentSongDetails(): CurrentSongDetails? = null
     fun lyricsEntries(): List<CustomLyricsEntry> = emptyList()
     fun readLyrics(appleMusicId: Long): String? = null
+    /** Reads and validates a SAF TTML document without persisting it. */
+    fun readTtml(uri: Uri): String? = null
     fun saveLyrics(draft: CustomLyricsDraft, replacingAppleMusicId: Long? = null): EmbeddedActionResult =
         EmbeddedActionResult.Failed("歌词管理不可用")
+    fun saveLyrics(
+        draft: CustomLyricsMultiIdDraft,
+        replacingAppleMusicIds: List<Long> = emptyList(),
+    ): EmbeddedActionResult = EmbeddedActionResult.Failed("歌词管理不可用")
     fun setLyricsEnabled(appleMusicId: Long, enabled: Boolean): EmbeddedActionResult =
         EmbeddedActionResult.Failed("歌词管理不可用")
+    fun setLyricsEnabled(appleMusicIds: List<Long>, enabled: Boolean): EmbeddedActionResult =
+        EmbeddedActionResult.Failed("歌词管理不可用")
     fun deleteLyrics(appleMusicId: Long): EmbeddedActionResult =
+        EmbeddedActionResult.Failed("歌词管理不可用")
+    fun deleteLyrics(appleMusicIds: List<Long>): EmbeddedActionResult =
         EmbeddedActionResult.Failed("歌词管理不可用")
     fun importFont(uri: Uri): EmbeddedActionResult = EmbeddedActionResult.Failed("字体导入不可用")
     fun clearFont(): EmbeddedActionResult = EmbeddedActionResult.Failed("字体管理不可用")
@@ -380,6 +391,7 @@ internal class EmbeddedSettingsHost private constructor(
     private var libraryRefreshDialog: AlertDialog? = null
     private val customLyricsListState = CustomLyricsListState()
     private var customLyricsSearchQuery = ""
+    private var pendingTtmlImport: ((String) -> Unit)? = null
     private var buttonReference: WeakReference<View>? = null
     private var settingsOptionReference: WeakReference<View>? = null
     private var activeActivityId: String? = null
@@ -468,6 +480,7 @@ internal class EmbeddedSettingsHost private constructor(
         return when (val route = safRouter.route(requestCode, resultCode, data?.dataString)) {
             EmbeddedSafRoute.Ignored -> false
             is EmbeddedSafRoute.Canceled -> {
+                if (route.operation == EmbeddedSafOperation.Ttml) pendingTtmlImport = null
                 currentActivity()?.let { activity ->
                     Toast.makeText(activity, "未选择文件", Toast.LENGTH_SHORT).show()
                 }
@@ -1207,10 +1220,18 @@ internal class EmbeddedSettingsHost private constructor(
             addView(embeddedDivider(activity))
             addView(embeddedSettingRow(
                 activity,
-                "平板隐藏编辑视频",
+                "平板禁用动态视频",
                 "平板横屏时禁用 Editorial Video",
                 settings.disableEditorialVideoOnTablet,
             ) { onSettingsChanged(settings.copy(disableEditorialVideoOnTablet = it)) })
+            addView(embeddedDivider(activity))
+            addView(embeddedSettingRow(
+                activity,
+                "手机液态玻璃底栏",
+                "仅手机启用 · 更改后需强制停止并重开 Apple Music",
+                settings.phoneLiquidGlassEnabled,
+                badge = "WIP",
+            ) { onSettingsChanged(settings.copy(phoneLiquidGlassEnabled = it)) })
             addView(embeddedDivider(activity))
             addView(embeddedSettingRow(
                 activity,
@@ -1269,12 +1290,16 @@ internal class EmbeddedSettingsHost private constructor(
         ))
         parent.addView(embeddedSpacer(activity, 20))
         parent.addView(embeddedSectionLabel(activity, "应用"))
-        parent.addView(embeddedInfoCard(activity, "配置保存在 Apple Music 私有目录，不依赖模块 Activity。"))
+        parent.addView(embeddedInfoCard(
+            activity,
+            "配置保存在 Apple Music 私有目录，不依赖模块 Activity。\n嵌入版没有独立启动器 Activity，因此不显示“隐藏启动器图标”开关。",
+        ))
         parent.addView(embeddedSpacer(activity, 16))
         parent.addView(embeddedSectionLabel(activity, "帮助"))
         parent.addView(embeddedInfoCard(
             activity,
-            "字体和标记“需重启”的设置，需要完全重开 Apple Music 后生效。",
+            "LSPosed 配置提示\n字体和标记“需重启”的设置，需要完全重开 Apple Music 后生效。",
+            onClick = { showEmbeddedHelp(activity) },
         ))
     }
 
@@ -1313,7 +1338,7 @@ internal class EmbeddedSettingsHost private constructor(
                 orientation = LinearLayout.HORIZONTAL
                 setPadding(dp(activity, 12), 0, dp(activity, 12), dp(activity, 8))
                 addView(embeddedActionButton(activity, "添加歌词") {
-                    showLyricsEditor(activity, null, song)
+                    showLyricsEditor(activity, null as CustomLyricsUiGroup?, song)
                 }, LinearLayout.LayoutParams(0, dp(activity, 48), 1f))
             }, matchWidthWrapContent())
 
@@ -1328,7 +1353,12 @@ internal class EmbeddedSettingsHost private constructor(
                     launchSafPicker(
                         activity,
                         EmbeddedSafOperation.RestoreOverwrite,
-                        "application/zip",
+                        "*/*",
+                        arrayOf(
+                            "application/zip",
+                            "application/x-zip-compressed",
+                            "application/octet-stream",
+                        ),
                     )
                 }, LinearLayout.LayoutParams(0, dp(activity, 48), 1f))
             }, matchWidthWrapContent())
@@ -1382,10 +1412,10 @@ internal class EmbeddedSettingsHost private constructor(
                     })
                     return
                 }
-                val visibleEntries = state.visibleEntries
-                visibleEntries.forEachIndexed { index, entry ->
-                    entriesRegion.addView(embeddedCustomLyricsEntryRow(activity, entry, song))
-                    if (index < visibleEntries.lastIndex) entriesRegion.addView(embeddedDivider(activity))
+                val visibleGroups = state.visibleGroups
+                visibleGroups.forEachIndexed { index, group ->
+                    entriesRegion.addView(embeddedCustomLyricsEntryRow(activity, group, song))
+                    if (index < visibleGroups.lastIndex) entriesRegion.addView(embeddedDivider(activity))
                 }
                 entriesRegion.addView(TextView(activity).apply {
                     text = "已显示 ${state.visibleCount} / 共 ${state.totalCount} 首"
@@ -1421,9 +1451,10 @@ internal class EmbeddedSettingsHost private constructor(
 
     private fun embeddedCustomLyricsEntryRow(
         activity: Activity,
-        entry: CustomLyricsEntry,
+        group: CustomLyricsUiGroup,
         song: CurrentSongDetails?,
     ): View = LinearLayout(activity).apply {
+        val entry = group.primary
         orientation = LinearLayout.VERTICAL
         setPadding(dp(activity, 16), dp(activity, 12), dp(activity, 12), dp(activity, 12))
         addView(LinearLayout(activity).apply {
@@ -1441,17 +1472,18 @@ internal class EmbeddedSettingsHost private constructor(
                     )
                 }, matchWidthWrapContent())
                 addView(TextView(activity).apply {
-                    text = "${entry.appleMusicId} · ${embeddedCustomLyricsSourceName(entry.source)}"
+                    text = "主 ID：${entry.appleMusicId} · 共 ${group.entries.size} 个 ID · " +
+                        embeddedCustomLyricsSourceName(entry.source)
                     textSize = 13f
                     setTextColor(Color.GRAY)
                     setPadding(0, dp(activity, 3), 0, 0)
                 }, matchWidthWrapContent())
             }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             addView(Switch(activity).apply {
-                isChecked = entry.enabled
+                isChecked = group.allEnabled
                 contentDescription = "${entry.displayName} 自定义歌词开关"
                 setOnCheckedChangeListener { _, checked ->
-                    runAsync(activity) { controller.setLyricsEnabled(entry.appleMusicId, checked) }
+                    runAsync(activity) { controller.setLyricsEnabled(group.appleMusicIds, checked) }
                 }
             }, LinearLayout.LayoutParams(dp(activity, 64), dp(activity, 48)))
         }, matchWidthWrapContent())
@@ -1459,15 +1491,18 @@ internal class EmbeddedSettingsHost private constructor(
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, dp(activity, 8), 0, 0)
             addView(embeddedActionButton(activity, "编辑") {
-                showLyricsEditor(activity, entry, song)
+                showLyricsEditor(activity, group, song)
             }, LinearLayout.LayoutParams(0, dp(activity, 44), 1f))
             addView(embeddedActionSpacer(activity))
             addView(embeddedActionButton(activity, "删除") {
                 AlertDialog.Builder(activity)
-                    .setMessage("删除 ${entry.displayName.ifBlank { entry.appleMusicId.toString() }}？")
+                    .setMessage(
+                        "删除“${entry.displayName.ifBlank { entry.appleMusicId.toString() }}”及其 " +
+                            "${group.entries.size} 个 Apple Music ID 的 TTML 映射？",
+                    )
                     .setNegativeButton("取消", null)
                     .setPositiveButton("删除") { _, _ ->
-                        runAsync(activity) { controller.deleteLyrics(entry.appleMusicId) }
+                        runAsync(activity) { controller.deleteLyrics(group.appleMusicIds) }
                     }
                     .show()
             }, LinearLayout.LayoutParams(0, dp(activity, 44), 1f))
@@ -1696,21 +1731,41 @@ internal class EmbeddedSettingsHost private constructor(
             setPadding(dp(activity, 16), dp(activity, 16), dp(activity, 16), dp(activity, 8))
         }
 
-    private fun embeddedInfoCard(activity: Activity, text: String): View =
-        embeddedCard(activity, null) {
+    private fun embeddedInfoCard(
+        activity: Activity,
+        text: String,
+        onClick: (() -> Unit)? = null,
+    ): View = embeddedCard(activity, null) {
             addView(TextView(activity).apply {
                 this.text = text
                 textSize = 13.5f
                 setTextColor(Color.GRAY)
                 setPadding(dp(activity, 16), dp(activity, 12), dp(activity, 16), dp(activity, 12))
             }, matchWidthWrapContent())
+            onClick?.let { click ->
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { click() }
+            }
         }
+
+    private fun showEmbeddedHelp(activity: Activity) {
+        AlertDialog.Builder(activity)
+            .setTitle("LSPosed 配置提示")
+            .setMessage(
+                "在 LSPosed 中启用 AM++，并仅选择 Apple Music（com.apple.android.music）作为作用域。" +
+                    "修改功能后，请强制停止并重新打开 Apple Music。",
+            )
+            .setPositiveButton("知道了", null)
+            .show()
+    }
 
     private fun embeddedSettingRow(
         activity: Activity,
         title: String,
         summary: String,
         checked: Boolean,
+        badge: String? = null,
         onChanged: (Boolean) -> Unit,
     ): View = LinearLayout(activity).apply {
         orientation = LinearLayout.HORIZONTAL
@@ -1719,11 +1774,18 @@ internal class EmbeddedSettingsHost private constructor(
         setPadding(dp(activity, 16), dp(activity, 8), dp(activity, 12), dp(activity, 8))
         val labels = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
-            addView(TextView(activity).apply {
-                text = title
-                textSize = 16f
-                setTextColor(Color.DKGRAY)
-                setTypeface(typeface, android.graphics.Typeface.BOLD)
+            addView(LinearLayout(activity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(TextView(activity).apply {
+                    text = title
+                    textSize = 16f
+                    setTextColor(Color.DKGRAY)
+                    setTypeface(typeface, android.graphics.Typeface.BOLD)
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                badge?.let { badgeText ->
+                    addView(embeddedBadge(activity, badgeText))
+                }
             }, matchWidthWrapContent())
             addView(TextView(activity).apply {
                 text = summary
@@ -1733,10 +1795,28 @@ internal class EmbeddedSettingsHost private constructor(
             }, matchWidthWrapContent())
         }
         addView(labels, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        addView(Switch(activity).apply {
+        val toggle = Switch(activity).apply {
             isChecked = checked
             setOnCheckedChangeListener { _, value -> onChanged(value) }
-        }, LinearLayout.LayoutParams(dp(activity, 52), dp(activity, 48)))
+        }
+        addView(toggle, LinearLayout.LayoutParams(dp(activity, 52), dp(activity, 48)))
+        setOnClickListener { toggle.isChecked = !toggle.isChecked }
+    }
+
+    private fun embeddedBadge(activity: Activity, text: String): View = TextView(activity).apply {
+        this.text = text
+        textSize = 12f
+        gravity = Gravity.CENTER
+        setTextColor(Color.rgb(55, 90, 180))
+        setPadding(dp(activity, 8), dp(activity, 3), dp(activity, 8), dp(activity, 3))
+        background = GradientDrawable().apply {
+            setColor(Color.rgb(232, 238, 255))
+            cornerRadius = dp(activity, 99).toFloat()
+        }
+        layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { marginStart = dp(activity, 8) }
     }
 
     private fun embeddedBlurRadiusRow(
@@ -1746,8 +1826,9 @@ internal class EmbeddedSettingsHost private constructor(
     ): View = LinearLayout(activity).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(activity, 16), dp(activity, 10), dp(activity, 16), dp(activity, 8))
+        val title = "歌词模糊半径偏移"
         val label = TextView(activity).apply {
-            text = "歌词模糊偏移：${value}px"
+            text = "$title：${value}px"
             textSize = 15f
             setTextColor(Color.DKGRAY)
         }
@@ -1762,12 +1843,22 @@ internal class EmbeddedSettingsHost private constructor(
                         ModuleSettings.MIN_LYRIC_BLUR_RADIUS_OFFSET_PX,
                         ModuleSettings.MAX_LYRIC_BLUR_RADIUS_OFFSET_PX,
                     )
-                    label.text = "歌词模糊偏移：${next}px"
-                    if (fromUser) onChanged(next)
+                    label.text = "$title：${next}px"
                 }
 
                 override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
-                override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                    if (seekBar != null) {
+                        onChanged(
+                            (seekBar.progress + ModuleSettings.MIN_LYRIC_BLUR_RADIUS_OFFSET_PX)
+                                .coerceIn(
+                                    ModuleSettings.MIN_LYRIC_BLUR_RADIUS_OFFSET_PX,
+                                    ModuleSettings.MAX_LYRIC_BLUR_RADIUS_OFFSET_PX,
+                                ),
+                        )
+                    }
+                }
             })
         }, matchWidthWrapContent())
     }
@@ -2078,7 +2169,7 @@ internal class EmbeddedSettingsHost private constructor(
 
         Button(activity).apply {
             text = "手动新增歌词"
-            setOnClickListener { showLyricsEditor(activity, null, song) }
+            setOnClickListener { showLyricsEditor(activity, null as CustomLyricsUiGroup?, song) }
             parent.addView(this, matchWidthWrapContent())
         }
         if (song != null) {
@@ -2155,18 +2246,22 @@ internal class EmbeddedSettingsHost private constructor(
 
     private fun showLyricsEditor(
         activity: Activity,
-        entry: CustomLyricsEntry?,
+        group: CustomLyricsUiGroup?,
         song: CurrentSongDetails?,
     ) {
+        val entry = group?.primary
         var source = entry?.source ?: CustomLyricsSources.MANUAL
         val fields = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(activity, 20), 0, dp(activity, 20), 0)
         }
         val idInput = EditText(activity).apply {
-            hint = "Apple Music ID"
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            setText((entry?.appleMusicId ?: song?.appleMusicId)?.toString().orEmpty())
+            hint = "Apple Music ID（可用逗号分隔多个 ID）"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT
+            setText(
+                group?.appleMusicIds?.let(CustomLyricsIdParser::format)
+                    ?: song?.appleMusicId?.toString().orEmpty(),
+            )
         }
         val nameInput = EditText(activity).apply {
             hint = "显示名称"
@@ -2209,6 +2304,26 @@ internal class EmbeddedSettingsHost private constructor(
         fields.addView(sourceLabel, matchWidthWrapContent())
         fields.addView(LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL
+            addView(embeddedActionButton(activity, "导入 TTML") {
+                pendingTtmlImport = { imported ->
+                    ttmlInput.setText(imported)
+                    source = CustomLyricsSources.MANUAL
+                    updateSourceLabel()
+                }
+                launchSafPicker(activity, EmbeddedSafOperation.Ttml, "application/xml", arrayOf(
+                    "application/ttml+xml",
+                    "application/xml",
+                    "text/xml",
+                    "text/plain",
+                ))
+            }, LinearLayout.LayoutParams(0, dp(activity, 44), 1f))
+            addView(embeddedActionSpacer(activity))
+            addView(embeddedActionButton(activity, "获取 ID") {
+                requestCurrentSongId(activity, idInput, nameInput)
+            }, LinearLayout.LayoutParams(0, dp(activity, 44), 1f))
+        }, matchWidthWrapContent())
+        fields.addView(LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
             addView(embeddedActionButton(activity, "从 AMLL 导入") {
                 importOnline(EmbeddedOnlineSource.AMLL)
             }, LinearLayout.LayoutParams(0, dp(activity, 44), 1f))
@@ -2223,30 +2338,80 @@ internal class EmbeddedSettingsHost private constructor(
         }, matchWidthWrapContent())
         fields.addView(ttmlInput, matchWidthWrapContent())
         AlertDialog.Builder(activity)
-            .setTitle(if (entry == null) "新增歌词" else "编辑歌词")
+            .setTitle(if (group == null) "新增歌词" else "编辑歌词")
             .setView(fields)
             .setNegativeButton("取消", null)
             .setPositiveButton("保存") { _, _ ->
-                val id = idInput.text.toString().toLongOrNull()
-                if (id == null || id <= 0L) {
-                    Toast.makeText(activity, "Apple Music ID 无效", Toast.LENGTH_SHORT).show()
+                val ids = CustomLyricsIdParser.parse(idInput.text.toString())
+                if (ids == null) {
+                    idInput.error = "请输入一个或多个正整数 Apple Music ID（用逗号分隔）"
+                } else if (ttmlInput.text.toString().isBlank()) {
+                    ttmlInput.error = "请输入或导入 TTML"
                 } else {
                     runAsync(activity) {
-                        controller.saveLyrics(
-                            CustomLyricsDraft(
-                                appleMusicId = id,
+                        saveMany(
+                            CustomLyricsMultiIdDraft(
+                                appleMusicIds = ids,
                                 displayName = nameInput.text.toString(),
                                 ttml = ttmlInput.text.toString(),
                                 source = source,
                                 enabled = entry?.enabled ?: true,
                             ),
-                            entry?.appleMusicId,
+                            group?.appleMusicIds.orEmpty(),
                         )
                     }
                 }
             }
-            .show()
+            .create().also { dialog ->
+                dialog.setOnDismissListener {
+                    if (pendingTtmlImport != null) pendingTtmlImport = null
+                }
+                dialog.show()
+            }
     }
+
+    /** Compatibility overload used by the legacy embedded dialog path. */
+    private fun showLyricsEditor(
+        activity: Activity,
+        entry: CustomLyricsEntry?,
+        song: CurrentSongDetails?,
+    ) = showLyricsEditor(
+        activity,
+        entry?.let { CustomLyricsUiGroup(listOf(it)) },
+        song,
+    )
+
+    private fun requestCurrentSongId(
+        activity: Activity,
+        appleMusicId: EditText,
+        displayName: EditText,
+    ) {
+        val currentSong = controller.currentSongDetails()
+        if (currentSong == null) {
+            Toast.makeText(
+                activity,
+                "未获取到当前歌曲信息，请先在 Apple Music 播放一首歌",
+                Toast.LENGTH_SHORT,
+            ).show()
+            return
+        }
+        appleMusicId.setText(currentSong.appleMusicId.toString())
+        appleMusicId.setSelection(appleMusicId.length())
+        listOfNotNull(
+            currentSong.title?.takeIf(String::isNotBlank),
+            currentSong.artist?.takeIf(String::isNotBlank),
+        ).joinToString(" - ").takeIf(String::isNotBlank)?.let { value ->
+            displayName.setText(value)
+            displayName.setSelection(displayName.length())
+        }
+        Toast.makeText(activity, "已获取当前歌曲信息", Toast.LENGTH_SHORT).show()
+    }
+
+    /** Keeps the editor's multi-ID operation explicit at the host boundary. */
+    private fun saveMany(
+        draft: CustomLyricsMultiIdDraft,
+        replacingAppleMusicIds: List<Long>,
+    ): EmbeddedActionResult = controller.saveLyrics(draft, replacingAppleMusicIds)
 
     private fun importEmbeddedOnlineLyrics(
         activity: Activity,
@@ -2379,20 +2544,41 @@ internal class EmbeddedSettingsHost private constructor(
         when (operation) {
             EmbeddedSafOperation.Font -> runAsync(activity) { controller.importFont(uri) }
             EmbeddedSafOperation.Ttml -> {
-                val song = controller.currentSongDetails()
-                if (song == null) {
-                    Toast.makeText(activity, "尚未捕获当前歌曲", Toast.LENGTH_SHORT).show()
+                val editorImport = pendingTtmlImport
+                pendingTtmlImport = null
+                if (editorImport != null) {
+                    worker.execute {
+                        val imported = controller.readTtml(uri)
+                        mainHandler.post {
+                            val current = currentActivity() ?: return@post
+                            if (imported == null) {
+                                Toast.makeText(
+                                    current,
+                                    "所选文件不是有效且不超过 512 KiB 的 TTML",
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            } else {
+                                editorImport(imported)
+                                Toast.makeText(current, "TTML 已导入，请确认后保存", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
                 } else {
-                    runAsync(activity) {
-                        val replacing = controller.lyricsEntries()
-                            .firstOrNull { it.appleMusicId == song.appleMusicId }
-                            ?.appleMusicId
-                        controller.importTtml(
-                            uri,
-                            song.appleMusicId,
-                            song.title.orEmpty().ifBlank { song.appleMusicId.toString() },
-                            replacing,
-                        )
+                    val song = controller.currentSongDetails()
+                    if (song == null) {
+                        Toast.makeText(activity, "尚未捕获当前歌曲", Toast.LENGTH_SHORT).show()
+                    } else {
+                        runAsync(activity) {
+                            val replacing = controller.lyricsEntries()
+                                .firstOrNull { it.appleMusicId == song.appleMusicId }
+                                ?.appleMusicId
+                            controller.importTtml(
+                                uri,
+                                song.appleMusicId,
+                                song.title.orEmpty().ifBlank { song.appleMusicId.toString() },
+                                replacing,
+                            )
+                        }
                     }
                 }
             }
@@ -2487,6 +2673,7 @@ internal class EmbeddedSettingsHost private constructor(
         // A settings host teardown must stop any in-flight native refresh
         // before releasing the progress dialog and its callback closure.
         controller.cancelLibraryRefresh()
+        pendingTtmlImport = null
         libraryRefreshDialog?.dismiss()
         libraryRefreshDialog = null
         dialogReference?.get()?.dismiss()

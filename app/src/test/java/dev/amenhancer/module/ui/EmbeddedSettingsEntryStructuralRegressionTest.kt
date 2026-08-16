@@ -5,11 +5,20 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class EmbeddedSettingsEntryStructuralRegressionTest {
+    private data class VisibleSetting(
+        val title: String,
+        val field: String? = null,
+    )
+
     private fun projectFile(relativePath: String): String = sequenceOf(
         File(relativePath),
         File("../$relativePath"),
     ).firstOrNull(File::isFile)?.readText()
         ?: error("$relativePath was not found")
+
+    private fun assertSourceContains(source: String, marker: String, description: String) {
+        assertTrue("missing $description: $marker", source.contains(marker))
+    }
 
     @Test
     fun `injects a tagged AM plus option and opens the existing settings dialog`() {
@@ -165,5 +174,146 @@ class EmbeddedSettingsEntryStructuralRegressionTest {
         assertTrue(host.contains("source = source"))
         assertTrue(host.contains("同步 GitHub 源"))
         assertTrue(host.contains("controller.syncFromGitHub"))
+    }
+
+    @Test
+    fun `main settings visible item checklist stays mirrored in embedded host`() {
+        val activity = projectFile("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
+        val host = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsHost.kt")
+        val settings = listOf(
+            VisibleSetting("平板双栏播放器", "dualPaneEnabled"),
+            VisibleSetting("平板底栏补偿", "navigationCompensationEnabled"),
+            VisibleSetting("平板禁用动态视频", "disableEditorialVideoOnTablet"),
+            VisibleSetting("手机液态玻璃底栏", "phoneLiquidGlassEnabled"),
+            VisibleSetting("双向歌词模糊", "futureBlurEnabled"),
+            VisibleSetting("歌词模糊半径偏移", "lyricBlurRadiusOffsetPx"),
+            VisibleSetting("歌曲名显示修正", "titleCorrectionEnabled"),
+            VisibleSetting("目标语言", "titleCorrectionTargetLanguage"),
+            VisibleSetting("刷新资料库"),
+            VisibleSetting("自定义歌词"),
+        )
+
+        settings.forEach { item ->
+            assertSourceContains(activity, "\"${item.title}\"", "SettingsActivity item ${item.title}")
+            assertSourceContains(host, "\"${item.title}\"", "EmbeddedSettingsHost item ${item.title}")
+            item.field?.let { field ->
+                assertSourceContains(
+                    activity,
+                    "settings.$field",
+                    "SettingsActivity binding for ${item.title}",
+                )
+                assertSourceContains(
+                    host,
+                    "settings.$field",
+                    "EmbeddedSettingsHost binding for ${item.title}",
+                )
+                assertSourceContains(
+                    activity,
+                    "$field =",
+                    "SettingsActivity write path for ${item.title}",
+                )
+                assertSourceContains(
+                    host,
+                    "$field =",
+                    "EmbeddedSettingsHost write path for ${item.title}",
+                )
+            }
+        }
+
+        assertSourceContains(
+            activity,
+            "showTargetLanguagePicker()",
+            "standalone target-language action",
+        )
+        assertSourceContains(
+            host,
+            "showEmbeddedTargetLanguagePicker(",
+            "embedded target-language action",
+        )
+        assertSourceContains(activity, "requestLibraryRefresh()", "standalone refresh action")
+        assertSourceContains(
+            host,
+            "onRefreshLibrary = { requestLibraryRefresh(activity) }",
+            "embedded refresh action",
+        )
+        assertSourceContains(
+            activity,
+            "showPage(SettingsPage.CUSTOM_LYRICS)",
+            "standalone custom-lyrics navigation",
+        )
+        assertSourceContains(
+            host,
+            "page = EmbeddedSettingsPage.CUSTOM_LYRICS",
+            "embedded custom-lyrics navigation",
+        )
+    }
+
+    @Test
+    fun `font and custom lyric page checklist stays mirrored in embedded host`() {
+        val activity = projectFile("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
+        val host = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsHost.kt")
+
+        listOf(
+            "歌词字体",
+            "选择字体",
+            "恢复原字体",
+            "自定义歌词替换",
+            "添加歌词",
+            "同步 GitHub 源",
+            "备份歌词",
+            "恢复备份",
+            "搜索名称或 Apple Music ID",
+            "加载更多",
+            "编辑",
+            "删除",
+        ).forEach { title ->
+            assertSourceContains(activity, "\"$title\"", "SettingsActivity item $title")
+            assertSourceContains(host, "\"$title\"", "EmbeddedSettingsHost item $title")
+        }
+
+        assertSourceContains(
+            activity,
+            "settings.customLyricsEnabled",
+            "standalone custom-lyrics toggle binding",
+        )
+        assertSourceContains(
+            host,
+            "settings.customLyricsEnabled",
+            "embedded custom-lyrics toggle binding",
+        )
+        assertSourceContains(
+            activity,
+            "settings.fontManifest",
+            "standalone font manifest binding",
+        )
+        assertSourceContains(
+            host,
+            "settings.fontManifest",
+            "embedded font manifest binding",
+        )
+    }
+
+    @Test
+    fun `custom lyric editor keeps import identity and multi-id capabilities in both surfaces`() {
+        val activity = projectFile("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
+        val host = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsHost.kt")
+
+        listOf("从 AMLL 导入", "从网易云导入", "从 GitHub 导入").forEach { title ->
+            assertSourceContains(activity, "\"$title\"", "SettingsActivity editor action $title")
+            assertSourceContains(host, "\"$title\"", "EmbeddedSettingsHost editor action $title")
+        }
+        listOf("导入 TTML", "获取 ID").forEach { title ->
+            assertSourceContains(activity, "\"$title\"", "SettingsActivity editor action $title")
+            assertSourceContains(host, "\"$title\"", "EmbeddedSettingsHost editor action $title")
+        }
+
+        listOf(
+            "CustomLyricsIdParser.parse",
+            "CustomLyricsMultiIdDraft",
+            "saveMany(",
+        ).forEach { marker ->
+            assertSourceContains(activity, marker, "SettingsActivity multi-id editor support")
+            assertSourceContains(host, marker, "EmbeddedSettingsHost multi-id editor support")
+        }
     }
 }

@@ -16,9 +16,12 @@ import dev.amenhancer.module.hook.AmllTtmlClient
 import dev.amenhancer.module.hook.HttpLyricTransport
 import dev.amenhancer.module.hook.NeteaseLyricClient
 import dev.amenhancer.module.lyrics.CustomLyricsDraft
+import dev.amenhancer.module.lyrics.CustomLyricsBatchSaveResult
 import dev.amenhancer.module.lyrics.CustomLyricsFilePolicy
+import dev.amenhancer.module.lyrics.CustomLyricsInspection
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImportResult
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImporter
+import dev.amenhancer.module.lyrics.CustomLyricsMultiIdDraft
 import dev.amenhancer.module.lyrics.CustomLyricsRestoreResult
 import dev.amenhancer.module.lyrics.CustomLyricsSaveResult
 import dev.amenhancer.module.lyrics.CustomLyricsSyncLoadResult
@@ -71,16 +74,39 @@ internal class EmbeddedRuntimeSettingsController(
 
     override fun readLyrics(appleMusicId: Long): String? = content.readLyrics(appleMusicId)
 
+    override fun readTtml(uri: Uri): String? = runCatching {
+        val bytes = appContext.contentResolver.openInputStream(uri)?.use(CustomLyricsFilePolicy::readBounded)
+            ?: return@runCatching null
+        when (val inspection = CustomLyricsFilePolicy.inspect(bytes.toString(Charsets.UTF_8))) {
+            is CustomLyricsInspection.Accepted -> inspection.ttml
+            is CustomLyricsInspection.Rejected -> null
+        }
+    }.getOrNull()
+
     override fun saveLyrics(
         draft: CustomLyricsDraft,
         replacingAppleMusicId: Long?,
     ): EmbeddedActionResult = content.saveLyrics(draft, replacingAppleMusicId).toActionResult()
 
+    override fun saveLyrics(
+        draft: CustomLyricsMultiIdDraft,
+        replacingAppleMusicIds: List<Long>,
+    ): EmbeddedActionResult = content.saveLyrics(draft, replacingAppleMusicIds).toActionResult()
+
     override fun setLyricsEnabled(appleMusicId: Long, enabled: Boolean): EmbeddedActionResult =
         content.setLyricsEnabled(appleMusicId, enabled).toActionResult("歌词状态已更新")
 
+    override fun setLyricsEnabled(
+        appleMusicIds: List<Long>,
+        enabled: Boolean,
+    ): EmbeddedActionResult = content.setLyricsEnabled(appleMusicIds, enabled)
+        .toActionResult("歌词状态已更新")
+
     override fun deleteLyrics(appleMusicId: Long): EmbeddedActionResult =
         content.deleteLyrics(appleMusicId).toActionResult("歌词映射已删除")
+
+    override fun deleteLyrics(appleMusicIds: List<Long>): EmbeddedActionResult =
+        content.deleteLyrics(appleMusicIds).toActionResult("歌词映射已删除")
 
     override fun importFont(uri: Uri): EmbeddedActionResult {
         val bytes = try {
@@ -274,6 +300,11 @@ internal class EmbeddedRuntimeSettingsController(
 private fun CustomLyricsSaveResult.toActionResult(): EmbeddedActionResult = when (this) {
     is CustomLyricsSaveResult.Saved -> EmbeddedActionResult.Done("歌词已保存")
     is CustomLyricsSaveResult.Failed -> EmbeddedActionResult.Failed(message)
+}
+
+private fun CustomLyricsBatchSaveResult.toActionResult(): EmbeddedActionResult = when (this) {
+    is CustomLyricsBatchSaveResult.Saved -> EmbeddedActionResult.Done("歌词已保存")
+    is CustomLyricsBatchSaveResult.Failed -> EmbeddedActionResult.Failed(message)
 }
 
 private fun EmbeddedLyricsMutationResult.toActionResult(success: String): EmbeddedActionResult = when (this) {

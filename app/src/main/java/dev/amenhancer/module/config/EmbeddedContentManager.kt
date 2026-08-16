@@ -4,10 +4,12 @@ import dev.amenhancer.module.font.FontImportResult
 import dev.amenhancer.module.font.FontImportTransaction
 import dev.amenhancer.module.lyrics.CustomLyricsBackupCodec
 import dev.amenhancer.module.lyrics.CustomLyricsBackupEncodeResult
+import dev.amenhancer.module.lyrics.CustomLyricsBatchSaveResult
 import dev.amenhancer.module.lyrics.CustomLyricsDraft
 import dev.amenhancer.module.lyrics.CustomLyricsFilePolicy
 import dev.amenhancer.module.lyrics.CustomLyricsFileReader
 import dev.amenhancer.module.lyrics.CustomLyricsImportTransaction
+import dev.amenhancer.module.lyrics.CustomLyricsMultiIdDraft
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImportResult
 import dev.amenhancer.module.lyrics.CustomLyricsRestorePolicy
 import dev.amenhancer.module.lyrics.CustomLyricsRestoreResult
@@ -147,6 +149,35 @@ internal class EmbeddedContentManager(
         }
     }
 
+    /**
+     * Atomically imports one TTML body for several Apple Music IDs.
+     *
+     * [CustomLyricsImportTransaction] writes every generated file before it
+     * publishes the replacement manifest, so a failed write or publish leaves
+     * the previous mappings intact.  Replaced IDs are retired only after the
+     * new manifest has been committed.
+     */
+    fun saveLyrics(
+        draft: CustomLyricsMultiIdDraft,
+        replacingAppleMusicIds: List<Long> = emptyList(),
+    ): CustomLyricsBatchSaveResult = synchronized(mutationLock) {
+        session.withCustomLyricsMutation {
+            val current = currentLyricsManifest()
+            CustomLyricsImportTransaction(
+                fileIdFactory = { fileIdFactory("lyrics") },
+                writeRemoteFile = session::writeFile,
+                publishManifest = { next ->
+                    session.commitCustomLyrics(next) is CustomLyricsIndexCommitResult.Committed
+                },
+                deleteRemoteFile = { fileId -> session.deleteFile(fileId) },
+            ).upsertMany(
+                oldManifest = current,
+                draft = draft,
+                replacingAppleMusicIds = replacingAppleMusicIds,
+            )
+        }
+    }
+
     fun importOnlineLyrics(
         appleMusicId: Long,
         displayName: String,
@@ -186,39 +217,67 @@ internal class EmbeddedContentManager(
         replacingAppleMusicId = replacingAppleMusicId,
     )
 
+    fun setLyricsEnabled(
+        appleMusicIds: List<Long>,
+        enabled: Boolean,
+    ): EmbeddedLyricsMutationResult = synchronized(mutationLock) {
+        session.withCustomLyricsMutation {
+            val targetIds = appleMusicIds.toSet()
+            if (targetIds.isEmpty() || targetIds.any { it <= 0L }) {
+                return@withCustomLyricsMutation EmbeddedLyricsMutationResult.Failed("歌词映射不存在")
+            }
+            val current = currentLyricsManifest()
+            var found = 0
+            val nextEntries = current.entries.map { entry ->
+                if (entry.appleMusicId in targetIds) {
+                    found += 1
+                    entry.copy(enabled = enabled)
+                } else {
+                    entry
+                }
+            }
+            if (found != targetIds.size) {
+                return@withCustomLyricsMutation EmbeddedLyricsMutationResult.Failed("歌词映射不存在")
+            }
+            publishLyrics(CustomLyricsManifest(nextEntries))
+        }
+    }
+
+    /** Backward-compatible single-ID enable/disable API. */
     fun setLyricsEnabled(appleMusicId: Long, enabled: Boolean): EmbeddedLyricsMutationResult =
+        setLyricsEnabled(listOf(appleMusicId), enabled)
+
+    fun deleteLyrics(appleMusicIds: List<Long>): EmbeddedLyricsMutationResult =
         synchronized(mutationLock) {
             session.withCustomLyricsMutation {
-                val current = currentLyricsManifest()
-                if (current.entries.none { it.appleMusicId == appleMusicId }) {
+                val targetIds = appleMusicIds.toSet()
+                if (targetIds.isEmpty() || targetIds.any { it <= 0L }) {
                     return@withCustomLyricsMutation EmbeddedLyricsMutationResult.Failed("歌词映射不存在")
                 }
-                publishLyrics(
-                    CustomLyricsManifest(
-                        current.entries.map { entry ->
-                            if (entry.appleMusicId == appleMusicId) entry.copy(enabled = enabled) else entry
-                        },
-                    ),
-                )
+                val current = currentLyricsManifest()
+                val removed = current.entries.filter { it.appleMusicId in targetIds }
+                if (removed.size != targetIds.size) {
+                    return@withCustomLyricsMutation EmbeddedLyricsMutationResult.Failed("歌词映射不存在")
+                }
+                when (val result = publishLyrics(
+                    CustomLyricsManifest(current.entries.filterNot { it.appleMusicId in targetIds }),
+                )) {
+                    is EmbeddedLyricsMutationResult.Updated -> {
+                        val nextFileIds = result.manifest.entries.mapTo(mutableSetOf()) { it.fileId }
+                        removed.map { it.fileId }
+                            .filterNot(nextFileIds::contains)
+                            .distinct()
+                            .forEach { fileId -> runCatching { session.deleteFile(fileId) } }
+                        result
+                    }
+                    is EmbeddedLyricsMutationResult.Failed -> result
+                }
             }
         }
 
-    fun deleteLyrics(appleMusicId: Long): EmbeddedLyricsMutationResult = synchronized(mutationLock) {
-        session.withCustomLyricsMutation {
-            val current = currentLyricsManifest()
-            val removed = current.entries.singleOrNull { it.appleMusicId == appleMusicId }
-                ?: return@withCustomLyricsMutation EmbeddedLyricsMutationResult.Failed("歌词映射不存在")
-            when (val result = publishLyrics(
-                CustomLyricsManifest(current.entries.filterNot { it.appleMusicId == appleMusicId }),
-            )) {
-                is EmbeddedLyricsMutationResult.Updated -> {
-                    session.deleteFile(removed.fileId)
-                    result
-                }
-                is EmbeddedLyricsMutationResult.Failed -> result
-            }
-        }
-    }
+    /** Backward-compatible single-ID delete API. */
+    fun deleteLyrics(appleMusicId: Long): EmbeddedLyricsMutationResult =
+        deleteLyrics(listOf(appleMusicId))
 
     fun backupLyrics(out: OutputStream): CustomLyricsBackupEncodeResult = synchronized(mutationLock) {
         CustomLyricsBackupCodec.encode(currentLyricsManifest(), ::readFile, out)

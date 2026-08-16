@@ -3,6 +3,8 @@ package dev.amenhancer.module.config
 import dev.amenhancer.module.font.FontFilePolicy
 import dev.amenhancer.module.font.FontImportResult
 import dev.amenhancer.module.lyrics.CustomLyricsBackupEncodeResult
+import dev.amenhancer.module.lyrics.CustomLyricsBatchSaveResult
+import dev.amenhancer.module.lyrics.CustomLyricsMultiIdDraft
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImportResult
 import dev.amenhancer.module.lyrics.CustomLyricsRestoreResult
 import dev.amenhancer.module.lyrics.CustomLyricsRestorePolicy
@@ -132,6 +134,38 @@ class EmbeddedContentManagerTest {
         assertTrue(deleted is EmbeddedLyricsMutationResult.Updated)
         assertEquals(listOf(101L), manager.listLyrics().map(CustomLyricsEntry::appleMusicId))
         assertEquals(null, manager.readLyrics(202L))
+    }
+
+    @Test
+    fun `multi id lyric save enable and delete are one host transaction`() {
+        val storage = MemoryStorage()
+        val manager = EmbeddedContentManager(
+            session = EmbeddedConfigurationSession(storage),
+            fileIdFactory = sequenceFileIds("lyrics_multi"),
+        )
+
+        val saved = manager.saveLyrics(
+            CustomLyricsMultiIdDraft(
+                appleMusicIds = listOf(601L, 602L),
+                displayName = "Grouped",
+                ttml = ttml("grouped"),
+                source = CustomLyricsSources.AM_LYRICS,
+            ),
+        )
+
+        assertTrue(saved is CustomLyricsBatchSaveResult.Saved)
+        assertEquals(listOf(601L, 602L), manager.listLyrics().map(CustomLyricsEntry::appleMusicId))
+        assertEquals(ttml("grouped"), manager.readLyrics(601L))
+        assertEquals(ttml("grouped"), manager.readLyrics(602L))
+
+        val disabled = manager.setLyricsEnabled(listOf(601L, 602L), false)
+        assertTrue(disabled is EmbeddedLyricsMutationResult.Updated)
+        assertTrue(manager.listLyrics().all { !it.enabled })
+
+        val deleted = manager.deleteLyrics(listOf(601L, 602L))
+        assertTrue(deleted is EmbeddedLyricsMutationResult.Updated)
+        assertTrue(manager.listLyrics().isEmpty())
+        assertTrue(storage.files.keys.none { it.startsWith("lyrics_multi_") })
     }
 
     @Test
