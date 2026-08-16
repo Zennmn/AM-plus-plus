@@ -32,6 +32,7 @@ internal class AppleMusicLibraryRefreshTarget(
     private val titleCache: CatalogTitleCache? = null,
     private val titleCacheProvider: CatalogTitleCacheProvider? = null,
     private val catalogLookup: CatalogEntityLookup? = null,
+    private val useRequestPermission: Boolean = true,
 ) : LibraryRefreshTarget {
     override fun install(): TargetCapabilityInstall {
         val libraryType = symbols.resolve(AppleMusicSymbols.MediaLibraryType).valueOrNull()
@@ -94,6 +95,7 @@ internal class AppleMusicLibraryRefreshTarget(
             ),
             targetLanguage = targetLanguage,
             updateReason = updateReason,
+            useRequestPermission = useRequestPermission,
             logger = ModernXposedRuntime::log,
         )
         if (!responder.register()) {
@@ -141,6 +143,7 @@ private class LibraryRefreshRequestResponder(
     private val catalogBackfill: AppleMusicCatalogBackfill,
     private val targetLanguage: String,
     private val updateReason: Any,
+    private val useRequestPermission: Boolean,
     private val logger: (String) -> Unit,
 ) {
     private val executor = Executors.newSingleThreadExecutor { runnable ->
@@ -398,20 +401,26 @@ private class LibraryRefreshRequestResponder(
             addAction(LibraryRefreshProtocol.REQUEST_ACTION)
             addAction(LibraryRefreshProtocol.CANCEL_ACTION)
         }
+        val requestPermission = LibraryRefreshProtocol.REQUEST_PERMISSION
+            .takeIf { useRequestPermission }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             application.registerReceiver(
                 receiver,
                 filter,
-                LibraryRefreshProtocol.REQUEST_PERMISSION,
+                requestPermission,
                 null,
-                Context.RECEIVER_EXPORTED,
+                if (requestPermission == null) {
+                    Context.RECEIVER_NOT_EXPORTED
+                } else {
+                    Context.RECEIVER_EXPORTED
+                },
             )
         } else {
             @Suppress("DEPRECATION")
             application.registerReceiver(
                 receiver,
                 filter,
-                LibraryRefreshProtocol.REQUEST_PERMISSION,
+                requestPermission,
                 null,
             )
         }

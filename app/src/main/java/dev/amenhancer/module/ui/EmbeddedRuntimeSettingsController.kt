@@ -58,6 +58,13 @@ internal class EmbeddedRuntimeSettingsController(
 
     override fun saveOrdinarySettings(settings: ModuleSettings): Boolean = session.saveSettings(settings)
 
+    private val libraryRefreshRequester = LibraryRefreshRequester(appContext)
+
+    override fun requestLibraryRefresh(onResult: (LibraryRefreshResult) -> Unit): Boolean =
+        libraryRefreshRequester.request(onResult)
+
+    override fun cancelLibraryRefresh() = libraryRefreshRequester.cancel()
+
     override fun currentSongDetails(): CurrentSongDetails? = currentSong()
 
     override fun lyricsEntries(): List<CustomLyricsEntry> = content.listLyrics()

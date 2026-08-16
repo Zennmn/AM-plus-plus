@@ -43,6 +43,7 @@ internal data class TargetAdaptation(
             lyricsTypefaceSession: LyricsTypefaceSession,
             currentSong: CurrentSongIdentityCache = CurrentSongIdentityCache(),
             registerCurrentSongResponder: Boolean = true,
+            useLibraryRefreshPermission: Boolean = true,
         ): TargetAdaptation {
             val build = targetBuild(application)
             val resolver = IndexedTargetSymbolResolver(
@@ -111,6 +112,7 @@ internal data class TargetAdaptation(
                     settings.titleCorrectionTargetLanguage.takeIf { settings.titleCorrectionEnabled }.orEmpty(),
                     titleCacheProvider = titleCacheProvider,
                     catalogLookup = catalogLookup,
+                    useRequestPermission = useLibraryRefreshPermission,
                 ),
             )
         }

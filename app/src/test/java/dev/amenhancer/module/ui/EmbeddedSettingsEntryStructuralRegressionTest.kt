@@ -112,6 +112,24 @@ class EmbeddedSettingsEntryStructuralRegressionTest {
     }
 
     @Test
+    fun `embedded main page exposes an in-process library refresh action`() {
+        val host = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsHost.kt")
+        val controller = projectFile(
+            "app/src/main/java/dev/amenhancer/module/ui/EmbeddedRuntimeSettingsController.kt",
+        )
+
+        assertTrue(host.contains("刷新资料库"))
+        assertTrue(host.contains("onRefreshLibrary = { requestLibraryRefresh(activity) }"))
+        assertTrue(host.contains("controller.requestLibraryRefresh(::finish)"))
+        assertTrue(host.contains("controller.cancelLibraryRefresh()"))
+        assertTrue(host.contains("LibraryRefreshProtocol.RESULT_COMPLETED"))
+        assertTrue(host.contains("A sendBroadcast failure can synchronously complete"))
+        assertTrue(controller.contains("LibraryRefreshRequester(appContext)"))
+        assertTrue(controller.contains("override fun requestLibraryRefresh"))
+        assertTrue(controller.contains("override fun cancelLibraryRefresh"))
+    }
+
+    @Test
     fun `embedded font picker accepts providers that do not advertise font wildcard`() {
         val host = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsHost.kt")
 

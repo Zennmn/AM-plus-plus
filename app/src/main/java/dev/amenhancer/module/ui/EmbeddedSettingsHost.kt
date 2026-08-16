@@ -28,6 +28,7 @@ import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import dev.amenhancer.module.LibraryRefreshProtocol
 import dev.amenhancer.module.ModuleConstants
 import dev.amenhancer.module.config.CatalogLanguagePolicy
 import dev.amenhancer.module.config.EmbeddedConfigurationSession
@@ -303,6 +304,16 @@ internal interface EmbeddedSettingsController {
 
     fun saveOrdinarySettings(settings: ModuleSettings): Boolean
 
+    /**
+     * Starts the host-process library refresh and reports its terminal result
+     * on the caller's UI handler.  The default keeps lightweight test/fallback
+     * controllers fail-open when the Apple Music refresh target is unavailable.
+     */
+    fun requestLibraryRefresh(onResult: (LibraryRefreshResult) -> Unit): Boolean = false
+
+    /** Cancels the in-flight host refresh, if any. */
+    fun cancelLibraryRefresh() = Unit
+
     fun currentSongDetails(): CurrentSongDetails? = null
     fun lyricsEntries(): List<CustomLyricsEntry> = emptyList()
     fun readLyrics(appleMusicId: Long): String? = null
@@ -366,6 +377,7 @@ internal class EmbeddedSettingsHost private constructor(
     private var activityReference: WeakReference<Activity>? = null
     private var dialogReference: WeakReference<Dialog>? = null
     private var pageRefresh: (() -> Unit)? = null
+    private var libraryRefreshDialog: AlertDialog? = null
     private val customLyricsListState = CustomLyricsListState()
     private var customLyricsSearchQuery = ""
     private var buttonReference: WeakReference<View>? = null
@@ -1115,6 +1127,7 @@ internal class EmbeddedSettingsHost private constructor(
                         page = EmbeddedSettingsPage.CUSTOM_LYRICS
                         renderPage()
                     },
+                    onRefreshLibrary = { requestLibraryRefresh(activity) },
                     onChooseFont = {
                         launchSafPicker(
                             activity,
@@ -1171,6 +1184,7 @@ internal class EmbeddedSettingsHost private constructor(
         lyricsCount: Int,
         onSettingsChanged: (ModuleSettings) -> Unit,
         onOpenCustomLyrics: () -> Unit,
+        onRefreshLibrary: () -> Unit,
         onChooseFont: () -> Unit,
         onClearFont: () -> Unit,
     ) {
@@ -1231,6 +1245,13 @@ internal class EmbeddedSettingsHost private constructor(
                     pageRefresh?.invoke()
                 }
             })
+            addView(embeddedDivider(activity))
+            addView(embeddedNavigationRow(
+                activity,
+                "刷新资料库",
+                "触发 Apple Music 原生同步并补查歌曲名",
+                onRefreshLibrary,
+            ))
             addView(embeddedDivider(activity))
             addView(embeddedNavigationRow(
                 activity,
@@ -1518,6 +1539,89 @@ internal class EmbeddedSettingsHost private constructor(
                 if (result is CustomLyricsSyncResult.Synced) pageRefresh?.invoke()
             }
         }
+    }
+
+    /**
+     * Requests the refresh through the controller's in-process protocol.  The
+     * native target owns all reflection, waiting and Catalog backfill work;
+     * this host only keeps a cancellable progress surface on the UI thread.
+     */
+    private fun requestLibraryRefresh(activity: Activity) {
+        if (libraryRefreshDialog?.isShowing == true) return
+
+        val completed = AtomicBoolean(false)
+        val progress = TextView(activity).apply {
+            text = "正在触发 Apple Music 资料库同步…"
+            textSize = 15f
+            setTextColor(Color.DKGRAY)
+            setPadding(dp(activity, 24), dp(activity, 12), dp(activity, 24), dp(activity, 12))
+        }
+        lateinit var dialog: AlertDialog
+        fun finish(result: LibraryRefreshResult) {
+            if (!completed.compareAndSet(false, true)) return
+            if (libraryRefreshDialog === dialog) {
+                dialog.dismiss()
+            }
+            val current = currentActivity() ?: return
+            val message = result.message.orEmpty().ifBlank {
+                when (result.resultCode) {
+                    LibraryRefreshProtocol.RESULT_COMPLETED -> "资料库刷新完成"
+                    LibraryRefreshProtocol.RESULT_CANCELLED -> "已停止刷新资料库"
+                    LibraryRefreshProtocol.RESULT_UNAVAILABLE -> "资料库刷新不可用"
+                    else -> "资料库刷新失败"
+                }
+            }
+            Toast.makeText(
+                current,
+                message,
+                if (result.resultCode == LibraryRefreshProtocol.RESULT_COMPLETED) {
+                    Toast.LENGTH_LONG
+                } else {
+                    Toast.LENGTH_SHORT
+                },
+            ).show()
+        }
+
+        dialog = AlertDialog.Builder(activity)
+            .setTitle("刷新资料库")
+            .setView(progress)
+            .setNegativeButton("取消") { _, _ ->
+                completed.set(true)
+                controller.cancelLibraryRefresh()
+            }
+            .create()
+        dialog.setCanceledOnTouchOutside(false)
+        dialog.setOnCancelListener {
+            if (completed.compareAndSet(false, true)) controller.cancelLibraryRefresh()
+        }
+        dialog.setOnDismissListener {
+            if (libraryRefreshDialog === dialog) libraryRefreshDialog = null
+            if (completed.compareAndSet(false, true)) controller.cancelLibraryRefresh()
+        }
+        libraryRefreshDialog = dialog
+
+        val requested = runCatching {
+            controller.requestLibraryRefresh(::finish)
+        }.getOrElse { error ->
+            finish(
+                LibraryRefreshResult(
+                    LibraryRefreshProtocol.RESULT_FAILED,
+                    "无法向 Apple Music 发送刷新请求：${error.message.orEmpty()}",
+                ),
+            )
+            false
+        }
+        if (!requested) {
+            if (!completed.get()) {
+                completed.set(true)
+                if (libraryRefreshDialog === dialog) dialog.dismiss()
+                Toast.makeText(activity, "刷新和补查正在进行或不可用", Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
+        // A sendBroadcast failure can synchronously complete the requester;
+        // do not show a stale progress dialog after that callback has arrived.
+        if (!completed.get() && !dialog.isShowing) dialog.show()
     }
 
     private fun embeddedStatusCard(activity: Activity, song: CurrentSongDetails?): View =
@@ -2380,6 +2484,11 @@ internal class EmbeddedSettingsHost private constructor(
     }
 
     private fun dismissDialog() {
+        // A settings host teardown must stop any in-flight native refresh
+        // before releasing the progress dialog and its callback closure.
+        controller.cancelLibraryRefresh()
+        libraryRefreshDialog?.dismiss()
+        libraryRefreshDialog = null
         dialogReference?.get()?.dismiss()
         dialogReference = null
         pageRefresh = null

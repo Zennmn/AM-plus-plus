@@ -44,6 +44,7 @@ internal object FeatureInstallation {
                     lyricsTypefaceSession = lyricsTypefaceSession,
                     currentSong = currentSong,
                     registerCurrentSongResponder = false,
+                    useLibraryRefreshPermission = false,
                 ),
             )
         }
