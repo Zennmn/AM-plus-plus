@@ -7,7 +7,13 @@ import android.app.Dialog
 import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ColorFilter
+import android.graphics.Paint
+import android.graphics.PixelFormat
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
@@ -91,6 +97,71 @@ private object EmbeddedSettingsPalette {
     val disabledSurface: Int = Color.rgb(244, 237, 240)
     val disabledText: Int = Color.rgb(158, 140, 149)
     val divider: Int = Color.rgb(238, 220, 227)
+}
+
+/**
+ * A host-safe fallback for the module logo.  Some Apple Music resource
+ * loaders can resolve the module vector but drop its AAPT gradient attributes,
+ * leaving only the pale square background.  Drawing this tiny mark directly
+ * on Canvas keeps the title affordance visible in that case.
+ */
+private class EmbeddedAmppFallbackDrawable : android.graphics.drawable.Drawable() {
+    private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val markPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        textAlign = Paint.Align.CENTER
+    }
+    private var alphaValue = 255
+
+    override fun draw(canvas: Canvas) {
+        val box = bounds
+        if (box.width() <= 0 || box.height() <= 0) return
+        val size = minOf(box.width(), box.height()).toFloat()
+        val radius = size * 0.22f
+        val outer = RectF(
+            box.left.toFloat(),
+            box.top.toFloat(),
+            box.right.toFloat(),
+            box.bottom.toFloat(),
+        )
+        backgroundPaint.color = EmbeddedSettingsPalette.softBackground
+        backgroundPaint.alpha = alphaValue
+        canvas.drawRoundRect(outer, radius, radius, backgroundPaint)
+
+        val inset = size * 0.13f
+        val inner = RectF(
+            outer.left + inset,
+            outer.top + inset,
+            outer.right - inset,
+            outer.bottom - inset,
+        )
+        backgroundPaint.color = EmbeddedSettingsPalette.primary
+        backgroundPaint.alpha = alphaValue
+        canvas.drawRoundRect(inner, radius * 0.7f, radius * 0.7f, backgroundPaint)
+
+        markPaint.color = Color.WHITE
+        markPaint.alpha = alphaValue
+        // Keep the fallback an icon rather than repeating the adjacent title.
+        // The real module vector is preferred; this glyph is only used when
+        // the host drops the vector's gradient artwork while loading it.
+        markPaint.textSize = size * 0.52f
+        val metrics = markPaint.fontMetrics
+        val baseline = inner.centerY() - (metrics.ascent + metrics.descent) / 2f
+        canvas.drawText("♫", inner.centerX(), baseline, markPaint)
+    }
+
+    override fun setAlpha(alpha: Int) {
+        alphaValue = alpha.coerceIn(0, 255)
+        invalidateSelf()
+    }
+
+    override fun setColorFilter(colorFilter: ColorFilter?) {
+        backgroundPaint.colorFilter = colorFilter
+        markPaint.colorFilter = colorFilter
+        invalidateSelf()
+    }
+
+    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 }
 
 private val EMBEDDED_FONT_MIME_TYPES = arrayOf(
@@ -2884,25 +2955,46 @@ internal class EmbeddedSettingsHost private constructor(
      * are inflated with Apple's Context, so looking up the module resource ID
      * directly on the host can resolve the wrong package (or throw).
      */
-    private fun loadEmbeddedModuleIcon(context: Context): Drawable? =
+    private fun loadEmbeddedModuleIcon(context: Context): Drawable {
+        val candidates = mutableListOf<Drawable>()
         runCatching {
             context.packageManager.getApplicationIcon(ModuleConstants.MODULE_PACKAGE)
-        }.getOrNull()
-            ?: sequenceOf(
-                ModuleConstants.MODULE_PACKAGE,
-                "${ModuleConstants.MODULE_PACKAGE}.debug",
-            ).firstNotNullOfOrNull { packageName ->
-                runCatching {
-                    val moduleContext = context.createPackageContext(
-                        packageName,
-                        Context.CONTEXT_IGNORE_SECURITY,
-                    )
-                    moduleContext.resources.getDrawable(
-                        dev.amenhancer.module.R.drawable.ic_module,
-                        moduleContext.theme,
-                    )
-                }.getOrNull()
-            }
+        }.getOrNull()?.let(candidates::add)
+        sequenceOf(
+            ModuleConstants.MODULE_PACKAGE,
+            "${ModuleConstants.MODULE_PACKAGE}.debug",
+        ).forEach { packageName ->
+            runCatching {
+                val moduleContext = context.createPackageContext(
+                    packageName,
+                    Context.CONTEXT_IGNORE_SECURITY,
+                )
+                moduleContext.resources.getDrawable(
+                    dev.amenhancer.module.R.drawable.ic_module,
+                    moduleContext.theme,
+                )
+            }.getOrNull()?.let(candidates::add)
+        }
+        return candidates.firstOrNull(::hasEmbeddedIconArtwork)
+            ?: EmbeddedAmppFallbackDrawable()
+    }
+
+    /** Returns false for a transparent/missing-gradient vector resource. */
+    private fun hasEmbeddedIconArtwork(drawable: Drawable): Boolean = runCatching {
+        val size = 64
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val probe = drawable.constantState?.newDrawable()?.mutate() ?: drawable
+        probe.setBounds(0, 0, size, size)
+        probe.draw(Canvas(bitmap))
+        val pixels = IntArray(size * size)
+        bitmap.getPixels(pixels, 0, size, 0, 0, size, size)
+        bitmap.recycle()
+        val hsv = FloatArray(3)
+        pixels.count { color ->
+            Color.colorToHSV(color, hsv)
+            Color.alpha(color) > 24 && hsv[1] >= 0.28f && hsv[2] >= 0.35f
+        } >= 8
+    }.getOrDefault(false)
 
     private fun isEmbeddedPhone(activity: Activity): Boolean {
         val widthDp = activity.resources.configuration.screenWidthDp
