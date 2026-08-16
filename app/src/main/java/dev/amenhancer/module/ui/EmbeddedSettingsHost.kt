@@ -13,6 +13,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.text.Editable
+import android.text.InputType
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
@@ -28,6 +29,7 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import dev.amenhancer.module.ModuleConstants
+import dev.amenhancer.module.config.CatalogLanguagePolicy
 import dev.amenhancer.module.config.EmbeddedConfigurationSession
 import dev.amenhancer.module.CurrentSongDetails
 import dev.amenhancer.module.hook.AmLyricsClient
@@ -39,6 +41,8 @@ import dev.amenhancer.module.lyrics.CustomLyricsDraft
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImportResult
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImporter
 import dev.amenhancer.module.lyrics.CustomLyricsRestorePolicy
+import dev.amenhancer.module.lyrics.CustomLyricsSyncProgress
+import dev.amenhancer.module.lyrics.CustomLyricsSyncResult
 import dev.amenhancer.module.model.CustomLyricsEntry
 import dev.amenhancer.module.model.CustomLyricsSources
 import dev.amenhancer.module.model.ModuleSettings
@@ -48,6 +52,7 @@ import java.lang.reflect.Proxy
 import java.util.ArrayDeque
 import java.util.Locale
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 internal enum class EmbeddedHostActivityRole {
     Player,
@@ -66,6 +71,15 @@ private val EMBEDDED_FONT_MIME_TYPES = arrayOf(
     "application/x-font-ttf",
     "application/x-font-opentype",
     "application/vnd.ms-opentype",
+)
+
+/** AMTool-compatible language choices shared by the standalone settings UI. */
+private val EMBEDDED_CATALOG_LANGUAGE_TAGS = listOf(
+    "zh-CN",
+    "zh-TW",
+    "ja-JP",
+    "en-US",
+    "tr-TR",
 )
 
 /** Stable, locale-aware signals for the fixed Apple Music settings surface. */
@@ -315,6 +329,11 @@ internal interface EmbeddedSettingsController {
         neteaseSongId: Long?,
         displayName: String,
     ): EmbeddedActionResult = EmbeddedActionResult.Failed("在线导入不可用")
+
+    fun syncFromGitHub(
+        isCancelled: () -> Boolean = { false },
+        onProgress: (CustomLyricsSyncProgress) -> Unit = {},
+    ): CustomLyricsSyncResult = CustomLyricsSyncResult.Failed("GitHub 同步不可用")
 }
 
 internal class EmbeddedSessionSettingsController(
@@ -1190,6 +1209,29 @@ internal class EmbeddedSettingsHost private constructor(
                 onSettingsChanged(settings.copy(lyricBlurRadiusOffsetPx = it))
             })
             addView(embeddedDivider(activity))
+            addView(embeddedSettingRow(
+                activity,
+                "歌曲名显示修正",
+                "将部分 Catalog 请求改为目标语言并回填标题 · 修改后重开 Apple Music",
+                settings.titleCorrectionEnabled,
+            ) { onSettingsChanged(settings.copy(titleCorrectionEnabled = it)) })
+            addView(embeddedDivider(activity))
+            addView(embeddedNavigationRow(
+                activity,
+                "目标语言",
+                CatalogLanguagePolicy.displayName(settings.titleCorrectionTargetLanguage),
+            ) {
+                showEmbeddedTargetLanguagePicker(
+                    activity = activity,
+                    current = settings.titleCorrectionTargetLanguage,
+                ) { target ->
+                    onSettingsChanged(settings.copy(titleCorrectionTargetLanguage = target))
+                    // Re-render only after a picker selection so the summary
+                    // reflects the persisted canonical tag immediately.
+                    pageRefresh?.invoke()
+                }
+            })
+            addView(embeddedDivider(activity))
             addView(embeddedNavigationRow(
                 activity,
                 "自定义歌词",
@@ -1269,6 +1311,17 @@ internal class EmbeddedSettingsHost private constructor(
                     )
                 }, LinearLayout.LayoutParams(0, dp(activity, 48), 1f))
             }, matchWidthWrapContent())
+
+            addView(embeddedActionButton(activity, "同步 GitHub 源") {
+                syncEmbeddedGitHub(activity)
+            }, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(activity, 48),
+            ).apply {
+                marginStart = dp(activity, 12)
+                marginEnd = dp(activity, 12)
+                bottomMargin = dp(activity, 12)
+            })
 
             val search = EditText(activity).apply {
                 hint = "搜索名称或 Apple Music ID"
@@ -1405,6 +1458,66 @@ internal class EmbeddedSettingsHost private constructor(
         CustomLyricsSources.NETEASE -> "网易云 YRC"
         CustomLyricsSources.AM_LYRICS -> "AM-Lyrics 仓库"
         else -> "手动 TTML"
+    }
+
+    private fun syncEmbeddedGitHub(activity: Activity) {
+        val cancelled = AtomicBoolean(false)
+        val progress = TextView(activity).apply {
+            text = "正在读取 GitHub 索引…"
+            textSize = 15f
+            setTextColor(Color.DKGRAY)
+            setPadding(dp(activity, 24), dp(activity, 8), dp(activity, 24), dp(activity, 8))
+        }
+        val dialog = AlertDialog.Builder(activity)
+            .setTitle("同步 GitHub 源")
+            .setView(progress)
+            .setNegativeButton("取消") { _, _ -> cancelled.set(true) }
+            .create()
+        dialog.setCanceledOnTouchOutside(false)
+        dialog.setOnCancelListener { cancelled.set(true) }
+        dialog.show()
+        worker.execute {
+            val result = runCatching {
+                controller.syncFromGitHub(
+                    isCancelled = cancelled::get,
+                    onProgress = { update ->
+                        mainHandler.post {
+                            if (dialog.isShowing) {
+                                progress.text =
+                                    "正在同步 ${update.processedEntries}/${update.totalEntries} 条 GitHub 歌词…"
+                            }
+                        }
+                    },
+                )
+            }.getOrElse { error ->
+                CustomLyricsSyncResult.Failed(
+                    "同步 GitHub 源失败：${error.message.orEmpty()}",
+                )
+            }
+            mainHandler.post {
+                if (dialog.isShowing) dialog.dismiss()
+                val current = currentActivity() ?: return@post
+                when (result) {
+                    is CustomLyricsSyncResult.Synced -> Toast.makeText(
+                        current,
+                        "GitHub 同步完成：新增 ${result.importedIds} 个 ID，覆盖 " +
+                            "${result.overwrittenIds} 个 ID，保留 ${result.preservedIds} 个本地 ID",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    CustomLyricsSyncResult.Cancelled -> Toast.makeText(
+                        current,
+                        "GitHub 同步已取消",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                    is CustomLyricsSyncResult.Failed -> Toast.makeText(
+                        current,
+                        result.message,
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+                if (result is CustomLyricsSyncResult.Synced) pageRefresh?.invoke()
+            }
+        }
     }
 
     private fun embeddedStatusCard(activity: Activity, song: CurrentSongDetails?): View =
@@ -1553,6 +1666,58 @@ internal class EmbeddedSettingsHost private constructor(
                 override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
             })
         }, matchWidthWrapContent())
+    }
+
+    private fun showEmbeddedTargetLanguagePicker(
+        activity: Activity,
+        current: String,
+        onSelected: (String) -> Unit,
+    ) {
+        val normalizedCurrent = CatalogLanguagePolicy.normalize(current)
+        val tags = EMBEDDED_CATALOG_LANGUAGE_TAGS
+        val labels = tags.map { CatalogLanguagePolicy.displayName(it) }.toTypedArray()
+        val selected = tags.indexOf(normalizedCurrent)
+        AlertDialog.Builder(activity)
+            .setTitle("目标语言")
+            .setSingleChoiceItems(labels, selected) { dialog, which ->
+                tags.getOrNull(which)?.let { tag ->
+                    onSelected(tag)
+                    dialog.dismiss()
+                }
+            }
+            .setNeutralButton("自定义") { _, _ ->
+                showEmbeddedTargetLanguageEditor(activity, normalizedCurrent, onSelected)
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun showEmbeddedTargetLanguageEditor(
+        activity: Activity,
+        current: String,
+        onSelected: (String) -> Unit,
+    ) {
+        val input = EditText(activity).apply {
+            hint = "例如 tr-TR"
+            inputType = InputType.TYPE_CLASS_TEXT
+            setText(current)
+            setSelectAllOnFocus(true)
+            setPadding(dp(activity, 24), dp(activity, 8), dp(activity, 24), 0)
+        }
+        AlertDialog.Builder(activity)
+            .setTitle("自定义目标语言")
+            .setMessage("请输入 BCP-47 语言标签（例如 zh-CN）；空值或非法值无法保存")
+            .setView(input)
+            .setNegativeButton("取消", null)
+            .setPositiveButton("保存") { _, _ ->
+                val raw = input.text?.toString().orEmpty()
+                if (!CatalogLanguagePolicy.isValid(raw)) {
+                    Toast.makeText(activity, "目标语言格式无效，例如 tr-TR", Toast.LENGTH_SHORT).show()
+                } else {
+                    onSelected(CatalogLanguagePolicy.normalize(raw))
+                }
+            }
+            .show()
     }
 
     private fun embeddedNavigationRow(

@@ -13,6 +13,11 @@ import dev.amenhancer.module.lyrics.CustomLyricsRestorePolicy
 import dev.amenhancer.module.lyrics.CustomLyricsRestoreResult
 import dev.amenhancer.module.lyrics.CustomLyricsRestoreTransaction
 import dev.amenhancer.module.lyrics.CustomLyricsSaveResult
+import dev.amenhancer.module.lyrics.CustomLyricsSyncLoadResult
+import dev.amenhancer.module.lyrics.CustomLyricsSyncPlanEntry
+import dev.amenhancer.module.lyrics.CustomLyricsSyncProgress
+import dev.amenhancer.module.lyrics.CustomLyricsSyncResult
+import dev.amenhancer.module.lyrics.CustomLyricsSyncTransaction
 import dev.amenhancer.module.model.CustomLyricsEntry
 import dev.amenhancer.module.model.CustomLyricsManifest
 import dev.amenhancer.module.model.CustomLyricsSources
@@ -233,6 +238,45 @@ internal class EmbeddedContentManager(
                 },
                 deleteRemoteFile = { fileId -> session.deleteFile(fileId) },
             ).merge(current, policy) { onFile -> CustomLyricsBackupCodec.decode(input, onFile) }
+        }
+    }
+
+    /**
+     * Synchronizes an enabled GitHub snapshot into host-private storage.
+     *
+     * The transaction owns the all-or-nothing merge and rollback behavior;
+     * this facade only resolves the current host index and binds the existing
+     * session file/pointer protocol to that transaction.  Keeping the network
+     * callbacks outside this class also lets callers cancel or report progress
+     * without making the storage layer aware of an Android lifecycle.
+     */
+    fun syncFromGitHub(
+        plan: List<CustomLyricsSyncPlanEntry>,
+        loadTtml: (CustomLyricsSyncPlanEntry) -> CustomLyricsSyncLoadResult,
+        isCancelled: () -> Boolean = { false },
+        onProgress: (CustomLyricsSyncProgress) -> Unit = {},
+    ): CustomLyricsSyncResult = synchronized(mutationLock) {
+        session.withCustomLyricsMutation {
+            val state = CustomLyricsIndexRepository.state(session.values(), session::openFile)
+            if (!state.canCommit) {
+                return@withCustomLyricsMutation CustomLyricsSyncResult.Failed(
+                    "歌词索引文件不可读，无法同步",
+                )
+            }
+            CustomLyricsSyncTransaction(
+                fileIdFactory = { fileIdFactory("lyrics") },
+                writeRemoteFile = session::writeFile,
+                publishManifest = { next ->
+                    session.commitCustomLyrics(next) is CustomLyricsIndexCommitResult.Committed
+                },
+                deleteRemoteFile = { fileId -> session.deleteFile(fileId) },
+            ).sync(
+                oldManifest = state.manifest,
+                plan = plan,
+                loadTtml = loadTtml,
+                isCancelled = isCancelled,
+                onProgress = onProgress,
+            )
         }
     }
 

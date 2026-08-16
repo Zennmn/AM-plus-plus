@@ -7,6 +7,10 @@ import dev.amenhancer.module.lyrics.CustomLyricsOnlineImportResult
 import dev.amenhancer.module.lyrics.CustomLyricsRestoreResult
 import dev.amenhancer.module.lyrics.CustomLyricsRestorePolicy
 import dev.amenhancer.module.lyrics.CustomLyricsSaveResult
+import dev.amenhancer.module.lyrics.CustomLyricsSyncLoadResult
+import dev.amenhancer.module.lyrics.CustomLyricsSyncPlanEntry
+import dev.amenhancer.module.lyrics.CustomLyricsSyncProgress
+import dev.amenhancer.module.lyrics.CustomLyricsSyncResult
 import dev.amenhancer.module.model.CustomLyricsEntry
 import dev.amenhancer.module.model.CustomLyricsSources
 import dev.amenhancer.module.model.LyricsFontManifest
@@ -150,6 +154,42 @@ class EmbeddedContentManagerTest {
         val entry = (result as CustomLyricsSaveResult.Saved).entry
         assertEquals(CustomLyricsSources.AMLL, entry.source)
         assertEquals(ttml("online"), manager.readLyrics(303L))
+    }
+
+    @Test
+    fun `github sync replaces remote ids and preserves local-only entries`() {
+        val storage = MemoryStorage()
+        val manager = EmbeddedContentManager(
+            session = EmbeddedConfigurationSession(storage),
+            fileIdFactory = sequenceFileIds("lyrics_sync"),
+        )
+        manager.addLyrics(900L, "Local", ttml("local"))
+        storage.events.clear()
+        val progress = mutableListOf<CustomLyricsSyncProgress>()
+
+        val result = manager.syncFromGitHub(
+            plan = listOf(
+                CustomLyricsSyncPlanEntry(
+                    key = "am-lyrics/remote.ttml",
+                    appleMusicIds = listOf(100L, 200L),
+                    displayName = "Remote",
+                ),
+            ),
+            loadTtml = { CustomLyricsSyncLoadResult.Loaded(ttml("remote")) },
+            onProgress = progress::add,
+        )
+
+        assertTrue(result is CustomLyricsSyncResult.Synced)
+        val synced = result as CustomLyricsSyncResult.Synced
+        assertEquals(2, synced.importedIds)
+        assertEquals(0, synced.overwrittenIds)
+        assertEquals(1, synced.preservedIds)
+        assertEquals(listOf(900L, 100L, 200L), manager.listLyrics().map(CustomLyricsEntry::appleMusicId))
+        assertEquals(ttml("local"), manager.readLyrics(900L))
+        assertEquals(ttml("remote"), manager.readLyrics(100L))
+        assertEquals(ttml("remote"), manager.readLyrics(200L))
+        assertEquals(listOf(1), progress.map(CustomLyricsSyncProgress::processedEntries))
+        assertTrue(storage.events.indexOf("publish-index") > storage.events.indexOf("write:lyrics_sync_2"))
     }
 
     @Test

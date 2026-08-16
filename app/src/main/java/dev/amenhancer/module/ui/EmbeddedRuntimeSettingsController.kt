@@ -11,6 +11,7 @@ import dev.amenhancer.module.config.EmbeddedLyricsMutationResult
 import dev.amenhancer.module.font.FontFilePolicy
 import dev.amenhancer.module.font.FontImportResult
 import dev.amenhancer.module.hook.AmLyricsClient
+import dev.amenhancer.module.hook.AmLyricsIndexEntry
 import dev.amenhancer.module.hook.AmllTtmlClient
 import dev.amenhancer.module.hook.HttpLyricTransport
 import dev.amenhancer.module.hook.NeteaseLyricClient
@@ -20,6 +21,10 @@ import dev.amenhancer.module.lyrics.CustomLyricsOnlineImportResult
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImporter
 import dev.amenhancer.module.lyrics.CustomLyricsRestoreResult
 import dev.amenhancer.module.lyrics.CustomLyricsSaveResult
+import dev.amenhancer.module.lyrics.CustomLyricsSyncLoadResult
+import dev.amenhancer.module.lyrics.CustomLyricsSyncPlanEntry
+import dev.amenhancer.module.lyrics.CustomLyricsSyncProgress
+import dev.amenhancer.module.lyrics.CustomLyricsSyncResult
 import dev.amenhancer.module.model.CustomLyricsEntry
 import dev.amenhancer.module.model.CustomLyricsSources
 import dev.amenhancer.module.model.ModuleSettings
@@ -170,6 +175,65 @@ internal class EmbeddedRuntimeSettingsController(
             ).toActionResult()
         }
     }
+
+    /**
+     * Synchronizes the current enabled AM-Lyrics GitHub snapshot into the
+     * host-private index.  Callers should invoke this from their worker; the
+     * method performs bounded network reads before entering the content
+     * transaction and reports transaction progress through [onProgress].
+     */
+    override fun syncFromGitHub(
+        isCancelled: () -> Boolean,
+        onProgress: (CustomLyricsSyncProgress) -> Unit,
+    ): CustomLyricsSyncResult = runCatching {
+        val client = AmLyricsClient(HttpLyricTransport())
+        val index = client.fetchIndex()
+            ?: return@runCatching CustomLyricsSyncResult.Failed("GitHub 索引无效或读取失败")
+        val enabledEntries = index.entries.filter(AmLyricsIndexEntry::enabled)
+        val plan = enabledEntries.map { entry ->
+            CustomLyricsSyncPlanEntry(
+                key = entry.path,
+                appleMusicIds = entry.allAppleMusicIds,
+                displayName = entry.displayName,
+            )
+        }
+        val entriesByPath = enabledEntries.associateBy(AmLyricsIndexEntry::path)
+        content.syncFromGitHub(
+            plan = plan,
+            loadTtml = { source ->
+                if (runCatching { isCancelled() }.getOrDefault(false)) {
+                    CustomLyricsSyncLoadResult.Cancelled
+                } else {
+                    val entry = entriesByPath[source.key]
+                    if (entry == null) {
+                        CustomLyricsSyncLoadResult.Failed("GitHub 索引条目已变化")
+                    } else {
+                        client.fetchTtml(entry)?.let(CustomLyricsSyncLoadResult::Loaded)
+                            ?: CustomLyricsSyncLoadResult.Failed(
+                                "下载 GitHub 歌词失败：${source.displayName}",
+                            )
+                    }
+                }
+            },
+            isCancelled = isCancelled,
+            onProgress = onProgress,
+        )
+    }.getOrElse { error ->
+        CustomLyricsSyncResult.Failed("同步 GitHub 源失败：${error.message.orEmpty()}")
+    }
+
+    /** Binds an already downloaded GitHub snapshot to the host transaction. */
+    fun syncFromGitHub(
+        plan: List<CustomLyricsSyncPlanEntry>,
+        loadTtml: (CustomLyricsSyncPlanEntry) -> CustomLyricsSyncLoadResult,
+        isCancelled: () -> Boolean = { false },
+        onProgress: (CustomLyricsSyncProgress) -> Unit = {},
+    ): CustomLyricsSyncResult = content.syncFromGitHub(
+        plan = plan,
+        loadTtml = loadTtml,
+        isCancelled = isCancelled,
+        onProgress = onProgress,
+    )
 
     private fun displayName(uri: Uri, fallback: String): String = runCatching {
         appContext.contentResolver.query(

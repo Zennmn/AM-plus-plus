@@ -96,6 +96,22 @@ class EmbeddedSettingsEntryStructuralRegressionTest {
     }
 
     @Test
+    fun `embedded main page exposes title correction and target language picker`() {
+        val host = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsHost.kt")
+
+        assertTrue(host.contains("歌曲名显示修正"))
+        assertTrue(host.contains("settings.titleCorrectionEnabled"))
+        assertTrue(host.contains("titleCorrectionEnabled = it"))
+        assertTrue(host.contains("目标语言"))
+        assertTrue(host.contains("titleCorrectionTargetLanguage"))
+        assertTrue(host.contains("CatalogLanguagePolicy.displayName"))
+        assertTrue(host.contains("CatalogLanguagePolicy.isValid(raw)"))
+        assertTrue(host.contains("CatalogLanguagePolicy.normalize(raw)"))
+        assertTrue(host.contains("showEmbeddedTargetLanguagePicker"))
+        assertTrue(host.contains("val tags = EMBEDDED_CATALOG_LANGUAGE_TAGS"))
+    }
+
+    @Test
     fun `embedded font picker accepts providers that do not advertise font wildcard`() {
         val host = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsHost.kt")
 
@@ -129,5 +145,7 @@ class EmbeddedSettingsEntryStructuralRegressionTest {
         assertTrue(host.contains("CustomLyricsOnlineImporter"))
         assertTrue(host.contains("importEmbeddedOnlineLyrics"))
         assertTrue(host.contains("source = source"))
+        assertTrue(host.contains("同步 GitHub 源"))
+        assertTrue(host.contains("controller.syncFromGitHub"))
     }
 }
