@@ -371,7 +371,7 @@ class SettingsActivity : Activity() {
             })
             addView(settingRow(
                 title = "平板双栏播放器",
-                summary = "仅在 Apple Music 判定为平板且横屏时启用",
+                summary = "平板横屏启用双栏，同时停用 Editorial Video",
                 checked = settings.dualPaneEnabled,
                 enabled = writable,
             ) { enabled ->
@@ -388,20 +388,14 @@ class SettingsActivity : Activity() {
             })
             addView(insetDivider())
             addView(settingRow(
-                title = "平板禁用动态视频",
-                summary = "平板横屏时禁用 Editorial Video；普通音乐视频不受影响",
-                checked = settings.disableEditorialVideoOnTablet,
-                enabled = writable,
-            ) {
-                store.saveSettings(store.settings().copy(disableEditorialVideoOnTablet = it))
-            })
-            addView(insetDivider())
-            addView(settingRow(
                 title = "手机液态玻璃底栏",
                 summary = "仅手机启用 · 更改后需强制停止并重开 Apple Music",
                 checked = settings.phoneLiquidGlassEnabled,
                 enabled = writable,
                 badge = "WIP",
+                onEnableConfirmation = { onConfirmed ->
+                    showLiquidGlassConfirmation(onConfirmed)
+                },
             ) {
                 store.saveSettings(store.settings().copy(phoneLiquidGlassEnabled = it))
             })
@@ -1564,6 +1558,7 @@ class SettingsActivity : Activity() {
         checked: Boolean,
         enabled: Boolean,
         badge: String? = null,
+        onEnableConfirmation: ((onConfirmed: () -> Unit) -> Unit)? = null,
         onChanged: (Boolean) -> Unit,
     ): View {
         val switch = Switch(this).apply {
@@ -1573,7 +1568,26 @@ class SettingsActivity : Activity() {
             contentDescription = title
             thumbTintList = switchThumbColors()
             trackTintList = switchTrackColors()
-            setOnCheckedChangeListener { _, value -> onChanged(value) }
+        }
+        var suppressSwitchCallback = false
+        var committedSwitchValue = checked
+        switch.setOnCheckedChangeListener { _, value ->
+            if (suppressSwitchCallback) return@setOnCheckedChangeListener
+            if (value && !committedSwitchValue && onEnableConfirmation != null) {
+                suppressSwitchCallback = true
+                switch.isChecked = false
+                suppressSwitchCallback = false
+                onEnableConfirmation.invoke {
+                    suppressSwitchCallback = true
+                    switch.isChecked = true
+                    suppressSwitchCallback = false
+                    committedSwitchValue = true
+                    onChanged(true)
+                }
+            } else {
+                committedSwitchValue = value
+                onChanged(value)
+            }
         }
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1609,6 +1623,15 @@ class SettingsActivity : Activity() {
             addView(switch, LinearLayout.LayoutParams(dp(64), dp(48)))
             setOnClickListener { switch.isChecked = !switch.isChecked }
         }
+    }
+
+    private fun showLiquidGlassConfirmation(onConfirmed: () -> Unit) {
+        AlertDialog.Builder(this)
+            .setTitle("手机液态玻璃底栏")
+            .setMessage("这是半成品功能，不接受反馈。\n开启后需要强制停止并重新打开 Apple Music。")
+            .setNegativeButton("取消", null)
+            .setPositiveButton("继续开启") { _, _ -> onConfirmed() }
+            .show()
     }
 
     private fun blurRadiusOffsetRow(
