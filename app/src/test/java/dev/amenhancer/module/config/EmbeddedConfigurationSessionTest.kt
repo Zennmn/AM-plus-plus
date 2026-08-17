@@ -97,6 +97,27 @@ class EmbeddedConfigurationSessionTest {
         )
     }
 
+    @Test
+    fun `read-only session preserves reads but rejects every mutation`() {
+        val storage = InMemoryEmbeddedStorage(
+            initialValues = ModuleSettingsSchema.encodeOrdinarySettings(ModuleSettings()),
+        )
+        val session = EmbeddedConfigurationSession(storage = storage, writable = false)
+        val before = storage.values()
+
+        assertTrue(session.settings().dualPaneEnabled)
+        assertFalse(session.saveSettings(session.settings().copy(dualPaneEnabled = false)))
+        assertFalse(session.saveFontManifest(LyricsFontManifest.disabled()))
+        assertFalse(session.writeFile("lyrics_read_only", byteArrayOf(1)))
+        assertFalse(session.deleteFile("lyrics_read_only"))
+        assertTrue(
+            session.commitCustomLyrics(CustomLyricsManifest.empty()) is
+                CustomLyricsIndexCommitResult.Failed,
+        )
+        assertEquals(before, storage.values())
+        assertTrue(storage.openFile("lyrics_read_only") == null)
+    }
+
     private class InMemoryEmbeddedStorage(
         initialValues: Map<String, Any> = emptyMap(),
     ) : EmbeddedConfigurationStorage {

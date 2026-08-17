@@ -172,15 +172,21 @@ class HookEntry : XposedModule() {
                         if (!resourcePreparationStarted.compareAndSet(false, true)) return
                         try {
                             val storage = HostPrivateEmbeddedStorage(application)
-                            if (migrateRemoteConfiguration(storage) is EmbeddedConfigurationMigrationResult.Failed) {
-                                // Do not publish a writable host session after a
-                                // partial migration.  A later process restart
-                                // must be able to retry from the in-progress
-                                // marker without user settings masking it.
-                                resourcePreparationStarted.set(false)
-                                return
+                            val migrationDeferred = migrateRemoteConfiguration(storage) is
+                                EmbeddedConfigurationMigrationResult.Failed
+                            if (migrationDeferred) {
+                                // Keep the host runtime fail-open when the legacy
+                                // source is temporarily unavailable.  The session
+                                // remains read-only so settings cannot mask an
+                                // in-progress migration; a fresh process retries it.
+                                ModernXposedRuntime.log(
+                                    "embedded configuration migration deferred; continuing read-only",
+                                )
                             }
-                            val session = EmbeddedConfigurationSession(storage)
+                            val session = EmbeddedConfigurationSession(
+                                storage = storage,
+                                writable = !migrationDeferred,
+                            )
                             if (!bootstrap.bind(build, session)) {
                                 resourcePreparationStarted.set(false)
                                 return
@@ -250,6 +256,7 @@ class HookEntry : XposedModule() {
     private fun migrateRemoteConfiguration(
         storage: HostPrivateEmbeddedStorage,
     ): EmbeddedConfigurationMigrationResult? {
+        if (EmbeddedConfigurationMigration.destinationAlreadyInitialized(storage)) return null
         if (frameworkProperties.and(XposedService.PROP_CAP_REMOTE) == 0L) return null
         val remotePreferences = runCatching {
             getRemotePreferences(ModuleConstants.REMOTE_PREFERENCES_GROUP)

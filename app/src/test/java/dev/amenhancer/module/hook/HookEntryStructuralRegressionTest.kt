@@ -48,6 +48,9 @@ class HookEntryStructuralRegressionTest {
         assertTrue(beforeHook.contains("val config = TargetConfigClient(bootstrap.reader)"))
         assertTrue(beforeHook.contains("FeatureInstallation.registerResources(config)"))
         assertTrue(beforeHook.contains("migrateRemoteConfiguration(storage)"))
+        assertTrue(beforeHook.contains("val migrationDeferred"))
+        assertTrue(beforeHook.contains("writable = !migrationDeferred"))
+        assertTrue(beforeHook.contains("continuing read-only"))
         assertTrue(beforeHook.indexOf("migrateRemoteConfiguration(storage)") <
             beforeHook.indexOf("bootstrap.bind(build, session)"))
         assertTrue(beforeHook.indexOf("FeatureInstallation.registerResources(config)") <

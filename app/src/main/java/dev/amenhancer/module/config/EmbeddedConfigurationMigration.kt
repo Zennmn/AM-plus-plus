@@ -3,7 +3,6 @@ package dev.amenhancer.module.config
 import android.content.SharedPreferences
 import android.os.ParcelFileDescriptor
 import dev.amenhancer.module.lyrics.CustomLyricsFilePolicy
-import dev.amenhancer.module.lyrics.TtmlInputPolicy
 import java.io.ByteArrayInputStream
 import java.io.InputStream
 
@@ -17,6 +16,22 @@ internal object EmbeddedConfigurationMigration {
     const val MIGRATION_MARKER_KEY = "embedded_storage_migration_v1"
     const val MIGRATION_IN_PROGRESS = "in_progress"
     const val MIGRATION_COMPLETE = "complete"
+
+    /** Bounds synchronous pre-Application migration for large lyric libraries. */
+    const val MAX_TOTAL_TTML_BYTES = 64L * 1024 * 1024
+
+    /** Existing host state must not depend on the legacy remote service. */
+    fun destinationAlreadyInitialized(destination: EmbeddedConfigurationStorage): Boolean =
+        synchronized(destination) {
+            when (destinationState(destination)) {
+                DestinationState.COMPLETE,
+                DestinationState.OCCUPIED,
+                -> true
+                DestinationState.EMPTY,
+                DestinationState.IN_PROGRESS,
+                -> false
+            }
+        }
 
     /**
      * Adapter used by the host-process call site, where libxposed exposes
@@ -164,10 +179,22 @@ internal object EmbeddedConfigurationMigration {
                         !previous.sha256.equals(payload.sha256, ignoreCase = true)
                     )
             ) return false
-            // Prefer an already materialized payload when two schema entries
-            // reference the same file, otherwise retain the streaming source.
-            if (previous == null || (previous.bytes == null && payload.bytes != null)) {
+            if (previous == null) {
                 payloads[payload.name] = payload
+            } else {
+                // Prefer an already materialized payload when two schema
+                // entries reference the same file, but preserve the TTML
+                // accounting bit if a schema aliases file roles.
+                payloads[payload.name] = when {
+                    previous.bytes == null && payload.bytes != null -> payload.copy(
+                        countsTowardTtmlBudget =
+                            previous.countsTowardTtmlBudget || payload.countsTowardTtmlBudget,
+                    )
+                    else -> previous.copy(
+                        countsTowardTtmlBudget =
+                            previous.countsTowardTtmlBudget || payload.countsTowardTtmlBudget,
+                    )
+                }
             }
             return true
         }
@@ -191,14 +218,18 @@ internal object EmbeddedConfigurationMigration {
         }
 
         indexState.manifest.entries.forEach { entry ->
-            val bytes = readBounded(openRemoteFile, entry.fileId, TtmlInputPolicy.MAX_TTML_BYTES)
-                ?: return null
-            if (bytes.size.toLong() != entry.sizeBytes) return null
-            if (!CustomLyricsFilePolicy.sha256(bytes).equals(entry.sha256, ignoreCase = true)) {
-                return null
-            }
-            if (!addPayload(Payload.bytes(entry.fileId, bytes))) return null
+            if (!addPayload(
+                    Payload.stream(
+                        name = entry.fileId,
+                        sizeBytes = entry.sizeBytes,
+                        sha256 = entry.sha256,
+                        openStream = { openRemoteFile(entry.fileId) },
+                        countsTowardTtmlBudget = true,
+                    )
+                )
+            ) return null
         }
+        if (exceedsTtmlBudget(payloads.values)) return null
 
         val values = LinkedHashMap<String, Any>()
             .apply { putAll(ModuleSettingsSchema.encodeOrdinarySettings(settings)) }
@@ -254,6 +285,17 @@ internal object EmbeddedConfigurationMigration {
         }
     }.getOrNull()
 
+    private fun exceedsTtmlBudget(payloads: Collection<Payload>): Boolean {
+        var total = 0L
+        payloads.filter(Payload::countsTowardTtmlBudget).forEach { payload ->
+            if (payload.sizeBytes < 0L ||
+                total > MAX_TOTAL_TTML_BYTES - payload.sizeBytes
+            ) return true
+            total += payload.sizeBytes
+        }
+        return false
+    }
+
     private fun hasFontValues(values: Map<String, *>): Boolean =
         values.keys.any { it.startsWith("lyrics_font_") }
 
@@ -278,6 +320,7 @@ internal object EmbeddedConfigurationMigration {
         val sha256: String,
         val bytes: ByteArray? = null,
         val openStream: (() -> InputStream?)? = null,
+        val countsTowardTtmlBudget: Boolean = false,
     ) {
         fun openStream(): InputStream? = bytes?.let(::ByteArrayInputStream) ?: openStream?.invoke()
 
@@ -294,11 +337,13 @@ internal object EmbeddedConfigurationMigration {
                 sizeBytes: Long,
                 sha256: String,
                 openStream: () -> InputStream?,
+                countsTowardTtmlBudget: Boolean = false,
             ): Payload = Payload(
                 name = name,
                 sizeBytes = sizeBytes,
                 sha256 = sha256,
                 openStream = openStream,
+                countsTowardTtmlBudget = countsTowardTtmlBudget,
             )
         }
     }

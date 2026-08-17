@@ -70,6 +70,7 @@ internal class EmbeddedConfigurationSession(
     newIndexFileId: () -> String = {
         "index_" + UUID.randomUUID().toString().replace("-", "")
     },
+    private val writable: Boolean = true,
 ) : ConfigurationReader {
     private val indexRepository = CustomLyricsIndexRepository(
         newIndexFileId = newIndexFileId,
@@ -81,29 +82,33 @@ internal class EmbeddedConfigurationSession(
 
     fun settings(): ModuleSettings = ModuleSettingsSchema.decode(storage.values())
 
-    fun saveSettings(settings: ModuleSettings): Boolean = storage.writeValues(
+    fun saveSettings(settings: ModuleSettings): Boolean = writable && storage.writeValues(
         ModuleSettingsSchema.encodeOrdinarySettings(settings),
         synchronous = true,
     )
 
-    fun saveFontManifest(manifest: LyricsFontManifest): Boolean = storage.writeValues(
+    fun saveFontManifest(manifest: LyricsFontManifest): Boolean = writable && storage.writeValues(
         ModuleSettingsSchema.encodeFontManifest(manifest),
         synchronous = true,
     )
 
-    fun writeFile(name: String, bytes: ByteArray): Boolean = storage.writeFile(name, bytes)
+    fun writeFile(name: String, bytes: ByteArray): Boolean = writable && storage.writeFile(name, bytes)
 
-    fun deleteFile(name: String): Boolean = storage.deleteFile(name)
+    fun deleteFile(name: String): Boolean = writable && storage.deleteFile(name)
 
     fun commitCustomLyrics(
         manifest: CustomLyricsManifest,
         allowRecovery: Boolean = false,
-    ): CustomLyricsIndexCommitResult = synchronized(INDEX_MUTATION_LOCK) {
-        indexRepository.commit(
-            state = indexRepository.state(storage.values()),
-            next = manifest,
-            allowRecovery = allowRecovery,
-        )
+    ): CustomLyricsIndexCommitResult = if (!writable) {
+        CustomLyricsIndexCommitResult.Failed("嵌入配置迁移未完成，当前仅可读")
+    } else {
+        synchronized(INDEX_MUTATION_LOCK) {
+            indexRepository.commit(
+                state = indexRepository.state(storage.values()),
+                next = manifest,
+                allowRecovery = allowRecovery,
+            )
+        }
     }
 
     internal fun <T> withCustomLyricsMutation(block: () -> T): T =

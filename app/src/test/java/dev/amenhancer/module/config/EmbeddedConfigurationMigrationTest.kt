@@ -117,6 +117,15 @@ class EmbeddedConfigurationMigrationTest {
     }
 
     @Test
+    fun `initialized host state can skip legacy service access`() {
+        val destination = MemoryStorage(
+            initialValues = ModuleSettingsSchema.encodeOrdinarySettings(ModuleSettings()),
+        )
+
+        assertTrue(EmbeddedConfigurationMigration.destinationAlreadyInitialized(destination))
+    }
+
+    @Test
     fun `failed file copy leaves in-progress marker and can be retried`() {
         val body = "<ttml/>".toByteArray()
         val entry = CustomLyricsEntry(
@@ -230,6 +239,47 @@ class EmbeddedConfigurationMigrationTest {
         assertEquals(EmbeddedConfigurationMigrationResult.SkippedNoRemoteConfiguration, result)
         assertTrue(destination.values().isEmpty())
         assertTrue(!destination.hasAnyFiles())
+    }
+
+    @Test
+    fun `rejects a lyric library above the synchronous migration budget before opening payloads`() {
+        val entries = (0 until 129).map { index ->
+            CustomLyricsEntry(
+                appleMusicId = index + 1L,
+                displayName = "Song $index",
+                fileId = "lyrics_$index",
+                sizeBytes = 512L * 1024,
+                sha256 = "0".repeat(64),
+                source = CustomLyricsSources.MANUAL,
+            )
+        }
+        val indexBytes = CustomLyricsManifestCodec.encode(CustomLyricsManifest(entries))
+            .toByteArray(Charsets.UTF_8)
+        val pointer = CustomLyricsIndexPointer(
+            fileId = "index_budget",
+            generation = 1L,
+            sha256 = sha256(indexBytes),
+            sizeBytes = indexBytes.size.toLong(),
+        )
+        val destination = MemoryStorage()
+        var lyricPayloadOpens = 0
+
+        val result = EmbeddedConfigurationMigration.migrate(
+            remoteValues = ModuleSettingsSchema.encodeIndexPointer(pointer),
+            openRemoteFile = { name ->
+                if (name == pointer.fileId) {
+                    ByteArrayInputStream(indexBytes)
+                } else {
+                    lyricPayloadOpens += 1
+                    null
+                }
+            },
+            destination = destination,
+        )
+
+        assertTrue(result is EmbeddedConfigurationMigrationResult.Failed)
+        assertEquals(0, lyricPayloadOpens)
+        assertTrue(destination.values().isEmpty())
     }
 
     private class MemoryStorage(
