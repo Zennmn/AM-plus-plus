@@ -39,6 +39,35 @@ class HookEntryStructuralRegressionTest {
     }
 
     @Test
+    fun `registers resources before Application onCreate and reuses the deferred config`() {
+        val source = projectFile("app/src/main/java/dev/amenhancer/module/hook/HookEntry.kt")
+        val beforeHook = source.substringAfter("override fun beforeHookedMethod")
+            .substringBefore("override fun afterHookedMethod")
+        val afterHook = source.substringAfter("override fun afterHookedMethod")
+
+        assertTrue(beforeHook.contains("val config = TargetConfigClient(bootstrap.reader)"))
+        assertTrue(beforeHook.contains("FeatureInstallation.registerResources(config)"))
+        assertTrue(beforeHook.contains("migrateRemoteConfiguration(storage)"))
+        assertTrue(beforeHook.indexOf("migrateRemoteConfiguration(storage)") <
+            beforeHook.indexOf("bootstrap.bind(build, session)"))
+        assertTrue(beforeHook.indexOf("FeatureInstallation.registerResources(config)") <
+            beforeHook.indexOf("embeddedConfig = config"))
+        assertTrue(beforeHook.contains("resourcePreparationFailed"))
+        assertTrue(beforeHook.contains("resourcePreparationStarted.compareAndSet(false, true)"))
+        assertTrue(source.indexOf("override fun beforeHookedMethod") <
+            source.indexOf("override fun afterHookedMethod"))
+        assertTrue(source.contains(
+            "installApplicationBootstrap(param.applicationInfo.className, targetClassLoader)",
+        ))
+        assertTrue(source.contains("FeatureInstallation.installEmbedded("))
+
+        assertTrue(afterHook.contains("val config = embeddedConfig ?: return"))
+        assertTrue(afterHook.contains("val session = embeddedSession ?: return"))
+        assertTrue(!afterHook.contains("bootstrap.bind(build, session)"))
+        assertTrue(!afterHook.contains("TargetConfigClient(bootstrap.reader)"))
+    }
+
+    @Test
     fun `resolves inherited no-arg onResume for the fixed settings fragment seam`() {
         open class PreferenceFragmentFixture {
             fun onResume() = Unit

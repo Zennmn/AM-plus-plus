@@ -9,6 +9,8 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import dev.amenhancer.module.ModuleConstants
+import dev.amenhancer.module.config.EmbeddedConfigurationMigration
+import dev.amenhancer.module.config.EmbeddedConfigurationMigrationResult
 import dev.amenhancer.module.config.EmbeddedConfigurationSession
 import dev.amenhancer.module.config.HostPrivateEmbeddedStorage
 import dev.amenhancer.module.config.TargetConfigClient
@@ -17,6 +19,7 @@ import dev.amenhancer.module.ui.EmbeddedSettingsHost
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
+import io.github.libxposed.service.XposedService
 import java.lang.reflect.Method
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -95,10 +98,18 @@ class HookEntry : XposedModule() {
     private val resultBridgeInstalled = AtomicBoolean(false)
     private val settingsFragmentHookInstalled = AtomicBoolean(false)
     private val applicationHooksInstalled = AtomicBoolean(false)
+    private val resourcePreparationStarted = AtomicBoolean(false)
+    private val resourcePreparationFailed = AtomicBoolean(false)
     private val initializationStarted = AtomicBoolean(false)
 
     @Volatile
     private var settingsHost: EmbeddedSettingsHost? = null
+
+    @Volatile
+    private var embeddedConfig: TargetConfigClient? = null
+
+    @Volatile
+    private var embeddedSession: EmbeddedConfigurationSession? = null
 
     @Volatile
     private var processName: String = ""
@@ -144,54 +155,131 @@ class HookEntry : XposedModule() {
         }
         methods.forEach { onCreate ->
             ModernXposedRuntime.hookMethod(onCreate, object : ModernMethodHook() {
-            override fun afterHookedMethod(param: MethodHookParam) {
-                runCatching {
-                    val application = param.thisObject as? Application ?: return
-                    if (application.packageName != ModuleConstants.TARGET_PACKAGE) return
-                    if (!isTargetMainProcess(application)) return
-                    val build = targetBuild(application)
-                    if (!bootstrap.supports(build)) {
-                        ModernXposedRuntime.log(
-                            "embedded build ${build.displayName} is unsupported; expected 6.5.1 (1583)",
-                        )
-                        return
-                    }
-                    val session = EmbeddedConfigurationSession(HostPrivateEmbeddedStorage(application))
-                    if (!bootstrap.bind(build, session)) return
-                    if (!initializationStarted.compareAndSet(false, true)) return
-                    val config = TargetConfigClient(bootstrap.reader)
-                    val currentSong = CurrentSongIdentityCache()
+                override fun beforeHookedMethod(param: MethodHookParam) {
                     runCatching {
-                        FeatureInstallation.installEmbedded(
-                            config,
-                            application,
-                            targetClassLoader,
-                            currentSong,
-                        )
+                        val application = param.thisObject as? Application ?: return
+                        if (application.packageName != ModuleConstants.TARGET_PACKAGE) return
+                        if (!isTargetMainProcess(application)) return
+                        val build = targetBuild(application)
+                        if (!bootstrap.supports(build)) {
+                            ModernXposedRuntime.log(
+                                "embedded build ${build.displayName} is unsupported; expected 6.5.1 (1583)",
+                            )
+                            return
+                        }
+                        if (embeddedConfig != null) return
+                        if (resourcePreparationFailed.get()) return
+                        if (!resourcePreparationStarted.compareAndSet(false, true)) return
+                        try {
+                            val storage = HostPrivateEmbeddedStorage(application)
+                            if (migrateRemoteConfiguration(storage) is EmbeddedConfigurationMigrationResult.Failed) {
+                                // Do not publish a writable host session after a
+                                // partial migration.  A later process restart
+                                // must be able to retry from the in-progress
+                                // marker without user settings masking it.
+                                resourcePreparationStarted.set(false)
+                                return
+                            }
+                            val session = EmbeddedConfigurationSession(storage)
+                            if (!bootstrap.bind(build, session)) {
+                                resourcePreparationStarted.set(false)
+                                return
+                            }
+                            val config = TargetConfigClient(bootstrap.reader)
+                            runCatching { FeatureInstallation.registerResources(config) }
+                                .getOrElse { error ->
+                                    resourcePreparationFailed.set(true)
+                                    throw error
+                                }
+                            // Publish only after resources are fully registered.
+                            // If a callback throws, the current process stays
+                            // fail-open and a fresh process can retry cleanly.
+                            embeddedSession = session
+                            embeddedConfig = config
+                        } catch (error: Throwable) {
+                            resourcePreparationStarted.set(false)
+                            throw error
+                        }
                     }.onFailure { error ->
-                        ModernXposedRuntime.log("embedded feature installation failed open", error)
+                        ModernXposedRuntime.log("embedded resource preparation failed open: $error")
                     }
-                    val playerActivityClass = runCatching {
-                        targetClassLoader.loadClass(EmbeddedSettingsHost.PLAYER_ACTIVITY_NAME)
-                    }.getOrNull()
-                    val host = EmbeddedSettingsHost.install(
-                        application,
-                        EmbeddedRuntimeSettingsController(
-                            application,
-                            session,
-                            currentSong = { currentSong.current()?.details },
-                        ),
-                        playerActivityClass = playerActivityClass,
-                    )
-                    settingsHost = host
-                    installActivityResultBridge(targetClassLoader, host)
-                    installSettingsFragmentHook(targetClassLoader, host)
-                }.onFailure { error ->
-                    ModernXposedRuntime.log("embedded initialization failed open: $error")
                 }
-            }
+
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    runCatching {
+                        val application = param.thisObject as? Application ?: return
+                        if (application.packageName != ModuleConstants.TARGET_PACKAGE) return
+                        if (!isTargetMainProcess(application)) return
+                        val config = embeddedConfig ?: return
+                        if (!initializationStarted.compareAndSet(false, true)) return
+                        val session = embeddedSession ?: return
+                        val currentSong = CurrentSongIdentityCache()
+                        runCatching {
+                            FeatureInstallation.installEmbedded(
+                                config,
+                                application,
+                                targetClassLoader,
+                                currentSong,
+                            )
+                        }.onFailure { error ->
+                            ModernXposedRuntime.log("embedded feature installation failed open", error)
+                        }
+                        val playerActivityClass = runCatching {
+                            targetClassLoader.loadClass(EmbeddedSettingsHost.PLAYER_ACTIVITY_NAME)
+                        }.getOrNull()
+                        val host = EmbeddedSettingsHost.install(
+                            application,
+                            EmbeddedRuntimeSettingsController(
+                                application,
+                                session,
+                                currentSong = { currentSong.current()?.details },
+                            ),
+                            playerActivityClass = playerActivityClass,
+                        )
+                        settingsHost = host
+                        installActivityResultBridge(targetClassLoader, host)
+                        installSettingsFragmentHook(targetClassLoader, host)
+                    }.onFailure { error ->
+                        ModernXposedRuntime.log("embedded initialization failed open: $error")
+                    }
+                }
             })
         }
+    }
+
+    private fun migrateRemoteConfiguration(
+        storage: HostPrivateEmbeddedStorage,
+    ): EmbeddedConfigurationMigrationResult? {
+        if (frameworkProperties.and(XposedService.PROP_CAP_REMOTE) == 0L) return null
+        val remotePreferences = runCatching {
+            getRemotePreferences(ModuleConstants.REMOTE_PREFERENCES_GROUP)
+        }.getOrElse { error ->
+            ModernXposedRuntime.log("embedded remote configuration unavailable; migration deferred", error)
+            return EmbeddedConfigurationMigrationResult.Failed("无法读取远程配置")
+        }
+
+        val result = runCatching {
+            EmbeddedConfigurationMigration.migrate(
+                remotePreferences = remotePreferences,
+                remoteFileOpener = { name -> openRemoteFile(name) },
+                destination = storage,
+            )
+        }.getOrElse { error ->
+            ModernXposedRuntime.log("embedded configuration migration failed open", error)
+            EmbeddedConfigurationMigrationResult.Failed("迁移调用失败: ${error.javaClass.simpleName}")
+        }
+        when (result) {
+            is EmbeddedConfigurationMigrationResult.Failed ->
+                ModernXposedRuntime.log(
+                    "embedded configuration migration incomplete: ${result.message}",
+                )
+            is EmbeddedConfigurationMigrationResult.Migrated ->
+                ModernXposedRuntime.log(
+                    "embedded configuration migrated ${result.copiedFileIds.size} file(s)",
+                )
+            else -> Unit
+        }
+        return result
     }
 
     private fun installSettingsFragmentHook(

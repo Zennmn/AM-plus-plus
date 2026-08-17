@@ -6,6 +6,7 @@ import dev.amenhancer.module.model.CustomLyricsManifest
 import java.io.InputStream
 import android.os.ParcelFileDescriptor
 import java.util.UUID
+import java.security.MessageDigest
 
 /** Read-only configuration surface consumed by target-process features. */
 internal interface ConfigurationReader {
@@ -19,6 +20,45 @@ internal interface EmbeddedConfigurationStorage : ConfigurationReader {
     fun writeValues(values: Map<String, Any>, synchronous: Boolean): Boolean
     fun writeFile(name: String, bytes: ByteArray): Boolean
     fun deleteFile(name: String): Boolean
+
+    /** Copies and verifies a payload without requiring host implementations to buffer it. */
+    fun copyFile(
+        name: String,
+        input: InputStream,
+        expectedSizeBytes: Long,
+        expectedSha256: String,
+    ): Boolean = runCatching {
+        val bytes = input.use(InputStream::readBytes)
+        bytes.size.toLong() == expectedSizeBytes &&
+            sha256(bytes).equals(expectedSha256, ignoreCase = true) &&
+            writeFile(name, bytes)
+    }.getOrDefault(false)
+
+    /** Compares an existing payload without exposing its bytes to callers. */
+    fun fileMatches(
+        name: String,
+        expectedSizeBytes: Long,
+        expectedSha256: String,
+    ): Boolean = runCatching {
+        val bytes = openFile(name)?.use(InputStream::readBytes) ?: return@runCatching false
+        bytes.size.toLong() == expectedSizeBytes &&
+            sha256(bytes).equals(expectedSha256, ignoreCase = true)
+    }.getOrDefault(false)
+
+    /**
+     * Returns whether this storage already contains a file payload.
+     *
+     * The migration gate must treat file-only state as initialized too.  The
+     * default keeps lightweight test/dynamic adapters source-compatible; the
+     * host-private implementation overrides it with a directory scan.
+     */
+    fun hasAnyFiles(): Boolean = false
+
+    companion object {
+        private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
+            .digest(bytes)
+            .joinToString(separator = "") { byte -> "%02x".format(byte) }
+    }
 }
 
 /**

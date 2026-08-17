@@ -11,6 +11,7 @@ import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
+import java.security.MessageDigest
 
 /** Persists embedded settings and immutable payloads inside Apple Music's data directory. */
 internal class HostPrivateEmbeddedStorage(
@@ -78,10 +79,85 @@ internal class HostPrivateEmbeddedStorage(
         }
     }
 
+    override fun copyFile(
+        name: String,
+        input: InputStream,
+        expectedSizeBytes: Long,
+        expectedSha256: String,
+    ): Boolean {
+        val destination = file(name) ?: return false
+        if (expectedSizeBytes < 0L) return false
+        if (!directory.exists() && !directory.mkdirs()) return false
+        val pending = runCatching {
+            File.createTempFile("pending_", ".tmp", directory)
+        }.getOrNull() ?: return false
+        return try {
+            val digest = MessageDigest.getInstance("SHA-256")
+            var size = 0L
+            var valid = true
+            input.use { source ->
+                FileOutputStream(pending).use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (valid) {
+                        val count = source.read(buffer)
+                        if (count < 0) break
+                        if (count == 0) continue
+                        size += count
+                        if (size > expectedSizeBytes) {
+                            valid = false
+                        } else {
+                            digest.update(buffer, 0, count)
+                            output.write(buffer, 0, count)
+                        }
+                    }
+                    output.flush()
+                    output.fd.sync()
+                }
+            }
+            if (!valid || size != expectedSizeBytes) return false
+            if (!digestHex(digest).equals(expectedSha256, ignoreCase = true)) return false
+            moveAtomically(pending, destination)
+            syncDirectoryBestEffort()
+            true
+        } catch (_: Throwable) {
+            false
+        } finally {
+            pending.delete()
+        }
+    }
+
+    override fun fileMatches(
+        name: String,
+        expectedSizeBytes: Long,
+        expectedSha256: String,
+    ): Boolean {
+        val source = openFile(name) ?: return false
+        return runCatching {
+            val digest = MessageDigest.getInstance("SHA-256")
+            var size = 0L
+            source.use { input ->
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    if (count == 0) continue
+                    size += count
+                    digest.update(buffer, 0, count)
+                }
+            }
+            size == expectedSizeBytes &&
+                digestHex(digest).equals(expectedSha256, ignoreCase = true)
+        }.getOrDefault(false)
+    }
+
     override fun deleteFile(name: String): Boolean {
         val file = file(name) ?: return false
         return runCatching { file.isFile && file.delete() }.getOrDefault(false)
     }
+
+    override fun hasAnyFiles(): Boolean = runCatching {
+        directory.listFiles()?.any(File::isFile) == true
+    }.getOrDefault(false)
 
     private fun file(name: String): File? = name
         .takeIf(FILE_NAME_PATTERN::matches)
@@ -112,6 +188,9 @@ internal class HostPrivateEmbeddedStorage(
             }
         }
     }
+
+    private fun digestHex(digest: MessageDigest): String = digest.digest()
+        .joinToString(separator = "") { byte -> "%02x".format(byte) }
 
     private companion object {
         const val PREFERENCES_NAME = "ampp-embedded-settings"

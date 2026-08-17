@@ -21,6 +21,15 @@ internal object FeatureInstallation {
     private val lyricsTypefaceSession by lazy(::LyricsTypefaceSession)
     private val module by lazy { productionFeatureInstallationModule(lyricsTypefaceSession) }
 
+    /**
+     * Registers resource and layout callbacks without requiring an Application
+     * instance. Embedded callers invoke this from the Application onCreate
+     * before-hook so LayoutInflater hooks are live before the host body runs.
+     */
+    fun registerResources(config: TargetConfigClient) {
+        module.registerResources(config)
+    }
+
     fun install(
         config: TargetConfigClient,
         targetClassLoader: ClassLoader,
@@ -63,6 +72,13 @@ internal class FeatureInstallationModule(
 ) {
     @Volatile
     private var activeSession: FeatureInstallationSession? = null
+    /** Resource callbacks are an at-most-once stage, including failed attempts. */
+    private var resourceRegistrationAttempted = false
+    private var resourceRegistrationFailure: Throwable? = null
+
+    fun registerResources(config: TargetConfigClient) = synchronized(this) {
+        registerResourcesIfNeeded(config)
+    }
 
     fun install(
         config: TargetConfigClient,
@@ -70,7 +86,7 @@ internal class FeatureInstallationModule(
     ): FeatureInstallationSession = synchronized(this) {
         activeSession?.let { return@synchronized it }
 
-        registerResources(config)
+        registerResourcesIfNeeded(config)
         val session = newSession()
         registerApplicationCreated(config, targetClassLoader, session::install)
         activeSession = session
@@ -83,16 +99,24 @@ internal class FeatureInstallationModule(
     ): FeatureInstallationSession = synchronized(this) {
         activeSession?.let { return@synchronized it }
 
-        registerResources(config)
+        registerResourcesIfNeeded(config)
         val session = newSession()
         session.install(contextFactory)
         activeSession = session
         session
     }
 
-    private fun registerResources(config: TargetConfigClient) {
-        plans.forEach { plan -> plan.registerResources(config) }
-        installLayoutInflationHooks()
+    private fun registerResourcesIfNeeded(config: TargetConfigClient) {
+        resourceRegistrationFailure?.let { throw it }
+        if (resourceRegistrationAttempted) return
+        resourceRegistrationAttempted = true
+        try {
+            plans.forEach { plan -> plan.registerResources(config) }
+            installLayoutInflationHooks()
+        } catch (error: Throwable) {
+            resourceRegistrationFailure = error
+            throw error
+        }
     }
 
     private fun newSession(): FeatureInstallationSession = FeatureInstallationSession(
