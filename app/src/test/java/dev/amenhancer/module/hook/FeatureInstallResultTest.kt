@@ -39,12 +39,11 @@ class FeatureInstallResultTest {
         val entry = source("dev/amenhancer/module/hook/HookEntry.kt")
         val installation = source("dev/amenhancer/module/hook/FeatureInstallation.kt")
 
-        assertTrue(entry.contains("FeatureInstallation.install(config, param.classLoader)"))
+        assertTrue(entry.contains("FeatureInstallation.installEmbedded("))
         listOf(
             "DualPaneResourceHook.install",
             "PhoneLiquidGlassResourceHook.install",
             "LayoutInflationRegistry.install",
-            "Application::class.java",
             "FeatureHook",
         ).forEach { leaked -> assertFalse("entry leaked $leaked", entry.contains(leaked)) }
 
@@ -59,6 +58,18 @@ class FeatureInstallResultTest {
         assertTrue(installation.contains("DualPaneResourceHook.install()"))
         assertTrue(installation.contains("PhoneLiquidGlassResourceHook::install"))
         assertTrue(installation.contains("LayoutInflationRegistry::install"))
+    }
+
+    @Test
+    fun `embedded installation shares the resource and target lyric typeface session`() {
+        val installation = source("dev/amenhancer/module/hook/FeatureInstallation.kt")
+        val adaptation = source("dev/amenhancer/module/hook/TargetAdaptation.kt")
+
+        assertTrue(installation.contains("private val lyricsTypefaceSession by lazy"))
+        assertTrue(installation.contains("productionFeatureInstallationModule(lyricsTypefaceSession)"))
+        assertTrue(installation.contains("lyricsTypefaceSession = lyricsTypefaceSession"))
+        assertTrue(adaptation.contains("lyricsTypefaceSession: LyricsTypefaceSession,"))
+        assertFalse(adaptation.contains("?: LyricsTypefaceSession()"))
     }
 
     @Test

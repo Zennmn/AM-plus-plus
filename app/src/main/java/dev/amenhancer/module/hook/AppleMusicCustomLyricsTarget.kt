@@ -2,7 +2,6 @@ package dev.amenhancer.module.hook
 
 import android.os.Handler
 import android.os.Looper
-import android.os.ParcelFileDescriptor
 import dev.amenhancer.module.config.TargetConfigClient
 import dev.amenhancer.module.lyrics.CustomLyricsFilePolicy
 import dev.amenhancer.module.lyrics.CustomLyricsFileReader
@@ -62,11 +61,9 @@ internal class AppleMusicCustomLyricsTarget(
                 ).joinToString("; "),
         )
         val fileReader = CustomLyricsFileReader { fileId ->
-            config.openRemoteFile(fileId)?.let { descriptor ->
+            config.openFile(fileId)?.let { input ->
                 runCatching {
-                    ParcelFileDescriptor.AutoCloseInputStream(descriptor).use(
-                        CustomLyricsFilePolicy::readBounded,
-                    )
+                    input.use(CustomLyricsFilePolicy::readBounded)
                 }.getOrNull()
             }
         }

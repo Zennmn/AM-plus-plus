@@ -127,6 +127,10 @@ internal object ModuleSettingsSchema {
     fun hasIndexPointerValues(values: Map<String, *>): Boolean =
         indexPointerKeys.any(values::containsKey)
 
+    /** Avoid turning an unrelated/empty remote group into a completed migration. */
+    fun hasMigratableValues(values: Map<String, *>): Boolean =
+        values.keys.any { it in settingKeys || it in indexPointerKeys }
+
     /** Legacy v1 preference-string manifest, kept for pre-migration reads. */
     fun decodeLegacyCustomLyricsManifest(values: Map<String, *>): CustomLyricsManifest =
         CustomLyricsManifestCodec.decode(values.string(KEY_CUSTOM_LYRICS_MANIFEST))

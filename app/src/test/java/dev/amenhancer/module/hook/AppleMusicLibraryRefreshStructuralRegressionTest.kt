@@ -128,6 +128,26 @@ class AppleMusicLibraryRefreshStructuralRegressionTest {
         assertTrue(protocol.contains("RESULT_TRIGGERED = RESULT_STARTED"))
     }
 
+    @Test
+    fun `embedded refresh receiver can stay same process and non exported`() {
+        val target = projectFile(
+            "app/src/main/java/dev/amenhancer/module/hook/AppleMusicLibraryRefreshTarget.kt",
+        )
+        val adaptation = projectFile(
+            "app/src/main/java/dev/amenhancer/module/hook/TargetAdaptation.kt",
+        )
+        val installation = projectFile(
+            "app/src/main/java/dev/amenhancer/module/hook/FeatureInstallation.kt",
+        )
+
+        assertTrue(target.contains("useRequestPermission"))
+        assertTrue(target.contains("Context.RECEIVER_NOT_EXPORTED"))
+        assertTrue(target.contains("requestPermission == null"))
+        assertTrue(adaptation.contains("useLibraryRefreshPermission: Boolean = true"))
+        assertTrue(adaptation.contains("useRequestPermission = useLibraryRefreshPermission"))
+        assertTrue(installation.contains("useLibraryRefreshPermission = false"))
+    }
+
     private fun projectFile(relativePath: String): String = sequenceOf(
         File(relativePath),
         File("../$relativePath"),

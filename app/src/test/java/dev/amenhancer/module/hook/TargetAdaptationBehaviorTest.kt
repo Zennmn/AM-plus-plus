@@ -12,13 +12,13 @@ class TargetAdaptationBehaviorTest {
     @Test
     fun `capability results map to existing feature outcomes`() {
         val active = EditorialVideoFeature().install(context(
-            editorialEnabled = true,
+            dualPaneEnabled = true,
             dualPane = DualPaneTarget { TargetCapabilityInstall.Degraded("unused") },
             editorialVideo = EditorialVideoTarget { TargetCapabilityInstall.Active("installed") },
             lyricBlur = BidirectionalLyricBlurTarget { TargetCapabilityInstall.Degraded("unused") },
         ))
         val degraded = EditorialVideoFeature().install(context(
-            editorialEnabled = true,
+            dualPaneEnabled = true,
             dualPane = DualPaneTarget { TargetCapabilityInstall.Active("unused") },
             editorialVideo = EditorialVideoTarget { TargetCapabilityInstall.Degraded("missing symbol") },
             lyricBlur = BidirectionalLyricBlurTarget { TargetCapabilityInstall.Active("unused") },
@@ -49,7 +49,7 @@ class TargetAdaptationBehaviorTest {
         var editorialCalls = 0
         var lyricBlurCalls = 0
         val context = context(
-            editorialEnabled = true,
+            dualPaneEnabled = true,
             dualPane = DualPaneTarget {
                 dualPaneCalls += 1
                 TargetCapabilityInstall.Active("dual pane")
@@ -81,7 +81,7 @@ class TargetAdaptationBehaviorTest {
             TargetCapabilityInstall.Active("unexpected")
         }
         val context = context(
-            editorialEnabled = false,
+            dualPaneEnabled = false,
             dualPane = DualPaneTarget(countingCapability),
             editorialVideo = EditorialVideoTarget(countingCapability),
             lyricBlur = BidirectionalLyricBlurTarget(countingCapability),
@@ -96,7 +96,7 @@ class TargetAdaptationBehaviorTest {
     @Test
     fun `coordinator maps unexpected capability exception to failed`() {
         val context = context(
-            editorialEnabled = true,
+            dualPaneEnabled = true,
             dualPane = DualPaneTarget { TargetCapabilityInstall.Active("dual pane") },
             editorialVideo = EditorialVideoTarget { TargetCapabilityInstall.Active("editorial") },
             lyricBlur = BidirectionalLyricBlurTarget { TargetCapabilityInstall.Active("lyric blur") },
@@ -117,12 +117,12 @@ class TargetAdaptationBehaviorTest {
     }
 
     private fun context(
-        editorialEnabled: Boolean,
+        dualPaneEnabled: Boolean,
         dualPane: DualPaneTarget,
         editorialVideo: EditorialVideoTarget,
         lyricBlur: BidirectionalLyricBlurTarget,
     ): HookContext = HookContext(
-        config = TargetConfigClient(preferences(editorialEnabled)),
+        config = TargetConfigClient(preferences(dualPaneEnabled)),
         target = TargetAdaptation(
             identity = "test target",
             dualPane = dualPane,
@@ -131,12 +131,15 @@ class TargetAdaptationBehaviorTest {
         ),
     )
 
-    private fun preferences(editorialEnabled: Boolean): SharedPreferences = Proxy.newProxyInstance(
+    private fun preferences(dualPaneEnabled: Boolean): SharedPreferences = Proxy.newProxyInstance(
         SharedPreferences::class.java.classLoader,
         arrayOf(SharedPreferences::class.java),
     ) { _, method, _ ->
         when (method.name) {
-            "getAll" -> mapOf("disable_editorial_video_on_tablet" to editorialEnabled)
+            "getAll" -> mapOf(
+                "dual_pane_enabled" to dualPaneEnabled,
+                "disable_editorial_video_on_tablet" to dualPaneEnabled,
+            )
             "toString" -> "target-adaptation-test-preferences"
             "hashCode" -> 1
             "equals" -> false

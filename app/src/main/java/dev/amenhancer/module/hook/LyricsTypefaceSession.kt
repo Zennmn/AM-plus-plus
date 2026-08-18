@@ -191,8 +191,8 @@ internal class LyricsTypefaceSession {
         config: TargetConfigClient,
         manifest: LyricsFontManifest,
     ): LyricsFontLoadOutcome {
-        val descriptor = config.openRemoteFile(manifest.fileId)
-            ?: return LyricsFontLoadOutcome.Transient("Remote font file could not be opened")
+        val descriptor = config.openFileDescriptor(manifest.fileId)
+            ?: return LyricsFontLoadOutcome.Transient("Embedded font file could not be opened")
         return try {
             when (val result = verify(descriptor, manifest)) {
                 is VerifyResult.Permanent -> return LyricsFontLoadOutcome.Permanent(result.message)
@@ -202,13 +202,13 @@ internal class LyricsTypefaceSession {
             try {
                 Os.lseek(descriptor.fileDescriptor, 0L, OsConstants.SEEK_SET)
             } catch (_: Throwable) {
-                return LyricsFontLoadOutcome.Transient("Remote font file could not be rewound")
+                return LyricsFontLoadOutcome.Transient("Embedded font file could not be rewound")
             }
             val importedBase = try {
                 Typeface.Builder(descriptor.fileDescriptor).build()
             } catch (_: Throwable) {
                 return LyricsFontLoadOutcome.Permanent(
-                    "Android Typeface.Builder could not parse the remote font",
+                    "Android Typeface.Builder could not parse the embedded font",
                 )
             }
             if (importedBase == null) {
@@ -255,10 +255,9 @@ internal class LyricsTypefaceSession {
             ParcelFileDescriptor.dup(descriptor.fileDescriptor)
         } catch (_: Throwable) {
             return VerifyResult.Unreadable(
-                "Remote font file could not be duplicated for verification",
+                "Embedded font file could not be duplicated for verification",
             )
         }
-
         return try {
             ParcelFileDescriptor.AutoCloseInputStream(duplicate).use { input ->
                 val digest = MessageDigest.getInstance("SHA-256")
@@ -279,16 +278,16 @@ internal class LyricsTypefaceSession {
                 }
                 when {
                     !FontFilePolicy.hasSupportedSfntMagic(header) ->
-                        VerifyResult.Permanent("Remote font has an unsupported SFNT signature")
+                        VerifyResult.Permanent("Embedded font has an unsupported SFNT signature")
                     size != manifest.sizeBytes ->
-                        VerifyResult.Permanent("Remote font size did not match its manifest")
+                        VerifyResult.Permanent("Embedded font size did not match its manifest")
                     hex(digest.digest()) != manifest.sha256.lowercase() ->
-                        VerifyResult.Permanent("Remote font hash did not match its manifest")
+                        VerifyResult.Permanent("Embedded font hash did not match its manifest")
                     else -> VerifyResult.Ok
                 }
             }
         } catch (_: Throwable) {
-            VerifyResult.Unreadable("Remote font could not be read for verification")
+            VerifyResult.Unreadable("Embedded font could not be read for verification")
         }
     }
 

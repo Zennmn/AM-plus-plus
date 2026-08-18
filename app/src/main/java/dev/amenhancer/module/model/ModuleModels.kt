@@ -5,6 +5,7 @@ import dev.amenhancer.module.config.CatalogLanguagePolicy
 
 data class ModuleSettings(
     val dualPaneEnabled: Boolean = true,
+    /** Legacy storage key; Editorial Video suppression now follows dualPaneEnabled. */
     val disableEditorialVideoOnTablet: Boolean = true,
     val phoneLiquidGlassEnabled: Boolean = false,
     val futureBlurEnabled: Boolean = true,

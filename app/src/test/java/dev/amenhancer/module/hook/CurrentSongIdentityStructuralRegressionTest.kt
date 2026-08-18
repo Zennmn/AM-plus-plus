@@ -80,7 +80,8 @@ class CurrentSongIdentityStructuralRegressionTest {
         )
         val constants = projectFile("app/src/main/java/dev/amenhancer/module/ModuleConstants.kt")
 
-        assertTrue(adaptation.contains("val currentSong = CurrentSongIdentityCache()"))
+        assertTrue(adaptation.contains("currentSong: CurrentSongIdentityCache = CurrentSongIdentityCache()"))
+        assertTrue(adaptation.contains("currentSong = currentSong"))
         assertTrue(adaptation.contains("currentSongIdentity = AppleMusicCurrentSongIdentityTarget("))
         assertTrue(
             adaptation.contains(
@@ -97,7 +98,7 @@ class CurrentSongIdentityStructuralRegressionTest {
     }
 
     @Test
-    fun `uses a signature-protected request responder instead of an embedded holder`() {
+    fun `embedded settings shares the in-process cache without a manifest permission`() {
         val target = projectFile(
             "app/src/main/java/dev/amenhancer/module/hook/AppleMusicCurrentSongIdentityTarget.kt",
         )
@@ -105,15 +106,15 @@ class CurrentSongIdentityStructuralRegressionTest {
             "app/src/main/java/dev/amenhancer/module/CurrentSongIdentityProtocol.kt",
         )
         val manifest = projectFile("app/src/main/AndroidManifest.xml")
+        val entry = projectFile("app/src/main/java/dev/amenhancer/module/hook/HookEntry.kt")
 
         assertTrue(target.contains("CurrentSongIdentityRequestResponder"))
-        assertTrue(target.contains("ResultReceiver"))
-        assertTrue(target.contains("Context.RECEIVER_EXPORTED"))
-        assertTrue(target.contains("CurrentSongIdentityProtocol.REQUEST_PERMISSION"))
-        assertTrue(protocol.contains("REQUEST_CURRENT_SONG_ID"))
+        assertTrue(target.contains("registerRequestResponder: Boolean = true"))
+        assertTrue(entry.contains("currentSong = { currentSong.current()?.details }"))
+        assertTrue(entry.contains("EmbeddedRuntimeSettingsController"))
         assertTrue(protocol.contains("EXTRA_SONG_TITLE"))
         assertTrue(protocol.contains("EXTRA_SONG_ARTIST"))
-        assertTrue(manifest.contains("android:protectionLevel=\"signature\""))
-        assertTrue(manifest.contains("permission.REQUEST_CURRENT_SONG_ID"))
+        assertFalse(manifest.contains("android:protectionLevel=\"signature\""))
+        assertFalse(manifest.contains("permission.REQUEST_CURRENT_SONG_ID"))
     }
 }

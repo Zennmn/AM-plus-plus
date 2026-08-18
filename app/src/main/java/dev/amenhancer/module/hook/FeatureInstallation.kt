@@ -18,13 +18,45 @@ import java.util.concurrent.atomic.AtomicReference
  * required order, lifecycle split, failure isolation, or health reporting.
  */
 internal object FeatureInstallation {
-    private val module by lazy(::productionFeatureInstallationModule)
+    private val lyricsTypefaceSession by lazy(::LyricsTypefaceSession)
+    private val module by lazy { productionFeatureInstallationModule(lyricsTypefaceSession) }
+
+    /**
+     * Registers resource and layout callbacks without requiring an Application
+     * instance. Embedded callers invoke this from the Application onCreate
+     * before-hook so LayoutInflater hooks are live before the host body runs.
+     */
+    fun registerResources(config: TargetConfigClient) {
+        module.registerResources(config)
+    }
 
     fun install(
         config: TargetConfigClient,
         targetClassLoader: ClassLoader,
     ) {
         module.install(config, targetClassLoader)
+    }
+
+    fun installEmbedded(
+        config: TargetConfigClient,
+        application: Application,
+        targetClassLoader: ClassLoader,
+        currentSong: CurrentSongIdentityCache,
+    ) {
+        module.installNow(config) {
+            HookContext(
+                config = config,
+                target = TargetAdaptation.appleMusic(
+                    config = config,
+                    application = application,
+                    classLoader = targetClassLoader,
+                    lyricsTypefaceSession = lyricsTypefaceSession,
+                    currentSong = currentSong,
+                    registerCurrentSongResponder = false,
+                    useLibraryRefreshPermission = false,
+                ),
+            )
+        }
     }
 }
 internal class FeatureInstallationModule(
@@ -40,6 +72,13 @@ internal class FeatureInstallationModule(
 ) {
     @Volatile
     private var activeSession: FeatureInstallationSession? = null
+    /** Resource callbacks are an at-most-once stage, including failed attempts. */
+    private var resourceRegistrationAttempted = false
+    private var resourceRegistrationFailure: Throwable? = null
+
+    fun registerResources(config: TargetConfigClient) = synchronized(this) {
+        registerResourcesIfNeeded(config)
+    }
 
     fun install(
         config: TargetConfigClient,
@@ -47,18 +86,44 @@ internal class FeatureInstallationModule(
     ): FeatureInstallationSession = synchronized(this) {
         activeSession?.let { return@synchronized it }
 
-        plans.forEach { plan -> plan.registerResources(config) }
-        installLayoutInflationHooks()
-
-        val session = FeatureInstallationSession(
-            features = plans.map(FeatureInstallationPlan::feature),
-            reportHealth = reportHealth,
-            reportError = reportError,
-        )
+        registerResourcesIfNeeded(config)
+        val session = newSession()
         registerApplicationCreated(config, targetClassLoader, session::install)
         activeSession = session
         session
     }
+
+    fun installNow(
+        config: TargetConfigClient,
+        contextFactory: () -> HookContext,
+    ): FeatureInstallationSession = synchronized(this) {
+        activeSession?.let { return@synchronized it }
+
+        registerResourcesIfNeeded(config)
+        val session = newSession()
+        session.install(contextFactory)
+        activeSession = session
+        session
+    }
+
+    private fun registerResourcesIfNeeded(config: TargetConfigClient) {
+        resourceRegistrationFailure?.let { throw it }
+        if (resourceRegistrationAttempted) return
+        resourceRegistrationAttempted = true
+        try {
+            plans.forEach { plan -> plan.registerResources(config) }
+            installLayoutInflationHooks()
+        } catch (error: Throwable) {
+            resourceRegistrationFailure = error
+            throw error
+        }
+    }
+
+    private fun newSession(): FeatureInstallationSession = FeatureInstallationSession(
+        features = plans.map(FeatureInstallationPlan::feature),
+        reportHealth = reportHealth,
+        reportError = reportError,
+    )
 }
 
 internal data class FeatureInstallationPlan(
@@ -93,8 +158,9 @@ internal class FeatureInstallationSession(
     fun snapshot(): FeatureInstallationSnapshot = snapshot.get()
 
     fun install(contextFactory: () -> HookContext) {
-        if (!installed.compareAndSet(false, true)) return
+        if (installed.get()) return
         val context = contextFactory()
+        if (!installed.compareAndSet(false, true)) return
         val installedHealth = mutableListOf<FeatureHealth>()
         snapshot.set(
             FeatureInstallationSnapshot(
@@ -189,11 +255,12 @@ internal fun targetBuild(context: Context): TargetBuild = runCatching {
     )
 }.getOrDefault(TargetBuild.UNKNOWN)
 
-private fun productionFeatureInstallationModule(): FeatureInstallationModule {
+private fun productionFeatureInstallationModule(
+    lyricsTypefaceSession: LyricsTypefaceSession,
+): FeatureInstallationModule {
     // The same session is used by resource callbacks registered before
     // Application.onCreate and by lifecycle hooks installed afterwards.
     // It owns the one lazy remote-file open and Typeface build.
-    val lyricsTypefaceSession = LyricsTypefaceSession()
     return FeatureInstallationModule(
         plans = listOf(
             FeatureInstallationPlan(

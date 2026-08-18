@@ -17,20 +17,19 @@ class EditorialVideoFeatureStructuralRegressionTest {
         ?: error("$relativePath was not found from the unit-test working directory")
 
     @Test
-    fun `persists and transports the tablet editorial video setting default on`() {
+    fun `keeps the legacy tablet editorial video key for compatibility`() {
         val models = source("dev/amenhancer/module/model/ModuleModels.kt")
-        val store = source("dev/amenhancer/module/config/ConfigStore.kt")
+        val session = source("dev/amenhancer/module/config/EmbeddedConfigurationSession.kt")
         val schema = source("dev/amenhancer/module/config/ModuleSettingsSchema.kt")
         val client = source("dev/amenhancer/module/config/TargetConfigClient.kt")
-        val application = source("dev/amenhancer/module/ModuleApplication.kt")
-        val settings = source("dev/amenhancer/module/ui/SettingsActivity.kt")
+        val storage = source("dev/amenhancer/module/config/HostPrivateEmbeddedStorage.kt")
+        val settings = source("dev/amenhancer/module/ui/EmbeddedSettingsHost.kt")
 
         assertTrue(models.contains("val disableEditorialVideoOnTablet: Boolean = true"))
         assertTrue(schema.contains("\"disable_editorial_video_on_tablet\""))
         assertTrue(schema.contains("settings.disableEditorialVideoOnTablet"))
-        assertTrue(store.contains("ModuleSettingsSchema.encodeOrdinarySettings(settings)"))
-        assertTrue(store.contains("ModuleSettingsSchema.encodeFontManifest(manifest)"))
-        assertFalse(store.contains("lyrics_font_"))
+        assertTrue(session.contains("ModuleSettingsSchema.encodeOrdinarySettings(settings)"))
+        assertTrue(session.contains("ModuleSettingsSchema.encodeFontManifest(manifest)"))
         listOf(
             "lyrics_font_enabled",
             "lyrics_font_file_id",
@@ -38,10 +37,10 @@ class EditorialVideoFeatureStructuralRegressionTest {
             "lyrics_font_size_bytes",
             "lyrics_font_sha256",
         ).forEach { key -> assertTrue(schema.contains("\"$key\"")) }
-        assertTrue(application.contains("getRemotePreferences(ModuleConstants.REMOTE_PREFERENCES_GROUP)"))
-        assertTrue(client.contains("ModuleSettingsSchema.decode(preferences.all)"))
-        assertTrue(settings.contains("平板禁用动态视频"))
-        assertTrue(settings.contains("store.settings().copy(disableEditorialVideoOnTablet = it)"))
+        assertTrue(storage.contains("ampp-embedded-settings"))
+        assertTrue(client.contains("valuesProvider"))
+        assertFalse(settings.contains("平板隐藏编辑视频"))
+        assertTrue(settings.contains("平板横屏启用双栏，同时停用 Editorial Video"))
     }
 
     @Test
@@ -60,7 +59,7 @@ class EditorialVideoFeatureStructuralRegressionTest {
     }
 
     @Test
-    fun `suppresses only in official tablet landscape without consulting dual pane`() {
+    fun `suppresses only in official tablet landscape when dual pane is enabled`() {
         val qualifier = source("dev/amenhancer/module/hook/AppleMusicDualPaneTarget.kt")
         val feature = source("dev/amenhancer/module/hook/EditorialVideoFeature.kt")
         val target = source("dev/amenhancer/module/hook/TargetAdaptation.kt")
@@ -68,7 +67,8 @@ class EditorialVideoFeatureStructuralRegressionTest {
         assertTrue(qualifier.contains("fun isOfficialTabletLandscape(context: Context): Boolean"))
         assertTrue(target.contains("TabletModeQualifier.isOfficialTabletLandscape(application)"))
         assertTrue(target.contains("param.result = null"))
-        assertFalse(feature.contains("dualPaneEnabled"))
+        assertTrue(feature.contains("dualPaneEnabled"))
+        assertFalse(feature.contains("disableEditorialVideoOnTablet"))
         assertFalse(target.contains("TabletModeQualifier.isEligible"))
     }
 
@@ -79,7 +79,7 @@ class EditorialVideoFeatureStructuralRegressionTest {
 
         assertTrue(constants.contains("FEATURE_EDITORIAL_VIDEO"))
         assertTrue(feature.contains("ModuleConstants.FEATURE_EDITORIAL_VIDEO"))
-        assertTrue(feature.contains("settings().disableEditorialVideoOnTablet"))
+        assertTrue(feature.contains("settings().dualPaneEnabled"))
         assertTrue(feature.contains("context.target.editorialVideo.install()"))
         listOf("Class<", "Method", "Field", "TargetResolution", "AppleMusicSymbols").forEach {
             forbidden -> assertFalse("feature leaked $forbidden", feature.contains(forbidden))
