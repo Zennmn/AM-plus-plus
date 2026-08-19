@@ -32,7 +32,6 @@
    - [自定义歌词](#自定义歌词)
    - [歌词字体](#歌词字体)
    - [手机液态玻璃](#手机液态玻璃)
-   - [隐藏启动器图标](#隐藏启动器图标)
 4. [构建技术](#构建技术)
 5. [从源码构建](#从源码构建)
    - [环境](#环境)
@@ -50,7 +49,7 @@
 
 AM++ 是一个通过 libxposed API 102 注入 Apple Music 的增强模块，目标包名为 `com.apple.android.music`。它不替换播放器本身，而是在保留 Apple Music 原有播放流程的基础上，补充平板双栏播放器、双向歌词模糊、自定义歌词注入、歌词字体替换和手机液态玻璃等体验增强。
 
-模块同时提供独立的设置页。设置由 Xposed 框架的 remote preferences 管理；字体和自定义歌词正文使用 remote file 保存，并由 Apple Music 注入进程读取。
+模块把设置页嵌入 Apple Music 自己的设置界面，在 Apple Music 的设置列表中提供“AM++ 模块设置”入口。当前主分支不声明独立的桌面 Activity；首次启动时会从 libxposed remote preferences/remote file 迁移旧配置，之后由 Apple Music 宿主私有目录保存设置和文件。
 
 ## 功能
 
@@ -64,7 +63,6 @@ AM++ 是一个通过 libxposed API 102 注入 Apple Music 的增强模块，目�
 | 歌词字体替换 | 关闭 | 导入 TTF/OTF 后应用到播放器歌词布局，可恢复原字体；示例使用 MiSans。 |
 | 手机液态玻璃 | 关闭 | 手机底栏和 mini-player 的实时模糊、半透明材质与选中胶囊，目前为 WIP。 |
 | 平板底栏补偿 | 关闭 | 平板底栏显示异常时使用的兼容性选项。 |
-| 隐藏启动器图标 | 显示 | 隐藏后可从 LSPosed 的模块详情重新打开设置页。 |
 
 双向歌词模糊的核心逻辑移植并适配自 [a23bc/amlyricblur](https://github.com/a23bc/amlyricblur)。
 
@@ -131,9 +129,9 @@ AM++ 是一个通过 libxposed API 102 注入 Apple Music 的增强模块，目�
 2. 在 LSPosed 或兼容的 Xposed 管理器中启用 **AM++**。
 3. 仅将 Apple Music（`com.apple.android.music`）加入作用域。
 4. 强制停止并重新打开 Apple Music。
-5. 打开 AM++ 设置页，确认状态显示已连接 libxposed API 102 后再修改需要 remote preferences 或 remote file 的设置。
+5. 打开 Apple Music → 设置，在原生设置列表中找到“AM++ 模块设置”；确认页面状态显示已连接 libxposed API 102 后再修改设置。
 
-Apple Music 功能修改后都需要重新打开目标应用。隐藏启动器图标只影响 AM++ 的桌面入口，不影响 Apple Music Hook。
+Apple Music 功能修改后都需要强制停止并重新打开目标应用。设置入口属于 Apple Music 页面，不会出现在独立的 AM++ 桌面图标中。
 
 ## 使用
 
@@ -171,10 +169,6 @@ AMLL 和网易云导入属于用户主动操作，可能需要网络连接；模
 ### 手机液态玻璃
 
 在设置页开启“手机液态玻璃底栏”后重新打开 Apple Music。该功能只在手机路径启用，会修改底部导航栏和 mini-player 的背景材质与选中状态动画，目前仍可能出现视觉闪烁。
-
-### 隐藏启动器图标
-
-在设置页开启“隐藏启动器图标”即可移除桌面入口。隐藏后，从 LSPosed 的 AM++ 模块详情进入设置页。
 
 ## 构建技术
 
@@ -255,7 +249,7 @@ assembleRelease
 - 模块声明了 `INTERNET` 权限，仅用于设置页中用户主动触发的 AMLL 或网易云歌词导入。
 - 模块不会在播放过程中自动联网识别歌曲或请求歌词。
 - 模块不申请存储或通知运行时权限；本地文件通过 Android 文件选择器读取。
-- Apple Music 功能设置保存在 Xposed 框架管理的 remote preferences 中，歌词和字体文件保存在框架提供的 remote file 中。
+- 首次迁移前的配置来源于 Xposed 框架 remote preferences/remote file；嵌入设置启用后，普通设置、歌词索引和字体文件保存在 Apple Music 宿主私有目录中。
 - 模块不包含分析服务。启动器图标状态由 Android PackageManager 本地保存。
 
 ## 联系方式

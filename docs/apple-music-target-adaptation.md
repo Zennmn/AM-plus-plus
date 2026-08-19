@@ -365,10 +365,10 @@ profile 阶段有多个候选时即返回 `Ambiguous`，即使策略是 `EXACT_P
 
 ### 6.3 迁移和进程通信
 
-- 设置进程通过 `ModuleApplication` 连接 libxposed API 102 remote preferences，并在首次绑定时从 legacy `module-settings` 迁移。
-- `ModuleSettingsSchema.upgrade` 只在存储版本低于 `7` 时生成新值；当前或更高版本不被重写。
-- 目标进程通过 `TargetConfigClient` 只读 remote preferences，并通过 remote file opener 读取字体或自定义歌词索引。
-- remote preferences 不可用时，设置侧可以回退到 legacy 本地 preferences；目标侧则在 `HookEntry` 门控处保持 Hook 禁用，不会继续读取 `module-settings`。适配不能假设两个进程共享普通内存。
+- 嵌入设置入口由 `HookEntry` 在 Apple Music 主进程中接线；首次启动时可从 libxposed API 102 remote preferences/remote file 迁移，之后由 `HostPrivateEmbeddedStorage` 和 `EmbeddedConfigurationSession` 保存普通设置、歌词索引与字体文件。
+- `ModuleSettingsSchema.upgrade` 只在存储版本低于当前 schema 时生成新值；当前或更高版本不被重写。
+- 目标进程通过 `TargetConfigClient` 只读嵌入宿主配置，并通过宿主文件 opener 读取字体或自定义歌词索引。
+- remote preferences 不可用时，已完成迁移的宿主仍可读写本地配置；首次迁移未完成时设置页只读并在下一次进程启动重试。目标侧不会继续读取旧的 `module-settings`，适配不能假设两个进程共享普通内存。
 - 目标进程通过 `reportHealth` 写日志上报，不向设置进程直接写回 feature 状态。
 
 ### 6.4 配置适配禁区

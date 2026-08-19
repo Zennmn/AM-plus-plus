@@ -7,7 +7,7 @@ import java.io.InputStream
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
-/** Fixed-version bootstrap for the embedded-only artifact. */
+/** Exact-version bootstrap for the embedded-only artifact. */
 internal class EmbeddedBootstrap {
     private val prepared = AtomicBoolean(false)
     private val deferredReader = DeferredConfigurationReader()
@@ -33,8 +33,10 @@ internal class EmbeddedBootstrap {
 
     fun supports(build: TargetBuild): Boolean =
         build.packageName == ModuleConstants.TARGET_PACKAGE &&
-            build.versionName == EXPECTED_VERSION_NAME &&
-            build.versionCode == EXPECTED_VERSION_CODE
+            SUPPORTED_BUILDS.any { supported ->
+                build.versionName == supported.versionName &&
+                    build.versionCode == supported.versionCode
+            }
 
     private class DeferredConfigurationReader : ConfigurationReader {
         private val delegate = AtomicReference<ConfigurationReader?>(null)
@@ -50,7 +52,9 @@ internal class EmbeddedBootstrap {
     }
 
     private companion object {
-        const val EXPECTED_VERSION_NAME = "6.5.1"
-        const val EXPECTED_VERSION_CODE = 1583L
+        private val SUPPORTED_BUILDS = listOf(
+            TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.1", 1583L),
+            TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.2", 1586L),
+        )
     }
 }

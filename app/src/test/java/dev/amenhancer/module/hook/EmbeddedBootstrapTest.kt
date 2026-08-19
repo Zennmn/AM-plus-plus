@@ -64,7 +64,7 @@ class EmbeddedBootstrapTest {
     }
 
     @Test
-    fun `only exact 651 build binds one host reader`() {
+    fun `only supported exact builds bind one host reader`() {
         val bootstrap = EmbeddedBootstrap()
         val reader = reader(mapOf("dual_pane_enabled" to false))
 
@@ -99,6 +99,32 @@ class EmbeddedBootstrapTest {
             bootstrap.bind(
                 TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.1", 1583L),
                 reader(emptyMap()),
+            ),
+        )
+    }
+
+    @Test
+    fun `652 build is supported while neighboring versions remain rejected`() {
+        val bootstrap = EmbeddedBootstrap()
+        val reader = reader(mapOf("dual_pane_enabled" to true))
+
+        assertTrue(
+            bootstrap.prepare(
+                ModuleConstants.TARGET_PACKAGE,
+                ModuleConstants.TARGET_PACKAGE,
+                true,
+            ),
+        )
+        assertFalse(
+            bootstrap.bind(
+                TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.3", 1587L),
+                reader,
+            ),
+        )
+        assertTrue(
+            bootstrap.bind(
+                TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.2", 1586L),
+                reader,
             ),
         )
     }
