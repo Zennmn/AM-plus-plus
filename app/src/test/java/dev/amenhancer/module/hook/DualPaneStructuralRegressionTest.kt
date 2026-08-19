@@ -93,7 +93,7 @@ class DualPaneStructuralRegressionTest {
         assertTrue(source.contains("ConstraintLayoutPane.resolveBottomNavigationRoot(view)"))
         assertTrue(source.contains("BOTTOM_NAVIGATION_ROOT_STACKED"))
         assertTrue(source.contains("view.findViewById<ViewGroup>(candidateId)"))
-        assertTrue(source.contains("installLandscapeBottomNavigation(root)"))
+        assertTrue(source.contains("installLandscapeBottomNavigation(root, targetBuild(root.context))"))
         assertTrue(source.contains("BOTTOM_NAVIGATION_TABS"))
         assertTrue(source.contains("PLAYER_CONTAINER"))
         assertTrue(source.contains("NAVIGATION_TABS_HEIGHT"))
@@ -182,6 +182,7 @@ class DualPaneStructuralRegressionTest {
     @Test
     fun `limits flat player boundary sync to the compensation switch`() {
         assertTrue(source.contains("val tabsHeight = stackedTabsContainerHeight(root.context, menuHeight)"))
+        assertTrue(source.contains("StaticCollapsedInterceptGuard.isSupportedBuild(targetBuild)"))
         assertTrue(source.contains("translationY = if (!expanded && reserveNavigationSpace) -tabsHeight else 0"))
         assertTrue(source.contains("if (!FlatLandscapeWindowPolicy.shouldInstallBoundarySync(root.context)) return"))
         assertFalse(source.contains("display.getRealMetrics(metrics)"))
@@ -266,7 +267,7 @@ class DualPaneStructuralRegressionTest {
     @Test
     fun `preserves the flat holder for the landscape flat root`() {
         assertTrue(source.contains("preserving native flat bottom navigation holder"))
-        assertTrue(source.contains("if (flatRoot != null)"))
+        assertTrue(source.contains("if (flatRoot != null && StaticCollapsedInterceptGuard.isSupportedBuild(targetBuild))"))
         assertTrue(source.contains("constructor.newInstance(activity, navigationRoot, behavior)"))
     }
 
@@ -274,6 +275,8 @@ class DualPaneStructuralRegressionTest {
     fun `scopes static collapsed interception to transformed flat player buttons`() {
         assertTrue(source.contains("AppleMusicSymbols.StaticCollapsedInterceptMethod"))
         assertTrue(interceptGuardSource.contains("StaticCollapsedInterceptPolicy.shouldBypass"))
+        assertTrue(interceptGuardSource.contains("StaticCollapsedInterceptGestureLatch"))
+        assertTrue(interceptGuardSource.contains("compensationEnabled ="))
         assertTrue(interceptGuardSource.contains("targetCoordinator = child.parent === coordinator"))
         assertTrue(interceptGuardSource.contains("targetChild = isTransformedFlatRoot(child)"))
         assertTrue(interceptGuardSource.contains("eventInTargetRegion = isInPlayerButtonRegion(child, event)"))

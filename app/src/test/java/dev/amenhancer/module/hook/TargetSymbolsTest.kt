@@ -274,9 +274,43 @@ class TargetSymbolsTest {
     }
 
     @Test
-    fun `651 profile resolves the static collapsed intercept method without dex scanning`() {
+    fun `652 profile resolves the APK verified dual pane identity changes`() {
+        val source = FakeTargetClassSource(
+            classes = mapOf(
+                "com.apple.android.music.player.fragment.t0" to DualPaneControllerFixture::class.java,
+                "com.apple.android.music.common.activity.PlayerActivity" to DualPaneActivityFixture::class.java,
+                "com.apple.android.music.player.fragment.e" to DualPaneLyricsChromeFixture::class.java,
+                "com.apple.android.music.player.fragment.m" to CurrentItem651Fixture::class.java,
+                "Hd.b" to ProfileFixture::class.java,
+            ),
+        )
+        val resolver = IndexedTargetSymbolResolver(
+            build = TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.2", 1586L),
+            source = source,
+        )
+
+        val controller = resolver.resolve(AppleMusicSymbols.PlayerControllerInitialize)
+        val holder = resolver.resolve(AppleMusicSymbols.PlayerActivityCreateStackedNavigationHolder)
+        val root = resolver.resolve(AppleMusicSymbols.PlayerActivityRoot)
+        val chrome = resolver.resolve(AppleMusicSymbols.LyricsChromeAnimate)
+        val currentItem = resolver.resolve(AppleMusicSymbols.LyricsCurrentItemField)
+
+        listOf(controller, holder, root, chrome, currentItem).forEach { resolution ->
+            assertTrue(resolution is TargetResolution.Found)
+            assertEquals(SymbolMatch.VERSION_PROFILE, (resolution as TargetResolution.Found).match)
+            assertEquals("apple-music-6.5.2-1586", resolution.profileId)
+        }
+        assertEquals("k1", (holder as TargetResolution.Found).value.name)
+        assertEquals("n0", (root as TargetResolution.Found).value.name)
+        assertEquals("a2", (chrome as TargetResolution.Found).value.name)
+        assertEquals("c", (currentItem as TargetResolution.Found).value.name)
+    }
+
+    @Test
+    fun `static collapsed intercept stays independent of version profiles`() {
         val ownerName = "com.apple.android.music.common.behavior.StaticCollapsedBottomSheetBehavior"
         val source = FakeTargetClassSource(
+            names = listOf(ownerName),
             classes = mapOf(ownerName to StaticCollapsedBehaviorFixture::class.java),
         )
         val resolver = IndexedTargetSymbolResolver(
@@ -287,9 +321,10 @@ class TargetSymbolsTest {
         val resolution = resolver.resolve(AppleMusicSymbols.StaticCollapsedInterceptMethod)
 
         assertTrue(resolution is TargetResolution.Found)
-        assertEquals(SymbolMatch.VERSION_PROFILE, (resolution as TargetResolution.Found).match)
+        assertEquals(SymbolMatch.STRUCTURAL_FALLBACK, (resolution as TargetResolution.Found).match)
         assertEquals("h", resolution.value.name)
-        assertEquals(0, source.classNameReads)
+        assertEquals("apple-music-6.5.1-1583", resolution.profileId)
+        assertEquals(1, source.classNameReads)
     }
 
     @Test

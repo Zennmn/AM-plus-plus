@@ -121,32 +121,35 @@ FeatureInstallation.install
 
 ### 3.1 已登记的精确 profile
 
-`TargetSymbols.kt:262-346` 当前只对两个精确版本返回 profile：
+`TargetSymbols.kt` 当前对三个精确版本返回 profile：
 
 | package | versionName | versionCode | profile ID | 代码含义 |
 | --- | --- | ---: | --- | --- |
 | `com.apple.android.music` | `6.5.0` | `1580` | `apple-music-6.5.0-1580` | 已登记的 profile |
 | `com.apple.android.music` | `6.5.1` | `1583` | `apple-music-6.5.1-1583` | 已登记的 profile |
+| `com.apple.android.music` | `6.5.2` | `1586` | `apple-music-6.5.2-1586` | 基于 APKPure base + arm64 + mdpi 清单登记 |
 
 匹配是包名、版本名和版本码的严格同时匹配。未知版本、版本名与版本码错配、版本读取失败都不会复用旧 profile。
 
-### 3.2 两个 profile 的关键迁移
+### 3.2 三个 profile 的关键迁移
 
-`AppleMusicProfile` 同时支持 `exactClasses`、`exactMethods` 和 `exactFields`。当前两个 profile 的关键差异如下：
+`AppleMusicProfile` 同时支持 `exactClasses`、`exactMethods` 和 `exactFields`。当前三个 profile 的关键差异如下：
 
-| 目标契约 | 6.5.0 / 1580 | 6.5.1 / 1583 |
-| --- | --- | --- |
-| `PLAYER_CONTROLLER` | `com.apple.android.music.player.fragment.w0` | `com.apple.android.music.player.fragment.q0` |
-| `EDITORIAL_VIDEO_OWNER` | `com.apple.android.music.player.c1` | `com.apple.android.music.player.f1` |
-| `LYRICS_CHROME` | `com.apple.android.music.player.fragment.e` | `com.apple.android.music.player.fragment.d` |
-| `LYRICS_CURRENT_ITEM_FIELD` owner | `com.apple.android.music.player.fragment.m` | `com.apple.android.music.player.fragment.l` |
-| `METADATA_TO_ITEM_CONVERTER` owner | `com.apple.android.music.player.P` | `com.apple.android.music.player.O` |
-| `LYRICS_AVAILABILITY_OWNER` | `com.apple.android.music.player.d1` | `com.apple.android.music.player.e1` |
-| Activity holder method | `k1` | `j1` |
-| Activity root method | `n0` | `l1` |
-| Activity behavior field | `c1` | `c1` |
+| 目标契约 | 6.5.0 / 1580 | 6.5.1 / 1583 | 6.5.2 / 1586 |
+| --- | --- | --- | --- |
+| `PLAYER_CONTROLLER` | `com.apple.android.music.player.fragment.w0` | `com.apple.android.music.player.fragment.q0` | `com.apple.android.music.player.fragment.t0` |
+| `EDITORIAL_VIDEO_OWNER` | `com.apple.android.music.player.c1` | `com.apple.android.music.player.f1` | `com.apple.android.music.player.f1` |
+| `LYRICS_CHROME` | `com.apple.android.music.player.fragment.e` | `com.apple.android.music.player.fragment.d` | `com.apple.android.music.player.fragment.e` |
+| `LYRICS_CURRENT_ITEM_FIELD` owner | `com.apple.android.music.player.fragment.m` | `com.apple.android.music.player.fragment.l` | `com.apple.android.music.player.fragment.m` |
+| `METADATA_TO_ITEM_CONVERTER` owner | `com.apple.android.music.player.P` | `com.apple.android.music.player.O` | `com.apple.android.music.player.O` |
+| `LYRICS_AVAILABILITY_OWNER` | `com.apple.android.music.player.d1` | `com.apple.android.music.player.e1` | `com.apple.android.music.player.e1` |
+| Activity holder method | `k1` | `j1` | `k1` |
+| Activity root method | `n0` | `l1` | `n0` (inherited) |
+| Activity behavior field | `c1` | `c1` | `c1` |
 
-以下身份在两个 profile 中保持不变：`PlayerActivity`、`PlayerLyricsViewFragment`、`LyricsLineVector`、`SongInfoTimeProcessor`、高亮 callback owner、`PlayerLyricsViewModel`、`Hd.b`、`SongInfoPtr`、`SongInfoNative`、`TTMLParserNative` 和 metadata hub `com.apple.android.music.player.f`。
+以下身份在三个 profile 中保持不变：`PlayerActivity`、`PlayerLyricsViewFragment`、`LyricsLineVector`、`SongInfoTimeProcessor`、高亮 callback owner、`PlayerLyricsViewModel`、`Hd.b`、`SongInfoPtr`、`SongInfoNative`、`TTMLParserNative` 和 metadata hub `com.apple.android.music.player.f`。
+
+6.5.2 的 APK 证据：XAPK SHA-256 为 `96A70F0B724F6196C9F2B356986D9C93A1CF6BC9FDD555C1C96AABA5B4783C1C`；base APK SHA-256 为 `1E7151D02CAC39A9F70D017BCC26E3B0FD4C2AFB3AA30C363206D8616A4FEC59`。其 `k1()` 在存在 `bottom_navigation_root_flat` 时返回官方 `FlatBottomNavigationHolder`，歌词 chrome 使用 `fragment.e.a2(int, int[])`，静态折叠拦截使用 `h(CoordinatorLayout, View, MotionEvent)`。
 
 新增版本时应显式比较三类身份，不能只比较类名：
 
@@ -206,9 +209,9 @@ profile 阶段有多个候选时即返回 `Ambiguous`，即使策略是 `EXACT_P
 
 未知版本没有 profile ID；已匹配 profile 但发生 stable 或 structural 回退时，摘要仍会带该 profile ID。`TargetClassIndex`、解析器和每个符号结果都在进程内缓存，适配时不能假设每次 `resolve` 都会重新扫描 DEX。
 
-### 4.3 22 个 profile symbol ID
+### 4.3 20 个 profile symbol ID
 
-`TargetSymbolId` 当前有 22 个条目。它们是 profile 的身份键，不等同于 `AppleMusicSymbols` 的全部 32 个解析 key。
+`TargetSymbolId` 当前有 20 个条目。它们是通用 Apple Music profile 的身份键，不等同于 `AppleMusicSymbols` 的全部解析 key；静态折叠私有方法由独立结构 resolver 解析，不参与版本 profile。
 
 | 能力族 | `TargetSymbolId` | 适配用途 |
 | --- | --- | --- |
@@ -217,8 +220,6 @@ profile 阶段有多个候选时即返回 `Ambiguous`，即使策略是 `EXACT_P
 | 播放器和双栏 | `PLAYER_ACTIVITY_CREATE_STACKED_NAVIGATION_HOLDER` | Activity 中创建 stacked navigation holder 的方法名 |
 | 播放器和双栏 | `PLAYER_ACTIVITY_ROOT` | Activity 内容根方法名 |
 | 播放器和双栏 | `PLAYER_ACTIVITY_BEHAVIOR_FIELD` | Activity BottomSheetBehavior 字段名 |
-| 播放器和双栏 | `STATIC_COLLAPSED_BEHAVIOR` | 6.5.2 静态折叠 Behavior owner |
-| 播放器和双栏 | `STATIC_COLLAPSED_INTERCEPT_METHOD` | 6.5.2 `h(CoordinatorLayout, View, MotionEvent): Boolean` |
 | 播放器和歌词 | `EDITORIAL_VIDEO_OWNER` | Editorial Video URL owner |
 | 播放器和歌词 | `LYRICS_FRAGMENT` | 歌词 Fragment owner |
 | 播放器和歌词 | `LYRICS_CHROME` | 歌词 chrome/metrics owner |
@@ -260,12 +261,12 @@ profile 阶段有多个候选时即返回 `Ambiguous`，即使策略是 `EXACT_P
 
 - 设置门控：`dual_pane_enabled`，默认 `true`。
 - 资源阶段：注册 `bottom_navigation`、`fragment_player_main`、`fragment_player_lyrics_sheet`、`lyrics_line` 和 `lyrics_word_karaoke` 回调。
-- 应用阶段：安装 11 个目标方法/字段契约，包括 controller 三钩子、Activity holder/root/behavior、菜单 `onMeasure`、歌词 Fragment、chrome、metrics 和 `onResume`。
+- 应用阶段：安装 11 个核心目标方法/字段契约，包括 controller 三钩子、Activity holder/root/behavior、菜单 `onMeasure`、歌词 Fragment、chrome、metrics 和 `onResume`。对 6.5.2/1586 另外按独立私有契约解析并安装 `StaticCollapsedInterceptGuard`。
 - 资格判定：`TabletModeQualifier` 读取目标包的 `is_tablet` bool，并要求横屏；资源和目标运行时都还受双栏开关约束。
 - 运行机制：资源回调镜像 layout-land 约束；目标 Hook 负责原生 holder、Fragment transaction、歌词 pane 和生命周期接线；不能替换目标 player root 或接管目标 bottom-sheet 生命周期。
 - 私有适配知识：`AlphaGradientEdgeFieldProfiles`、`LyricsLayoutFieldProfiles` 和 `ConstraintLayout$b` 的 `TARGET_650_FIELD_NAMES` 与 `AppleMusicProfile` 独立。新版适配时必须单独确认这些字段变体。
 - 边界补偿：`navigation_compensation_enabled` 只在官方平板横屏生效。`FlatPlayerBoundaryPolicy` 通过 `player_sheet_container` 的几何、`translationY` 和 pre-draw 同步处理折叠态；只做视觉平移，不修改布局 margin，不改 native holder 的动画目标。
-- `ACTIVE` 条件：11 个 resolution 均为 `Found`，controller 三个 Hook、菜单测量、chrome、metrics 和 typography Hook 数量都满足安装要求。
+- `ACTIVE` 条件：11 个核心 resolution 均为 `Found`，controller 三个 Hook、菜单测量、chrome、metrics 和 typography Hook 数量都满足安装要求；在 6.5.2/1586 上静态折叠 guard 也必须成功安装。
 - `DEGRADED` 条件：任一核心 resolution 缺失/歧义，或实际 Hook 数量不足。
 
 ### 5.2 Editorial Video `editorial_video`
@@ -476,7 +477,7 @@ adb shell pm path com.apple.android.music
 - `TARGET_650_FIELD_NAMES`：只在目标 LayoutParams 类型为 `androidx.constraintlayout.widget.ConstraintLayout$b` 时启用的 6.5.0 字段映射。
 - `LayoutInflationRegistry` 的资源名称推断：`bottom_navigation`、`fragment_player_main`、`fragment_player_lyrics_sheet`、`lyrics_line`、`lyrics_word_karaoke` 等。
 - `LyricsTypefaceLayoutContract.layoutNames`：12 个歌词布局名称，包括 instrumental 行。
-- `StaticCollapsedInterceptGuard`：仅对已验证的 Apple Music 6.5.2 / 1590 安装；方法必须由 `AppleMusicSymbols.StaticCollapsedInterceptMethod` 独立解析，运行时还要求 AM++ 标记的 `bottom_navigation_root_flat` 树及可见的 `player_lyrics` / `player_queue` 命中区域，其他版本跳过该 hook。
+- `StaticCollapsedInterceptGuard`：仅对已验证的 Apple Music 6.5.2 / 1586 安装；方法必须由 `AppleMusicSymbols.StaticCollapsedInterceptMethod` 独立解析，运行时还要求 AM++ 标记的 `bottom_navigation_root_flat` 树及可见的 `player_lyrics` / `player_queue` 命中区域，其他版本跳过该 hook。
 
 这些知识不参与 `AppleMusicProfiles.match`。新增版本时要单独确认变体，并把结果集中记录在对应 adapter 的适配知识中。
 

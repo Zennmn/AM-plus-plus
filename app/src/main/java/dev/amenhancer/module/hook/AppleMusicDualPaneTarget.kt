@@ -40,7 +40,7 @@ internal object DualPaneResourceHook {
                 "bottom navigation layout callback root=" + root.javaClass.name +
                     " orientation=" + root.resources.configuration.orientation,
             )
-            ConstraintLayoutPane.installLandscapeBottomNavigation(root)
+            ConstraintLayoutPane.installLandscapeBottomNavigation(root, targetBuild(root.context))
         }
         LayoutInflationRegistry.register("fragment_player_main") { view ->
             val root = view as? ViewGroup ?: return@register
@@ -844,7 +844,7 @@ internal class AppleMusicDualPaneTarget(
                     // that native holder: it owns the full-player lifecycle.
                     // The stacked holder is only valid for a real stacked
                     // root, not for the transformed landscape flat layout.
-                    if (flatRoot != null) {
+                    if (flatRoot != null && StaticCollapsedInterceptGuard.isSupportedBuild(targetBuild)) {
                         debug("preserving native flat bottom navigation holder")
                         return
                     }
@@ -1215,7 +1215,10 @@ private object ConstraintLayoutPane {
      * stock flat resource tree into full-width tablet chrome. Apple Music's
      * native bottom-navigation holder owns its peek height and transitions.
      */
-    fun installLandscapeBottomNavigation(root: ViewGroup) {
+    fun installLandscapeBottomNavigation(
+        root: ViewGroup,
+        targetBuild: TargetBuild = TargetBuild.UNKNOWN,
+    ) {
         if (!TabletModeQualifier.isEligible(root.context)) {
             debug("bottom navigation skipped: tablet-landscape predicate is false")
             return
@@ -1250,11 +1253,18 @@ private object ConstraintLayoutPane {
             }
             configureTabsTopShadow(topShadow)
             configurePlayerContainer(playerContainer, root.context)
+            val boundaryTabsHeight = if (
+                StaticCollapsedInterceptGuard.isSupportedBuild(targetBuild)
+            ) {
+                tabsHeight
+            } else {
+                (tabsHeight - menuHeight).coerceAtLeast(0)
+            }
             installFlatPlayerBoundarySync(
                 root,
                 playerContainer,
                 tabsFrame,
-                tabsHeight,
+                boundaryTabsHeight,
             )
             installTabsDivider(tabsFrame, resources)
 

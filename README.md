@@ -108,7 +108,7 @@ AM++ 是一个通过 libxposed API 102 注入 Apple Music 的增强模块，目�
 | --- | --- |
 | Android | Android 8.0（API 26）及以上 |
 | Xposed 框架 | 支持 libxposed API 102、remote preferences 和 remote file 的实现 |
-| Apple Music | `6.5.0 (1580)`、`6.5.1 (1583)` |
+| Apple Music | `6.5.0 (1580)`、`6.5.1 (1583)`、`6.5.2 (1586)` |
 | 双向歌词模糊 | Android 12（API 31）及以上 |
 
 - Apple Music 的内部类、方法和资源会随版本混淆或调整，未列出的版本不保证兼容。
