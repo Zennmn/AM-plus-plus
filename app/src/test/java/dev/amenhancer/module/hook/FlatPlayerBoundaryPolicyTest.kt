@@ -10,8 +10,9 @@ import org.junit.Test
  *
  * The policy never mutates layout geometry: it produces a visual
  * translationY for the outer player container. Expanded is always settled at
- * 0; a settled collapsed sheet settles at exactly -tabsHeight. The
- * decision stays binary on `expanded` (sheetTop <= rootHeight / 2) on
+ * 0; a settled collapsed sheet settles at exactly -navigationInset. The full
+ * tabs frame is used only for overlap detection. The decision stays binary
+ * on `expanded` (sheetTop <= rootHeight / 2) on
  * purpose: the collapsed peek geometry is owned by Apple's holder and is not
  * measurable here, so no continuous sheetTop -> collapsed mapping can be
  * verified. The reservation latch makes a detected collapsed state sticky,
@@ -147,7 +148,7 @@ class FlatPlayerBoundaryPolicyTest {
     }
 
     @Test
-    fun `reserved collapsed sheet clears the full tabs frame`() {
+    fun `reserved collapsed sheet uses the navigation inset`() {
         val decision = FlatPlayerBoundaryPolicy.decide(
             rootHeight = 1080,
             sheetTop = 982,
@@ -159,6 +160,23 @@ class FlatPlayerBoundaryPolicyTest {
 
         assertTrue(decision.reserveNavigationSpace)
         assertEquals(-126, decision.translationY)
+        assertTrue(decision.tabsVisible)
+    }
+
+    @Test
+    fun `uses the full tabs frame for overlap but only the navigation inset for translation`() {
+        val decision = FlatPlayerBoundaryPolicy.decide(
+            rootHeight = 1080,
+            sheetTop = 982,
+            sheetBottom = 1080,
+            tabsTop = 954,
+            tabsHeight = 126,
+            navigationInset = 16,
+            wasNavigationSpaceReserved = false,
+        )
+
+        assertTrue(decision.reserveNavigationSpace)
+        assertEquals(-16, decision.translationY)
         assertTrue(decision.tabsVisible)
     }
 

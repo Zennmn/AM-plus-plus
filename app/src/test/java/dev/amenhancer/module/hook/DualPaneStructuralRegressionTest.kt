@@ -183,7 +183,7 @@ class DualPaneStructuralRegressionTest {
     fun `limits flat player boundary sync to the compensation switch`() {
         assertTrue(source.contains("val tabsHeight = stackedTabsContainerHeight(root.context, menuHeight)"))
         assertTrue(source.contains("StaticCollapsedInterceptGuard.isSupportedBuild(targetBuild)"))
-        assertTrue(source.contains("translationY = if (!expanded && reserveNavigationSpace) -tabsHeight else 0"))
+        assertTrue(source.contains("translationY = if (!expanded && reserveNavigationSpace) -navigationInset else 0"))
         assertTrue(source.contains("if (!FlatLandscapeWindowPolicy.shouldInstallBoundarySync(root.context)) return"))
         assertFalse(source.contains("display.getRealMetrics(metrics)"))
         assertFalse(source.contains("physicalWidthPx = metrics?.widthPixels ?: 0"))
@@ -203,7 +203,7 @@ class DualPaneStructuralRegressionTest {
         assertTrue(source.contains("sheet.viewTreeObserver.addOnPreDrawListener"))
         assertTrue(source.contains("removeOnPreDrawListener"))
         assertTrue(source.contains("sheet.addOnAttachStateChangeListener"))
-        assertTrue(source.contains("translationY = if (!expanded && reserveNavigationSpace) -tabsHeight else 0"))
+        assertTrue(source.contains("translationY = if (!expanded && reserveNavigationSpace) -navigationInset else 0"))
         assertTrue(source.contains("val desiredTabsVisibility = if (decision.tabsVisible) View.VISIBLE else View.INVISIBLE"))
         assertTrue(source.contains("tabsFrame.visibility = desiredTabsVisibility"))
         assertFalse(source.contains("miniPlayerId"))
@@ -265,10 +265,22 @@ class DualPaneStructuralRegressionTest {
     }
 
     @Test
-    fun `preserves the flat holder for the landscape flat root`() {
-        assertTrue(source.contains("preserving native flat bottom navigation holder"))
-        assertTrue(source.contains("if (flatRoot != null && StaticCollapsedInterceptGuard.isSupportedBuild(targetBuild))"))
+    fun `keeps the verified stacked holder for the transformed flat root`() {
+        // The transformed layout still relies on the stacked holder for the
+        // mini-player peek/transition lifecycle. A native flat holder owns a
+        // different StaticCollapsed behavior and drops the mini-player on
+        // 6.5.2, so the flat-root branch must not bypass the holder hook.
+        assertFalse(source.contains("preserving native flat bottom navigation holder"))
+        assertFalse(source.contains("if (flatRoot != null && StaticCollapsedInterceptGuard.isSupportedBuild(targetBuild))"))
         assertTrue(source.contains("constructor.newInstance(activity, navigationRoot, behavior)"))
+    }
+
+    @Test
+    fun `keeps the accepted navigation inset boundary for every target build`() {
+        assertTrue(source.contains("val navigationInset = (tabsHeight - menuHeight).coerceAtLeast(0)"))
+        assertTrue(source.contains("tabsHeight = tabsHeight"))
+        assertTrue(source.contains("navigationInset = navigationInset"))
+        assertFalse(source.contains("val boundaryTabsHeight = if ("))
     }
 
     @Test

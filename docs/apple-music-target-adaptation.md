@@ -149,7 +149,7 @@ FeatureInstallation.install
 
 以下身份在三个 profile 中保持不变：`PlayerActivity`、`PlayerLyricsViewFragment`、`LyricsLineVector`、`SongInfoTimeProcessor`、高亮 callback owner、`PlayerLyricsViewModel`、`Hd.b`、`SongInfoPtr`、`SongInfoNative`、`TTMLParserNative` 和 metadata hub `com.apple.android.music.player.f`。
 
-6.5.2 的 APK 证据：XAPK SHA-256 为 `96A70F0B724F6196C9F2B356986D9C93A1CF6BC9FDD555C1C96AABA5B4783C1C`；base APK SHA-256 为 `1E7151D02CAC39A9F70D017BCC26E3B0FD4C2AFB3AA30C363206D8616A4FEC59`；API 33+ 使用的 v3.1 证书 SHA-256 为 `771d8674d3d9837c9edf11b11873443998f19105abcecab425ed9b8e6fefff9b`。其 `k1()` 在存在 `bottom_navigation_root_flat` 时返回官方 `FlatBottomNavigationHolder`，歌词 chrome 使用 `fragment.e.a2(int, int[])`，静态折叠拦截使用 `h(CoordinatorLayout, View, MotionEvent)`。
+6.5.2 的 APK 证据：XAPK SHA-256 为 `96A70F0B724F6196C9F2B356986D9C93A1CF6BC9FDD555C1C96AABA5B4783C1C`；base APK SHA-256 为 `1E7151D02CAC39A9F70D017BCC26E3B0FD4C2AFB3AA30C363206D8616A4FEC59`；API 33+ 使用的 v3.1 证书 SHA-256 为 `771d8674d3d9837c9edf11b11873443998f19105abcecab425ed9b8e6fefff9b`。其 `k1()` 在存在 `bottom_navigation_root_flat` 时返回官方 `FlatBottomNavigationHolder`，歌词 chrome 使用 `fragment.e.a2(int, int[])`，静态折叠拦截使用 `h(CoordinatorLayout, View, MotionEvent)`。AM++ 变换该 flat root 后仍改为返回官方 `StackedBottomNavigationHolder`，以保留已验收的 mini-player/peek 生命周期。
 
 新增版本时应显式比较三类身份，不能只比较类名：
 
@@ -265,7 +265,7 @@ profile 阶段有多个候选时即返回 `Ambiguous`，即使策略是 `EXACT_P
 - 资格判定：`TabletModeQualifier` 读取目标包的 `is_tablet` bool，并要求横屏；资源和目标运行时都还受双栏开关约束。
 - 运行机制：资源回调镜像 layout-land 约束；目标 Hook 负责原生 holder、Fragment transaction、歌词 pane 和生命周期接线；不能替换目标 player root 或接管目标 bottom-sheet 生命周期。
 - 私有适配知识：`AlphaGradientEdgeFieldProfiles`、`LyricsLayoutFieldProfiles` 和 `ConstraintLayout$b` 的 `TARGET_650_FIELD_NAMES` 与 `AppleMusicProfile` 独立。新版适配时必须单独确认这些字段变体。
-- 边界补偿：`navigation_compensation_enabled` 只在官方平板横屏生效。`FlatPlayerBoundaryPolicy` 通过 `player_sheet_container` 的几何、`translationY` 和 pre-draw 同步处理折叠态；只做视觉平移，不修改布局 margin，不改 native holder 的动画目标。
+- 边界补偿：`navigation_compensation_enabled` 只在官方平板横屏生效。`FlatPlayerBoundaryPolicy` 通过 `player_sheet_container` 的几何、`translationY` 和 pre-draw 同步处理折叠态；只做视觉平移，不修改布局 margin。传入的补偿量保持为 `tabsHeight - menuHeight`，不能把整块 tabs frame 平移到 mini-player 后面；变换后的 flat root 仍强制返回官方 `StackedBottomNavigationHolder`，不能让 native flat holder 接管播放器生命周期。
 - `ACTIVE` 条件：11 个核心 resolution 均为 `Found`，controller 三个 Hook、菜单测量、chrome、metrics 和 typography Hook 数量都满足安装要求；在 6.5.2/1586 上静态折叠 guard 也必须成功安装。
 - `DEGRADED` 条件：任一核心 resolution 缺失/歧义，或实际 Hook 数量不足。
 

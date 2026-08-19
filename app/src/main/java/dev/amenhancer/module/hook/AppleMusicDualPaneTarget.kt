@@ -778,10 +778,10 @@ internal class AppleMusicDualPaneTarget(
     }
 
     /**
-     * Keep the native flat holder for the transformed landscape root. Only
-     * return the native stacked holder when the actual root is stacked; the
-     * holder owns slide interpolation, peek height, navigation translation,
-     * colors and system-bar transitions.
+     * Return Apple's native stacked holder for the transformed landscape
+     * root. The transformed flat resource still relies on the stacked
+     * holder's mini-player peek, navigation translation, colors and system-bar
+     * transitions; allowing the native flat holder here loses that lifecycle.
      */
     private fun installNativeStackedNavigationHolderHook(
         method: Method?,
@@ -838,15 +838,6 @@ internal class AppleMusicDualPaneTarget(
                             ?: activity.findViewById<View>(flatRootId)
                     } else {
                         null
-                    }
-                    // 6.5.2 selects the flat holder whenever the
-                    // landscape resource exposes the flat root. Preserve
-                    // that native holder: it owns the full-player lifecycle.
-                    // The stacked holder is only valid for a real stacked
-                    // root, not for the transformed landscape flat layout.
-                    if (flatRoot != null && StaticCollapsedInterceptGuard.isSupportedBuild(targetBuild)) {
-                        debug("preserving native flat bottom navigation holder")
-                        return
                     }
                     val navigationRoot = sequenceOf(stackedRootId, flatRootId)
                         .filter { it != 0 }
@@ -1061,7 +1052,8 @@ internal data class FlatPlayerBoundaryDecision(
 /**
  * Phase 109 settled visual compensation: expanded always settles at
  * translationY 0, a settled collapsed sheet settles at exactly
- * -tabsHeight. The decision stays binary on `expanded` (sheetTop <=
+ * -navigationInset. The full `tabsHeight` is used only to detect overlap.
+ * The decision stays binary on `expanded` (sheetTop <=
  * rootHeight / 2) on purpose: the collapsed peek geometry is owned by
  * Apple's holder and is not measurable here, so no continuous
  * sheetTop-to-collapsed mapping could be verified. It is applied as visual
@@ -1076,6 +1068,7 @@ internal object FlatPlayerBoundaryPolicy {
         sheetBottom: Int,
         tabsTop: Int,
         tabsHeight: Int,
+        navigationInset: Int = tabsHeight,
         wasNavigationSpaceReserved: Boolean,
     ): FlatPlayerBoundaryDecision {
         require(rootHeight > 0) { "rootHeight must be positive" }
@@ -1088,10 +1081,10 @@ internal object FlatPlayerBoundaryPolicy {
         return FlatPlayerBoundaryDecision(
             reserveNavigationSpace = reserveNavigationSpace,
             // Expanded is the settled zero; a reserved collapsed sheet must
-            // clear the complete tabs frame, not only its 16dp breathing
-            // space. The reservation latch makes the collapsed state sticky
+            // clear the navigation inset. The reservation latch makes the
+            // collapsed state sticky
             // so the binary flip cannot oscillate around the midpoint.
-            translationY = if (!expanded && reserveNavigationSpace) -tabsHeight else 0,
+            translationY = if (!expanded && reserveNavigationSpace) -navigationInset else 0,
             // Let the native holder own an expanded transition until the
             // collapsed geometry has established a navigation reservation.
             tabsVisible = !reserveNavigationSpace || !expanded,
@@ -1253,18 +1246,17 @@ private object ConstraintLayoutPane {
             }
             configureTabsTopShadow(topShadow)
             configurePlayerContainer(playerContainer, root.context)
-            val boundaryTabsHeight = if (
-                StaticCollapsedInterceptGuard.isSupportedBuild(targetBuild)
-            ) {
-                tabsHeight
-            } else {
-                (tabsHeight - menuHeight).coerceAtLeast(0)
-            }
+            // Keep the accepted Phase-109 navigation inset on every target
+            // build. The full tabs frame is owned by the native holder; using
+            // it as a container translation pulls the mini-player behind the
+            // navigation bar on 6.5.2.
+            val navigationInset = (tabsHeight - menuHeight).coerceAtLeast(0)
             installFlatPlayerBoundarySync(
                 root,
                 playerContainer,
                 tabsFrame,
-                boundaryTabsHeight,
+                tabsHeight = tabsHeight,
+                navigationInset = navigationInset,
             )
             installTabsDivider(tabsFrame, resources)
 
@@ -1427,6 +1419,7 @@ private object ConstraintLayoutPane {
         playerContainer: View,
         tabsFrame: View,
         tabsHeight: Int,
+        navigationInset: Int,
     ) {
         if (!FlatLandscapeWindowPolicy.shouldInstallBoundarySync(root.context)) return
         val sheetId = targetId(root.resources, PLAYER_SHEET_CONTAINER)
@@ -1465,6 +1458,7 @@ private object ConstraintLayoutPane {
                 sheetBottom = sheetTop + sheet.height,
                 tabsTop = tabsLocation[1] - rootTop,
                 tabsHeight = tabsHeight,
+                navigationInset = navigationInset,
                 wasNavigationSpaceReserved = reserveNavigationSpace,
             )
             reserveNavigationSpace = decision.reserveNavigationSpace
