@@ -149,7 +149,7 @@ FeatureInstallation.install
 
 以下身份在三个 profile 中保持不变：`PlayerActivity`、`PlayerLyricsViewFragment`、`LyricsLineVector`、`SongInfoTimeProcessor`、高亮 callback owner、`PlayerLyricsViewModel`、`Hd.b`、`SongInfoPtr`、`SongInfoNative`、`TTMLParserNative` 和 metadata hub `com.apple.android.music.player.f`。
 
-6.5.2 的 APK 证据：XAPK SHA-256 为 `96A70F0B724F6196C9F2B356986D9C93A1CF6BC9FDD555C1C96AABA5B4783C1C`；base APK SHA-256 为 `1E7151D02CAC39A9F70D017BCC26E3B0FD4C2AFB3AA30C363206D8616A4FEC59`。其 `k1()` 在存在 `bottom_navigation_root_flat` 时返回官方 `FlatBottomNavigationHolder`，歌词 chrome 使用 `fragment.e.a2(int, int[])`，静态折叠拦截使用 `h(CoordinatorLayout, View, MotionEvent)`。
+6.5.2 的 APK 证据：XAPK SHA-256 为 `96A70F0B724F6196C9F2B356986D9C93A1CF6BC9FDD555C1C96AABA5B4783C1C`；base APK SHA-256 为 `1E7151D02CAC39A9F70D017BCC26E3B0FD4C2AFB3AA30C363206D8616A4FEC59`；API 33+ 使用的 v3.1 证书 SHA-256 为 `771d8674d3d9837c9edf11b11873443998f19105abcecab425ed9b8e6fefff9b`。其 `k1()` 在存在 `bottom_navigation_root_flat` 时返回官方 `FlatBottomNavigationHolder`，歌词 chrome 使用 `fragment.e.a2(int, int[])`，静态折叠拦截使用 `h(CoordinatorLayout, View, MotionEvent)`。
 
 新增版本时应显式比较三类身份，不能只比较类名：
 
