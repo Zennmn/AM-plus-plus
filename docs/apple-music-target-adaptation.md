@@ -79,6 +79,9 @@ HookEntry.onPackageReady
 | 歌词字体 | 定位目标 RecyclerView/文本渲染路径 | 只影响歌词字体 |
 | 自定义歌词 | 定位歌曲身份和歌词加载入口 | 原始值缺失时 fail-open |
 | 当前歌曲身份 | 提供稳定的歌曲 ID/对象快照 | 供多个 feature 复用 |
+| 媒体库刷新 | 定位 MediaLibrary singleton、update/ready 和请求入口 | 只影响手动刷新/目录补全按钮 |
+| 标题修正 | 定位标题转换、缓存和 miss 回填入口 | 候选缺失时保留宿主标题 |
+| 目录语言 | 定位 storefront、Accept-Language 和 catalog map | 只重写语言字段，保留请求返回契约 |
 | 设置页 | 把模块设置注入宿主原生设置页 | 配置入口可见且可持久化 |
 
 ### 2.3 关键文件
@@ -342,6 +345,39 @@ Guard 的反射安装是独立能力。方法缺失、签名歧义或安装异�
 
 这些能力有独立设备资格和资源期约束。版本适配时只更新目标符号和资源定位，不要扩大 URL 抑制、窗口背景或手机/平板资格范围。
 
+### 10.4 媒体库刷新
+
+媒体库刷新通常同时依赖 MediaLibrary 类型、singleton、ready/update 方法、更新原因枚举，以及可选的 native catalog refresh/native pointer。适配时：
+
+- 先确认用户主动刷新请求的入口和广播/回调生命周期；
+- 独立解析 `MediaLibraryType`、singleton、ready、update 和更新原因，不要把一个方法找到当成整项能力成功；
+- 优先使用结构明确的 `UserInitiatedPoll` 等更新原因，枚举缺失时返回 `DEGRADED`；
+- native pointer 或 native catalog refresh 缺失时，只关闭加速/回填路径，不影响播放器和歌词；
+- 注册 request responder 失败时报告 `DEGRADED`，不得让宿主启动失败；
+- 如果刷新后需要目录补全，和标题修正共享同一个 bounded cache，禁止每次点击重新扫描配置或遍历关系。
+
+### 10.5 标题修正和目录缓存
+
+标题修正通常跨越“宿主显示转换 → Apple Music ID → 目录缓存 → miss 后台回填”四个边界。适配新版本时：
+
+- 重新确认标题转换方法的 owner、参数/返回类型和调用时机；
+- 保留宿主原始 title/artist/album 作为 fail-open 值，候选为空、异常或缓存 miss 时不阻塞 UI；
+- 标题缓存应延迟到第一次实际解析或用户主动刷新，不要在 `Application.onCreate` 扫描偏好或创建无界任务；
+- 当前歌曲身份解析、标题缓存和媒体库刷新必须共享同一身份/缓存语义，避免重复解析和跨歌曲污染；
+- miss 回填应有 bounded queue、去重、后台执行和可重试结果，不能在主线程做目录查询；
+- title correction 开关关闭时，不应创建 catalog lookup、scheduler 或额外的宿主 Hook。
+
+### 10.6 目录语言
+
+目录语言不是一个单独的字符串 Hook，而是一组请求契约适配。新版可能把语言分散在 storefront、Accept-Language、iCloud helper、Store API/iTunes header map、Media API 参数和 store lookup 参数中。适配时：
+
+- 为每个语言承载点独立解析和报告状态；
+- 只改语言字段，保留其他 header、map key、未知值和原始返回对象；
+- 同时处理 raw language tag 与 `Accept-Language` header 映射，避免只改 UI locale 而目录仍返回默认语言；
+- map 重写应在值类型正确时复制并替换，未命中或类型不符时返回原 map；
+- 不直接 Hook suspend/Continuation 返回值，除非已经验证其返回契约；
+- 至少覆盖 storefront、header、map、raw tag 和无相关字段的 fail-open 测试。
+
 ## 11. 测试策略
 
 ### 11.1 先写行为测试，再更新 profile
@@ -351,6 +387,9 @@ Guard 的反射安装是独立能力。方法缺失、签名歧义或安装异�
 - holder：目标 root 返回正确的 native holder，非目标 root 调用原始实现；
 - boundary：完整 tabs frame 参与 overlap，translation 使用 navigation inset；
 - guard：portrait、双栏关闭、补偿关闭、无关 coordinator、无关 child 和非按钮区域均放行原始方法；
+- library refresh：缺少 MediaLibrary 私有符号时只让刷新能力降级，播放器和歌词仍可安装；
+- title correction：缓存 miss、空候选和后台回填失败均保留宿主原始显示；
+- catalog language：各语言承载点分别重写，未知 map/key/类型保持原值；
 - settings：supported build 显示设置入口，unsupported build 不发布半初始化设置；
 - resolver：Missing/Ambiguous 时不安装错误 Hook，健康状态准确反映结果。
 
@@ -433,6 +472,9 @@ adb pull /sdcard/ampp.xml .work/ampp.xml
 - [ ] lyrics blur
 - [ ] lyrics typeface
 - [ ] custom lyrics
+- [ ] library refresh
+- [ ] title correction
+- [ ] catalog language
 - [ ] current-song identity
 - [ ] editorial video
 - [ ] phone liquid glass
