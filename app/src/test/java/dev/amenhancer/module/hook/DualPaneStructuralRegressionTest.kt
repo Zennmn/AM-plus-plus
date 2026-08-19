@@ -28,6 +28,13 @@ class DualPaneStructuralRegressionTest {
         ).firstOrNull(File::isFile)?.readText()
             ?: error("DualPaneFeature.kt was not found from the unit-test working directory")
     }
+    private val interceptGuardSource: String by lazy {
+        sequenceOf(
+            File("src/main/java/dev/amenhancer/module/hook/StaticCollapsedInterceptGuard.kt"),
+            File("app/src/main/java/dev/amenhancer/module/hook/StaticCollapsedInterceptGuard.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+            ?: error("StaticCollapsedInterceptGuard.kt was not found from the unit-test working directory")
+    }
 
     @Test
     fun `keeps target internals behind the dual pane capability seam`() {
@@ -261,6 +268,19 @@ class DualPaneStructuralRegressionTest {
         assertTrue(source.contains("preserving native flat bottom navigation holder"))
         assertTrue(source.contains("if (flatRoot != null)"))
         assertTrue(source.contains("constructor.newInstance(activity, navigationRoot, behavior)"))
+    }
+
+    @Test
+    fun `scopes static collapsed interception to transformed flat player buttons`() {
+        assertTrue(source.contains("AppleMusicSymbols.StaticCollapsedInterceptMethod"))
+        assertTrue(interceptGuardSource.contains("StaticCollapsedInterceptPolicy.shouldBypass"))
+        assertTrue(interceptGuardSource.contains("targetCoordinator = child.parent === coordinator"))
+        assertTrue(interceptGuardSource.contains("targetChild = isTransformedFlatRoot(child)"))
+        assertTrue(interceptGuardSource.contains("eventInTargetRegion = isInPlayerButtonRegion(child, event)"))
+        assertTrue(source.contains("StaticCollapsedInterceptGuard.isSupportedBuild(targetBuild)"))
+        assertTrue(interceptGuardSource.contains("PLAYER_LYRICS = \"player_lyrics\""))
+        assertTrue(interceptGuardSource.contains("PLAYER_QUEUE = \"player_queue\""))
+        assertFalse(interceptGuardSource.contains("Class.forName(\"com.apple.android.music.common.behavior.StaticCollapsedBottomSheetBehavior\""))
     }
 
     @Test

@@ -81,7 +81,7 @@ internal data class TargetAdaptation(
             return TargetAdaptation(
                 identity = build.displayName,
                 currentSong = currentSong,
-                dualPane = AppleMusicDualPaneTarget(resolver),
+                dualPane = AppleMusicDualPaneTarget(resolver, build),
                 editorialVideo = AppleMusicEditorialVideoTarget(application, resolver),
                 bidirectionalLyricBlur = AppleMusicBidirectionalLyricBlurTarget(resolver),
                 lyricsTypeface = AppleMusicLyricsTypefaceTarget(

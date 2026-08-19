@@ -242,6 +242,8 @@ internal enum class TargetSymbolId {
     PLAYER_ACTIVITY_CREATE_STACKED_NAVIGATION_HOLDER,
     PLAYER_ACTIVITY_ROOT,
     PLAYER_ACTIVITY_BEHAVIOR_FIELD,
+    STATIC_COLLAPSED_BEHAVIOR,
+    STATIC_COLLAPSED_INTERCEPT_METHOD,
     EDITORIAL_VIDEO_OWNER,
     LYRICS_FRAGMENT,
     LYRICS_CHROME,
@@ -269,6 +271,8 @@ private object AppleMusicProfiles {
         exactClasses = mapOf(
             TargetSymbolId.PLAYER_CONTROLLER to "com.apple.android.music.player.fragment.w0",
             TargetSymbolId.PLAYER_ACTIVITY to "com.apple.android.music.common.activity.PlayerActivity",
+            TargetSymbolId.STATIC_COLLAPSED_BEHAVIOR to
+                "com.apple.android.music.common.behavior.StaticCollapsedBottomSheetBehavior",
             TargetSymbolId.EDITORIAL_VIDEO_OWNER to "com.apple.android.music.player.c1",
             TargetSymbolId.LYRICS_FRAGMENT to "com.apple.android.music.player.fragment.PlayerLyricsViewFragment",
             TargetSymbolId.LYRICS_CHROME to "com.apple.android.music.player.fragment.e",
@@ -298,6 +302,7 @@ private object AppleMusicProfiles {
         exactMethods = mapOf(
             TargetSymbolId.PLAYER_ACTIVITY_CREATE_STACKED_NAVIGATION_HOLDER to "k1",
             TargetSymbolId.PLAYER_ACTIVITY_ROOT to "n0",
+            TargetSymbolId.STATIC_COLLAPSED_INTERCEPT_METHOD to "h",
             TargetSymbolId.LYRICS_ITEM_UPDATE_METHOD to "o2",
             TargetSymbolId.STORE_FRONT_LANGUAGE_ARRAY_METHOD to "b",
         ),
@@ -311,6 +316,8 @@ private object AppleMusicProfiles {
         exactClasses = mapOf(
             TargetSymbolId.PLAYER_CONTROLLER to "com.apple.android.music.player.fragment.q0",
             TargetSymbolId.PLAYER_ACTIVITY to "com.apple.android.music.common.activity.PlayerActivity",
+            TargetSymbolId.STATIC_COLLAPSED_BEHAVIOR to
+                "com.apple.android.music.common.behavior.StaticCollapsedBottomSheetBehavior",
             TargetSymbolId.EDITORIAL_VIDEO_OWNER to "com.apple.android.music.player.f1",
             TargetSymbolId.LYRICS_FRAGMENT to "com.apple.android.music.player.fragment.PlayerLyricsViewFragment",
             TargetSymbolId.LYRICS_CHROME to "com.apple.android.music.player.fragment.d",
@@ -340,6 +347,7 @@ private object AppleMusicProfiles {
         exactMethods = mapOf(
             TargetSymbolId.PLAYER_ACTIVITY_CREATE_STACKED_NAVIGATION_HOLDER to "j1",
             TargetSymbolId.PLAYER_ACTIVITY_ROOT to "l1",
+            TargetSymbolId.STATIC_COLLAPSED_INTERCEPT_METHOD to "h",
             TargetSymbolId.LYRICS_ITEM_UPDATE_METHOD to "o2",
             TargetSymbolId.STORE_FRONT_LANGUAGE_ARRAY_METHOD to "b",
         ),
@@ -434,6 +442,15 @@ internal object AppleMusicSymbols {
         searchHierarchy = true,
         fallbackOwner = { it.endsWith(".common.activity.PlayerActivity") },
         contract = ::isPlayerActivityBehaviorField,
+    )
+
+    val StaticCollapsedInterceptMethod = methodSymbol(
+        id = "static-collapsed-intercept-method",
+        profileOwner = TargetSymbolId.STATIC_COLLAPSED_BEHAVIOR,
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
+        exactMethodId = TargetSymbolId.STATIC_COLLAPSED_INTERCEPT_METHOD,
+        fallbackOwner = { it.endsWith(".StaticCollapsedBottomSheetBehavior") },
+        contract = ::isStaticCollapsedIntercept,
     )
 
     val EditorialVideoUrlSelector = methodSymbol(
@@ -1817,6 +1834,16 @@ private fun isPlayerActivityRoot(method: Method): Boolean =
 
 private fun isPlayerActivityBehaviorField(field: Field): Boolean =
     !Modifier.isStatic(field.modifiers) && isBottomSheetBehaviorType(field.type)
+
+private fun isStaticCollapsedIntercept(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "h" &&
+        method.returnType == Boolean::class.javaPrimitiveType &&
+        method.parameterTypes.map(Class<*>::getName) == listOf(
+            "androidx.coordinatorlayout.widget.CoordinatorLayout",
+            "android.view.View",
+            "android.view.MotionEvent",
+        )
 
 private fun isBottomSheetBehaviorType(type: Class<*>): Boolean {
     var current: Class<*>? = type

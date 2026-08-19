@@ -206,9 +206,9 @@ profile 阶段有多个候选时即返回 `Ambiguous`，即使策略是 `EXACT_P
 
 未知版本没有 profile ID；已匹配 profile 但发生 stable 或 structural 回退时，摘要仍会带该 profile ID。`TargetClassIndex`、解析器和每个符号结果都在进程内缓存，适配时不能假设每次 `resolve` 都会重新扫描 DEX。
 
-### 4.3 20 个 profile symbol ID
+### 4.3 22 个 profile symbol ID
 
-`TargetSymbolId` 当前有 20 个条目。它们是 profile 的身份键，不等同于 `AppleMusicSymbols` 的全部 32 个解析 key。
+`TargetSymbolId` 当前有 22 个条目。它们是 profile 的身份键，不等同于 `AppleMusicSymbols` 的全部 32 个解析 key。
 
 | 能力族 | `TargetSymbolId` | 适配用途 |
 | --- | --- | --- |
@@ -217,6 +217,8 @@ profile 阶段有多个候选时即返回 `Ambiguous`，即使策略是 `EXACT_P
 | 播放器和双栏 | `PLAYER_ACTIVITY_CREATE_STACKED_NAVIGATION_HOLDER` | Activity 中创建 stacked navigation holder 的方法名 |
 | 播放器和双栏 | `PLAYER_ACTIVITY_ROOT` | Activity 内容根方法名 |
 | 播放器和双栏 | `PLAYER_ACTIVITY_BEHAVIOR_FIELD` | Activity BottomSheetBehavior 字段名 |
+| 播放器和双栏 | `STATIC_COLLAPSED_BEHAVIOR` | 6.5.2 静态折叠 Behavior owner |
+| 播放器和双栏 | `STATIC_COLLAPSED_INTERCEPT_METHOD` | 6.5.2 `h(CoordinatorLayout, View, MotionEvent): Boolean` |
 | 播放器和歌词 | `EDITORIAL_VIDEO_OWNER` | Editorial Video URL owner |
 | 播放器和歌词 | `LYRICS_FRAGMENT` | 歌词 Fragment owner |
 | 播放器和歌词 | `LYRICS_CHROME` | 歌词 chrome/metrics owner |
@@ -474,6 +476,7 @@ adb shell pm path com.apple.android.music
 - `TARGET_650_FIELD_NAMES`：只在目标 LayoutParams 类型为 `androidx.constraintlayout.widget.ConstraintLayout$b` 时启用的 6.5.0 字段映射。
 - `LayoutInflationRegistry` 的资源名称推断：`bottom_navigation`、`fragment_player_main`、`fragment_player_lyrics_sheet`、`lyrics_line`、`lyrics_word_karaoke` 等。
 - `LyricsTypefaceLayoutContract.layoutNames`：12 个歌词布局名称，包括 instrumental 行。
+- `StaticCollapsedInterceptGuard`：仅对已验证的 Apple Music 6.5.2 / 1590 安装；方法必须由 `AppleMusicSymbols.StaticCollapsedInterceptMethod` 独立解析，运行时还要求 AM++ 标记的 `bottom_navigation_root_flat` 树及可见的 `player_lyrics` / `player_queue` 命中区域，其他版本跳过该 hook。
 
 这些知识不参与 `AppleMusicProfiles.match`。新增版本时要单独确认变体，并把结果集中记录在对应 adapter 的适配知识中。
 

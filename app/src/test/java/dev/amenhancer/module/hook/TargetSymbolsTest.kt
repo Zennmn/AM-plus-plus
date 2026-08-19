@@ -2,6 +2,7 @@ package dev.amenhancer.module.hook
 
 import android.os.Bundle
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import com.apple.android.music.model.BaseContentItem
@@ -270,6 +271,55 @@ class TargetSymbolsTest {
         assertTrue(behavior is TargetResolution.Found)
         assertEquals(SymbolMatch.VERSION_PROFILE, (behavior as TargetResolution.Found).match)
         assertEquals("c1", behavior.value.name)
+    }
+
+    @Test
+    fun `651 profile resolves the static collapsed intercept method without dex scanning`() {
+        val ownerName = "com.apple.android.music.common.behavior.StaticCollapsedBottomSheetBehavior"
+        val source = FakeTargetClassSource(
+            classes = mapOf(ownerName to StaticCollapsedBehaviorFixture::class.java),
+        )
+        val resolver = IndexedTargetSymbolResolver(
+            build = TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.1", 1583L),
+            source = source,
+        )
+
+        val resolution = resolver.resolve(AppleMusicSymbols.StaticCollapsedInterceptMethod)
+
+        assertTrue(resolution is TargetResolution.Found)
+        assertEquals(SymbolMatch.VERSION_PROFILE, (resolution as TargetResolution.Found).match)
+        assertEquals("h", resolution.value.name)
+        assertEquals(0, source.classNameReads)
+    }
+
+    @Test
+    fun `unknown build resolves the static collapsed intercept by owner and signature`() {
+        val ownerName = "com.apple.android.music.common.behavior.StaticCollapsedBottomSheetBehavior"
+        val source = FakeTargetClassSource(
+            names = listOf(ownerName),
+            classes = mapOf(ownerName to StaticCollapsedBehaviorFixture::class.java),
+        )
+        val resolver = IndexedTargetSymbolResolver(TargetBuild.UNKNOWN, source)
+
+        val resolution = resolver.resolve(AppleMusicSymbols.StaticCollapsedInterceptMethod)
+
+        assertTrue(resolution is TargetResolution.Found)
+        assertEquals(SymbolMatch.STRUCTURAL_FALLBACK, (resolution as TargetResolution.Found).match)
+        assertEquals("h", resolution.value.name)
+    }
+
+    @Test
+    fun `static collapsed intercept rejects a same named wrong signature`() {
+        val ownerName = "com.apple.android.music.common.behavior.StaticCollapsedBottomSheetBehavior"
+        val source = FakeTargetClassSource(
+            names = listOf(ownerName),
+            classes = mapOf(ownerName to StaticCollapsedWrongSignatureFixture::class.java),
+        )
+        val resolver = IndexedTargetSymbolResolver(TargetBuild.UNKNOWN, source)
+
+        assertTrue(
+            resolver.resolve(AppleMusicSymbols.StaticCollapsedInterceptMethod) is TargetResolution.Missing,
+        )
     }
 
     @Test
@@ -1423,6 +1473,20 @@ private class FakeTargetClassSource(
 private class ProfileFixture {
     @Suppress("UNUSED_PARAMETER")
     fun onMeasure(width: Int, height: Int) = Unit
+}
+
+private class StaticCollapsedBehaviorFixture {
+    @Suppress("UNUSED_PARAMETER")
+    fun h(
+        parent: androidx.coordinatorlayout.widget.CoordinatorLayout,
+        child: View,
+        event: MotionEvent,
+    ): Boolean = false
+}
+
+private class StaticCollapsedWrongSignatureFixture {
+    @Suppress("UNUSED_PARAMETER")
+    fun h(parent: View, child: View, event: MotionEvent): Boolean = false
 }
 
 private class BagConfig

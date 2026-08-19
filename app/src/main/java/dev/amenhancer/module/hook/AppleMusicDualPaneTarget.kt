@@ -396,6 +396,7 @@ internal object LyricsLayoutFieldProfiles {
 
 internal class AppleMusicDualPaneTarget(
     private val symbols: TargetSymbolResolver,
+    private val targetBuild: TargetBuild = TargetBuild.UNKNOWN,
 ) : DualPaneTarget {
     private val anchorResizeListeners = WeakHashMap<View, View.OnLayoutChangeListener>()
 
@@ -420,9 +421,16 @@ internal class AppleMusicDualPaneTarget(
             activityRootResolution.valueOrNull(),
             behaviorFieldResolution.valueOrNull(),
         )
-        StaticCollapsedInterceptGuard.install(
-            behaviorFieldResolution.valueOrNull()?.declaringClass?.classLoader,
-        )
+        val staticCollapsedInterceptApplicable =
+            StaticCollapsedInterceptGuard.isSupportedBuild(targetBuild)
+        val staticCollapsedInterceptResolution = staticCollapsedInterceptApplicable
+            .takeIf { it }
+            ?.let { symbols.resolve(AppleMusicSymbols.StaticCollapsedInterceptMethod) }
+        val staticCollapsedInterceptHook = if (staticCollapsedInterceptApplicable) {
+            StaticCollapsedInterceptGuard.install(staticCollapsedInterceptResolution?.valueOrNull())
+        } else {
+            true
+        }
         val lyricsFragmentResolution = symbols.resolve(AppleMusicSymbols.LyricsFragment)
         val lyricsFragmentClass = lyricsFragmentResolution.valueOrNull()
         val lyricsChromeResolution = symbols.resolve(AppleMusicSymbols.LyricsChromeAnimate)
@@ -436,7 +444,7 @@ internal class AppleMusicDualPaneTarget(
         val lyricsTypographyHooks = installLandscapeLyricsTypographyHook(
             lyricsTypographyResolution.valueOrNull(),
         )
-        val failures = listOf(
+        val failures = listOfNotNull(
             controllerInitializeResolution,
             controllerCreateViewResolution,
             controllerSelectPaneResolution,
@@ -444,6 +452,7 @@ internal class AppleMusicDualPaneTarget(
             activityResolution,
             activityRootResolution,
             behaviorFieldResolution,
+            staticCollapsedInterceptResolution,
             lyricsFragmentResolution,
             lyricsChromeResolution,
             lyricsMetricsResolution,
@@ -456,15 +465,22 @@ internal class AppleMusicDualPaneTarget(
             controllerHooks != 3 ||
             navigationMenuMeasureHooks == 0 ||
             chromeHooks == 0 ||
+            !staticCollapsedInterceptHook ||
             lyricsChromeHooks == 0 ||
             lyricsMetricsHooks == 0 ||
             lyricsTypographyHooks == 0 ||
             failures.isNotEmpty()
         ) {
+            val staticInterceptStatus = when {
+                !staticCollapsedInterceptApplicable -> "skipped"
+                staticCollapsedInterceptHook -> "1"
+                else -> "0"
+            }
             return TargetCapabilityInstall.Degraded(
                 "Installed controller=$controllerHooks navigationMeasure=$navigationMenuMeasureHooks " +
                     "chrome=$chromeHooks lyricsChrome=$lyricsChromeHooks " +
-                    "lyricsMetrics=$lyricsMetricsHooks lyricsTypography=$lyricsTypographyHooks hook(s)" +
+                    "lyricsMetrics=$lyricsMetricsHooks lyricsTypography=$lyricsTypographyHooks " +
+                    "staticIntercept=$staticInterceptStatus hook(s)" +
                     failureSummary,
             )
         }
