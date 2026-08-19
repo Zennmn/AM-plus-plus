@@ -215,7 +215,7 @@ app/src/main/resources/  libxposed 模块元数据
 app/src/test/             JVM 单元测试与结构回归测试
 docs/images/             项目演示图
 docs/adr/                 架构决策记录
-docs/apple-music-target-adaptation.md  Apple Music 版本适配手册
+docs/apple-music-6.5.2-adaptation.md  Apple Music 6.5.2/1586 适配实战记录
 scripts/                  可选的真机回归与录屏分析脚本
 ```
 
@@ -242,7 +242,7 @@ lintVitalRelease
 assembleRelease
 ```
 
-涉及界面行为时，请在 Issue 或 PR 中附上设备型号、Android 版本、Apple Music 版本以及截图或录屏。适配 Apple Music 新版本时，请先阅读 [Apple Music 新版本适配手册](docs/apple-music-target-adaptation.md)。
+涉及界面行为时，请在 Issue 或 PR 中附上设备型号、Android 版本、Apple Music 版本以及截图或录屏。适配 Apple Music 新版本时，请先阅读 [Apple Music 6.5.2/1586 适配实战记录](docs/apple-music-6.5.2-adaptation.md)，并按其中的取证、解析和设备验收流程重新建立版本档案。
 
 ## 隐私与权限
 
