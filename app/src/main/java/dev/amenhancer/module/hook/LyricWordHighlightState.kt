@@ -68,6 +68,11 @@ internal class LyricWordHighlightState {
         snapshotLocked()
     }
 
+    /** Returns only the currently reported word rows, excluding subset-transition grace. */
+    fun liveSnapshot(): Set<Int> = synchronized(lock) {
+        liveSnapshotLocked()
+    }
+
     fun clear() = synchronized(lock) {
         lineIdsBySource.clear()
         reportedLineIds.clear()
@@ -76,7 +81,9 @@ internal class LyricWordHighlightState {
         subsetGraceLineIds = emptySet()
     }
 
-    private fun snapshotLocked(): Set<Int> = lineIdsBySource.values
+    private fun snapshotLocked(): Set<Int> = liveSnapshotLocked() + subsetGraceLineIds
+
+    private fun liveSnapshotLocked(): Set<Int> = lineIdsBySource.values
         .flatten()
-        .toSet() + subsetGraceLineIds
+        .toSet()
 }

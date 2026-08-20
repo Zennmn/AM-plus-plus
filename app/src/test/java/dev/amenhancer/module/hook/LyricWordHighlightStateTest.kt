@@ -17,6 +17,38 @@ class LyricWordHighlightStateTest {
     }
 
     @Test
+    fun `subset grace only does not suppress the instrumental anchor during a line gap`() {
+        val session = LyricHighlightSession()
+        val state = LyricWordHighlightState()
+
+        session.update(setOf(1, 2))
+        state.onLineHighlightsChanged(setOf(1, 2))
+        state.update("word", setOf(2))
+
+        state.onLineHighlightsChanged(setOf(1))
+        session.update(setOf(1))
+        state.update("word", emptySet())
+        state.onLineHighlightsChanged(emptySet())
+        session.update(emptySet())
+
+        val wordActiveIds = state.snapshot()
+        assertEquals(setOf(2), wordActiveIds)
+        assertEquals(emptySet<Int>(), state.liveSnapshot())
+
+        val gap = session.isGap() && state.liveSnapshot().isEmpty()
+        assertEquals(
+            3,
+            BidirectionalBlurPolicy.selectInstrumentalGapAnchor(
+                active = session.snapshot() + wordActiveIds,
+                isGap = gap,
+                isOpeningHighlight = session.isOpeningHighlight(),
+                instrumentalPositions = listOf(3),
+                visiblePositions = listOf(1, 2),
+            ),
+        )
+    }
+
+    @Test
     fun `empty line callback does not retire subset grace`() {
         val state = LyricWordHighlightState()
 
@@ -105,16 +137,20 @@ class LyricWordHighlightStateTest {
         state.onLineHighlightsChanged(setOf(5))
         state.update("word", emptySet())
         assertEquals(setOf(6), state.snapshot())
+        assertEquals(emptySet<Int>(), state.liveSnapshot())
 
         state.resetLineHistory()
 
         assertEquals(emptySet<Int>(), state.snapshot())
+        assertEquals(emptySet<Int>(), state.liveSnapshot())
         state.update("word", setOf(6))
         state.resetLineHistory()
         assertEquals(setOf(6), state.snapshot())
+        assertEquals(setOf(6), state.liveSnapshot())
         state.update("word", emptySet())
         state.onLineHighlightsChanged(setOf(5))
         assertEquals(emptySet<Int>(), state.snapshot())
+        assertEquals(emptySet<Int>(), state.liveSnapshot())
     }
 
     @Test

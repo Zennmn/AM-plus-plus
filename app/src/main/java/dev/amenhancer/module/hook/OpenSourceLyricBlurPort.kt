@@ -286,10 +286,11 @@ internal class OpenSourceLyricBlurPort(
             visibleRows += child to adapterPos
         }
         val wordActiveIds = wordHighlightState.snapshot()
+        val liveWordActiveIds = wordHighlightState.liveSnapshot()
         val activeIds = highlightSession.snapshot() + wordActiveIds
         val gapAnchorPosition = BidirectionalBlurPolicy.selectInstrumentalGapAnchor(
             active = activeIds,
-            isGap = highlightSession.isGap() && wordActiveIds.isEmpty(),
+            isGap = highlightSession.isGap() && liveWordActiveIds.isEmpty(),
             isOpeningHighlight = highlightSession.isOpeningHighlight(),
             instrumentalPositions = instrumentalRows.map { (_, position) -> position },
             visiblePositions = visibleRows.map { (_, position) -> position },
