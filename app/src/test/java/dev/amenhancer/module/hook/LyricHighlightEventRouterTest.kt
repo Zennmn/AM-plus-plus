@@ -71,6 +71,7 @@ class LyricHighlightEventRouterTest {
         assertTrue(probeLines[1].contains("native2=202"))
         assertTrue(probeLines[1].contains("rawLineIds=[7, 8]"))
         assertTrue(probeLines[1].contains("effectiveLineIds=[8]"))
+        assertEquals(listOf(101L), runtime.nativePositions)
         assertEquals(2, fallbackProbeLines.size)
         assertTrue(fallbackProbeLines[0].contains("source=vm4"))
         assertTrue(fallbackProbeLines[1].contains("source=vm1"))
@@ -79,11 +80,17 @@ class LyricHighlightEventRouterTest {
     private class RecordingLyricBlurRuntime : LyricBlurRuntime {
         val highlightUpdates = mutableListOf<Set<Int>>()
         val fallbackHighlights = mutableListOf<Int>()
+        val nativePositions = mutableListOf<Long?>()
 
         override fun onSessionChanged(songInfo: Any) = Unit
 
         override fun onHighlightsChanged(lineIds: Set<Int>) {
             highlightUpdates += lineIds
+        }
+
+        override fun onNativeHighlightsChanged(lineIds: Set<Int>, nativePosition: Long?) {
+            nativePositions += nativePosition
+            onHighlightsChanged(lineIds)
         }
 
         override fun onFallbackHighlightChanged(lineId: Int) {

@@ -44,6 +44,7 @@ internal class OpenSourceLyricBlurPort(
     private var observedScrollView: View? = null
     private var scrollChangedListener: ViewTreeObserver.OnScrollChangedListener? = null
     private var isUserScrolling = false
+    private var lastNativePosition: Long? = null
     private val scrollHandler by lazy { Handler(Looper.getMainLooper()) }
     private var blurFrameScheduled = false
     private val blurFrameCallback = Choreographer.FrameCallback {
@@ -58,12 +59,23 @@ internal class OpenSourceLyricBlurPort(
     override fun onSessionChanged(songInfo: Any) {
         if (highlightSession.enter(songInfo)) {
             wordHighlightState.clear()
+            lastNativePosition = null
             Log.i(TAG, "Lyric session changed")
             scheduleBlurUpdate()
         }
     }
 
+    override fun onNativeHighlightsChanged(lineIds: Set<Int>, nativePosition: Long?) {
+        val previousPosition = lastNativePosition
+        if (nativePosition != null && previousPosition != null && nativePosition < previousPosition) {
+            wordHighlightState.resetLineHistory()
+        }
+        if (nativePosition != null) lastNativePosition = nativePosition
+        onHighlightsChanged(lineIds)
+    }
+
     override fun onHighlightsChanged(lineIds: Set<Int>) {
+        wordHighlightState.onLineHighlightsChanged(lineIds)
         val activeIds = highlightSession.update(lineIds)
         probe.recordSessionUpdate(
             incomingIds = lineIds,
@@ -117,6 +129,7 @@ internal class OpenSourceLyricBlurPort(
         detachScrollListener()
         blurRenderer.clearAll()
         wordHighlightState.clear()
+        lastNativePosition = null
         recyclerView = null
         lyricsRootView = null
         lyricsFragmentOwner = null
@@ -374,6 +387,9 @@ internal class OpenSourceLyricBlurPort(
 internal interface LyricBlurRuntime {
     fun onSessionChanged(songInfo: Any)
     fun onHighlightsChanged(lineIds: Set<Int>)
+    fun onNativeHighlightsChanged(lineIds: Set<Int>, nativePosition: Long?) {
+        onHighlightsChanged(lineIds)
+    }
     fun onFallbackHighlightChanged(lineId: Int)
     fun onWordHighlightsChanged(source: String, lineIds: Set<Int>) = Unit
     fun onLyricsViewCreated(owner: Any, root: View)

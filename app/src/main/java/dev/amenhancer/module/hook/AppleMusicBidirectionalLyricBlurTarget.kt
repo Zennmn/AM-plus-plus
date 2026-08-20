@@ -393,7 +393,7 @@ internal class LyricHighlightEventRouter(
         rawLineIds: Set<Int>? = null,
     ) {
         probe.recordNative(nativeFirst, lineIds, nativeLast, rawLineIds ?: lineIds)
-        runtime.onHighlightsChanged(lineIds)
+        runtime.onNativeHighlightsChanged(lineIds, nativeFirst)
     }
 
     fun onFourArgumentViewModelEvent(lineId: Int, isBackground: Boolean) {
