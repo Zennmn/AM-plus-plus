@@ -7,16 +7,13 @@ import dev.amenhancer.module.hook.ModernMethodHook as XC_MethodHook
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 
-private const val LYRICS_PROCESS_EVENTS_SUFFIX = "\$processEvents"
-
-/**
- * Returns the stable owner prefix shared by Apple's line/word callback lambdas.
- * The local callback name is compiler-generated and may change between builds.
- */
-internal fun deriveLyricWordCallbackPrefix(ownerName: String): String? {
-    val nestedOwnerStart = ownerName.indexOf('$')
-    if (nestedOwnerStart <= 0) return null
-    return ownerName.substring(0, nestedOwnerStart) + LYRICS_PROCESS_EVENTS_SUFFIX
+/** Classifies canonical callback owner names without relying on the trailing lambda ordinal. */
+internal fun lyricWordCallbackSource(ownerName: String): String? = when {
+    ownerName.contains("\$prBgWordEventCallback\$") -> LyricHighlightProbe.Source.PR_BG_WORD
+    ownerName.contains("\$bgWordEventCallback\$") -> LyricHighlightProbe.Source.BG_WORD
+    ownerName.contains("\$prWordEventCallback\$") -> LyricHighlightProbe.Source.PR_WORD
+    ownerName.contains("\$wordEventCallback\$") -> LyricHighlightProbe.Source.WORD
+    else -> null
 }
 
 /** Apple Music symbol and hook adapter for the target-independent lyric blur runtime. */
@@ -39,6 +36,7 @@ internal class AppleMusicBidirectionalLyricBlurTarget(
         val vectorResolution = symbols.resolve(AppleMusicSymbols.LyricsLineVector)
         val sessionResolution = symbols.resolve(AppleMusicSymbols.LyricsSessionProcessor)
         val callbackResolution = symbols.resolve(AppleMusicSymbols.LyricsHighlightCallback)
+        val wordCallbackResolution = symbols.resolve(AppleMusicSymbols.LyricsWordHighlightCallbacks)
         val notifyWordHighlightResolution = symbols.resolve(
             AppleMusicSymbols.LyricsViewModelNotifyWordHighlight,
         )
@@ -74,6 +72,11 @@ internal class AppleMusicBidirectionalLyricBlurTarget(
             runtime = runtime,
             probe = probe,
         )
+        hookWordHighlightCallbacks(
+            callbacks = wordCallbackResolution.valueOrNull().orEmpty(),
+            probe = probe,
+            runtime = runtime,
+        )
         hookHighlightCallback(
             method = callback,
             vectorClass = vectorResolution.valueOrNull(),
@@ -88,6 +91,7 @@ internal class AppleMusicBidirectionalLyricBlurTarget(
             vectorResolution,
             sessionResolution,
             callbackResolution,
+            wordCallbackResolution,
             notifyWordHighlightResolution,
             setCurrentHighlightedLineResolution,
         ).filterNot { it is TargetResolution.Found<*> }
@@ -160,7 +164,6 @@ internal class AppleMusicBidirectionalLyricBlurTarget(
                     }
                 }
             })
-            hookWordHighlightCallbacks(method, probe, runtime)
             highlights.onCallbackInstalled()
             Log.i(TAG, "Highlight hook installed on ${method.name}")
         } catch (t: Throwable) {
@@ -176,65 +179,71 @@ internal class AppleMusicBidirectionalLyricBlurTarget(
      * the existing line session.
      */
     private fun hookWordHighlightCallbacks(
-        lineMethod: Method,
+        callbacks: List<Method>,
         probe: LyricHighlightProbe,
         runtime: LyricBlurRuntime,
     ) {
-        val owner = lineMethod.declaringClass
-        val prefix = deriveLyricWordCallbackPrefix(owner.name) ?: run {
-            Log.w(TAG, "Word callback owner prefix unavailable: ${owner.name}")
+        if (callbacks.isEmpty()) {
+            Log.w(TAG, "Word callback methods were unavailable")
             return
         }
-        val candidates = listOf(
-            "\$wordEventCallback\$1" to LyricHighlightProbe.Source.WORD,
-            "\$bgWordEventCallback\$1" to LyricHighlightProbe.Source.BG_WORD,
-            "\$prWordEventCallback\$1" to LyricHighlightProbe.Source.PR_WORD,
-            "\$prBgWordEventCallback\$1" to LyricHighlightProbe.Source.PR_BG_WORD,
-        )
-        candidates.forEach { (suffix, source) ->
-            val callbackOwner = runCatching {
-                Class.forName(prefix + suffix, false, owner.classLoader)
-            }.getOrNull() ?: return@forEach
-            callbackOwner.declaredMethods
-                .filter { method -> isWordHighlightCallback(method) }
-                .forEach { wordMethod ->
-                    runCatching {
-                        ModernXposedRuntime.hookMethod(wordMethod, object : XC_MethodHook() {
-                            override fun afterHookedMethod(param: MethodHookParam) {
-                                runCatching {
-                                    val vector = param.args.getOrNull(1) ?: return@runCatching
-                                    val wordKeys = readWordKeys(wordMethod.parameterTypes[1], vector)
-                                        ?: return@runCatching
-                                    probe.recordWord(
-                                        source = source,
-                                        firstNative = (param.args.getOrNull(0) as? Number)?.toLong(),
-                                        wordKeys = wordKeys,
-                                        lastNative = (param.args.getOrNull(2) as? Number)?.toLong(),
-                                    )
-                                    runtime.onWordHighlightsChanged(
-                                        source = source,
-                                        lineIds = wordKeys.mapNotNull { key ->
-                                            key.substringBefore(':').toIntOrNull()
-                                        }.toSet(),
-                                    )
-                                }
-                            }
-                        })
-                    }.onFailure { error ->
-                        Log.w(TAG, "Word callback hook failed on ${wordMethod.declaringClass.name}", error)
+        assignWordCallbackSources(callbacks).forEach { (wordMethod, source) ->
+            runCatching {
+                ModernXposedRuntime.hookMethod(wordMethod, object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        runCatching {
+                            val vector = param.args.getOrNull(1) ?: return@runCatching
+                            val wordKeys = readWordKeys(wordMethod.parameterTypes[1], vector)
+                                ?: return@runCatching
+                            probe.recordWord(
+                                source = source,
+                                firstNative = (param.args.getOrNull(0) as? Number)?.toLong(),
+                                wordKeys = wordKeys,
+                                lastNative = (param.args.getOrNull(2) as? Number)?.toLong(),
+                            )
+                            runtime.onWordHighlightsChanged(
+                                source = source,
+                                lineIds = wordKeys.mapNotNull { key ->
+                                    key.substringBefore(':').toIntOrNull()
+                                }.toSet(),
+                            )
+                        }
                     }
-                }
+                })
+            }.onFailure { error ->
+                Log.w(TAG, "Word callback hook failed on ${wordMethod.declaringClass.name}", error)
+            }
         }
     }
 
-    private fun isWordHighlightCallback(method: Method): Boolean {
-        val types = method.parameterTypes
-        return method.name == "call" &&
-            method.returnType == Void.TYPE &&
-            types.size == 3 &&
-            types[0] == Long::class.javaPrimitiveType &&
-            types[1].name.endsWith(".javanative.model.LyricsWordVector") &&
-            types[2] == Long::class.javaPrimitiveType
+    private fun assignWordCallbackSources(callbacks: List<Method>): List<Pair<Method, String>> {
+        val selected = selectWordCallbackMethods(callbacks)
+        val knownSources = selected.mapNotNull { method ->
+            lyricWordCallbackSource(method.declaringClass.name)
+        }.toSet()
+        val remainingSources = listOf(
+            LyricHighlightProbe.Source.WORD,
+            LyricHighlightProbe.Source.BG_WORD,
+            LyricHighlightProbe.Source.PR_WORD,
+            LyricHighlightProbe.Source.PR_BG_WORD,
+        ).filterNot(knownSources::contains).toMutableList()
+        return selected.map { method ->
+            val source = lyricWordCallbackSource(method.declaringClass.name) ?:
+                remainingSources.removeFirstOrNull() ?: LyricHighlightProbe.Source.WORD
+            method to source
+        }
+    }
+
+    private fun selectWordCallbackMethods(callbacks: List<Method>): List<Method> = buildList {
+        val seenSources = mutableSetOf<String>()
+        callbacks.forEach { method ->
+            val source = lyricWordCallbackSource(method.declaringClass.name) ?: return@forEach
+            if (size < MAX_WORD_CALLBACKS && seenSources.add(source)) add(method)
+        }
+        callbacks.forEach { method ->
+            if (size >= MAX_WORD_CALLBACKS) return@forEach
+            if (lyricWordCallbackSource(method.declaringClass.name) == null) add(method)
+        }
     }
 
     private fun readWordKeys(vectorClass: Class<*>, vector: Any): Set<String>? = runCatching {
@@ -345,6 +354,7 @@ internal class AppleMusicBidirectionalLyricBlurTarget(
 
     private companion object {
         const val TAG = "AMLyricBlur"
+        const val MAX_WORD_CALLBACKS = 4
     }
 }
 

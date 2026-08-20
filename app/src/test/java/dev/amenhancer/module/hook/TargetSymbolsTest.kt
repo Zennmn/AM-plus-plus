@@ -1125,6 +1125,71 @@ class TargetSymbolsTest {
     }
 
     @Test
+    fun `word callback structural fallback discovers renamed sibling owners`() {
+        val wordVectorName = "com.apple.android.music.ttml.javanative.model.LyricsWordVector"
+        val primaryName = "com.apple.android.music.ttml.SongInfoTimeProcessor\$renamedWordCallback"
+        val backgroundName =
+            "com.apple.android.music.ttml.SongInfoTimeProcessor\$renamedBackgroundWordCallback"
+        val staticName =
+            "com.apple.android.music.ttml.SongInfoTimeProcessor\$staticWordCallback"
+        val subtypeName =
+            "com.apple.android.music.ttml.SongInfoTimeProcessor\$subtypeWordCallback"
+        val decoyName = "com.apple.android.music.unrelated.WordCallback"
+        val source = FakeTargetClassSource(
+            names = listOf(
+                wordVectorName,
+                primaryName,
+                backgroundName,
+                staticName,
+                subtypeName,
+                decoyName,
+            ),
+            classes = mapOf(
+                wordVectorName to ProfileWordVector::class.java,
+                primaryName to ProfileWordCallback::class.java,
+                backgroundName to ProfileBackgroundWordCallback::class.java,
+                staticName to StaticWordCallback::class.java,
+                subtypeName to SubtypeWordCallback::class.java,
+                decoyName to DecoyWordCallback::class.java,
+            ),
+        )
+        val resolver = IndexedTargetSymbolResolver(
+            TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.2", 9999L),
+            source,
+        )
+
+        val resolution = resolver.resolve(AppleMusicSymbols.LyricsWordHighlightCallbacks)
+
+        assertTrue(resolution is TargetResolution.Found)
+        val callbacks = (resolution as TargetResolution.Found).value
+        assertEquals(2, callbacks.size)
+        assertTrue(callbacks.all { it.parameterTypes[1] == ProfileWordVector::class.java })
+        assertNull(source.loadCounts[decoyName])
+    }
+
+    @Test
+    fun `canonical word callback source ignores trailing lambda ordinal`() {
+        val prefix = "com.apple.android.music.ttml.SongInfoTimeProcessor\$processEvents\$"
+
+        assertEquals(
+            LyricHighlightProbe.Source.WORD,
+            lyricWordCallbackSource(prefix + "wordEventCallback\$1"),
+        )
+        assertEquals(
+            LyricHighlightProbe.Source.BG_WORD,
+            lyricWordCallbackSource(prefix + "bgWordEventCallback\$1"),
+        )
+        assertEquals(
+            LyricHighlightProbe.Source.PR_WORD,
+            lyricWordCallbackSource(prefix + "prWordEventCallback\$1"),
+        )
+        assertEquals(
+            LyricHighlightProbe.Source.PR_BG_WORD,
+            lyricWordCallbackSource(prefix + "prBgWordEventCallback\$1"),
+        )
+    }
+
+    @Test
     fun `structural ambiguity of the current item field is reported instead of a silent first match`() {
         val fragmentName = "com.apple.android.music.player.fragment.PlayerLyricsViewFragment"
         val ownerName = "com.apple.android.music.player.fragment.z"
@@ -1503,6 +1568,31 @@ private class ProfileVector
 private class ProfileCallback {
     @Suppress("UNUSED_PARAMETER")
     fun call(time: Long, lines: ProfileVector, position: Long) = Unit
+}
+private open class ProfileWordVector
+private class ProfileWordCallback {
+    @Suppress("UNUSED_PARAMETER")
+    fun call(time: Long, words: ProfileWordVector, position: Long) = Unit
+}
+private class ProfileBackgroundWordCallback {
+    @Suppress("UNUSED_PARAMETER")
+    fun call(time: Long, words: ProfileWordVector, position: Long) = Unit
+}
+private class StaticWordCallback {
+    companion object {
+        @JvmStatic
+        @Suppress("UNUSED_PARAMETER")
+        fun call(time: Long, words: ProfileWordVector, position: Long) = Unit
+    }
+}
+private class SubtypeWordCallback {
+    @Suppress("UNUSED_PARAMETER")
+    fun call(time: Long, words: ProfileWordVectorSubclass, position: Long) = Unit
+}
+private class ProfileWordVectorSubclass : ProfileWordVector()
+private class DecoyWordCallback {
+    @Suppress("UNUSED_PARAMETER")
+    fun call(time: Long, words: ProfileWordVector, position: Long) = Unit
 }
 private class DecoyProfileCallback {
     @Suppress("UNUSED_PARAMETER")

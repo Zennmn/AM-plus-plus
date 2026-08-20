@@ -551,6 +551,52 @@ internal object AppleMusicSymbols {
         identity = ::methodIdentity,
     )
 
+    /**
+     * All line-independent word transition callbacks owned by the lyric
+     * processor.  The callback classes are compiler-generated and their local
+     * names may change, so this symbol deliberately resolves by the callback
+     * signature rather than by a `$wordEventCallback$1` suffix.
+     */
+    val LyricsWordHighlightCallbacks = TargetSymbolKey<List<Method>>(
+        id = "lyrics-word-highlight-callbacks",
+        profilePolicy = ProfilePolicy.EXACT_PREFERRED,
+        profileCandidates = { profile ->
+            val processorName = profile?.exactClasses?.get(TargetSymbolId.LYRICS_EVENT_PROCESSOR)
+            val vector = load("com.apple.android.music.ttml.javanative.model.LyricsWordVector")
+            val callbacks = if (processorName == null || vector == null) {
+                emptyList()
+            } else {
+                methods(
+                    namePredicate = { name -> name.startsWith("$processorName\$") },
+                    contract = { method -> isLyricsWordHighlightCallback(method, vector) },
+                )
+            }
+            callbacks.takeIf { it.isNotEmpty() }?.let(::listOf).orEmpty()
+        },
+        structuralCandidates = {
+            val vector = listOfNotNull(
+                load("com.apple.android.music.ttml.javanative.model.LyricsWordVector"),
+            ).plus(
+                classes(
+                    namePredicate = { it.endsWith(".ttml.javanative.model.LyricsWordVector") },
+                    contract = { true },
+                ),
+            ).distinctBy { it.name }.singleOrNull()
+            val callbacks = if (vector == null) {
+                emptyList()
+            } else {
+                methods(
+                    namePredicate = {
+                        it.startsWith("com.apple.android.music.ttml.SongInfoTimeProcessor\$")
+                    },
+                    contract = { method -> isLyricsWordHighlightCallback(method, vector) },
+                )
+            }
+            callbacks.takeIf { it.isNotEmpty() }?.let(::listOf).orEmpty()
+        },
+        identity = { callbacks -> callbacks.joinToString("|") { methodIdentity(it) } },
+    )
+
     val LyricsViewModel = classSymbol(
         id = "lyrics-view-model",
         profileId = TargetSymbolId.LYRICS_VIEW_MODEL,
@@ -1896,6 +1942,15 @@ private fun isLyricsHighlightCallback(method: Method, vectorClass: Class<*>): Bo
             method.parameterTypes[1] == vectorClass ||
                 vectorClass.isAssignableFrom(method.parameterTypes[1])
             ) &&
+        method.parameterTypes[2] == Long::class.javaPrimitiveType
+
+private fun isLyricsWordHighlightCallback(method: Method, vectorClass: Class<*>): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "call" &&
+        method.returnType == Void.TYPE &&
+        method.parameterTypes.size == 3 &&
+        method.parameterTypes[0] == Long::class.javaPrimitiveType &&
+        method.parameterTypes[1] == vectorClass &&
         method.parameterTypes[2] == Long::class.javaPrimitiveType
 
 private fun isLyricsSessionProcessor(method: Method): Boolean =
