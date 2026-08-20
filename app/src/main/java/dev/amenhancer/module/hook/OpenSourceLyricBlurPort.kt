@@ -24,6 +24,7 @@ import android.widget.ImageView
 internal class OpenSourceLyricBlurPort(
     private val targetAccess: LyricBlurTargetAccess,
     private val blurRadiusOffsetPx: Int = 0,
+    private val probe: LyricHighlightProbe = LyricHighlightProbe(),
 ) : LyricBlurRuntime {
     companion object {
         private const val TAG = "AMLyricBlur"
@@ -32,6 +33,7 @@ internal class OpenSourceLyricBlurPort(
     }
 
     private val highlightSession = LyricHighlightSession()
+    private val wordHighlightState = LyricWordHighlightState()
     private val blurRenderer = LyricBlurRenderer()
 
     private var recyclerView: Any? = null
@@ -42,6 +44,7 @@ internal class OpenSourceLyricBlurPort(
     private var observedScrollView: View? = null
     private var scrollChangedListener: ViewTreeObserver.OnScrollChangedListener? = null
     private var isUserScrolling = false
+    private var lastNativePosition: Long? = null
     private val scrollHandler by lazy { Handler(Looper.getMainLooper()) }
     private var blurFrameScheduled = false
     private val blurFrameCallback = Choreographer.FrameCallback {
@@ -55,18 +58,47 @@ internal class OpenSourceLyricBlurPort(
     }
     override fun onSessionChanged(songInfo: Any) {
         if (highlightSession.enter(songInfo)) {
+            wordHighlightState.clear()
+            lastNativePosition = null
             Log.i(TAG, "Lyric session changed")
             scheduleBlurUpdate()
         }
     }
 
+    override fun onNativeHighlightsChanged(lineIds: Set<Int>, nativePosition: Long?) {
+        val previousPosition = lastNativePosition
+        if (nativePosition != null && previousPosition != null && nativePosition < previousPosition) {
+            wordHighlightState.resetLineHistory()
+        }
+        if (nativePosition != null) lastNativePosition = nativePosition
+        onHighlightsChanged(lineIds)
+    }
+
     override fun onHighlightsChanged(lineIds: Set<Int>) {
-        highlightSession.update(lineIds)
+        wordHighlightState.onLineHighlightsChanged(lineIds)
+        val activeIds = highlightSession.update(lineIds)
+        probe.recordSessionUpdate(
+            incomingIds = lineIds,
+            activeIds = activeIds,
+            gap = highlightSession.isGap(),
+            opening = highlightSession.isOpeningHighlight(),
+        )
         scheduleBlurUpdate()
     }
 
     override fun onFallbackHighlightChanged(lineId: Int) {
         highlightSession.replace(lineId)
+        probe.recordSessionUpdate(
+            incomingIds = setOf(lineId),
+            activeIds = highlightSession.snapshot(),
+            gap = highlightSession.isGap(),
+            opening = highlightSession.isOpeningHighlight(),
+        )
+        scheduleBlurUpdate()
+    }
+
+    override fun onWordHighlightsChanged(source: String, lineIds: Set<Int>) {
+        wordHighlightState.update(source, lineIds)
         scheduleBlurUpdate()
     }
 
@@ -96,6 +128,8 @@ internal class OpenSourceLyricBlurPort(
         }
         detachScrollListener()
         blurRenderer.clearAll()
+        wordHighlightState.clear()
+        lastNativePosition = null
         recyclerView = null
         lyricsRootView = null
         lyricsFragmentOwner = null
@@ -251,10 +285,12 @@ internal class OpenSourceLyricBlurPort(
             if (!isLyricsLine(child)) continue
             visibleRows += child to adapterPos
         }
-        val activeIds = highlightSession.snapshot()
+        val wordActiveIds = wordHighlightState.snapshot()
+        val liveWordActiveIds = wordHighlightState.liveSnapshot()
+        val activeIds = highlightSession.snapshot() + wordActiveIds
         val gapAnchorPosition = BidirectionalBlurPolicy.selectInstrumentalGapAnchor(
             active = activeIds,
-            isGap = highlightSession.isGap(),
+            isGap = highlightSession.isGap() && liveWordActiveIds.isEmpty(),
             isOpeningHighlight = highlightSession.isOpeningHighlight(),
             instrumentalPositions = instrumentalRows.map { (_, position) -> position },
             visiblePositions = visibleRows.map { (_, position) -> position },
@@ -263,6 +299,15 @@ internal class OpenSourceLyricBlurPort(
             active = activeIds,
             visiblePositions = visibleRows.map { (_, position) -> position },
             gapAnchorPosition = gapAnchorPosition,
+        )
+        // One bounded diagnostic observation per coalesced frame; individual
+        // renderer setters remain intentionally silent.
+        probe.recordBlurFrame(
+            activeIds = activeIds,
+            effectiveIds = effectiveIds,
+            visibleIds = visibleRows.map { (_, position) -> position },
+            includeFocus = includeFocus,
+            immediate = immediate,
         )
         val useTabletEdges = TabletModeQualifier.isEligible(rv.context)
         val targets = LinkedHashMap<View, Float>(visibleRows.size + creditsRows.size)
@@ -343,7 +388,11 @@ internal class OpenSourceLyricBlurPort(
 internal interface LyricBlurRuntime {
     fun onSessionChanged(songInfo: Any)
     fun onHighlightsChanged(lineIds: Set<Int>)
+    fun onNativeHighlightsChanged(lineIds: Set<Int>, nativePosition: Long?) {
+        onHighlightsChanged(lineIds)
+    }
     fun onFallbackHighlightChanged(lineId: Int)
+    fun onWordHighlightsChanged(source: String, lineIds: Set<Int>) = Unit
     fun onLyricsViewCreated(owner: Any, root: View)
     fun onLyricsViewDestroyed(owner: Any)
 }

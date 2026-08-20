@@ -2,6 +2,7 @@ package dev.amenhancer.module.hook
 
 import android.os.Bundle
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import com.apple.android.music.model.BaseContentItem
@@ -270,6 +271,90 @@ class TargetSymbolsTest {
         assertTrue(behavior is TargetResolution.Found)
         assertEquals(SymbolMatch.VERSION_PROFILE, (behavior as TargetResolution.Found).match)
         assertEquals("c1", behavior.value.name)
+    }
+
+    @Test
+    fun `652 profile resolves the APK verified dual pane identity changes`() {
+        val source = FakeTargetClassSource(
+            classes = mapOf(
+                "com.apple.android.music.player.fragment.t0" to DualPaneControllerFixture::class.java,
+                "com.apple.android.music.common.activity.PlayerActivity" to DualPaneActivityFixture::class.java,
+                "com.apple.android.music.player.fragment.e" to DualPaneLyricsChromeFixture::class.java,
+                "com.apple.android.music.player.fragment.m" to CurrentItem651Fixture::class.java,
+                "Hd.b" to ProfileFixture::class.java,
+            ),
+        )
+        val resolver = IndexedTargetSymbolResolver(
+            build = TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.2", 1586L),
+            source = source,
+        )
+
+        val controller = resolver.resolve(AppleMusicSymbols.PlayerControllerInitialize)
+        val holder = resolver.resolve(AppleMusicSymbols.PlayerActivityCreateStackedNavigationHolder)
+        val root = resolver.resolve(AppleMusicSymbols.PlayerActivityRoot)
+        val chrome = resolver.resolve(AppleMusicSymbols.LyricsChromeAnimate)
+        val currentItem = resolver.resolve(AppleMusicSymbols.LyricsCurrentItemField)
+
+        listOf(controller, holder, root, chrome, currentItem).forEach { resolution ->
+            assertTrue(resolution is TargetResolution.Found)
+            assertEquals(SymbolMatch.VERSION_PROFILE, (resolution as TargetResolution.Found).match)
+            assertEquals("apple-music-6.5.2-1586", resolution.profileId)
+        }
+        assertEquals("k1", (holder as TargetResolution.Found).value.name)
+        assertEquals("n0", (root as TargetResolution.Found).value.name)
+        assertEquals("a2", (chrome as TargetResolution.Found).value.name)
+        assertEquals("c", (currentItem as TargetResolution.Found).value.name)
+    }
+
+    @Test
+    fun `static collapsed intercept stays independent of version profiles`() {
+        val ownerName = "com.apple.android.music.common.behavior.StaticCollapsedBottomSheetBehavior"
+        val source = FakeTargetClassSource(
+            names = listOf(ownerName),
+            classes = mapOf(ownerName to StaticCollapsedBehaviorFixture::class.java),
+        )
+        val resolver = IndexedTargetSymbolResolver(
+            build = TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.1", 1583L),
+            source = source,
+        )
+
+        val resolution = resolver.resolve(AppleMusicSymbols.StaticCollapsedInterceptMethod)
+
+        assertTrue(resolution is TargetResolution.Found)
+        assertEquals(SymbolMatch.STRUCTURAL_FALLBACK, (resolution as TargetResolution.Found).match)
+        assertEquals("h", resolution.value.name)
+        assertEquals("apple-music-6.5.1-1583", resolution.profileId)
+        assertEquals(1, source.classNameReads)
+    }
+
+    @Test
+    fun `unknown build resolves the static collapsed intercept by owner and signature`() {
+        val ownerName = "com.apple.android.music.common.behavior.StaticCollapsedBottomSheetBehavior"
+        val source = FakeTargetClassSource(
+            names = listOf(ownerName),
+            classes = mapOf(ownerName to StaticCollapsedBehaviorFixture::class.java),
+        )
+        val resolver = IndexedTargetSymbolResolver(TargetBuild.UNKNOWN, source)
+
+        val resolution = resolver.resolve(AppleMusicSymbols.StaticCollapsedInterceptMethod)
+
+        assertTrue(resolution is TargetResolution.Found)
+        assertEquals(SymbolMatch.STRUCTURAL_FALLBACK, (resolution as TargetResolution.Found).match)
+        assertEquals("h", resolution.value.name)
+    }
+
+    @Test
+    fun `static collapsed intercept rejects a same named wrong signature`() {
+        val ownerName = "com.apple.android.music.common.behavior.StaticCollapsedBottomSheetBehavior"
+        val source = FakeTargetClassSource(
+            names = listOf(ownerName),
+            classes = mapOf(ownerName to StaticCollapsedWrongSignatureFixture::class.java),
+        )
+        val resolver = IndexedTargetSymbolResolver(TargetBuild.UNKNOWN, source)
+
+        assertTrue(
+            resolver.resolve(AppleMusicSymbols.StaticCollapsedInterceptMethod) is TargetResolution.Missing,
+        )
     }
 
     @Test
@@ -1125,6 +1210,71 @@ class TargetSymbolsTest {
     }
 
     @Test
+    fun `word callback structural fallback discovers renamed sibling owners`() {
+        val wordVectorName = "com.apple.android.music.ttml.javanative.model.LyricsWordVector"
+        val primaryName = "com.apple.android.music.ttml.SongInfoTimeProcessor\$renamedWordCallback"
+        val backgroundName =
+            "com.apple.android.music.ttml.SongInfoTimeProcessor\$renamedBackgroundWordCallback"
+        val staticName =
+            "com.apple.android.music.ttml.SongInfoTimeProcessor\$staticWordCallback"
+        val subtypeName =
+            "com.apple.android.music.ttml.SongInfoTimeProcessor\$subtypeWordCallback"
+        val decoyName = "com.apple.android.music.unrelated.WordCallback"
+        val source = FakeTargetClassSource(
+            names = listOf(
+                wordVectorName,
+                primaryName,
+                backgroundName,
+                staticName,
+                subtypeName,
+                decoyName,
+            ),
+            classes = mapOf(
+                wordVectorName to ProfileWordVector::class.java,
+                primaryName to ProfileWordCallback::class.java,
+                backgroundName to ProfileBackgroundWordCallback::class.java,
+                staticName to StaticWordCallback::class.java,
+                subtypeName to SubtypeWordCallback::class.java,
+                decoyName to DecoyWordCallback::class.java,
+            ),
+        )
+        val resolver = IndexedTargetSymbolResolver(
+            TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.2", 9999L),
+            source,
+        )
+
+        val resolution = resolver.resolve(AppleMusicSymbols.LyricsWordHighlightCallbacks)
+
+        assertTrue(resolution is TargetResolution.Found)
+        val callbacks = (resolution as TargetResolution.Found).value
+        assertEquals(2, callbacks.size)
+        assertTrue(callbacks.all { it.parameterTypes[1] == ProfileWordVector::class.java })
+        assertNull(source.loadCounts[decoyName])
+    }
+
+    @Test
+    fun `canonical word callback source ignores trailing lambda ordinal`() {
+        val prefix = "com.apple.android.music.ttml.SongInfoTimeProcessor\$processEvents\$"
+
+        assertEquals(
+            LyricHighlightProbe.Source.WORD,
+            lyricWordCallbackSource(prefix + "wordEventCallback\$1"),
+        )
+        assertEquals(
+            LyricHighlightProbe.Source.BG_WORD,
+            lyricWordCallbackSource(prefix + "bgWordEventCallback\$1"),
+        )
+        assertEquals(
+            LyricHighlightProbe.Source.PR_WORD,
+            lyricWordCallbackSource(prefix + "prWordEventCallback\$1"),
+        )
+        assertEquals(
+            LyricHighlightProbe.Source.PR_BG_WORD,
+            lyricWordCallbackSource(prefix + "prBgWordEventCallback\$1"),
+        )
+    }
+
+    @Test
     fun `structural ambiguity of the current item field is reported instead of a silent first match`() {
         val fragmentName = "com.apple.android.music.player.fragment.PlayerLyricsViewFragment"
         val ownerName = "com.apple.android.music.player.fragment.z"
@@ -1425,6 +1575,20 @@ private class ProfileFixture {
     fun onMeasure(width: Int, height: Int) = Unit
 }
 
+private class StaticCollapsedBehaviorFixture {
+    @Suppress("UNUSED_PARAMETER")
+    fun h(
+        parent: androidx.coordinatorlayout.widget.CoordinatorLayout,
+        child: View,
+        event: MotionEvent,
+    ): Boolean = false
+}
+
+private class StaticCollapsedWrongSignatureFixture {
+    @Suppress("UNUSED_PARAMETER")
+    fun h(parent: View, child: View, event: MotionEvent): Boolean = false
+}
+
 private class BagConfig
 
 private enum class PlayerPane
@@ -1503,6 +1667,31 @@ private class ProfileVector
 private class ProfileCallback {
     @Suppress("UNUSED_PARAMETER")
     fun call(time: Long, lines: ProfileVector, position: Long) = Unit
+}
+private open class ProfileWordVector
+private class ProfileWordCallback {
+    @Suppress("UNUSED_PARAMETER")
+    fun call(time: Long, words: ProfileWordVector, position: Long) = Unit
+}
+private class ProfileBackgroundWordCallback {
+    @Suppress("UNUSED_PARAMETER")
+    fun call(time: Long, words: ProfileWordVector, position: Long) = Unit
+}
+private class StaticWordCallback {
+    companion object {
+        @JvmStatic
+        @Suppress("UNUSED_PARAMETER")
+        fun call(time: Long, words: ProfileWordVector, position: Long) = Unit
+    }
+}
+private class SubtypeWordCallback {
+    @Suppress("UNUSED_PARAMETER")
+    fun call(time: Long, words: ProfileWordVectorSubclass, position: Long) = Unit
+}
+private class ProfileWordVectorSubclass : ProfileWordVector()
+private class DecoyWordCallback {
+    @Suppress("UNUSED_PARAMETER")
+    fun call(time: Long, words: ProfileWordVector, position: Long) = Unit
 }
 private class DecoyProfileCallback {
     @Suppress("UNUSED_PARAMETER")

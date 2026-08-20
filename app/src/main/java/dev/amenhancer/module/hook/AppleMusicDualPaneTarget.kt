@@ -40,7 +40,7 @@ internal object DualPaneResourceHook {
                 "bottom navigation layout callback root=" + root.javaClass.name +
                     " orientation=" + root.resources.configuration.orientation,
             )
-            ConstraintLayoutPane.installLandscapeBottomNavigation(root)
+            ConstraintLayoutPane.installLandscapeBottomNavigation(root, targetBuild(root.context))
         }
         LayoutInflationRegistry.register("fragment_player_main") { view ->
             val root = view as? ViewGroup ?: return@register
@@ -396,6 +396,7 @@ internal object LyricsLayoutFieldProfiles {
 
 internal class AppleMusicDualPaneTarget(
     private val symbols: TargetSymbolResolver,
+    private val targetBuild: TargetBuild = TargetBuild.UNKNOWN,
 ) : DualPaneTarget {
     private val anchorResizeListeners = WeakHashMap<View, View.OnLayoutChangeListener>()
 
@@ -420,6 +421,16 @@ internal class AppleMusicDualPaneTarget(
             activityRootResolution.valueOrNull(),
             behaviorFieldResolution.valueOrNull(),
         )
+        val staticCollapsedInterceptApplicable =
+            StaticCollapsedInterceptGuard.isSupportedBuild(targetBuild)
+        val staticCollapsedInterceptResolution = staticCollapsedInterceptApplicable
+            .takeIf { it }
+            ?.let { symbols.resolve(AppleMusicSymbols.StaticCollapsedInterceptMethod) }
+        val staticCollapsedInterceptHook = if (staticCollapsedInterceptApplicable) {
+            StaticCollapsedInterceptGuard.install(staticCollapsedInterceptResolution?.valueOrNull())
+        } else {
+            true
+        }
         val lyricsFragmentResolution = symbols.resolve(AppleMusicSymbols.LyricsFragment)
         val lyricsFragmentClass = lyricsFragmentResolution.valueOrNull()
         val lyricsChromeResolution = symbols.resolve(AppleMusicSymbols.LyricsChromeAnimate)
@@ -433,7 +444,7 @@ internal class AppleMusicDualPaneTarget(
         val lyricsTypographyHooks = installLandscapeLyricsTypographyHook(
             lyricsTypographyResolution.valueOrNull(),
         )
-        val failures = listOf(
+        val failures = listOfNotNull(
             controllerInitializeResolution,
             controllerCreateViewResolution,
             controllerSelectPaneResolution,
@@ -441,6 +452,7 @@ internal class AppleMusicDualPaneTarget(
             activityResolution,
             activityRootResolution,
             behaviorFieldResolution,
+            staticCollapsedInterceptResolution,
             lyricsFragmentResolution,
             lyricsChromeResolution,
             lyricsMetricsResolution,
@@ -453,15 +465,22 @@ internal class AppleMusicDualPaneTarget(
             controllerHooks != 3 ||
             navigationMenuMeasureHooks == 0 ||
             chromeHooks == 0 ||
+            !staticCollapsedInterceptHook ||
             lyricsChromeHooks == 0 ||
             lyricsMetricsHooks == 0 ||
             lyricsTypographyHooks == 0 ||
             failures.isNotEmpty()
         ) {
+            val staticInterceptStatus = when {
+                !staticCollapsedInterceptApplicable -> "skipped"
+                staticCollapsedInterceptHook -> "1"
+                else -> "0"
+            }
             return TargetCapabilityInstall.Degraded(
                 "Installed controller=$controllerHooks navigationMeasure=$navigationMenuMeasureHooks " +
                     "chrome=$chromeHooks lyricsChrome=$lyricsChromeHooks " +
-                    "lyricsMetrics=$lyricsMetricsHooks lyricsTypography=$lyricsTypographyHooks hook(s)" +
+                    "lyricsMetrics=$lyricsMetricsHooks lyricsTypography=$lyricsTypographyHooks " +
+                    "staticIntercept=$staticInterceptStatus hook(s)" +
                     failureSummary,
             )
         }
@@ -742,8 +761,14 @@ internal class AppleMusicDualPaneTarget(
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val requested = param.args.firstOrNull() as? Enum<*> ?: return
                     val controllerInstance = param.thisObject ?: return
-                    if (requested.name != LYRICS_STATE || stateFor(controllerInstance) == null) return
-                    param.result = null
+                    val state = stateFor(controllerInstance) ?: return
+                    if (!TabletModeQualifier.isEligible(state.root.context)) {
+                        state.root.setTag(R.id.am_enhancer_dual_pane_state, null)
+                        return
+                    }
+                    if (requested.name == LYRICS_STATE) {
+                        param.result = null
+                    }
                 }
             })
         ) {
@@ -753,9 +778,10 @@ internal class AppleMusicDualPaneTarget(
     }
 
     /**
-     * Return Apple Music's own phone holder before k1() can instantiate the
-     * tablet holder. The native object then owns slide interpolation, peek
-     * height, navigation translation, colors and system-bar transitions.
+     * Return Apple's native stacked holder for the transformed landscape
+     * root. The transformed flat resource still relies on the stacked
+     * holder's mini-player peek, navigation translation, colors and system-bar
+     * transitions; allowing the native flat holder here loses that lifecycle.
      */
     private fun installNativeStackedNavigationHolderHook(
         method: Method?,
@@ -807,6 +833,12 @@ internal class AppleMusicDualPaneTarget(
                         "id",
                         ModuleConstants.TARGET_PACKAGE,
                     )
+                    val flatRoot = if (flatRootId != 0) {
+                        root.findViewById<View>(flatRootId)
+                            ?: activity.findViewById<View>(flatRootId)
+                    } else {
+                        null
+                    }
                     val navigationRoot = sequenceOf(stackedRootId, flatRootId)
                         .filter { it != 0 }
                         .mapNotNull(root::findViewById)
@@ -965,9 +997,7 @@ internal class AppleMusicDualPaneTarget(
                 System.identityHashCode(rootGroup) +
                 " attached=" + rootGroup.isAttachedToWindow,
         )
-        if (DualPaneShell.installImmediately(rootGroup) != null) {
-            attachLyricsPane(controller, rootGroup)
-        }
+        if (DualPaneShell.installImmediately(rootGroup) != null) attachLyricsPane(controller, rootGroup)
     }
 }
 
@@ -1022,7 +1052,8 @@ internal data class FlatPlayerBoundaryDecision(
 /**
  * Phase 109 settled visual compensation: expanded always settles at
  * translationY 0, a settled collapsed sheet settles at exactly
- * -navigationInset. The decision stays binary on `expanded` (sheetTop <=
+ * -navigationInset. The full `tabsHeight` is used only to detect overlap.
+ * The decision stays binary on `expanded` (sheetTop <=
  * rootHeight / 2) on purpose: the collapsed peek geometry is owned by
  * Apple's holder and is not measurable here, so no continuous
  * sheetTop-to-collapsed mapping could be verified. It is applied as visual
@@ -1037,7 +1068,7 @@ internal object FlatPlayerBoundaryPolicy {
         sheetBottom: Int,
         tabsTop: Int,
         tabsHeight: Int,
-        navigationInset: Int,
+        navigationInset: Int = tabsHeight,
         wasNavigationSpaceReserved: Boolean,
     ): FlatPlayerBoundaryDecision {
         require(rootHeight > 0) { "rootHeight must be positive" }
@@ -1049,10 +1080,10 @@ internal object FlatPlayerBoundaryPolicy {
         val reserveNavigationSpace = wasNavigationSpaceReserved || collapsedOverlap
         return FlatPlayerBoundaryDecision(
             reserveNavigationSpace = reserveNavigationSpace,
-            // Expanded is the settled zero; a reserved collapsed sheet
-            // settles at the negative navigation inset. The reservation
-            // latch makes the collapsed state sticky so the binary flip
-            // cannot oscillate around the midpoint.
+            // Expanded is the settled zero; a reserved collapsed sheet must
+            // clear the navigation inset. The reservation latch makes the
+            // collapsed state sticky
+            // so the binary flip cannot oscillate around the midpoint.
             translationY = if (!expanded && reserveNavigationSpace) -navigationInset else 0,
             // Let the native holder own an expanded transition until the
             // collapsed geometry has established a navigation reservation.
@@ -1174,10 +1205,13 @@ private object ConstraintLayoutPane {
 
     /**
      * Mirrors the modified layout-land/bottom_navigation.xml by converting the
-     * stock flat resource tree into full-width stacked chrome. Apple Music's
-     * native StackedBottomNavigationHolder owns its peek height and transitions.
+     * stock flat resource tree into full-width tablet chrome. Apple Music's
+     * native bottom-navigation holder owns its peek height and transitions.
      */
-    fun installLandscapeBottomNavigation(root: ViewGroup) {
+    fun installLandscapeBottomNavigation(
+        root: ViewGroup,
+        targetBuild: TargetBuild = TargetBuild.UNKNOWN,
+    ) {
         if (!TabletModeQualifier.isEligible(root.context)) {
             debug("bottom navigation skipped: tablet-landscape predicate is false")
             return
@@ -1212,12 +1246,17 @@ private object ConstraintLayoutPane {
             }
             configureTabsTopShadow(topShadow)
             configurePlayerContainer(playerContainer, root.context)
+            // Keep the accepted Phase-109 navigation inset on every target
+            // build. The full tabs frame is owned by the native holder; using
+            // it as a container translation pulls the mini-player behind the
+            // navigation bar on 6.5.2.
+            val navigationInset = (tabsHeight - menuHeight).coerceAtLeast(0)
             installFlatPlayerBoundarySync(
                 root,
                 playerContainer,
                 tabsFrame,
-                tabsHeight,
-                (tabsHeight - menuHeight).coerceAtLeast(0),
+                tabsHeight = tabsHeight,
+                navigationInset = navigationInset,
             )
             installTabsDivider(tabsFrame, resources)
 
@@ -1423,8 +1462,7 @@ private object ConstraintLayoutPane {
                 wasNavigationSpaceReserved = reserveNavigationSpace,
             )
             reserveNavigationSpace = decision.reserveNavigationSpace
-            val desired = decision.translationY
-            val desiredTranslation = desired.toFloat()
+            val desiredTranslation = decision.translationY.toFloat()
             val translationChanged = playerContainer.translationY != desiredTranslation
             val desiredTabsVisibility = if (decision.tabsVisible) View.VISIBLE else View.INVISIBLE
             val tabsVisibilityChanged = tabsFrame.visibility != desiredTabsVisibility

@@ -38,7 +38,7 @@ class CustomLyricsItemUpdateStructuralRegressionTest {
         assertTrue(symbols.contains("LyricsItemUpdateMethod"))
         assertTrue(symbols.contains("TargetSymbolId.LYRICS_ITEM_UPDATE_METHOD"))
         assertEquals(
-            2,
+            3,
             Regex("TargetSymbolId\\.LYRICS_ITEM_UPDATE_METHOD to \"o2\"").findAll(symbols).count(),
         )
     }

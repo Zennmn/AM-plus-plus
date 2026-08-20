@@ -28,6 +28,13 @@ class DualPaneStructuralRegressionTest {
         ).firstOrNull(File::isFile)?.readText()
             ?: error("DualPaneFeature.kt was not found from the unit-test working directory")
     }
+    private val interceptGuardSource: String by lazy {
+        sequenceOf(
+            File("src/main/java/dev/amenhancer/module/hook/StaticCollapsedInterceptGuard.kt"),
+            File("app/src/main/java/dev/amenhancer/module/hook/StaticCollapsedInterceptGuard.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+            ?: error("StaticCollapsedInterceptGuard.kt was not found from the unit-test working directory")
+    }
 
     @Test
     fun `keeps target internals behind the dual pane capability seam`() {
@@ -86,7 +93,7 @@ class DualPaneStructuralRegressionTest {
         assertTrue(source.contains("ConstraintLayoutPane.resolveBottomNavigationRoot(view)"))
         assertTrue(source.contains("BOTTOM_NAVIGATION_ROOT_STACKED"))
         assertTrue(source.contains("view.findViewById<ViewGroup>(candidateId)"))
-        assertTrue(source.contains("installLandscapeBottomNavigation(root)"))
+        assertTrue(source.contains("installLandscapeBottomNavigation(root, targetBuild(root.context))"))
         assertTrue(source.contains("BOTTOM_NAVIGATION_TABS"))
         assertTrue(source.contains("PLAYER_CONTAINER"))
         assertTrue(source.contains("NAVIGATION_TABS_HEIGHT"))
@@ -174,8 +181,9 @@ class DualPaneStructuralRegressionTest {
 
     @Test
     fun `limits flat player boundary sync to the compensation switch`() {
-        assertTrue(source.contains("tabsHeight - menuHeight"))
-        assertTrue(source.contains("navigationInset = navigationInset"))
+        assertTrue(source.contains("val tabsHeight = stackedTabsContainerHeight(root.context, menuHeight)"))
+        assertTrue(source.contains("StaticCollapsedInterceptGuard.isSupportedBuild(targetBuild)"))
+        assertTrue(source.contains("translationY = if (!expanded && reserveNavigationSpace) -navigationInset else 0"))
         assertTrue(source.contains("if (!FlatLandscapeWindowPolicy.shouldInstallBoundarySync(root.context)) return"))
         assertFalse(source.contains("display.getRealMetrics(metrics)"))
         assertFalse(source.contains("physicalWidthPx = metrics?.widthPixels ?: 0"))
@@ -184,7 +192,7 @@ class DualPaneStructuralRegressionTest {
         assertTrue(source.contains("sheet.getLocationInWindow(sheetLocation)"))
         assertTrue(source.contains("tabsFrame.getLocationInWindow(tabsLocation)"))
         assertTrue(source.contains("reserveNavigationSpace = decision.reserveNavigationSpace"))
-        assertTrue(source.contains("val desired = decision.translationY"))
+        assertTrue(source.contains("val desiredTranslation = decision.translationY.toFloat()"))
         assertTrue(source.contains("playerContainer.translationY = desiredTranslation"))
         assertFalse(source.contains("params.bottomMargin = desired"))
     }
@@ -195,7 +203,7 @@ class DualPaneStructuralRegressionTest {
         assertTrue(source.contains("sheet.viewTreeObserver.addOnPreDrawListener"))
         assertTrue(source.contains("removeOnPreDrawListener"))
         assertTrue(source.contains("sheet.addOnAttachStateChangeListener"))
-        assertTrue(source.contains("tabsHeight - menuHeight"))
+        assertTrue(source.contains("translationY = if (!expanded && reserveNavigationSpace) -navigationInset else 0"))
         assertTrue(source.contains("val desiredTabsVisibility = if (decision.tabsVisible) View.VISIBLE else View.INVISIBLE"))
         assertTrue(source.contains("tabsFrame.visibility = desiredTabsVisibility"))
         assertFalse(source.contains("miniPlayerId"))
@@ -239,6 +247,55 @@ class DualPaneStructuralRegressionTest {
         assertFalse(synchronousInstallSource.contains("addOnAttachStateChangeListener"))
         assertFalse(synchronousInstallSource.contains("onViewAttachedToWindow"))
         assertTrue(source.contains("[AMENH-2]"))
+    }
+
+    @Test
+    fun `does not intercept lyrics after leaving tablet landscape`() {
+        assertTrue(source.contains("val state = stateFor(controllerInstance) ?: return"))
+        assertTrue(source.contains("if (!TabletModeQualifier.isEligible(state.root.context))"))
+        assertTrue(source.contains("state.root.setTag(R.id.am_enhancer_dual_pane_state, null)"))
+        assertTrue(source.contains("if (requested.name == LYRICS_STATE)"))
+    }
+
+    @Test
+    fun `leaves queue selection and player transitions to native Apple Music`() {
+        assertFalse(source.contains("QUEUE_STATE"))
+        assertFalse(source.contains("paneSwitchInProgress"))
+        assertFalse(source.contains("expandPlayerSheet"))
+    }
+
+    @Test
+    fun `keeps the verified stacked holder for the transformed flat root`() {
+        // The transformed layout still relies on the stacked holder for the
+        // mini-player peek/transition lifecycle. A native flat holder owns a
+        // different StaticCollapsed behavior and drops the mini-player on
+        // 6.5.2, so the flat-root branch must not bypass the holder hook.
+        assertFalse(source.contains("preserving native flat bottom navigation holder"))
+        assertFalse(source.contains("if (flatRoot != null && StaticCollapsedInterceptGuard.isSupportedBuild(targetBuild))"))
+        assertTrue(source.contains("constructor.newInstance(activity, navigationRoot, behavior)"))
+    }
+
+    @Test
+    fun `keeps the accepted navigation inset boundary for every target build`() {
+        assertTrue(source.contains("val navigationInset = (tabsHeight - menuHeight).coerceAtLeast(0)"))
+        assertTrue(source.contains("tabsHeight = tabsHeight"))
+        assertTrue(source.contains("navigationInset = navigationInset"))
+        assertFalse(source.contains("val boundaryTabsHeight = if ("))
+    }
+
+    @Test
+    fun `scopes static collapsed interception to transformed flat player buttons`() {
+        assertTrue(source.contains("AppleMusicSymbols.StaticCollapsedInterceptMethod"))
+        assertTrue(interceptGuardSource.contains("StaticCollapsedInterceptPolicy.shouldBypass"))
+        assertTrue(interceptGuardSource.contains("StaticCollapsedInterceptGestureLatch"))
+        assertTrue(interceptGuardSource.contains("compensationEnabled ="))
+        assertTrue(interceptGuardSource.contains("targetCoordinator = child.parent === coordinator"))
+        assertTrue(interceptGuardSource.contains("targetChild = isTransformedFlatRoot(child)"))
+        assertTrue(interceptGuardSource.contains("eventInTargetRegion = isInPlayerButtonRegion(child, event)"))
+        assertTrue(source.contains("StaticCollapsedInterceptGuard.isSupportedBuild(targetBuild)"))
+        assertTrue(interceptGuardSource.contains("PLAYER_LYRICS = \"player_lyrics\""))
+        assertTrue(interceptGuardSource.contains("PLAYER_QUEUE = \"player_queue\""))
+        assertFalse(interceptGuardSource.contains("Class.forName(\"com.apple.android.music.common.behavior.StaticCollapsedBottomSheetBehavior\""))
     }
 
     @Test

@@ -7,6 +7,15 @@ import dev.amenhancer.module.hook.ModernMethodHook as XC_MethodHook
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 
+/** Classifies canonical callback owner names without relying on the trailing lambda ordinal. */
+internal fun lyricWordCallbackSource(ownerName: String): String? = when {
+    ownerName.contains("\$prBgWordEventCallback\$") -> LyricHighlightProbe.Source.PR_BG_WORD
+    ownerName.contains("\$bgWordEventCallback\$") -> LyricHighlightProbe.Source.BG_WORD
+    ownerName.contains("\$prWordEventCallback\$") -> LyricHighlightProbe.Source.PR_WORD
+    ownerName.contains("\$wordEventCallback\$") -> LyricHighlightProbe.Source.WORD
+    else -> null
+}
+
 /** Apple Music symbol and hook adapter for the target-independent lyric blur runtime. */
 internal class AppleMusicBidirectionalLyricBlurTarget(
     private val symbols: TargetSymbolResolver,
@@ -27,6 +36,7 @@ internal class AppleMusicBidirectionalLyricBlurTarget(
         val vectorResolution = symbols.resolve(AppleMusicSymbols.LyricsLineVector)
         val sessionResolution = symbols.resolve(AppleMusicSymbols.LyricsSessionProcessor)
         val callbackResolution = symbols.resolve(AppleMusicSymbols.LyricsHighlightCallback)
+        val wordCallbackResolution = symbols.resolve(AppleMusicSymbols.LyricsWordHighlightCallbacks)
         val notifyWordHighlightResolution = symbols.resolve(
             AppleMusicSymbols.LyricsViewModelNotifyWordHighlight,
         )
@@ -47,16 +57,33 @@ internal class AppleMusicBidirectionalLyricBlurTarget(
         }
 
         val targetAccess = AppleMusicLyricBlurTargetAccess(recyclerClass)
+        val probe = LyricHighlightProbe()
         val runtime = OpenSourceLyricBlurPort(
             targetAccess = targetAccess,
             blurRadiusOffsetPx = TargetConfigClient.currentSettings().lyricBlurRadiusOffsetPx,
+            probe = probe,
         )
-        val highlights = LyricHighlightEventRouter(runtime)
+        val highlights = LyricHighlightEventRouter(runtime, probe)
 
         // Preserve the upstream installation order: recycler, session, callback, lifecycle, VM.
         targetAccess.initializeAdapterPositionAccessor()
-        hookSessionProcessor(sessionResolution.valueOrNull(), runtime)
-        hookHighlightCallback(callback, vectorResolution.valueOrNull(), highlights)
+        hookSessionProcessor(
+            method = sessionResolution.valueOrNull(),
+            runtime = runtime,
+            probe = probe,
+        )
+        hookWordHighlightCallbacks(
+            callbacks = wordCallbackResolution.valueOrNull().orEmpty(),
+            probe = probe,
+            runtime = runtime,
+        )
+        hookHighlightCallback(
+            method = callback,
+            vectorClass = vectorResolution.valueOrNull(),
+            highlights = highlights,
+            probe = probe,
+            runtime = runtime,
+        )
         hookLyricsFragment(fragmentClass, runtime)
         hookViewModel(notifyWordHighlight, setCurrentHighlightedLine, highlights)
 
@@ -64,6 +91,7 @@ internal class AppleMusicBidirectionalLyricBlurTarget(
             vectorResolution,
             sessionResolution,
             callbackResolution,
+            wordCallbackResolution,
             notifyWordHighlightResolution,
             setCurrentHighlightedLineResolution,
         ).filterNot { it is TargetResolution.Found<*> }
@@ -79,7 +107,11 @@ internal class AppleMusicBidirectionalLyricBlurTarget(
         }
     }
 
-    private fun hookSessionProcessor(method: Method?, runtime: LyricBlurRuntime) {
+    private fun hookSessionProcessor(
+        method: Method?,
+        runtime: LyricBlurRuntime,
+        probe: LyricHighlightProbe,
+    ) {
         if (method == null) {
             Log.w(TAG, "Lyric session processor symbol was unavailable")
             return
@@ -87,6 +119,10 @@ internal class AppleMusicBidirectionalLyricBlurTarget(
         try {
             ModernXposedRuntime.hookMethod(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
+                    probe.recordSession(
+                        token = param.args.firstOrNull(),
+                        processPosition = (param.args.getOrNull(1) as? Number)?.toLong(),
+                    )
                     param.args.firstOrNull()?.let(runtime::onSessionChanged)
                 }
             })
@@ -100,6 +136,8 @@ internal class AppleMusicBidirectionalLyricBlurTarget(
         method: Method?,
         vectorClass: Class<*>?,
         highlights: LyricHighlightEventRouter,
+        probe: LyricHighlightProbe,
+        runtime: LyricBlurRuntime,
     ) {
         if (method == null || vectorClass == null) {
             Log.w(TAG, "Highlight callback symbols were unavailable")
@@ -113,7 +151,14 @@ internal class AppleMusicBidirectionalLyricBlurTarget(
                         val vector = param.args.firstOrNull { argument ->
                             argument != null && vectorClass.isInstance(argument)
                         } ?: return
-                        highlights.onCallback(readLineIds(vectorClass, vector))
+                        val rawLineIds = readLineIds(vectorClass, vector)
+                        val nativeFirst = (param.args.getOrNull(0) as? Number)?.toLong()
+                        highlights.onCallback(
+                            nativeFirst = nativeFirst,
+                            lineIds = rawLineIds,
+                            nativeLast = (param.args.getOrNull(2) as? Number)?.toLong(),
+                            rawLineIds = rawLineIds,
+                        )
                     } catch (t: Throwable) {
                         Log.e(TAG, "Highlight hook error", t)
                     }
@@ -125,6 +170,101 @@ internal class AppleMusicBidirectionalLyricBlurTarget(
             Log.e(TAG, "installHighlightHook failed", t)
         }
     }
+
+    /**
+     * Apple keeps line and word transition callbacks as four sibling
+     * Kotlin/JNI owner classes.  The line callback alone cannot tell whether
+     * the previous row is still receiving word progress, so the four word
+     * vectors are kept in a separate blur-state stream instead of replacing
+     * the existing line session.
+     */
+    private fun hookWordHighlightCallbacks(
+        callbacks: List<Method>,
+        probe: LyricHighlightProbe,
+        runtime: LyricBlurRuntime,
+    ) {
+        if (callbacks.isEmpty()) {
+            Log.w(TAG, "Word callback methods were unavailable")
+            return
+        }
+        assignWordCallbackSources(callbacks).forEach { (wordMethod, source) ->
+            runCatching {
+                ModernXposedRuntime.hookMethod(wordMethod, object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        runCatching {
+                            val vector = param.args.getOrNull(1) ?: return@runCatching
+                            val wordKeys = readWordKeys(wordMethod.parameterTypes[1], vector)
+                                ?: return@runCatching
+                            probe.recordWord(
+                                source = source,
+                                firstNative = (param.args.getOrNull(0) as? Number)?.toLong(),
+                                wordKeys = wordKeys,
+                                lastNative = (param.args.getOrNull(2) as? Number)?.toLong(),
+                            )
+                            runtime.onWordHighlightsChanged(
+                                source = source,
+                                lineIds = wordKeys.mapNotNull { key ->
+                                    key.substringBefore(':').toIntOrNull()
+                                }.toSet(),
+                            )
+                        }
+                    }
+                })
+            }.onFailure { error ->
+                Log.w(TAG, "Word callback hook failed on ${wordMethod.declaringClass.name}", error)
+            }
+        }
+    }
+
+    private fun assignWordCallbackSources(callbacks: List<Method>): List<Pair<Method, String>> {
+        val selected = selectWordCallbackMethods(callbacks)
+        val knownSources = selected.mapNotNull { method ->
+            lyricWordCallbackSource(method.declaringClass.name)
+        }.toSet()
+        val remainingSources = listOf(
+            LyricHighlightProbe.Source.WORD,
+            LyricHighlightProbe.Source.BG_WORD,
+            LyricHighlightProbe.Source.PR_WORD,
+            LyricHighlightProbe.Source.PR_BG_WORD,
+        ).filterNot(knownSources::contains).toMutableList()
+        return selected.map { method ->
+            val source = lyricWordCallbackSource(method.declaringClass.name) ?:
+                remainingSources.removeFirstOrNull() ?: LyricHighlightProbe.Source.WORD
+            method to source
+        }
+    }
+
+    private fun selectWordCallbackMethods(callbacks: List<Method>): List<Method> = buildList {
+        val seenSources = mutableSetOf<String>()
+        callbacks.forEach { method ->
+            val source = lyricWordCallbackSource(method.declaringClass.name) ?: return@forEach
+            if (size < MAX_WORD_CALLBACKS && seenSources.add(source)) add(method)
+        }
+        callbacks.forEach { method ->
+            if (size >= MAX_WORD_CALLBACKS) return@forEach
+            if (lyricWordCallbackSource(method.declaringClass.name) == null) add(method)
+        }
+    }
+
+    private fun readWordKeys(vectorClass: Class<*>, vector: Any): Set<String>? = runCatching {
+        val size = (vectorClass.getMethod("size").invoke(vector) as Number).toInt()
+        val get = vectorClass.getMethod("get", Long::class.javaPrimitiveType)
+        buildSet {
+            for (index in 0 until size) {
+                runCatching {
+                    val pointer = get.invoke(vector, index.toLong()) ?: return@runCatching
+                    val word = pointer.javaClass.getMethod("get").invoke(pointer) ?: return@runCatching
+                    val wordId = (word.javaClass.getMethod("getWordId").invoke(word) as Number).toInt()
+                    val linePointer = word.javaClass.getMethod("getLyricsLine").invoke(word)
+                        ?: return@runCatching
+                    val line = linePointer.javaClass.getMethod("get").invoke(linePointer)
+                        ?: return@runCatching
+                    val lineId = (line.javaClass.getMethod("getLineId").invoke(line) as Number).toInt()
+                    add("$lineId:$wordId")
+                }
+            }
+        }
+    }.getOrNull()
 
     private fun readLineIds(vectorClass: Class<*>, vector: Any): Set<Int> {
         val size = (vectorClass.getMethod("size").invoke(vector) as Long).toInt()
@@ -214,6 +354,7 @@ internal class AppleMusicBidirectionalLyricBlurTarget(
 
     private companion object {
         const val TAG = "AMLyricBlur"
+        const val MAX_WORD_CALLBACKS = 4
     }
 }
 
@@ -251,26 +392,45 @@ internal class AppleMusicLyricBlurTargetAccess(
 /** Callback wins once installed; otherwise ViewModel events replace the active lyric line. */
 internal class LyricHighlightEventRouter(
     private val runtime: LyricBlurRuntime,
+    private val probe: LyricHighlightProbe = LyricHighlightProbe(),
 ) {
     private var callbackInstalled = false
 
     fun onCallbackInstalled() {
         callbackInstalled = true
+        probe.recordSyntheticInstall()
         runtime.onHighlightsChanged(emptySet())
     }
 
     fun onCallback(lineIds: Set<Int>) {
-        runtime.onHighlightsChanged(lineIds)
+        onCallback(nativeFirst = null, lineIds = lineIds, nativeLast = null)
+    }
+
+    /**
+     * Native callback bridge.  The two Long values are intentionally kept as
+     * nullable wrappers: reflection may expose a null argument on a degraded
+     * callback shape, and a diagnostic failure must never affect the set path.
+     */
+    fun onCallback(
+        nativeFirst: Long?,
+        lineIds: Set<Int>,
+        nativeLast: Long?,
+        rawLineIds: Set<Int>? = null,
+    ) {
+        probe.recordNative(nativeFirst, lineIds, nativeLast, rawLineIds ?: lineIds)
+        runtime.onNativeHighlightsChanged(lineIds, nativeFirst)
     }
 
     fun onFourArgumentViewModelEvent(lineId: Int, isBackground: Boolean) {
         if (!callbackInstalled && !isBackground && lineId > 0) {
+            probe.recordVm4(lineId)
             runtime.onFallbackHighlightChanged(lineId)
         }
     }
 
     fun onSingleArgumentViewModelEvent(lineId: Int) {
         if (!callbackInstalled && lineId >= 0) {
+            probe.recordVm1(lineId)
             runtime.onFallbackHighlightChanged(lineId)
         }
     }

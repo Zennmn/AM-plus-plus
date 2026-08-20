@@ -1,545 +1,523 @@
 # Apple Music 新版本适配手册
 
-本文面向 AM++ 维护者，描述 Apple Music 目标适配层的当前代码契约和新版本分析方法。当前版本软件完全可用；适配的目标是让既有能力在新版 Apple Music 内部实现上继续工作，不是借版本更新改变产品行为。
+本文面向 AM++ 维护者，适用于任意 Apple Music 新版本。目标是让既有功能在宿主内部实现变化后继续工作，而不是借版本升级顺手改变产品行为。
 
-本文以仓库当前源码为准。源码中的类名、方法名、字段名和资源名是适配事实；本手册不能替代对新版 APK 的重新分析。
+Apple Music 的类名、方法名、字段名和资源 ID 都属于私有实现。本文定义的是适配方法和代码契约；每次适配仍必须针对实际 APK 重新取证、解析、测试和验收。
 
-## 1. 适配契约
+## 1. 适配的基本契约
 
-### 1.1 术语
+### 1.1 适配和行为变更是两件事
 
-- **目标符号**：Apple Music 内部被 AM++ 定位并使用的一个类、方法或字段。每个符号必须能独立得到 `Found`、`Missing` 或 `Ambiguous` 结果，禁止静默使用第一个候选。
-- **版本 profile**：针对一个精确的 Apple Music `packageName + versionName + versionCode` 三元组记录的适配知识。profile 不是跨版本猜测规则。
-- **目标适配**：把私有符号解析和 Hook 安装转换成某一项稳定的语义能力。Feature 只依赖这个能力，不接触 Apple Music 私有反射对象。
-- **配置 schema**：设置进程和 Apple Music 目标进程共同使用的键名、默认值、编码、迁移和远程文件指针规则。规则只能由 `ModuleSettingsSchema` 提供。
-- **双向歌词模糊**：当前高亮歌词保持清晰，历史歌词和后续歌词按距离逐渐模糊。
-- **滚动暂停**：用户手动浏览歌词时暂时移除焦点相关模糊，滚动稳定后恢复当前高亮位置对应的双向视觉状态。它是 `future_blur` 的运行时行为，不是独立 feature。
+版本适配只解决“同一能力在新宿主中如何找到并安装”。以下语义默认保持不变：
 
-### 1.2 不变行为
+- 功能开关的默认值、资格条件和 `FeatureHealth` 语义；
+- Android API 门槛、官方平板/手机和横竖屏判定；
+- 资源注册、`Application.onCreate` 安装、异常隔离和健康上报顺序；
+- Hook 的 before/after 时机、参数替换、返回值覆盖和调用顺序；
+- 双栏播放器的布局、Fragment transaction、折叠/展开和边界补偿；
+- 歌词模糊的焦点、滚动暂停、跨歌曲清理和恢复时序；
+- Editorial Video、歌词字体、自定义歌词和当前歌曲身份的范围；
+- 配置 schema 的键名、默认值、编码、迁移和双进程边界。
 
-只做版本适配时，不得顺手改变：
+如果新版迫使其中某项语义发生变化，应先写独立的行为变更记录，再修改 adapter；不要把行为变化伪装成 profile 更新。
 
-- 功能开关的默认值、启用条件和 `FeatureState` 语义。
-- Android API 门槛以及官方平板、横屏、手机资格判定。
-- 资源期注册、`Application.onCreate` 安装、异常隔离和健康上报顺序。
-- Hook 的 before/after 时机、参数替换、返回值覆盖和调用顺序。
-- 双栏播放器的布局、Fragment transaction、折叠/展开和边界补偿语义。
-- 双向歌词模糊的 session、焦点路由、跨歌曲清理、滚动暂停和恢复时序。
-- 歌词目标的精确 `RecyclerView` 类型约束。
-- Editorial Video 只在官方平板横屏抑制 URL 的范围。
-- 配置 schema 的键名、默认值、编码和升级规则。
+### 1.2 四层边界
 
-如果新版迫使上述行为发生变化，应先建立独立的行为变更说明，不要把行为变化伪装成 profile 更新。
+适配代码应保持四层分离：
 
-## 2. 当前运行架构
+```text
+APK 证据 / profile
+        ↓
+TargetSymbolResolver（Found / Missing / Ambiguous）
+        ↓
+Target adapter（稳定的语义能力）
+        ↓
+Feature（不接触宿主私有反射对象）
+```
+
+Feature 只依赖 adapter 暴露的稳定语义。不要把 `Class.forName`、混淆方法名或宿主 View 的具体层级扩散到 feature 和设置代码中。
+
+### 1.3 失败必须可见且可降级
+
+每项目标能力都应有独立的健康状态：
+
+- `ACTIVE`：所需符号已明确解析，Hook 已安装；
+- `DEGRADED`：非关键子能力缺失，但主功能仍可安全运行；
+- `FAILED`：关键能力无法安装，必须 fail-open，不得继续伪装为成功。
+
+一个可选 Hook 的 Boolean 返回值不能被静默丢弃。目标进程不能因为适配失败崩溃，但日志和健康状态必须让维护者知道“哪些能力没有安装”。
+
+## 2. 目标适配的运行架构
 
 ### 2.1 两阶段安装
 
+推荐保持以下时序：
+
 ```text
 HookEntry.onPackageReady
-    │  包名、首次 package、libxposed API 102 和 remote capability 门控
-    ▼
-FeatureInstallation.install
-    ├─ 注册各 feature 的资源期回调
-    ├─ LayoutInflationRegistry hook LayoutInflater.inflate 两个重载
-    └─ hook Application.onCreate
-             │
-             ▼
-        TargetAdaptation.appleMusic
-             ├─ targetBuild(application)
-             ├─ ApkTargetClassSource(base APK + split APK)
-             ├─ 一个共享 IndexedTargetSymbolResolver
-             └─ 组装 6 个目标能力
-             │
-             ▼
-        FeatureInstallationSession
-             ├─ 按固定顺序逐个 installSafely
-             ├─ 每项独立生成 FeatureHealth
-             └─ 更新 RESOURCES_REGISTERED → FEATURES_INSTALLING → COMPLETE
+    ├─ 包名、框架 API、remote capability 门控
+    └─ FeatureInstallation
+         ├─ 资源期回调注册
+         ├─ LayoutInflater hook
+         └─ Application.onCreate before-hook
+                ├─ 宿主绑定和配置迁移
+                ├─ 资源/布局注册
+                └─ after-hook 安装目标能力与设置桥接
 ```
 
-`HookEntry.kt:20-35` 在目标包 `com.apple.android.music` 的首次 package 回调中工作。框架低于 API 102 或不提供 `PROP_CAP_REMOTE` 时，目标 Hook 全部保持禁用状态。
-
-资源阶段在 `FeatureInstallationModule.install` 中先执行，目标进程的 `Application.onCreate` 之后才创建 `TargetAdaptation` 并安装目标符号 Hook。不能把需要目标类实例或版本信息的操作提前到资源阶段。
+资源和布局必须在宿主 inflate 目标布局之前注册；依赖目标类实例或版本 profile 的 Hook 不应提前到资源阶段。每个阶段都要幂等，失败时不能发布半初始化 session。
 
 ### 2.2 Feature 与目标能力的边界
 
-`TargetAdaptation.kt:12-56` 暴露 6 个 Apple Music 目标能力：
+目标适配层应按语义能力组织，而不是按“某个类里有几个方法”组织。例如：
 
-| 目标能力 | 语义接口 | 目标 adapter |
+| 能力 | 适配层职责 | Feature 看到的结果 |
 | --- | --- | --- |
-| 双栏播放器 | `DualPaneTarget` | `AppleMusicDualPaneTarget` |
-| Editorial Video | `EditorialVideoTarget` | `AppleMusicEditorialVideoTarget`，内联在 `TargetAdaptation.kt` |
-| 双向歌词模糊 | `BidirectionalLyricBlurTarget` | `AppleMusicBidirectionalLyricBlurTarget` |
-| 歌词字体 | `LyricsTypefaceTarget` | `AppleMusicLyricsTypefaceTarget` |
-| 自定义歌词 | `CustomLyricsTarget` | `AppleMusicCustomLyricsTarget` |
-| 当前歌曲身份 | `CurrentSongIdentityTarget` | `AppleMusicCurrentSongIdentityTarget` |
-
-`PhoneLiquidGlassFeature` 没有目标符号能力接口。它是资源期 feature，不能把它写成已有的 `TargetAdaptation` 能力。
-
-### 2.3 Feature 安装顺序和健康状态
-
-`FeatureInstallation.kt:199-219` 固定注册 7 个 feature，顺序为：
-
-1. `dual_pane`
-2. `editorial_video`
-3. `phone_liquid_glass`
-4. `future_blur`
-5. `lyrics_typeface`
-6. `current_song_identity`
-7. `custom_lyrics`
-
-每个 feature 都经过 `FeatureHook.installSafely`。返回状态为 `ACTIVE`、`DISABLED`、`UNSUPPORTED`、`DEGRADED` 或 `FAILED`；一个 feature 的异常会被记录并转换为 `FAILED`，不会阻断后续 feature。目标 adapter 自身只返回 `TargetCapabilityInstall.Active` 或 `Degraded`，再由 `toFeatureInstallResult` 转成 feature 状态。
-
-健康日志格式由 `TargetConfigClient.reportHealth` 固定为：
-
-```text
-<feature>: <state> - <message> [<targetVersion>]
-```
-
-`targetVersion` 来自 `TargetBuild.displayName`，通常是 `versionName (versionCode)`，不是 profile ID。profile 或符号解析摘要只有在对应 resolution message 中出现。
-
-### 2.4 关键文件
-
-| 文件 | 代码职责 |
-| --- | --- |
-| `app/src/main/java/dev/amenhancer/module/hook/HookEntry.kt` | 目标包和 API 102 门控 |
-| `app/src/main/java/dev/amenhancer/module/hook/FeatureInstallation.kt` | 资源阶段、应用阶段、安装顺序、异常隔离、快照和健康上报 |
-| `app/src/main/java/dev/amenhancer/module/hook/TargetAdaptation.kt` | 6 个目标能力的语义 seam 和 Editorial Video adapter |
-| `app/src/main/java/dev/amenhancer/module/hook/TargetSymbols.kt` | profile、目标符号、契约、解析策略和诊断 |
-| `app/src/main/java/dev/amenhancer/module/hook/ApkTargetClassSource.kt` | base/split DEX 类名合并和 ClassLoader 加载 |
-| `app/src/main/java/dev/amenhancer/module/hook/LayoutInflationRegistry.kt` | 两个 `LayoutInflater.inflate` 重载的资源回调分发 |
-| `app/src/main/java/dev/amenhancer/module/hook/AppleMusicDualPaneTarget.kt` | 双栏资源镜像、Fragment 接线、歌词 pane 和平板边界策略 |
-| `app/src/main/java/dev/amenhancer/module/hook/AppleMusicBidirectionalLyricBlurTarget.kt` | Apple Music 高亮/生命周期接入 |
-| `app/src/main/java/dev/amenhancer/module/hook/OpenSourceLyricBlurPort.kt` | 与 Apple Music 私有符号无关的模糊运行时 |
-| `app/src/main/java/dev/amenhancer/module/hook/AppleMusicLyricsTypefaceTarget.kt`、`LyricsTypefaceSession.kt` | 歌词字体目标接入、异步加载和布局回调 |
-| `app/src/main/java/dev/amenhancer/module/hook/AppleMusicCustomLyricsTarget.kt` 及 `CustomLyrics*` | TTML 替换、ready-late 重入和身份校验 |
-| `app/src/main/java/dev/amenhancer/module/hook/AppleMusicCurrentSongIdentityTarget.kt` | 元数据发布、当前项身份缓存和受权限保护的请求回复 |
-| `app/src/main/java/dev/amenhancer/module/config/ModuleSettingsSchema.kt` | 设置键、默认值、编码和迁移的唯一来源 |
-
-## 3. 版本 profile 基线
-
-### 3.1 已登记的精确 profile
-
-`TargetSymbols.kt:262-346` 当前只对两个精确版本返回 profile：
-
-| package | versionName | versionCode | profile ID | 代码含义 |
-| --- | --- | ---: | --- | --- |
-| `com.apple.android.music` | `6.5.0` | `1580` | `apple-music-6.5.0-1580` | 已登记的 profile |
-| `com.apple.android.music` | `6.5.1` | `1583` | `apple-music-6.5.1-1583` | 已登记的 profile |
-
-匹配是包名、版本名和版本码的严格同时匹配。未知版本、版本名与版本码错配、版本读取失败都不会复用旧 profile。
-
-### 3.2 两个 profile 的关键迁移
-
-`AppleMusicProfile` 同时支持 `exactClasses`、`exactMethods` 和 `exactFields`。当前两个 profile 的关键差异如下：
-
-| 目标契约 | 6.5.0 / 1580 | 6.5.1 / 1583 |
-| --- | --- | --- |
-| `PLAYER_CONTROLLER` | `com.apple.android.music.player.fragment.w0` | `com.apple.android.music.player.fragment.q0` |
-| `EDITORIAL_VIDEO_OWNER` | `com.apple.android.music.player.c1` | `com.apple.android.music.player.f1` |
-| `LYRICS_CHROME` | `com.apple.android.music.player.fragment.e` | `com.apple.android.music.player.fragment.d` |
-| `LYRICS_CURRENT_ITEM_FIELD` owner | `com.apple.android.music.player.fragment.m` | `com.apple.android.music.player.fragment.l` |
-| `METADATA_TO_ITEM_CONVERTER` owner | `com.apple.android.music.player.P` | `com.apple.android.music.player.O` |
-| `LYRICS_AVAILABILITY_OWNER` | `com.apple.android.music.player.d1` | `com.apple.android.music.player.e1` |
-| Activity holder method | `k1` | `j1` |
-| Activity root method | `n0` | `l1` |
-| Activity behavior field | `c1` | `c1` |
-
-以下身份在两个 profile 中保持不变：`PlayerActivity`、`PlayerLyricsViewFragment`、`LyricsLineVector`、`SongInfoTimeProcessor`、高亮 callback owner、`PlayerLyricsViewModel`、`Hd.b`、`SongInfoPtr`、`SongInfoNative`、`TTMLParserNative` 和 metadata hub `com.apple.android.music.player.f`。
-
-新增版本时应显式比较三类身份，不能只比较类名：
-
-- `exactClasses`：类 owner 变化。
-- `exactMethods`：同一 owner 中的 root 或构造方法名变化。
-- `exactFields`：同一 owner 或父类中的行为字段名变化。
-
-### 3.3 profile 的添加规则
-
-新增 profile 时：
-
-- 保留旧 profile，除非有明确的停版决策。
-- `id` 使用 `apple-music-X.Y.Z-CODE`，并与实际版本二元组一致。
-- 只写入经过新版 APK 分析和契约确认的身份。
-- 不使用版本范围、前缀匹配或“最接近版本”。
-- 如果只确认了部分符号，其他符号不要用看起来相似的混淆名填充。
-- 对新增的 `exactMethods` 和 `exactFields` 同时记录 profile 正匹配、版本错配和缺失时的解析行为。
-
-## 4. 目标符号解析模型
-
-### 4.1 解析源的限制
-
-`ApkTargetClassSource` 会合并 `ApplicationInfo.sourceDir` 和 `splitSourceDirs`，去重后读取每个 APK 的 DEX 类名，并只把 `com.apple.` 前缀类名放入结构索引。之后通过目标进程的 `ClassLoader` 惰性加载类。
-
-这带来两个适配规则：
-
-- 新版分析必须包含 base APK 和所有 split APK。
-- `Hd.b`、`androidx.recyclerview.widget.RecyclerView` 等非 `com.apple.` 的已知稳定类名不能依赖 DEX 枚举；它们通过稳定名称直接 `loadClass`。不要因为结构索引没有列出它们就重复添加模糊扫描。
-
-### 4.2 三级解析和三种策略
-
-`IndexedTargetSymbolResolver` 的解析顺序固定为：
-
-1. 匹配 profile 的精确候选。
-2. 已审查的稳定名称候选。
-3. 结构契约候选。
-
-`ProfilePolicy` 决定 profile 阶段失败后的行为。注意，只有版本命中 profile 时才存在 profile 阶段；未知版本仍会根据 key 的 stable/structural 定义继续解析：
-
-| 策略 | 语义 | 适用场景 |
-| --- | --- | --- |
-| `NO_PROFILE` | 不使用版本 profile，直接走稳定名和结构候选 | `RecyclerView` |
-| `EXACT_REQUIRED` | 版本命中 profile 且 profile 候选为空时，身份是权威契约，直接 `Missing`，不向下猜测；未知版本没有 profile 阶段，仍可能走 stable/structural | 类锚点和 `LyricsInstallMethod` 等名称本身具有身份意义的符号 |
-| `EXACT_PREFERRED` | 先使用精确身份，失败后再使用已经审查过的稳定名或结构契约 | 大多数可由完整签名和 owner 约束的方法/字段 |
-
-profile 阶段有多个候选时即返回 `Ambiguous`，即使策略是 `EXACT_PREFERRED` 也不能继续向下回退。结构候选同样遵守唯一性。对未登记版本，`EXACT_REQUIRED` key 的结构回退结果必须单独记录，不能当作 profile 身份。
-
-解析结果的摘要格式为：
-
-```text
-<symbol> resolved via version_profile [<profile-id>]
-<symbol> resolved via stable_name [<profile-id>]
-<symbol> resolved via structural_fallback [<profile-id>]
-<symbol> was not found [<profile-id>]
-<symbol> was ambiguous (N candidates): <first-three-identities> [<profile-id>]
-```
-
-未知版本没有 profile ID；已匹配 profile 但发生 stable 或 structural 回退时，摘要仍会带该 profile ID。`TargetClassIndex`、解析器和每个符号结果都在进程内缓存，适配时不能假设每次 `resolve` 都会重新扫描 DEX。
-
-### 4.3 20 个 profile symbol ID
-
-`TargetSymbolId` 当前有 20 个条目。它们是 profile 的身份键，不等同于 `AppleMusicSymbols` 的全部 32 个解析 key。
-
-| 能力族 | `TargetSymbolId` | 适配用途 |
-| --- | --- | --- |
-| 播放器和双栏 | `PLAYER_CONTROLLER` | 播放器控制器 owner |
-| 播放器和双栏 | `PLAYER_ACTIVITY` | 播放器 Activity owner |
-| 播放器和双栏 | `PLAYER_ACTIVITY_CREATE_STACKED_NAVIGATION_HOLDER` | Activity 中创建 stacked navigation holder 的方法名 |
-| 播放器和双栏 | `PLAYER_ACTIVITY_ROOT` | Activity 内容根方法名 |
-| 播放器和双栏 | `PLAYER_ACTIVITY_BEHAVIOR_FIELD` | Activity BottomSheetBehavior 字段名 |
-| 播放器和歌词 | `EDITORIAL_VIDEO_OWNER` | Editorial Video URL owner |
-| 播放器和歌词 | `LYRICS_FRAGMENT` | 歌词 Fragment owner |
-| 播放器和歌词 | `LYRICS_CHROME` | 歌词 chrome/metrics owner |
-| 歌词事件 | `LYRICS_LINE_VECTOR` | 原生歌词行向量类型 |
-| 歌词事件 | `LYRICS_EVENT_PROCESSOR` | session/processEvents owner |
-| 歌词事件 | `LYRICS_HIGHLIGHT_CALLBACK_OWNER` | 高亮 callback owner |
-| 歌词事件 | `LYRICS_VIEW_MODEL` | ViewModel fallback owner |
-| 播放器和双栏 | `STACKED_NAVIGATION_MENU` | 平板底部导航菜单 owner |
-| 自定义歌词 | `SONG_INFO_PTR` | `SongInfoPtr` 类型 |
-| 自定义歌词 | `SONG_INFO_NATIVE` | `SongInfoNative` 类型 |
-| 自定义歌词 | `TTML_PARSER_NATIVE` | TTML native parser 类型 |
-| 身份 seam | `LYRICS_CURRENT_ITEM_FIELD` | 歌词 Fragment 当前 `BaseContentItem` 字段 owner |
-| 当前歌曲身份 | `PLAYER_METADATA_HUB` | metadata 发布 owner |
-| 当前歌曲身份 | `METADATA_TO_ITEM_CONVERTER` | metadata 到 `PlaybackItem` 转换 owner |
-| 自定义歌词 | `LYRICS_AVAILABILITY_OWNER` | 原生歌词可用性谓词 owner |
-
-### 4.4 `AppleMusicSymbols` key 清单和关键契约
-
-新增版本分析应以 `TargetSymbols.kt` 中的完整定义为准。当前 key 按调用能力分组如下：
-
-| 能力族 | 解析 key | 必须保持的契约重点 |
-| --- | --- | --- |
-| 双栏播放器 | `PlayerController`, `PlayerControllerInitialize`, `PlayerControllerCreateView`, `PlayerControllerSelectPane` | `w1(BagConfig): void`；`onCreateView(LayoutInflater, ViewGroup, Bundle): View`；`F1(enum, Bundle): void`；三个方法必须属于同一 controller 契约 |
-| 双栏 Activity | `PlayerActivity`, `PlayerActivityCreateStackedNavigationHolder`, `PlayerActivityRoot`, `PlayerActivityBehaviorField` | holder 无参返回 `PlayerActivity$m`；root 无参返回 `View`；behavior 非 static 且沿继承层级为 BottomSheetBehavior 或目标专用子类 |
-| 双栏菜单 | `StackedNavigationMenu`, `StackedNavigationMenuOnMeasure` | owner 为 `Hd.b`；`onMeasure(int, int): void` 且非 static |
-| 双栏歌词 chrome | `LyricsFragment`, `LyricsFragmentOnResume`, `LyricsFragmentUpdateMetrics`, `LyricsChromeFragment`, `LyricsChromeAnimate` | `onResume()`、`j2(): boolean`、`a2(int, int[]): void`；chrome 还要求 `f2(): View` 兄弟契约 |
-| Editorial Video | `EditorialVideoUrlSelector` | static，返回 `String`，参数为 `Song`、primitive `float`、`EditorialVideo$Flavor[]` |
-| 模糊核心 | `RecyclerView`, `LyricsLineVector`, `LyricsSessionProcessor`, `LyricsHighlightCallback` | RecyclerView 使用精确类型；`processEvents` 为 7 参数并返回 `long`；callback 为 `call(long, LyricsLineVector, long): void` |
-| 模糊 fallback | `LyricsViewModel`, `LyricsViewModelNotifyWordHighlight`, `LyricsViewModelSetCurrentHighlightedLine` | `notifyWordHighlight(int, int, int, boolean): void` 和 `setCurrentHighlightedLine(int): void` |
-| 自定义歌词 | `LyricsInstallMethod`, `SongInfoPtr`, `SongInfoNative`, `TtmlParserNative`, `TtmlSongInfoFromTtml` | 安装入口必须是精确名称 `I2(SongInfoPtr): void`；不能把同形 `R2` 当作安装入口；native 类型和 `songInfoFromTTML(String)` 必须互相匹配 |
-| 自定义歌词入口 | `LyricsAvailabilityPredicate`, `LyricsCurrentItemField` | static `i(PlaybackItem): boolean`；当前项字段必须是非 static、名称 `c`、类型 `BaseContentItem`，结构回退只能接受歌词 Fragment 层级中的唯一字段 |
-| 当前歌曲身份 | `PlayerMetadataPublishMethod`, `MetadataToPlaybackItemMethod` | metadata 发布方法为非 static `g(v3.v): void`；转换方法为 static `b(v3.v): PlaybackItem`；结构回退还需要同类型的 `BaseContentItem` 兄弟转换方法 |
-
-上表列出的 11 个类 key 同时承担 owner 锚定职责：`PlayerController`、`PlayerActivity`、`LyricsFragment`、`LyricsChromeFragment`、`LyricsViewModel`、`StackedNavigationMenu`、`RecyclerView`、`LyricsLineVector`、`SongInfoPtr`、`SongInfoNative` 和 `TtmlParserNative`。它们已经计入 32 个 key，不应重复登记。profile ID、解析 key 和 feature 能力之间不是一对一关系；多个方法可能共享同一个 owner ID。
-
-## 5. 六项目标能力和七个 feature
-
-### 5.1 双栏播放器 `dual_pane`
-
-- 设置门控：`dual_pane_enabled`，默认 `true`。
-- 资源阶段：注册 `bottom_navigation`、`fragment_player_main`、`fragment_player_lyrics_sheet`、`lyrics_line` 和 `lyrics_word_karaoke` 回调。
-- 应用阶段：安装 11 个目标方法/字段契约，包括 controller 三钩子、Activity holder/root/behavior、菜单 `onMeasure`、歌词 Fragment、chrome、metrics 和 `onResume`。
-- 资格判定：`TabletModeQualifier` 读取目标包的 `is_tablet` bool，并要求横屏；资源和目标运行时都还受双栏开关约束。
-- 运行机制：资源回调镜像 layout-land 约束；目标 Hook 负责原生 holder、Fragment transaction、歌词 pane 和生命周期接线；不能替换目标 player root 或接管目标 bottom-sheet 生命周期。
-- 私有适配知识：`AlphaGradientEdgeFieldProfiles`、`LyricsLayoutFieldProfiles` 和 `ConstraintLayout$b` 的 `TARGET_650_FIELD_NAMES` 与 `AppleMusicProfile` 独立。新版适配时必须单独确认这些字段变体。
-- 边界补偿：`navigation_compensation_enabled` 只在官方平板横屏生效。`FlatPlayerBoundaryPolicy` 通过 `player_sheet_container` 的几何、`translationY` 和 pre-draw 同步处理折叠态；只做视觉平移，不修改布局 margin，不改 native holder 的动画目标。
-- `ACTIVE` 条件：11 个 resolution 均为 `Found`，controller 三个 Hook、菜单测量、chrome、metrics 和 typography Hook 数量都满足安装要求。
-- `DEGRADED` 条件：任一核心 resolution 缺失/歧义，或实际 Hook 数量不足。
-
-### 5.2 Editorial Video `editorial_video`
-
-- 设置门控：`disable_editorial_video_on_tablet`，默认 `true`。
-- 应用阶段：解析并 Hook `EditorialVideoUrlSelector`。
-- 运行条件：仅 `TabletModeQualifier.isOfficialTabletLandscape(application)` 为真时把 URL 返回值改为 `null`。
-- 行为边界：保留静态预览帧和独立 Music Video 路径，不做全设备或全视频类型抑制。
-- `ACTIVE` 只表示目标方法 Hook 安装成功；目标资格不是官方平板横屏时，不会发生 UI 变化。
-
-### 5.3 手机液态玻璃 `phone_liquid_glass`
-
-- 设置门控：`phone_liquid_glass_enabled`，默认 `false`。
-- 资源阶段：处理 `bottom_navigation` 和 `mini_player`，并排除官方平板。
-- 适配要求：保持资源期处理和官方平板排除规则，不要把它添加到 `TargetAdaptation` 作为 Apple Music 符号能力。
-
-### 5.4 双向歌词模糊 `future_blur`
-
-- 设置门控：`future_blur_enabled`，默认 `true`。
-- 平台门槛：Android API 31 以下返回 `UNSUPPORTED`。
-- 目标依赖：精确 `RecyclerView`、歌词 Fragment、歌词行向量、session processor、高亮 callback 和两个 ViewModel fallback 入口。
-- 安装首先要求精确 `RecyclerView` 和歌词 Fragment。高亮路由中 callback 安装后优先使用 callback；callback 不可用时，使用非后台的四参数 ViewModel 事件或单参数事件。三个高亮入口全部缺失，或歌词行向量/session processor 等可选核心解析失败时，能力进入降级路径。
-- 生命周期：歌词 Fragment `onCreateView` 时发现目标 RecyclerView，`onDestroyView` 时移除 listener、取消任务、清理 renderer 和 session 视图状态。
-- 运行时边界：`OpenSourceLyricBlurPort` 只消费语义事件和目标访问器，不应重新引入 Apple Music 反射知识。
-
-### 5.5 滚动暂停
-
-滚动暂停没有独立的 feature key 或独立健康状态，属于 `OpenSourceLyricBlurPort`：
-
-- `ACTION_DOWN` 和 `ACTION_MOVE` 进入手动滚动态，并取消待恢复任务。
-- 滚动期间调用 `applyBlur(includeFocus = false, immediate = true)`，移除焦点相关模糊。
-- `ACTION_UP`、`ACTION_CANCEL` 或滚动变化后安排 1000 ms 恢复任务。
-- 恢复时重新按照当前高亮 session 应用双向模糊。
-- Fragment 销毁时必须移除滚动监听和恢复任务。
-
-### 5.6 歌词字体 `lyrics_typeface`
-
-- 设置门控：`lyrics_font_enabled`，默认 `false`；实际字体元数据由 `fontManifest` 提供。
-- 资源阶段：为 `LyricsTypefaceLayoutContract.layoutNames` 中的 12 个当前布局契约注册回调，并标记 instrumental 行。
-- 应用阶段：解析歌词 Fragment 和精确 RecyclerView，Hook `onResume`，然后激活共享 `LyricsTypefaceSession`。
-- 加载模型：远程字体读取、大小检查、SHA-256 校验和 Typeface 解析在后台单线程进行；加载完成后重新应用仍处于观察期的 lyric root。
-- 失败策略：安装期 `prepare()` 失败会让能力显式 `DEGRADED`；运行期字体加载或单个 style 创建失败时保留 Apple Music 原字体，不能因字体失败阻断歌词生命周期。
-- `ACTIVE` 可在字体仍为 `Loading` 时返回；日志必须说明是 `font ready` 还是 `font loading in background`。
-
-### 5.7 当前歌曲身份 `current_song_identity`
-
-- 没有设置开关，由 `CurrentSongIdentityFeature` 总是尝试安装；请求不可用时 fail closed。
-- 目标依赖：`LyricsInstallMethod` 用于当前项身份 seam，metadata 发布方法，metadata 到 `PlaybackItem` 转换方法，以及歌词 Fragment 当前 `BaseContentItem` 字段。
-- 运行链路：Hook metadata 发布 → 转换为 `PlaybackItem` → 通过 `CurrentItemIdentitySeam` 读取身份 → 写入 `CurrentSongIdentityCache`。
-- 进程间请求：`CurrentSongIdentityProtocol` 使用签名权限保护的广播和 `ResultReceiver`，设置进程请求当前项，目标进程只回复缓存的 Apple Music ID、标题和艺人。
-- `ACTIVE` 还要求 receiver 注册成功；仅 Hook metadata 成功不能标记为 `ACTIVE`。
-- 该能力与自定义歌词共享 `CurrentSongIdentityCache` 和 `CurrentItemIdentitySeam`，但两项能力必须独立解析、独立返回 `Missing`/`Ambiguous` 和独立上报。
-
-### 5.8 自定义歌词 `custom_lyrics`
-
-- 设置门控：`custom_lyrics_enabled`，默认 `false`；旧键 `online_lyric_replacement_enabled` 只用于 schema 解码迁移。
-- 目标依赖：`I2(SongInfoPtr)`、`SongInfoPtr`、`SongInfoNative`、`TTMLParserNative`、`songInfoFromTTML(String)`、歌词可用性谓词和当前项身份字段。
-- 安装入口：`I2` 的名称是契约的一部分。相同参数形状的 `R2` 不能被结构回退误选。
-- 替换链路：读取 ID 到 TTML 的映射，后台解析 native pointer，检查指针存活和 Adam ID，再在 `I2` 前替换参数。
-- ready-late：自定义 pointer 尚未准备好时，以 Fragment 身份和 Apple Music ID 记录一次待重入项；发布后只有 Fragment 仍可用、当前项仍匹配且 replacement 仍 ready 才重入 `I2`。所有失败均 fail open，保留原生 pointer。
-- 可用性入口：原生无歌词且 replacement 已 ready 时，availability Hook 才把结果改为 `true`。
-- `ACTIVE` 要求安装入口、parser surface、身份 seam、availability Hook 等核心步骤成功；只装好 `I2` 替换但没有 availability 入口时必须 `DEGRADED`。
-
-## 6. 配置 schema 和双进程边界
-
-### 6.1 单一事实来源
-
-`ModuleSettingsSchema.kt` 是设置进程和目标进程共同使用的 schema。新增版本适配不得在 adapter、Feature 或 `TargetConfigClient` 中复制一套默认值、键名或迁移规则。
-
-当前 `ModuleConstants.CONFIG_SCHEMA_VERSION` 为 `7`，remote preferences group 为 `settings`。
-
-### 6.2 当前键和默认值
-
-| 分类 | 键 | 默认/规则 |
-| --- | --- | --- |
-| 普通设置 | `dual_pane_enabled` | `true` |
-| 普通设置 | `disable_editorial_video_on_tablet` | `true` |
-| 普通设置 | `phone_liquid_glass_enabled` | `false` |
-| 普通设置 | `future_blur_enabled` | `true` |
-| 普通设置 | `navigation_compensation_enabled` | `false` |
-| 普通设置 | `lyric_blur_radius_offset_px` | `0`，按 `ModuleSettings` 的最小/最大值 clamp |
-| 普通设置 | `custom_lyrics_enabled` | `false`；缺失时读取旧 `online_lyric_replacement_enabled` |
-| 字体 manifest | `lyrics_font_enabled` | `false` |
-| 字体 manifest | `lyrics_font_file_id` | 字符串并经过字体 manifest policy 校验 |
-| 字体 manifest | `lyrics_font_display_name` | 字符串 |
-| 字体 manifest | `lyrics_font_size_bytes` | 长整数并经过字体 policy 校验 |
-| 字体 manifest | `lyrics_font_sha256` | 字符串并经过字体 manifest policy 校验 |
-| 旧 manifest | `custom_lyrics_manifest` | 旧版字符串 manifest；新索引优先使用远程文件指针 |
-| 索引指针 | `custom_lyrics_index_file_id` | 与 generation、SHA-256、size 一起完整校验 |
-| 索引指针 | `custom_lyrics_index_generation` | 必须大于等于 1 |
-| 索引指针 | `custom_lyrics_index_sha256` | 必须是有效 SHA-256 |
-| 索引指针 | `custom_lyrics_index_size_bytes` | 必须在允许的索引大小范围内 |
-| schema | `schema_version` | 当前值为 `7` |
-
-写入值只允许 `Boolean`、`Int`、`Long` 和 `String`。普通设置写入故意不携带字体 manifest、custom lyrics manifest 和索引 pointer，避免旧快照覆盖已经提交的远程文件事务。
-
-### 6.3 迁移和进程通信
-
-- 设置进程通过 `ModuleApplication` 连接 libxposed API 102 remote preferences，并在首次绑定时从 legacy `module-settings` 迁移。
-- `ModuleSettingsSchema.upgrade` 只在存储版本低于 `7` 时生成新值；当前或更高版本不被重写。
-- 目标进程通过 `TargetConfigClient` 只读 remote preferences，并通过 remote file opener 读取字体或自定义歌词索引。
-- remote preferences 不可用时，设置侧可以回退到 legacy 本地 preferences；目标侧则在 `HookEntry` 门控处保持 Hook 禁用，不会继续读取 `module-settings`。适配不能假设两个进程共享普通内存。
-- 目标进程通过 `reportHealth` 写日志上报，不向设置进程直接写回 feature 状态。
-
-### 6.4 配置适配禁区
-
-版本适配不应：
-
-- 为新版 Apple Music 增加专用配置键。
-- 在 feature 中直接读取 `SharedPreferences` 或重新实现默认值。
-- 改变 schema version 只为让 profile 生效。
-- 把远程文件 pointer 当普通设置写入。
-- 把当前歌曲标题或艺人作为身份匹配 fallback；身份必须使用 `CurrentItemIdentitySeam` 和 Apple Music ID。
-
-## 7. 新版本适配流程
-
-### 7.1 建立代码基线
-
-适配开始前先记录工作区，不要覆盖用户或其他 agent 的未提交改动：
-
-```powershell
-git status --short
-git branch --show-current
-```
-
-### 7.2 记录新版 APK 集合
-
-```powershell
-adb shell dumpsys package com.apple.android.music | Select-String 'versionName=|versionCode='
-adb shell pm path com.apple.android.music
-```
-
-保存以下信息：
-
-- 包名、`versionName`、`versionCode`。
-- base APK 和全部 split APK 路径。
-- APK SHA-256、签名证书 SHA-256。
-
-不要只分析 base APK。`ApkTargetClassSource` 的结构索引明确合并 split APK；漏掉 split 会把真实存在的类误判为 `Missing`。
-
-### 7.3 只读建立符号变化清单
-
-对每个受影响 key 记录以下字段：
+| 双栏播放器 | root、holder、fragment、边界和原生行为协调 | 可展开/收回的双栏播放器 |
+| Editorial Video | 只在规定设备条件下抑制目标 URL | 视频行为保持原生，其余场景放行 |
+| 双向歌词模糊 | 建立歌词 session、焦点和滚动状态 | 当前行清晰，其他行按距离模糊 |
+| 歌词字体 | 定位目标 RecyclerView/文本渲染路径 | 只影响歌词字体 |
+| 自定义歌词 | 定位歌曲身份和歌词加载入口 | 原始值缺失时 fail-open |
+| 当前歌曲身份 | 提供稳定的歌曲 ID/对象快照 | 供多个 feature 复用 |
+| 媒体库刷新 | 定位 MediaLibrary singleton、update/ready 和请求入口 | 只影响手动刷新/目录补全按钮 |
+| 标题修正 | 定位标题转换、缓存和 miss 回填入口 | 候选缺失时保留宿主标题 |
+| 目录语言 | 定位 storefront、Accept-Language 和 catalog map | 只重写语言字段，保留请求返回契约 |
+| 设置页 | 把模块设置注入宿主原生设置页 | 配置入口可见且可持久化 |
+
+### 2.3 关键文件
+
+适配工作通常涉及：
+
+- `TargetSymbols.kt`：版本 profile、symbol key 和 resolver；
+- `TargetAdaptation.kt`：能力组装和 adapter 边界；
+- `AppleMusicDualPaneTarget.kt`：双栏播放器目标实现；
+- `StaticCollapsedInterceptGuard.kt`：可独立降级的触摸 interception 适配；
+- `EmbeddedBootstrap.kt`、`HookEntry.kt`：精确构建门控、生命周期和设置入口；
+- `TargetSymbolResolver` 相关代码：class/method/field 的证据化解析；
+- `app/src/test/...`：结构回归、纯策略和目标能力测试。
+
+## 3. 先建立新版本的证据档案
+
+### 3.1 输入包清单
+
+每次适配都要保存原始 APK/XAPK 的以下信息：
 
 | 字段 | 要求 |
 | --- | --- |
-| Symbol ID/key | 使用源码中的稳定 ID，不用临时描述代替 |
-| owner | 完整类名和 ClassLoader 来源 |
-| member | 方法名或字段名；注明是否来自 `exactMethods`/`exactFields` |
-| signature | 参数、返回值、静态性和继承关系 |
-| structural proof | 能说明真实职责的兄弟方法、字段或调用路径 |
-| profile policy | `NO_PROFILE`、`EXACT_REQUIRED` 或 `EXACT_PREFERRED` |
-| source | 反编译、DEX、资源表和调用路径来源 |
+| 文件名和来源 | 保留原名，不以 PR 标题代替 |
+| package name | 必须和作用域、profile 完全一致 |
+| version name/code | 以安装后的包管理器和 APK 元数据为准 |
+| base/split 集合 | 记录 ABI、density、语言等 split |
+| SHA-256 | 至少保存原始包和 base APK 摘要 |
+| 签名证书 | 记录证书摘要，避免分析错包 |
+| 测试设备 | 型号、Android 版本、ABI、分辨率和屏幕密度 |
 
-重点核对：
+不要从文件名猜 versionCode。一次适配中把版本 code 写错，会导致 profile、bootstrap 和日志全部看似一致但实际不匹配。
 
-- 混淆名变了但 owner 和结构未变：优先新增 profile 精确身份。
-- 参数、返回值、静态性或 owner 变了：重新评审 adapter 契约，不能只替换字符串。
-- 候选多于一个：加深契约，不按 DEX 顺序选择。
-- `EXACT_REQUIRED` 符号缺失：接受 `Missing` 和能力降级，不把结构猜测强行升级为成功。
-- 非 `com.apple.` 的稳定类：使用直接 `loadClass`，不要用索引缺失作为结论。
+### 3.2 安装后的复核
 
-### 7.4 更新 profile
-
-在 `TargetSymbols.kt` 添加独立 `AppleMusicProfile`，并在 `AppleMusicProfiles.match` 中添加严格二元组匹配。根据 APK 分析分别填充 `exactClasses`、`exactMethods` 和 `exactFields`。
-
-更新 profile 时确认以下解析行为：
-
-- 新版本正匹配。
-- 版本名正确但 versionCode 错配不匹配。
-- versionCode 正确但 versionName 错配不匹配。
-- 包名不符不匹配。
-- profile 精确命中不触发不必要的完整 DEX 枚举。
-- 命中 profile 且 exact identity 缺失时，`EXACT_REQUIRED` 返回 `Missing`，`EXACT_PREFERRED` 才允许稳定名或结构回退；未登记版本单独记录其 stable/structural 结果。
-
-### 7.5 决定是否修改 adapter
-
-通常只改 profile 的情况：
-
-- 混淆类名或方法名改变，但已确认的签名、owner、生命周期和参数语义不变。
-- 只增加了新版本的 `exactMethods` 或 `exactFields` 身份。
-
-必须改对应 adapter 或私有契约的情况：
-
-- 生命周期入口改变。
-- Fragment transaction、构造器或返回值类型改变。
-- 目标资源树、resource ID 或布局参数字段变了。
-- 目标需要新的 ready-late、身份或线程边界。
-- `AlphaGradientEdgeFieldProfiles`、`LyricsLayoutFieldProfiles` 或 ConstraintLayout 字段映射出现新变体。
-
-修改范围应保持在对应能力：
-
-- 双栏和边界策略：`AppleMusicDualPaneTarget.kt` 及其专属 policy/profile。
-- 歌词高亮接入：`AppleMusicBidirectionalLyricBlurTarget.kt`。
-- 歌词字体：`AppleMusicLyricsTypefaceTarget.kt`、`LyricsTypefaceSession.kt`。
-- 自定义歌词：`AppleMusicCustomLyricsTarget.kt`、`TtmlNativeParser.kt`、ready-late/session 文件。
-- 当前歌曲身份：`AppleMusicCurrentSongIdentityTarget.kt`、`CurrentItemIdentitySeam.kt`。
-- Editorial Video：`TargetAdaptation.kt` 内联 adapter。
-
-不要把 `Class`、`Method`、`Field`、`TargetResolution`、`TargetSymbolResolver` 或 `AppleMusicSymbols` 引入 `*Feature.kt` 和目标无关的 `OpenSourceLyricBlurPort.kt`。
-
-### 7.6 更新与私有资源相关的适配知识
-
-`AppleMusicProfile` 之外还有一层双栏私有知识，必须单独记录：
-
-- `AlphaGradientEdgeFieldProfiles`：AlphaGradientFrameLayout 的垂直/水平边缘布尔字段和整数配置字段。
-- `LyricsLayoutFieldProfiles`：歌词 Fragment binding、container、recycler、gradients 和 metrics 字段。
-- `TARGET_650_FIELD_NAMES`：只在目标 LayoutParams 类型为 `androidx.constraintlayout.widget.ConstraintLayout$b` 时启用的 6.5.0 字段映射。
-- `LayoutInflationRegistry` 的资源名称推断：`bottom_navigation`、`fragment_player_main`、`fragment_player_lyrics_sheet`、`lyrics_line`、`lyrics_word_karaoke` 等。
-- `LyricsTypefaceLayoutContract.layoutNames`：12 个歌词布局名称，包括 instrumental 行。
-
-这些知识不参与 `AppleMusicProfiles.match`。新增版本时要单独确认变体，并把结果集中记录在对应 adapter 的适配知识中。
-
-## 8. 诊断和失败处理
-
-### 8.1 `resolved via structural_fallback`
-
-这表示当前只有结构契约找到了唯一候选。应记录候选身份并补齐对应 profile，避免把结构候选当作跨版本身份。
-
-### 8.2 `was not found`
-
-按以下顺序排查：
-
-- 版本名和版本码是否真的匹配预期 profile。
-- 是否漏读 split APK。
-- profile 的 owner、exact method 或 exact field 是否过期。
-- 方法的静态性、参数、返回值和继承层级是否变化。
-- `EXACT_REQUIRED` 是否按设计拒绝了不安全的结构猜测。
-- 资源 ID、布局名称或 ClassLoader 是否变化。
-
-不要第一步就放宽 owner 前缀或删除名称约束。
-
-### 8.3 `was ambiguous`
-
-这表示当前契约无法唯一表达职责。继续补充参数、返回值、静态性、owner、父类、兄弟方法或调用路径条件，直到候选唯一；不要选择第一个候选。
-
-### 8.4 Apple Music 启动崩溃、FATAL 或 ANR
-
-优先检查本次 adapter 的强制类型转换、参数数组、constructor、字段可访问性和返回值覆盖。不要用捕获所有异常后继续运行掩盖稳定性问题；能独立降级的能力应返回 `DEGRADED` 或 `FAILED`，不能让目标进程崩溃。
-
-## 9. 适配记录模板
-
-```markdown
-## Apple Music X.Y.Z / versionCode
-
-- Package：`com.apple.android.music`
-- Profile ID：`apple-music-X.Y.Z-CODE`
-- APK：base + split 清单
-- APK SHA-256：
-- 签名证书 SHA-256：
-- 配置 schema：`7`
-- 与上一版本相比的 profile symbol 变化：
-  - 类：
-  - 方法：
-  - 字段：
-- 与上一版本相比的结构契约变化：
-- Adapter 行为变化：无 / 独立变更记录链接
-- 私有资源/字段 profile 变化：
-- 健康状态：
-  - `dual_pane`：
-  - `editorial_video`：
-  - `phone_liquid_glass`：
-  - `future_blur`：
-  - `lyrics_typeface`：
-  - `current_song_identity`：
-  - `custom_lyrics`：
-- 适配说明：
+```powershell
+adb shell dumpsys package com.apple.android.music |
+  Select-String 'versionName=|versionCode='
 ```
 
-## 10. 完成定义
+如果是 XAPK/APKS，先解包得到完整 split 集合；只分析 base APK 可能漏掉资源或实际执行的 ABI dex。
 
-新版本适配完成，必须满足：
+### 3.3 证据分级
 
-- 精确 profile 已按包名、版本名和版本码登记。
-- 所有受影响目标符号都有可复核的身份、结构契约和独立 resolution 结果。
-- `EXACT_REQUIRED`、`EXACT_PREFERRED`、`Missing` 和 `Ambiguous` 语义没有被绕过。
-- Feature 层和目标无关运行时没有新增 Apple Music 私有知识。
-- 配置 schema、远程文件和双进程边界没有被复制或绕开。
-- 适配记录包含版本、APK、签名、profile、符号变化和 adapter 变化。
+将发现分成三类：
+
+1. **精确证据**：owner、完整参数、返回值、继承链、资源名和版本 tuple 同时匹配；
+2. **结构证据**：名称变化，但调用关系、字段类型、构造参数和相邻资源关系一致；
+3. **猜测**：只凭混淆短名、方法顺序或单个资源 ID 推断。
+
+生产 Hook 只能依赖前两类，第三类只能作为待验证候选，不能静默安装。
+
+## 4. 版本 profile 设计
+
+### 4.1 profile 是精确构建知识
+
+一个 profile 至少包含：
+
+```text
+packageName
+versionName
+versionCode
+exactClasses
+exactMethods
+exactFields
+resourceIds
+evidence / analysis notes
+```
+
+profile 的键是精确的 `packageName + versionName + versionCode`。不要用“6.5.x”“最新版”或模糊范围代替。多个版本共享实现时，也应在每个版本条目中明确写出证据，而不是默认继承。
+
+### 4.2 添加 profile 的规则
+
+- 先复制上一版作为分析起点，逐项重新确认；
+- 解析结果全部为 `Found` 且无歧义后，才把版本标为 supported；
+- 资源、类、方法和字段应独立记录，不能因为主类找到就假设其他成员仍然存在；
+- 只对已验证版本开放会改变行为的 Hook；
+- 未识别版本应保持 `UNSUPPORTED` 或 `DEGRADED`，不能“尽力猜测”。
+
+### 4.3 profile 和通用符号的关系
+
+公共 API 或 AndroidX 成员可以使用稳定的结构解析；Apple Music 私有成员必须绑定 profile 或明确的结构 fallback。某个版本特有的私有 guard 不应塞进所有旧版本的公共 profile，否则会制造“profile 显示已支持、实际能力从未验证”的假象。
+
+## 5. 目标符号解析模型
+
+### 5.1 每个符号独立解析
+
+每个 class、method、field 都要独立得到：
+
+```text
+Found(candidate, evidence)
+Missing(reason)
+Ambiguous(candidates, reason)
+```
+
+禁止以下写法：
+
+```kotlin
+declaredMethods.firstOrNull { it.name == "h" }
+```
+
+即使当前版本只有一个候选，也应同时校验 owner、static/instance、参数类型、返回类型、可见性和调用结构。候选多于一个时宁可降级，也不要挑第一个。
+
+### 5.2 解析层级
+
+推荐按以下顺序解析：
+
+1. exact profile：已验证的 owner/name/descriptor；
+2. constrained structural fallback：owner、签名、字段类型、调用者和资源关系均满足约束；
+3. 不安装并报告 Missing/Ambiguous。
+
+Fallback 必须有边界、有日志、有测试。不能用 fallback 绕过版本门控，也不能将私有类名硬编码在多个 adapter 中。
+
+### 5.3 解析诊断
+
+日志至少包含：
+
+- package/version tuple；
+- symbol key 和 owner；
+- 使用的策略（exact/profile/structural fallback）；
+- 候选数量和被拒绝原因；
+- 安装结果和 FeatureHealth。
+
+这些信息比“Hook installed”更有用，尤其是方法混淆后签名未变但语义已经改变的情况。
+
+## 6. Hook 时序和原生行为所有权
+
+### 6.1 资源期和实例期分离
+
+- 资源 ID/布局替换：在目标 Application 创建前注册；
+- 目标类和方法 Hook：在 profile 解析完成后安装；
+- 需要 view tree 的判断：等到目标实例和布局真正创建后进行；
+- 设置页桥接：在宿主原生 SettingsFragment 生命周期中接入。
+
+不要在资源期创建依赖 Activity/CoordinatorLayout 的对象，也不要在实例 Hook 中重复注册资源。
+
+### 6.2 原生 holder 和动画由谁负责
+
+如果 AM++ 改造了宿主 View tree，必须明确“模块改哪些几何条件”和“原生 holder 管哪些状态”：
+
+- 原生 holder 负责 peek、展开/收回、过渡动画和最终状态；
+- 模块负责目标 root、Fragment、资源布局和必要的边界条件；
+- 模块不应永久改 mini-player 的 visibility、alpha 或动画；
+- 发现目标 root 后，不要因为“有 flat root”就无条件保留另一个 native holder；
+- holder 的 return/call 语义发生变化时，必须有独立行为记录和运行时测试。
+
+## 7. 双栏播放器适配方法
+
+### 7.1 先确认目标 View tree
+
+不要只检查某个资源 ID 是否存在。至少确认：
+
+- 当前 root 属于目标 PlayerActivity/CoordinatorLayout；
+- root 是由本模块转换过的目标树，而不是宿主其他页面的同名控件；
+- `player_container`、`player_sheet_container`、tabs frame、lyrics/queue child 的父子关系符合预期；
+- 当前版本和 profile 与解析结果一致。
+
+### 7.2 布局和边界的两个量
+
+将“检测重叠的高度”和“实际位移的 inset”分开：
+
+```text
+tabsHeight      = tabs frame 的完整高度
+menuHeight      = 原生底栏菜单高度
+navigationInset = tabsHeight - menuHeight
+```
+
+边界判断使用完整 `tabsHeight`，collapsed settled translation 通常只使用 `-navigationInset`。不要把“完整 frame 高度”直接当成播放器平移量，也不要用额外 bottom margin 复制 native sheet boundary。
+
+这条规则必须由纯单元测试锁定：
+
+- tabs frame 高度变化时，overlap 判断变化；
+- settled translation 只随 navigation inset 变化；
+- 原生 holder 仍拥有 peek/transition；
+- compensation 开关关闭时，模块不再改边界。
+
+### 7.3 资源和布局的可验证约束
+
+适配记录应明确记录资源名而不是只记录十六进制 ID。常见检查包括：
+
+- tabs frame 是否完整宽度、是否在正确的 CoordinatorLayout 下；
+- menu height 和 stacked container 的 padding 是否符合设计；
+- player container 是否仍由 native sheet 管理，是否错误设置 bottom margin；
+- root transform 是否只作用于目标页面；
+- 普通手机、portrait、非双栏页面是否完全放行。
+
+## 8. 触摸 interception Guard
+
+### 8.1 为什么不能按 Behavior 类全局放行
+
+`CoordinatorLayout.Behavior.onInterceptTouchEvent()` 决定 Behavior 是否接管整串触摸事件。对某个混淆 Behavior 类的所有实例直接设置 `param.result = false`，可能影响无关页面，也可能让播放器在 `ACTION_DOWN` 时失去后续拖拽事件。
+
+“未命中区域会回到 `onTouchEvent`”不能作为普遍保证。是否进入 `onTouchEvent` 取决于 CoordinatorLayout 对整条事件流的选择。
+
+### 8.2 最小 bypass 条件
+
+建议把判断拆成可测试的纯策略，只有以下条件同时满足才绕过原始 interception：
+
+- 当前构建是已验证的 profile；
+- 官方平板、横屏、双栏功能和补偿开关均开启；
+- coordinator 是目标 coordinator；
+- child 是目标 player sheet，并位于本模块转换过的 View tree 下；
+- MotionEvent 命中 lyrics/queue 等已确认会被误拦截的区域；
+- 对同一 behavior 建立 DOWN→UP/CANCEL 的短 gesture latch。
+
+否则应调用 Apple 原始方法，保持其拖拽和展开逻辑。
+
+示例接口：
+
+```kotlin
+internal object StaticCollapsedInterceptPolicy {
+    fun shouldBypass(
+        tabletEligible: Boolean,
+        targetCoordinator: Boolean,
+        targetChild: Boolean,
+        inPlayerButtonRegion: Boolean,
+    ): Boolean = tabletEligible && targetCoordinator && targetChild && inPlayerButtonRegion
+}
+```
+
+Guard 的反射安装是独立能力。方法缺失、签名歧义或安装异常必须报告 `DEGRADED/FAILED`，不能继续返回 `ACTIVE`。
+
+## 9. 设置页、配置 schema 和双进程边界
+
+### 9.1 不要假设模块有 launcher Activity
+
+独立模块可以没有可启动 Activity，设置页也可以嵌入 Apple Music 原生 SettingsFragment。适配新版本时要分别确认：
+
+- bootstrap 是否接受新的 package/version tuple；
+- SettingsFragment 的 owner、继承链和 preference setup 方法；
+- preference 的 key、title、summary、add/remove 路径；
+- 设置入口是否出现在 Apple Music 原生设置页；
+- 修改后重启宿主是否仍能读到同一配置。
+
+“作用域已启用但设置入口消失”不应直接归因于作用域。常见原因是 bootstrap 版本门控遗漏、SettingsFragment profile 失效或资源期注册太晚。
+
+### 9.2 配置 schema 是单一事实来源
+
+适配不应复制键名和默认值。所有设置都应从 `ModuleSettingsSchema` 或同等单一来源读取：
+
+- key、类型、默认值和序列化编码；
+- remote preference/file 位置；
+- 迁移 marker、冲突处理和失败重试；
+- 独立模块进程与宿主进程之间的同步边界。
+
+新版本宿主私有目录变化时，只适配存储路径和初始化时序，不要改动业务配置语义。
+
+## 10. 其他目标能力的适配要点
+
+### 10.1 歌词和字体
+
+- 先确认目标 RecyclerView/文本容器的精确类型，不能只按资源名猜；
+- blur session 要在切歌、退出播放器和异常时清理；
+- 字体替换只作用于歌词目标，不要污染搜索、推荐或设置页面；
+- 自定义歌词注入失败时保留宿主原始歌词。
+
+### 10.2 当前歌曲身份和显示修正
+
+身份解析应尽量在 adapter 中完成一次并复用快照。UI getter 不应遍历关系、读磁盘、等待网络或同步等待后台任务。候选值为空或异常时保留原始 title/artist/album，保持 fail-open。
+
+### 10.3 Editorial Video 和手机液态玻璃
+
+这些能力有独立设备资格和资源期约束。版本适配时只更新目标符号和资源定位，不要扩大 URL 抑制、窗口背景或手机/平板资格范围。
+
+### 10.4 媒体库刷新
+
+媒体库刷新通常同时依赖 MediaLibrary 类型、singleton、ready/update 方法、更新原因枚举，以及可选的 native catalog refresh/native pointer。适配时：
+
+- 先确认用户主动刷新请求的入口和广播/回调生命周期；
+- 独立解析 `MediaLibraryType`、singleton、ready、update 和更新原因，不要把一个方法找到当成整项能力成功；
+- 优先使用结构明确的 `UserInitiatedPoll` 等更新原因，枚举缺失时返回 `DEGRADED`；
+- native pointer 或 native catalog refresh 缺失时，只关闭加速/回填路径，不影响播放器和歌词；
+- 注册 request responder 失败时报告 `DEGRADED`，不得让宿主启动失败；
+- 如果刷新后需要目录补全，和标题修正共享同一个 bounded cache，禁止每次点击重新扫描配置或遍历关系。
+
+### 10.5 标题修正和目录缓存
+
+标题修正通常跨越“宿主显示转换 → Apple Music ID → 目录缓存 → miss 后台回填”四个边界。适配新版本时：
+
+- 重新确认标题转换方法的 owner、参数/返回类型和调用时机；
+- 保留宿主原始 title/artist/album 作为 fail-open 值，候选为空、异常或缓存 miss 时不阻塞 UI；
+- 标题缓存应延迟到第一次实际解析或用户主动刷新，不要在 `Application.onCreate` 扫描偏好或创建无界任务；
+- 当前歌曲身份解析、标题缓存和媒体库刷新必须共享同一身份/缓存语义，避免重复解析和跨歌曲污染；
+- miss 回填应有 bounded queue、去重、后台执行和可重试结果，不能在主线程做目录查询；
+- title correction 开关关闭时，不应创建 catalog lookup、scheduler 或额外的宿主 Hook。
+
+### 10.6 目录语言
+
+目录语言不是一个单独的字符串 Hook，而是一组请求契约适配。新版可能把语言分散在 storefront、Accept-Language、iCloud helper、Store API/iTunes header map、Media API 参数和 store lookup 参数中。适配时：
+
+- 为每个语言承载点独立解析和报告状态；
+- 只改语言字段，保留其他 header、map key、未知值和原始返回对象；
+- 同时处理 raw language tag 与 `Accept-Language` header 映射，避免只改 UI locale 而目录仍返回默认语言；
+- map 重写应在值类型正确时复制并替换，未命中或类型不符时返回原 map；
+- 不直接 Hook suspend/Continuation 返回值，除非已经验证其返回契约；
+- 至少覆盖 storefront、header、map、raw tag 和无相关字段的 fail-open 测试。
+
+## 11. 测试策略
+
+### 11.1 先写行为测试，再更新 profile
+
+针对每个容易回归的语义写 RED 测试，再实现 GREEN：
+
+- holder：目标 root 返回正确的 native holder，非目标 root 调用原始实现；
+- boundary：完整 tabs frame 参与 overlap，translation 使用 navigation inset；
+- guard：portrait、双栏关闭、补偿关闭、无关 coordinator、无关 child 和非按钮区域均放行原始方法；
+- library refresh：缺少 MediaLibrary 私有符号时只让刷新能力降级，播放器和歌词仍可安装；
+- title correction：缓存 miss、空候选和后台回填失败均保留宿主原始显示；
+- catalog language：各语言承载点分别重写，未知 map/key/类型保持原值；
+- settings：supported build 显示设置入口，unsupported build 不发布半初始化设置；
+- resolver：Missing/Ambiguous 时不安装错误 Hook，健康状态准确反映结果。
+
+只检查 `source.contains(...)` 不足以证明运行时行为。结构测试可以防止代码误删，但必须搭配纯策略测试、resolver seam 测试和设备验收。
+
+### 11.2 建议命令
+
+```powershell
+./gradlew.bat testDebugUnitTest --no-daemon
+./gradlew.bat lintDebug lintVitalRelease assembleDebug assembleRelease --no-daemon
+git diff --check
+```
+
+如果只修改 profile 或 adapter，也要运行受影响的定向测试，再运行全量 JVM；不要只依赖编译通过。
+
+### 11.3 设备验收
+
+在目标设备上再次确认宿主版本：
+
+```powershell
+adb shell dumpsys package com.apple.android.music |
+  Select-String 'versionName=|versionCode='
+adb shell uiautomator dump /sdcard/ampp.xml
+adb pull /sdcard/ampp.xml .work/ampp.xml
+```
+
+至少验收：
+
+1. 设置入口可见、可打开、可保存，重启后仍在；
+2. 平板横屏双栏播放器的 bottom navigation、mini-player、歌词和队列按钮均存在；
+3. 展开、收回、拖拽和点击事件互不破坏；
+4. portrait、手机、双栏关闭和补偿关闭路径保持原生行为；
+5. logcat 能区分 profile resolution、Hook 安装和 `ACTIVE/DEGRADED/FAILED`；
+6. PR 附带设备型号、Android 版本、宿主版本和截图/录屏。
+
+## 12. 常见症状和排查顺序
+
+| 症状 | 优先检查 | 常见根因 |
+| --- | --- | --- |
+| 作用域已开但设置入口消失 | bootstrap 日志、SettingsFragment profile、资源注册时序 | 新版本未加入 exact build gate，或设置 Hook owner/方法变化 |
+| 底部栏灰掉/布局异常 | holder 选择、root transform、tabs frame 层级 | flat root 提前 return、holder 语义错误或资源注册太晚 |
+| mini-player 消失 | `k1()` 返回值、native holder 生命周期、visibility/alpha Hook | 错保留 flat holder，或模块接管了原生动画 |
+| collapsed 播放器被底栏推入/遮挡 | `tabsHeight` 与 `navigationInset` 是否分离 | 把完整 tabs 高度直接当 translation，或重复修改 margin |
+| 歌词/队列按钮失效 | guard 的 coordinator/child/区域判断、gesture latch | 对 Behavior 类全局返回 false，或 DOWN 事件被截断 |
+| 日志显示 ACTIVE 但功能没生效 | 每个独立 install 的返回值和 FeatureHealth | 忽略 Boolean、Missing/Ambiguous 被吞掉 |
+| 只在某个版本崩溃 | profile tuple、owner、descriptor、split 集合 | 误用旧 profile 或只分析 base APK |
+
+排查顺序应是：版本身份 → bootstrap → 资源时序 → profile/resolver → holder/adapter → 设备 UI 行为。不要先通过扩大 Hook 作用域“碰运气”。
+
+## 13. 新版本适配流程
+
+1. 保存 APK/XAPK、split 清单、SHA-256、签名和设备信息。
+2. 安装后用包管理器确认 package/versionName/versionCode。
+3. 建立旧版与新版的 class、method、field、resource 差异表，只读分析，不立即修改业务行为。
+4. 为每个目标符号标记 Found/Missing/Ambiguous，并记录证据和候选拒绝原因。
+5. 更新 exact profile 和结构 fallback 的边界；未确认的符号保持未支持。
+6. 先修 bootstrap/设置入口，再修资源期注册和目标 adapter。
+7. 为 holder、boundary、touch guard、resolver 和设置 bootstrap 补行为测试。
+8. 运行定向测试、全量 JVM、lint、Debug/Release 构建和 diff 检查。
+9. 在准确宿主版本的目标设备上完成设置、双栏、歌词、拖拽和 fail-open 验收。
+10. 在 PR 中提交适配记录：版本证据、符号表、行为差异、测试结果、日志和截图/录屏。
+
+## 14. 适配记录模板
+
+复制以下模板到 PR 描述或 `docs/` 中，按实际版本填写：
+
+```markdown
+## Apple Music <versionName> / <versionCode>
+
+- package:
+- source APK/XAPK:
+- SHA-256:
+- base/split/ABI:
+- signer:
+- test device / Android / density:
+
+### Supported capabilities
+- [ ] embedded settings
+- [ ] dual-pane player
+- [ ] lyrics blur
+- [ ] lyrics typeface
+- [ ] custom lyrics
+- [ ] library refresh
+- [ ] title correction
+- [ ] catalog language
+- [ ] current-song identity
+- [ ] editorial video
+- [ ] phone liquid glass
+
+### Symbol changes
+| symbol key | owner | descriptor | strategy | evidence | status |
+| --- | --- | --- | --- | --- | --- |
+
+### Behavior checks
+- holder ownership:
+- boundary geometry:
+- touch interception scope:
+- native animation/drag ownership:
+- fail-open/degraded behavior:
+
+### Validation
+- JVM:
+- lint/build:
+- device smoke:
+- screenshots/video:
+- known limitations:
+```
+
+## 15. 完成定义
+
+一次新版本适配只有同时满足以下条件才算完成：
+
+- 版本 tuple 和 APK 证据可复现；
+- 每个目标符号都有独立解析结果和可追踪 profile；
+- unsupported、Missing、Ambiguous 和 Hook 异常不会误报 `ACTIVE`；
+- 设置入口、资源时序和配置迁移经过验证；
+- native holder、动画、拖拽和 boundary 语义没有被无记录改变；
+- 全量 JVM、lint、Debug/Release 和 `git diff --check` 通过；
+- 目标设备上有截图/录屏和 logcat 证据；
+- PR 明确列出尚未验证的版本、设备或能力。
+
+适配完成的标准不是“编译成功”或“某个页面出现了”，而是新宿主中既有功能仍按原契约工作，并且失败时能安全、可诊断地退化。
+
+## 16. 代码入口
+
+- [`TargetSymbols.kt`](../app/src/main/java/dev/amenhancer/module/hook/TargetSymbols.kt)：版本 profile、symbol key 和解析策略。
+- [`TargetAdaptation.kt`](../app/src/main/java/dev/amenhancer/module/hook/TargetAdaptation.kt)：目标能力组装和 adapter 边界。
+- [`AppleMusicDualPaneTarget.kt`](../app/src/main/java/dev/amenhancer/module/hook/AppleMusicDualPaneTarget.kt)：双栏播放器、holder、布局和边界 Hook。
+- [`StaticCollapsedInterceptGuard.kt`](../app/src/main/java/dev/amenhancer/module/hook/StaticCollapsedInterceptGuard.kt)：触摸 interception 的独立适配点。
+- [`EmbeddedBootstrap.kt`](../app/src/main/java/dev/amenhancer/module/hook/EmbeddedBootstrap.kt)：宿主版本门控和嵌入设置初始化。
+- [`HookEntry.kt`](../app/src/main/java/dev/amenhancer/module/hook/HookEntry.kt)：宿主生命周期和资源注册时序。

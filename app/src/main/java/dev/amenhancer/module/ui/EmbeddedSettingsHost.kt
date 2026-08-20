@@ -1208,10 +1208,11 @@ internal class EmbeddedSettingsHost private constructor(
     }
 
     /**
-     * Exact 6.5.1 seam: SettingsFragment is an AndroidX PreferenceFragment
-     * hosted by MainContentActivity. This keeps the option inside Apple's
-     * native settings list; the View row remains a fallback for future host
-     * layouts or when a repacker changes the Preference implementation.
+     * Verified 6.5.1/6.5.2 seam: SettingsFragment is an AndroidX
+     * PreferenceFragment hosted by MainContentActivity. This keeps the option
+     * inside Apple's native settings list; the View row remains a fallback
+     * for future host layouts or when a repacker changes the Preference
+     * implementation.
      */
     fun onSettingsPreferencesReady(fragment: Any, activity: Activity) {
         if (!registered || activity.packageName != ModuleConstants.TARGET_PACKAGE) return
@@ -1620,7 +1621,7 @@ internal class EmbeddedSettingsHost private constructor(
             findNativePreferencesByKey(it, preferenceClass, key)
         }.orEmpty()
         val existing = screenMatches.firstOrNull() ?: runCatching {
-            // AndroidX 6.5.1 maps PreferenceFragmentCompat.findPreference()
+            // AndroidX 6.5.1/6.5.2 maps PreferenceFragmentCompat.findPreference()
             // to t0(String); keep this as a fallback for repacked builds where
             // the PreferenceScreen field is not directly discoverable.
             ModernXposedRuntime.callMethod(fragment, "t0", key)
@@ -1643,7 +1644,7 @@ internal class EmbeddedSettingsHost private constructor(
         if (!keyWasSet) {
             return false
         }
-        // On the verified 6.5.1 AndroidX build, K is setTitle and J is
+        // On the verified 6.5.1/6.5.2 AndroidX builds, K is setTitle and J is
         // setSummary (J rejects a SummaryProvider, which distinguishes them).
         preferenceClass.getDeclaredMethod("K", CharSequence::class.java)
             .apply { isAccessible = true }
@@ -1654,7 +1655,7 @@ internal class EmbeddedSettingsHost private constructor(
         if (!installNativePreferenceClick(preferenceClass, preference, activity)) return false
 
         val targetScreen = screen ?: return false
-        // AndroidX 6.5.1 maps PreferenceGroup.P() to addPreference(); S()
+        // AndroidX 6.5.1/6.5.2 maps PreferenceGroup.P() to addPreference(); S()
         // is the corresponding remove path. Add once, then normalize the
         // whole screen so repeated lifecycle callbacks cannot accumulate rows.
         ModernXposedRuntime.callMethod(targetScreen, "P", preference)
