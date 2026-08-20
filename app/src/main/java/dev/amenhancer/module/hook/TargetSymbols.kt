@@ -348,11 +348,54 @@ private object AppleMusicProfiles {
         ),
     )
 
+    private val appleMusic652 = AppleMusicProfile(
+        id = "apple-music-6.5.2-1586",
+        exactClasses = mapOf(
+            TargetSymbolId.PLAYER_CONTROLLER to "com.apple.android.music.player.fragment.t0",
+            TargetSymbolId.PLAYER_ACTIVITY to "com.apple.android.music.common.activity.PlayerActivity",
+            TargetSymbolId.EDITORIAL_VIDEO_OWNER to "com.apple.android.music.player.f1",
+            TargetSymbolId.LYRICS_FRAGMENT to "com.apple.android.music.player.fragment.PlayerLyricsViewFragment",
+            TargetSymbolId.LYRICS_CHROME to "com.apple.android.music.player.fragment.e",
+            TargetSymbolId.LYRICS_LINE_VECTOR to
+                "com.apple.android.music.ttml.javanative.model.LyricsLineVector",
+            TargetSymbolId.LYRICS_EVENT_PROCESSOR to
+                "com.apple.android.music.ttml.SongInfoTimeProcessor",
+            TargetSymbolId.LYRICS_HIGHLIGHT_CALLBACK_OWNER to
+                "com.apple.android.music.ttml.SongInfoTimeProcessor\$processEvents\$lineEventCallback\$1",
+            TargetSymbolId.LYRICS_VIEW_MODEL to
+                "com.apple.android.music.player.viewmodel.PlayerLyricsViewModel",
+            TargetSymbolId.STACKED_NAVIGATION_MENU to "Hd.b",
+            TargetSymbolId.SONG_INFO_PTR to
+                "com.apple.android.music.ttml.javanative.model.SongInfo\$SongInfoPtr",
+            TargetSymbolId.SONG_INFO_NATIVE to
+                "com.apple.android.music.ttml.javanative.model.SongInfo\$SongInfoNative",
+            TargetSymbolId.TTML_PARSER_NATIVE to
+                "com.apple.android.music.ttml.javanative.TTMLParser\$TTMLParserNative",
+            TargetSymbolId.LYRICS_CURRENT_ITEM_FIELD to
+                "com.apple.android.music.player.fragment.m",
+            TargetSymbolId.PLAYER_METADATA_HUB to "com.apple.android.music.player.f",
+            TargetSymbolId.METADATA_TO_ITEM_CONVERTER to "com.apple.android.music.player.O",
+            TargetSymbolId.LYRICS_AVAILABILITY_OWNER to "com.apple.android.music.player.e1",
+            TargetSymbolId.MEDIA_ENTITY_TO_SONG_CONVERTER to "y8.B",
+            TargetSymbolId.STORE_FRONT_LANGUAGE_ARRAY_OWNER to "J5.a",
+        ),
+        exactMethods = mapOf(
+            TargetSymbolId.PLAYER_ACTIVITY_CREATE_STACKED_NAVIGATION_HOLDER to "k1",
+            TargetSymbolId.PLAYER_ACTIVITY_ROOT to "n0",
+            TargetSymbolId.LYRICS_ITEM_UPDATE_METHOD to "o2",
+            TargetSymbolId.STORE_FRONT_LANGUAGE_ARRAY_METHOD to "b",
+        ),
+        exactFields = mapOf(
+            TargetSymbolId.PLAYER_ACTIVITY_BEHAVIOR_FIELD to "c1",
+        ),
+    )
+
     fun match(build: TargetBuild): AppleMusicProfile? {
         if (build.packageName != ModuleConstants.TARGET_PACKAGE) return null
         return when {
             build.versionName == "6.5.0" && build.versionCode == 1580L -> appleMusic650
             build.versionName == "6.5.1" && build.versionCode == 1583L -> appleMusic651
+            build.versionName == "6.5.2" && build.versionCode == 1586L -> appleMusic652
             else -> null
         }
     }
@@ -434,6 +477,24 @@ internal object AppleMusicSymbols {
         searchHierarchy = true,
         fallbackOwner = { it.endsWith(".common.activity.PlayerActivity") },
         contract = ::isPlayerActivityBehaviorField,
+    )
+
+    /**
+     * Private dual-pane knowledge is intentionally independent of the
+     * general AppleMusicProfile table. The guard is version-gated by its
+     * adapter and this resolver still requires the exact owner suffix and
+     * full CoordinatorLayout/View/MotionEvent signature.
+     */
+    val StaticCollapsedInterceptMethod = TargetSymbolKey(
+        id = "static-collapsed-intercept-method",
+        profilePolicy = ProfilePolicy.NO_PROFILE,
+        structuralCandidates = {
+            methods(
+                namePredicate = { it.endsWith(".StaticCollapsedBottomSheetBehavior") },
+                contract = ::isStaticCollapsedIntercept,
+            )
+        },
+        identity = ::methodIdentity,
     )
 
     val EditorialVideoUrlSelector = methodSymbol(
@@ -1864,6 +1925,16 @@ private fun isPlayerActivityRoot(method: Method): Boolean =
 private fun isPlayerActivityBehaviorField(field: Field): Boolean =
     !Modifier.isStatic(field.modifiers) && isBottomSheetBehaviorType(field.type)
 
+private fun isStaticCollapsedIntercept(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "h" &&
+        method.returnType == Boolean::class.javaPrimitiveType &&
+        method.parameterTypes.map(Class<*>::getName) == listOf(
+            "androidx.coordinatorlayout.widget.CoordinatorLayout",
+            "android.view.View",
+            "android.view.MotionEvent",
+        )
+
 private fun isBottomSheetBehaviorType(type: Class<*>): Boolean {
     var current: Class<*>? = type
     while (current != null) {
@@ -1976,7 +2047,8 @@ private fun isLyricsInstallMethod(method: Method): Boolean =
  * The verified o2 contract: exact name, void return, the v3.v metadata type,
  * the BaseContentItem current item, and a flags holder declared as a member
  * of the fragment's immediate superclass whose non-static boolean fields are
- * exactly {a, b, c}. Both verified profiles (6.5.0 `e$c`, 6.5.1 `d$c`) carry
+ * exactly {a, b, c}. The verified profiles (6.5.0 `e$c`, 6.5.1 `d$c`,
+ * 6.5.2 `e$c`) carry
  * that exact shape, so the contract can never silently select an unrelated
  * three-argument method.
  */
@@ -2293,7 +2365,8 @@ private fun isAttributesSetAlbumNameMethod(method: Method): Boolean =
 
 /**
  * The verified AMTool "MediaEntity -> model.Song" converter shape
- * (`y8.B.b(Song, Bundle)` in both 6.5.0 and 6.5.1). The static signature is
+ * (`y8.B.b(Song, Bundle)` in the verified 6.5.0, 6.5.1 and 6.5.2 builds).
+ * The static signature is
  * specific enough that an unknown build can only produce a unique match or
  * an explicit ambiguity, never a silent first pick.
  */

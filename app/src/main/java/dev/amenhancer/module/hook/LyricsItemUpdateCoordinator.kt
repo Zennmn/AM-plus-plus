@@ -9,7 +9,7 @@ import java.lang.reflect.Modifier
  * Phase 152 natural-transition lyrics refresh seam. Apple's
  * `PlayerLyricsViewFragment.o2` receives every playback metadata publish with
  * a context item and a per-version flags holder whose `a` field is Apple's own
- * item-changed signal. On 6.5.1 the context item is a Playlist (`pl.*` id), not
+ * item-changed signal. On 6.5.1 and 6.5.2 the context item is a Playlist (`pl.*` id), not
  * the track Adam ID; after Apple's body returns, the fragment's verified
  * current-item field is the authoritative track identity. Apple's native tail
  * only calls I2 while the adapter still has no rows, so a natural A→B
@@ -129,7 +129,7 @@ internal class LyricsItemUpdateCoordinator(
 
 /**
  * Reads the verified item-changed flag (`a`) from Apple's per-version o2
- * flags holder (`e$c` on 6.5.0, `d$c` on 6.5.1). The field is public,
+ * flags holder (`e$c` on 6.5.0, `d$c` on 6.5.1, `e$c` on 6.5.2). The field is public,
  * non-static, boolean and declared on the exact flags type carried by the
  * resolved o2 method, so a holder of any other shape is rejected.
  */

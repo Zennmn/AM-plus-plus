@@ -26,9 +26,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 internal object EmbeddedSettingsFragmentMethodResolver {
     /**
      * Finds the host PreferenceFragment method that creates/binds its
-     * PreferenceScreen.  The fixed 6.5.1 build keeps the AndroidX owner but
-     * may rename the method; prefer the stable method name and otherwise
-     * accept only a unique void(Int) candidate in the AndroidX hierarchy.
+     * PreferenceScreen.  The verified 6.5.1 and 6.5.2 builds keep the
+     * AndroidX owner but rename the method; prefer the stable method name and
+     * otherwise accept only a unique void(Int) candidate in that hierarchy.
      */
     fun findPreferenceSetup(type: Class<*>): Method? {
         val candidates = buildList {
@@ -163,7 +163,7 @@ class HookEntry : XposedModule() {
                         val build = targetBuild(application)
                         if (!bootstrap.supports(build)) {
                             ModernXposedRuntime.log(
-                                "embedded build ${build.displayName} is unsupported; expected 6.5.1 (1583)",
+                                "embedded build ${build.displayName} is unsupported; expected 6.5.1 (1583) or 6.5.2 (1586)",
                             )
                             return
                         }
