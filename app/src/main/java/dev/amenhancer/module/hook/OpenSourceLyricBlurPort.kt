@@ -24,6 +24,7 @@ import android.widget.ImageView
 internal class OpenSourceLyricBlurPort(
     private val targetAccess: LyricBlurTargetAccess,
     private val blurRadiusOffsetPx: Int = 0,
+    private val probe: LyricHighlightProbe = LyricHighlightProbe(),
 ) : LyricBlurRuntime {
     companion object {
         private const val TAG = "AMLyricBlur"
@@ -32,6 +33,7 @@ internal class OpenSourceLyricBlurPort(
     }
 
     private val highlightSession = LyricHighlightSession()
+    private val wordHighlightState = LyricWordHighlightState()
     private val blurRenderer = LyricBlurRenderer()
 
     private var recyclerView: Any? = null
@@ -55,18 +57,36 @@ internal class OpenSourceLyricBlurPort(
     }
     override fun onSessionChanged(songInfo: Any) {
         if (highlightSession.enter(songInfo)) {
+            wordHighlightState.clear()
             Log.i(TAG, "Lyric session changed")
             scheduleBlurUpdate()
         }
     }
 
     override fun onHighlightsChanged(lineIds: Set<Int>) {
-        highlightSession.update(lineIds)
+        val activeIds = highlightSession.update(lineIds)
+        probe.recordSessionUpdate(
+            incomingIds = lineIds,
+            activeIds = activeIds,
+            gap = highlightSession.isGap(),
+            opening = highlightSession.isOpeningHighlight(),
+        )
         scheduleBlurUpdate()
     }
 
     override fun onFallbackHighlightChanged(lineId: Int) {
         highlightSession.replace(lineId)
+        probe.recordSessionUpdate(
+            incomingIds = setOf(lineId),
+            activeIds = highlightSession.snapshot(),
+            gap = highlightSession.isGap(),
+            opening = highlightSession.isOpeningHighlight(),
+        )
+        scheduleBlurUpdate()
+    }
+
+    override fun onWordHighlightsChanged(source: String, lineIds: Set<Int>) {
+        wordHighlightState.update(source, lineIds)
         scheduleBlurUpdate()
     }
 
@@ -96,6 +116,7 @@ internal class OpenSourceLyricBlurPort(
         }
         detachScrollListener()
         blurRenderer.clearAll()
+        wordHighlightState.clear()
         recyclerView = null
         lyricsRootView = null
         lyricsFragmentOwner = null
@@ -251,10 +272,11 @@ internal class OpenSourceLyricBlurPort(
             if (!isLyricsLine(child)) continue
             visibleRows += child to adapterPos
         }
-        val activeIds = highlightSession.snapshot()
+        val wordActiveIds = wordHighlightState.snapshot()
+        val activeIds = highlightSession.snapshot() + wordActiveIds
         val gapAnchorPosition = BidirectionalBlurPolicy.selectInstrumentalGapAnchor(
             active = activeIds,
-            isGap = highlightSession.isGap(),
+            isGap = highlightSession.isGap() && wordActiveIds.isEmpty(),
             isOpeningHighlight = highlightSession.isOpeningHighlight(),
             instrumentalPositions = instrumentalRows.map { (_, position) -> position },
             visiblePositions = visibleRows.map { (_, position) -> position },
@@ -263,6 +285,15 @@ internal class OpenSourceLyricBlurPort(
             active = activeIds,
             visiblePositions = visibleRows.map { (_, position) -> position },
             gapAnchorPosition = gapAnchorPosition,
+        )
+        // One bounded diagnostic observation per coalesced frame; individual
+        // renderer setters remain intentionally silent.
+        probe.recordBlurFrame(
+            activeIds = activeIds,
+            effectiveIds = effectiveIds,
+            visibleIds = visibleRows.map { (_, position) -> position },
+            includeFocus = includeFocus,
+            immediate = immediate,
         )
         val useTabletEdges = TabletModeQualifier.isEligible(rv.context)
         val targets = LinkedHashMap<View, Float>(visibleRows.size + creditsRows.size)
@@ -344,6 +375,7 @@ internal interface LyricBlurRuntime {
     fun onSessionChanged(songInfo: Any)
     fun onHighlightsChanged(lineIds: Set<Int>)
     fun onFallbackHighlightChanged(lineId: Int)
+    fun onWordHighlightsChanged(source: String, lineIds: Set<Int>) = Unit
     fun onLyricsViewCreated(owner: Any, root: View)
     fun onLyricsViewDestroyed(owner: Any)
 }
