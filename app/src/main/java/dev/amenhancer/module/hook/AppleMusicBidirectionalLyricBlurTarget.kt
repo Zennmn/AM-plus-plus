@@ -7,16 +7,16 @@ import dev.amenhancer.module.hook.ModernMethodHook as XC_MethodHook
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 
-private const val LYRICS_PROCESS_EVENTS_MARKER = "\$processEvents"
+private const val LYRICS_PROCESS_EVENTS_SUFFIX = "\$processEvents"
 
 /**
  * Returns the stable owner prefix shared by Apple's line/word callback lambdas.
  * The local callback name is compiler-generated and may change between builds.
  */
 internal fun deriveLyricWordCallbackPrefix(ownerName: String): String? {
-    val markerStart = ownerName.indexOf(LYRICS_PROCESS_EVENTS_MARKER)
-    if (markerStart < 0) return null
-    return ownerName.substring(0, markerStart + LYRICS_PROCESS_EVENTS_MARKER.length)
+    val nestedOwnerStart = ownerName.indexOf('$')
+    if (nestedOwnerStart <= 0) return null
+    return ownerName.substring(0, nestedOwnerStart) + LYRICS_PROCESS_EVENTS_SUFFIX
 }
 
 /** Apple Music symbol and hook adapter for the target-independent lyric blur runtime. */

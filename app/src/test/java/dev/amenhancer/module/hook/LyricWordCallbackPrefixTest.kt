@@ -18,10 +18,20 @@ class LyricWordCallbackPrefixTest {
     }
 
     @Test
-    fun `prefix is unavailable when owner is not a processEvents callback`() {
-        assertNull(
+    fun `prefix uses stable processor owner when callback name is renamed`() {
+        assertEquals(
+            "com.apple.android.music.ttml.SongInfoTimeProcessor\$processEvents",
             deriveLyricWordCallbackPrefix(
                 "com.apple.android.music.ttml.SongInfoTimeProcessor\$renamedCallback",
+            ),
+        )
+    }
+
+    @Test
+    fun `prefix is unavailable when owner is not a nested callback`() {
+        assertNull(
+            deriveLyricWordCallbackPrefix(
+                "com.apple.android.music.ttml.SongInfoTimeProcessor",
             ),
         )
     }
