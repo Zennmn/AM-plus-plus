@@ -25,9 +25,9 @@
    - 默认值：`true`
    - 关闭后需要重启 Apple Music，feature 才不会注册 Hook。
 
-## 临时生命周期探针
+## CJK 动画结束清理
 
-当前诊断提交会在 `AppleMusicCjkKaraokeAnimationTarget` 输出带 `[DEBUG-cjk-r2]` 前缀的日志，记录 `e.o/e.p`、Animator listener、词 View 的 alpha/translation/scale、TextView/Paint shadow 和背景 Drawable，以及动画结束或取消时的同一组状态。它还会给已发现的原生 Animator 加一个只读 `onAnimationEnd/onAnimationCancel` 观察 listener；这是临时诊断包，不应当作为长期发布包使用，拿到设备日志后应移除探针。
+当前实现只对 gate 放行的单个前景 CJK 词安装原生 Animator 的结束/取消 listener：外层 `AnimatorSet` 结束后，取消并移除该词 `e.p` 中残留的 Animator，再在同一个 `G[wordId]` 和 binding View 仍有效时恢复 translation、scale、pivot 和 TextView/Paint shadow。不会恢复 View alpha，也不会触碰英语或合并 CJK 词的动画。
 
 ## 关键代码位置
 
