@@ -82,8 +82,11 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
             )
         }
 
+        val cleanupNote = failures.joinToString("; ").takeIf(String::isNotBlank)
+            ?.let { "; cleanup diagnostics: $it" }
+            .orEmpty()
         return TargetCapabilityInstall.Active(
-            "Installed AM++ per-word ValueAnimator on exact 6.5.2/1586 z.a0 binding View",
+            "Installed AM++ per-word ValueAnimator on exact 6.5.2/1586 z.a0 binding View$cleanupNote",
         )
     }
 
@@ -182,10 +185,13 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         }
     }
 
-    private fun installWordLayoutRecycleHook(owner: Class<*>, failures: MutableList<String>) {
-        val g0 = findWordLayoutMethod(owner) ?: return
+    private fun installWordLayoutRecycleHook(owner: Class<*>, failures: MutableList<String>): Boolean {
+        val g0 = findWordLayoutMethod(owner) ?: run {
+            failures += "z.g0 recycle method unavailable"
+            return false
+        }
         try {
-            ModernXposedRuntime.hookMethod(g0, object : ModernMethodHook() {
+            val installed = ModernXposedRuntime.hookMethod(g0, object : ModernMethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     // g0 rebuilds one FullWidthAlphaGradientFlexboxLayout at
                     // a time. Clear only that layout's current children so a
@@ -193,11 +199,14 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
                     (param.args.getOrNull(2) as? View)?.let(::clearViewTree)
                 }
             })
+            if (!installed) failures += "z.g0 recycle hook was rejected"
+            return installed
         } catch (error: Throwable) {
             // This is an optional safety hook. z.a0 remains useful even if
             // an OEM build changes the layout method's return type.
             failures += "z.g0 recycle hook failed: ${error.cjkShortMessage()}"
             Log.w(TAG, "CJK z.g0 recycle hook failed open", error)
+            return false
         }
     }
 
@@ -210,16 +219,22 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         }
     }
 
-    private fun installFragmentDestroyHook(failures: MutableList<String>) {
-        val fragment = symbols.resolve(AppleMusicSymbols.LyricsFragment).valueOrNull() ?: return
+    private fun installFragmentDestroyHook(failures: MutableList<String>): Boolean {
+        val fragment = symbols.resolve(AppleMusicSymbols.LyricsFragment).valueOrNull() ?: run {
+            failures += "lyrics fragment symbol unavailable for cleanup"
+            return false
+        }
         try {
             val declaringClass = generateSequence(fragment) { it.superclass }
                 .firstOrNull { type ->
                     type.declaredMethods.any { method ->
                         method.name == "onDestroyView" && method.parameterCount == 0
                     }
-                } ?: return
-            ModernXposedRuntime.hookAllMethods(
+                } ?: run {
+                    failures += "lyrics onDestroyView method unavailable"
+                    return false
+                }
+            val installed = ModernXposedRuntime.hookAllMethods(
                 declaringClass,
                 "onDestroyView",
                 object : ModernMethodHook() {
@@ -228,9 +243,12 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
                     }
                 },
             )
+            if (installed.isEmpty()) failures += "lyrics onDestroyView hook was rejected"
+            return installed.isNotEmpty()
         } catch (error: Throwable) {
             failures += "lyrics onDestroyView cleanup failed: ${error.cjkShortMessage()}"
             Log.w(TAG, "CJK lyrics lifecycle cleanup failed open", error)
+            return false
         }
     }
 
@@ -243,8 +261,11 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         owner: Class<*>,
         holderClass: Class<*>?,
         failures: MutableList<String>,
-    ) {
-        if (holderClass == null) return
+    ): Boolean {
+        if (holderClass == null) {
+            failures += "z.p holder type unavailable for cleanup"
+            return false
+        }
         val recycle = owner.declaredMethods.firstOrNull { method ->
             val holderParameter = method.parameterTypes.firstOrNull()
             method.name == "p" &&
@@ -256,16 +277,22 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
                         holderParameter.isAssignableFrom(holderClass)
                     ) &&
                 method.parameterTypes[1] == Int::class.javaPrimitiveType
-        } ?: return
+        } ?: run {
+            failures += "z.p recycle method unavailable"
+            return false
+        }
         try {
-            ModernXposedRuntime.hookMethod(recycle, object : ModernMethodHook() {
+            val installed = ModernXposedRuntime.hookMethod(recycle, object : ModernMethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     param.args.getOrNull(0)?.let(::clearHolderAnimations)
                 }
             })
+            if (!installed) failures += "z.p recycle hook was rejected"
+            return installed
         } catch (error: Throwable) {
             failures += "z.p recycle hook failed: ${error.cjkShortMessage()}"
             Log.w(TAG, "CJK z.p recycle hook failed open", error)
+            return false
         }
     }
 
