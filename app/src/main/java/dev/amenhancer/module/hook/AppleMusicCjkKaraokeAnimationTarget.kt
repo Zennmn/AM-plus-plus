@@ -2,6 +2,7 @@ package dev.amenhancer.module.hook
 
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
 import java.lang.reflect.Executable
 import java.util.concurrent.atomic.AtomicInteger
 import java.lang.ref.WeakReference
@@ -28,15 +29,21 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     private val glowAnimators = Collections.synchronizedMap(
         WeakHashMap<Animator, WeakReference<Any>>(),
     )
+    /** z$f is called once per frame; cache its view lookup after the first frame. */
+    private val inspectedGlowListeners = Collections.synchronizedMap(
+        WeakHashMap<Any, WeakReference<Any>?>(),
+    )
     private val activeGlowByView = Collections.synchronizedMap(
         WeakHashMap<Any, WeakReference<Animator>>(),
     )
     private val trackedGlowViews = Collections.synchronizedMap(
-        WeakHashMap<Any, Boolean>(),
+        WeakHashMap<Any, CjkGlowBaseline>(),
     )
+    private val timingRewriteLogCount = AtomicInteger()
     private val rewriteLogCount = AtomicInteger()
     private var glowEndHookInstalled = false
     private var glowViewEndHookInstalled = false
+    private var glowTimingHookInstalled = false
 
     override fun install(): TargetCapabilityInstall {
         val a0Resolution = symbols.resolve(AppleMusicSymbols.CjkKaraokeAnimationMethod)
@@ -60,7 +67,7 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
 
                 override fun afterHookedMethod(param: MethodHookParam) {
                     // The host callback runs even when z.a0 throws; always
-                    // release this thread's scope so a later g0 call cannot
+                    // release this thread's scope so a later classifier call cannot
                     // inherit a stale override.
                     leaveA0Scope()
                 }
@@ -77,7 +84,7 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
             ModernXposedRuntime.hookMethod(helper, object : ModernMethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     try {
-                        rewriteCjkK0Result(param)
+                        rewriteCjkClassifierResult(param)
                     } catch (error: Throwable) {
                         // A malformed host call must never break its original
                         // helper result.  This is deliberately fail-open.
@@ -98,9 +105,10 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         // and was shown to disturb all lyric animations on device.
         glowEndHookInstalled = installGlowAnimatorEndHook(a0)
         glowViewEndHookInstalled = installGlowViewEndHook(a0)
+        glowTimingHookInstalled = installGlowTimingHook(a0)
 
         if (!a0Installed || !helperInstalled || !glowEndHookInstalled ||
-            !glowViewEndHookInstalled
+            !glowViewEndHookInstalled || !glowTimingHookInstalled
         ) {
             return TargetCapabilityInstall.Degraded(
                 failures.joinToString("; ").ifBlank { "CJK karaoke animation hooks were not installed" },
@@ -137,7 +145,8 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
             method,
             object : ModernMethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    attachGlowEndListener(param.thisObject, param.args.getOrNull(0) as? Animator)
+                    val animator = param.args.getOrNull(0) as? Animator
+                    attachGlowEndListener(param.thisObject, animator)
                 }
             },
         )
@@ -145,9 +154,52 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         ModernXposedRuntime.log("CJK karaoke z\$f end hook unavailable", error)
     }.getOrDefault(false)
 
+    /**
+     * The host's special glow uses a rise child followed by a return child.
+     * For a single CJK binding the return child is otherwise delayed by
+     * 2*duration, leaving the raised/glowing frame held for a long envelope.
+     * Shorten only that exact z$f child to begin after the rise duration.
+     */
+    private fun installGlowTimingHook(a0: Executable): Boolean = runCatching {
+        val addUpdateListener = ValueAnimator::class.java.getDeclaredMethod(
+            "addUpdateListener",
+            ValueAnimator.AnimatorUpdateListener::class.java,
+        )
+        ModernXposedRuntime.hookMethod(
+            addUpdateListener,
+            object : ModernMethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    val animator = param.thisObject as? ValueAnimator ?: return
+                    val listener = param.args.getOrNull(0) ?: return
+                    if (!isSingleWordScope()) return
+                    if (listener.javaClass.name != "${a0.declaringClass.name}\$f") return
+                    runCatching {
+                        val duration = animator.duration
+                        val originalDelay = animator.startDelay
+                        if (duration > 0L && originalDelay > duration) {
+                            animator.startDelay = duration
+                            if (timingRewriteLogCount.getAndIncrement() < MAX_TIMING_REWRITE_LOGS) {
+                                ModernXposedRuntime.log(
+                                    "CJK karaoke glow timing: z\$f delay " +
+                                        "$originalDelay -> $duration (duration=$duration)",
+                                )
+                            }
+                        }
+                    }.onFailure { error ->
+                        ModernXposedRuntime.log("CJK karaoke glow timing failed open", error)
+                    }
+                }
+            },
+        )
+    }.onFailure { error ->
+        ModernXposedRuntime.log("CJK karaoke glow timing hook unavailable", error)
+    }.getOrDefault(false)
+
     private fun attachGlowEndListener(updateListener: Any?, animator: Animator?) {
         if (updateListener == null || animator == null) return
-        val view = readNamedField(updateListener, "c") ?: return
+        val alreadyTracked = synchronized(glowAnimators) { glowAnimators.containsKey(animator) }
+        if (alreadyTracked) return
+        val view = inspectedGlowView(updateListener) ?: return
         if (!isTrackedCjkGlowView(view)) return
         val shouldAttach = synchronized(glowAnimators) {
             if (glowAnimators.containsKey(animator)) {
@@ -177,6 +229,15 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
 
             override fun onAnimationEnd(animation: Animator) = cleanup()
         })
+    }
+
+    private fun inspectedGlowView(listener: Any): Any? = synchronized(inspectedGlowListeners) {
+        if (inspectedGlowListeners.containsKey(listener)) {
+            return@synchronized inspectedGlowListeners[listener]?.get()
+        }
+        val view = readNamedField(listener, "c")
+        inspectedGlowListeners[listener] = view?.let(::WeakReference)
+        view
     }
 
     /**
@@ -225,7 +286,11 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
             activeGlowByView[view]?.get()
         }
         if (activeForView != null && activeForView !== animator) return
-        if (isTrackedCjkGlowView(view)) resetCjkGlowView(view)
+        synchronized(trackedGlowViews) {
+            trackedGlowViews[view]?.let { baseline ->
+                resetCjkGlowView(view, baseline)
+            }
+        }
         synchronized(activeGlowByView) { activeGlowByView.remove(view) }
         synchronized(trackedGlowViews) { trackedGlowViews.remove(view) }
     }
@@ -233,13 +298,23 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     private fun isTrackedCjkGlowView(view: Any): Boolean =
         synchronized(trackedGlowViews) { trackedGlowViews.containsKey(view) }
 
-    private fun resetCjkGlowView(view: Any) {
-        invokeMethod(view, "setScaleX", 1f)
-        invokeMethod(view, "setScaleY", 1f)
+    private fun resetCjkGlowView(view: Any, baseline: CjkGlowBaseline) {
+        invokeMethod(view, "setScaleX", baseline.scaleX)
+        invokeMethod(view, "setScaleY", baseline.scaleY)
+        invokeMethod(view, "setTranslationY", baseline.translationY)
         invokeNoArg(view, "resetPivot")
         invokeMethod(view, "setShadowLayer", 0f, 0f, 0f, 0)
         invokeNoArg(view, "invalidate")
     }
+
+    private fun captureCjkGlowBaseline(view: Any): CjkGlowBaseline? = runCatching {
+        CjkGlowBaseline(
+            scaleX = (invokeNoArg(view, "getScaleX") as? Number)?.toFloat() ?: return@runCatching null,
+            scaleY = (invokeNoArg(view, "getScaleY") as? Number)?.toFloat() ?: return@runCatching null,
+            translationY = (invokeNoArg(view, "getTranslationY") as? Number)
+                ?.toFloat() ?: return@runCatching null,
+        )
+    }.getOrNull()
 
     private fun foregroundEntryViews(entry: Any): List<Any> {
         // z.m0(e, foreground=false) returns the primary e.i binding when it
@@ -259,13 +334,20 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         return views
     }
 
-    private fun rewriteCjkK0Result(param: ModernMethodHook.MethodHookParam) {
-        if (!isSingleWordScope()) return
-
+    private fun rewriteCjkClassifierResult(param: ModernMethodHook.MethodHookParam) {
         val text = param.args.getOrNull(0) as? CharSequence ?: return
-        if (!containsCjkKaraokeScript(text)) return
-
         val languageSet = param.args.getOrNull(1) as? Set<*> ?: return
+        if (isSingleWordScope()) {
+            rewriteCjkAnimationResult(param, text, languageSet)
+        }
+    }
+
+    private fun rewriteCjkAnimationResult(
+        param: ModernMethodHook.MethodHookParam,
+        text: CharSequence,
+        languageSet: Set<*>,
+    ) {
+        if (!containsCjkKaraokeScript(text)) return
         when {
             isK0Set(languageSet) && param.result == true -> {
                 // CJK is normally classified into k0, which blocks the
@@ -288,10 +370,11 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     private fun logRewrite(text: CharSequence, change: String) {
         if (rewriteLogCount.getAndIncrement() < MAX_REWRITE_LOGS) {
             ModernXposedRuntime.log(
-                "CJK karaoke a0 scope: I0\$a.a(${text.length} chars, $change); g0 unchanged",
+                "CJK karaoke classifier: I0\$a.a(${text.length} chars, $change)",
             )
         }
     }
+
 
     private fun isK0Set(languageSet: Set<*>): Boolean = runCatching {
         // z.k0 always contains HANGUL_SYLLABLES.  This marker distinguishes
@@ -320,7 +403,13 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
             a0Stack().add(candidate != null)
             candidate?.let { state ->
                 synchronized(trackedGlowViews) {
-                    state.views.forEach { view -> trackedGlowViews[view] = true }
+                    state.views.forEach { view ->
+                        if (!trackedGlowViews.containsKey(view)) {
+                            captureCjkGlowBaseline(view)?.let { baseline ->
+                                trackedGlowViews[view] = baseline
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -438,8 +527,15 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         val views: List<Any>,
     )
 
+    private data class CjkGlowBaseline(
+        val scaleX: Float,
+        val scaleY: Float,
+        val translationY: Float,
+    )
+
     private companion object {
         const val MAX_REWRITE_LOGS = 3
+        const val MAX_TIMING_REWRITE_LOGS = 3
     }
 }
 
