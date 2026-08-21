@@ -31,9 +31,13 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     private val glowAnimators = Collections.synchronizedMap(
         WeakHashMap<Animator, Boolean>(),
     )
+    private val trackedGlowViews = Collections.synchronizedMap(
+        WeakHashMap<Any, Boolean>(),
+    )
     private val rewriteLogCount = AtomicInteger()
     private var specialEndHookInstalled = false
     private var glowEndHookInstalled = false
+    private var glowViewEndHookInstalled = false
 
     override fun install(): TargetCapabilityInstall {
         val a0Resolution = symbols.resolve(AppleMusicSymbols.CjkKaraokeAnimationMethod)
@@ -96,8 +100,11 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         // animations on device.
         specialEndHookInstalled = installSpecialEndHook(a0)
         glowEndHookInstalled = installGlowAnimatorEndHook(a0)
+        glowViewEndHookInstalled = installGlowViewEndHook(a0)
 
-        if (!a0Installed || !helperInstalled || !specialEndHookInstalled || !glowEndHookInstalled) {
+        if (!a0Installed || !helperInstalled || !specialEndHookInstalled ||
+            !glowEndHookInstalled || !glowViewEndHookInstalled
+        ) {
             return TargetCapabilityInstall.Degraded(
                 failures.joinToString("; ").ifBlank { "CJK karaoke animation hooks were not installed" },
             )
@@ -144,7 +151,7 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     private fun attachGlowEndListener(updateListener: Any?, animator: Animator?) {
         if (updateListener == null || animator == null) return
         val view = readNamedField(updateListener, "c") ?: return
-        if (!isSingleCjkGlowView(view)) return
+        if (!isTrackedCjkGlowView(view) && !isSingleCjkGlowView(view)) return
         val shouldAttach = synchronized(glowAnimators) {
             if (glowAnimators.containsKey(animator)) {
                 false
@@ -166,15 +173,59 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
                 animatorRef.get()?.let { ended ->
                     synchronized(glowAnimators) { glowAnimators.remove(ended) }
                 }
-                viewRef.get()?.let { target ->
-                    if (isSingleCjkGlowView(target)) resetCjkGlowView(target)
-                }
+                cleanupGlowView(viewRef.get())
             }
 
             override fun onAnimationCancel(animation: Animator) = cleanup()
 
             override fun onAnimationEnd(animation: Animator) = cleanup()
         })
+    }
+
+    /**
+     * z$g is the host's own end listener for the ValueAnimator that runs the
+     * glow's return-to-normal phase.  Hooking that exact seam is more reliable
+     * than waiting for a later outer AnimatorSet callback: CJK may be rendered
+     * through a binding whose text is not a single code point, while the
+     * recorded View identity still identifies the glow target precisely.
+     */
+    private fun installGlowViewEndHook(a0: Executable): Boolean = runCatching {
+        val owner = a0.declaringClass
+        val endType = Class.forName(
+            "${owner.name}\$g",
+            false,
+            owner.classLoader,
+        )
+        val method = endType.declaredMethods
+            .filter { candidate ->
+                candidate.name == "onAnimationEnd" &&
+                    candidate.parameterTypes.size == 1 &&
+                    Animator::class.java.isAssignableFrom(candidate.parameterTypes[0])
+            }
+            .singleOrNull()
+            ?: return@runCatching false
+        ModernXposedRuntime.hookMethod(
+            method,
+            object : ModernMethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    param.thisObject
+                        ?.let { readNamedField(it, "b") }
+                        ?.let(::cleanupGlowView)
+                }
+            },
+        )
+    }.onFailure { error ->
+        ModernXposedRuntime.log("CJK karaoke z\$g view end hook unavailable", error)
+    }.getOrDefault(false)
+
+    private fun cleanupGlowView(view: Any?) {
+        if (view == null) return
+        val tracked = isTrackedCjkGlowView(view)
+        if (!tracked && !isSingleCjkGlowView(view)) return
+        resetCjkGlowView(view)
+        if (tracked) {
+            synchronized(trackedGlowViews) { trackedGlowViews.remove(view) }
+        }
     }
 
     private fun isSingleCjkGlowView(view: Any): Boolean {
@@ -184,6 +235,9 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
             normalized.codePointCount(0, normalized.length) == 1 &&
             containsCjkKaraokeScript(normalized)
     }
+
+    private fun isTrackedCjkGlowView(view: Any): Boolean =
+        synchronized(trackedGlowViews) { trackedGlowViews.containsKey(view) }
 
     private fun resetCjkGlowView(view: Any) {
         invokeMethod(view, "setScaleX", 1f)
@@ -355,6 +409,9 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
             a0Stack().add(candidate != null)
             candidate?.let { state ->
                 synchronized(cjkEntryStates) { cjkEntryStates[state.entry] = state }
+                synchronized(trackedGlowViews) {
+                    state.views.forEach { view -> trackedGlowViews[view] = true }
+                }
             }
         }
             .onFailure { error -> ModernXposedRuntime.log("CJK karaoke a0 depth enter failed open", error) }
