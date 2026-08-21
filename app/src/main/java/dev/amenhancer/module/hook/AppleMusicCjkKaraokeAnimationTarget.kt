@@ -311,7 +311,7 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
 
     private fun trace(message: String) {
         if (traceEventCount.getAndIncrement() < MAX_TRACE_EVENTS) {
-            ModernXposedRuntime.log("[DEBUG-cjk-r1] $message")
+            ModernXposedRuntime.log("[DEBUG-cjk-r2] $message")
         }
     }
 
@@ -475,8 +475,34 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     private fun describeView(value: Any?): String {
         if (value == null) return "view=null"
         val type = value.javaClass.simpleName.ifBlank { value.javaClass.name }
-        return "$type{alpha=${invokeNoArg(value, "getAlpha")},ty=${invokeNoArg(value, "getTranslationY")}," +
-            "sx=${invokeNoArg(value, "getScaleX")},sy=${invokeNoArg(value, "getScaleY")}}"
+        val background = invokeNoArg(value, "getBackground")
+        return "$type{alpha=${invokeNoArg(value, "getAlpha")},tx=${invokeNoArg(value, "getTranslationX")}," +
+            "ty=${invokeNoArg(value, "getTranslationY")},sx=${invokeNoArg(value, "getScaleX")}," +
+            "sy=${invokeNoArg(value, "getScaleY")},shadow=${describeShadow(value)}," +
+            "paintShadow=${describePaintShadow(value)},bg=${describeDrawable(background)}}"
+    }
+
+    private fun describeShadow(value: Any): String =
+        listOf(
+            "r" to invokeNoArg(value, "getShadowRadius"),
+            "dx" to invokeNoArg(value, "getShadowDx"),
+            "dy" to invokeNoArg(value, "getShadowDy"),
+            "c" to invokeNoArg(value, "getShadowColor"),
+        ).joinToString(prefix = "{", postfix = "}") { (name, result) -> "$name=$result" }
+
+    private fun describePaintShadow(value: Any): String {
+        val paint = invokeNoArg(value, "getPaint") ?: return "null"
+        return listOf(
+            "r" to invokeNoArg(paint, "getShadowLayerRadius"),
+            "dx" to invokeNoArg(paint, "getShadowLayerDx"),
+            "dy" to invokeNoArg(paint, "getShadowLayerDy"),
+            "c" to invokeNoArg(paint, "getShadowLayerColor"),
+        ).joinToString(prefix = "{", postfix = "}") { (name, result) -> "$name=$result" }
+    }
+
+    private fun describeDrawable(value: Any?): String {
+        if (value == null) return "null"
+        return "${value.javaClass.simpleName}{alpha=${invokeNoArg(value, "getAlpha")}}"
     }
 
     private fun readAnimatorTag(value: Any?): Any? = value?.let { invokeNoArg(it, "getTag") }

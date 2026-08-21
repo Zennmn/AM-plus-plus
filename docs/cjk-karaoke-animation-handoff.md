@@ -27,7 +27,7 @@
 
 ## 临时生命周期探针
 
-当前诊断提交会在 `AppleMusicCjkKaraokeAnimationTarget` 输出带 `[DEBUG-cjk-r1]` 前缀的日志，记录 `e.o/e.p`、Animator listener、词 View 的 alpha/translation/scale，以及动画结束或取消时的同一组状态。它还会给已发现的原生 Animator 加一个只读 `onAnimationEnd/onAnimationCancel` 观察 listener；这是临时诊断包，不应当作为长期发布包使用，拿到设备日志后应移除探针。
+当前诊断提交会在 `AppleMusicCjkKaraokeAnimationTarget` 输出带 `[DEBUG-cjk-r2]` 前缀的日志，记录 `e.o/e.p`、Animator listener、词 View 的 alpha/translation/scale、TextView/Paint shadow 和背景 Drawable，以及动画结束或取消时的同一组状态。它还会给已发现的原生 Animator 加一个只读 `onAnimationEnd/onAnimationCancel` 观察 listener；这是临时诊断包，不应当作为长期发布包使用，拿到设备日志后应移除探针。
 
 ## 关键代码位置
 
