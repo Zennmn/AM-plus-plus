@@ -210,13 +210,19 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
 
         val languageSet = param.args.getOrNull(1) as? Set<*> ?: return
         when {
-            isJ0Set(languageSet) && param.result == true -> {
-                // Keep k0=true so z.a0 takes Apple's ordinary z$e/e.o
-                // lifecycle instead of the rush z$c/e.p lifecycle.  The
-                // j0 bit is only used by the ordinary child animator; make
-                // Han/Kana look like the Latin path there as well.
+            isK0Set(languageSet) && param.result == true -> {
+                // CJK is normally classified into k0, which blocks the
+                // rush branch.  Make that one result look like a default
+                // script only while a0 is running.
                 param.result = false
-                logRewrite(text, "j0 true -> false; k0 preserved")
+                logRewrite(text, "k0 true -> false")
+            }
+            isJ0Set(languageSet) && containsHangul(text) && param.result != true -> {
+                // i0 receives the j0 hit as its split/rush eligibility bit.
+                // Hangul belongs to k0 but not j0, so opt it into the same
+                // Apple animation only inside a0; g0 remains untouched.
+                param.result = true
+                logRewrite(text, "j0 false -> true")
             }
             else -> return
         }
@@ -396,6 +402,19 @@ internal fun containsCjkKaraokeScript(text: CharSequence): Boolean {
             Character.UnicodeBlock.HANGUL_JAMO,
             Character.UnicodeBlock.HANGUL_COMPATIBILITY_JAMO,
             -> return true
+        }
+    }
+    return false
+}
+
+private fun containsHangul(text: CharSequence): Boolean {
+    for (index in text.indices) {
+        when (Character.UnicodeBlock.of(text[index])) {
+            Character.UnicodeBlock.HANGUL_SYLLABLES,
+            Character.UnicodeBlock.HANGUL_JAMO,
+            Character.UnicodeBlock.HANGUL_COMPATIBILITY_JAMO,
+            -> return true
+            else -> Unit
         }
     }
     return false
