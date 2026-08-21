@@ -2,13 +2,12 @@
 
 ## 目的
 
-本分支保存 Apple Music 6.5.2/1586 的 CJK 长尾歌词动画实验。它不属于 `main` 稳定线，后续维护、设备验证或替换为 AM++ 自绘动画都从本分支继续。
+本分支保存 Apple Music 6.5.2/1586 的 CJK 长尾歌词动画实验。它不属于 `main` 稳定线，后续维护和设备验证都从本分支继续。
 
 ## 当前分支与远端
 
 - 分支：`codex/cjk-karaoke-animation`
-- 当前 HEAD：`38f923c docs: add CJK karaoke animation handoff`
-- 功能提交：`39e9b08 feat: isolate CJK karaoke animation feature`
+- 功能基线：`39e9b08 feat: isolate CJK karaoke animation feature`
 - 远端：[Zennmn/AM-plus-plus/tree/codex/cjk-karaoke-animation](https://github.com/Zennmn/AM-plus-plus/tree/codex/cjk-karaoke-animation)
 - 主分支基线：`main`（当前不包含本实验功能）
 - 当前分支已推送到 `origin`；不要把本分支代码直接合并到 `main`，除非完成新的设备验收。
@@ -18,8 +17,9 @@
 1. 仅对 Apple Music `6.5.2/1586` 解析并 Hook：
    - `com.apple.android.music.player.z.a0`
    - `com.apple.android.music.utils.I0$a.a(CharSequence, Set)`
-2. 在 `z.a0` 的线程局部调用范围内，临时放开 CJK 的 `k0/j0` 分类结果，以复用 Apple 原生 rush-gradient；不会全局修改 Apple 的静态字符集合，也不会改变 `g0` 的原始 CJK 排版路径。
-3. 设置页和嵌入式设置页都有独立开关：
+2. AM++ 不接管 Apple 的 duration/length 触发条件。`z.a0` 前只读取当前 `z$a.G/H -> e` 的 grouping metadata：`e.f`（累计 duration）、`e.g`（累计字符数）、`e.c`（词文本）和 `e.k`（拆分 binding）。只有规范化后恰好一个 CJK Unicode 字符、`e.f` 等于当前 native duration、`e.g == 1` 且没有多 binding 时，才临时放开 `k0/j0`；合并词保留 Apple 原始分类，不会进入长辉光分支。
+3. 放行仍限定在 `z.a0` 的线程局部调用范围内，不会全局修改 Apple 的静态字符集合，也不会改变 `g0` 的原始 CJK 排版路径。
+4. 设置页和嵌入式设置页都有独立开关：
    - key：`cjk_karaoke_animation_enabled`
    - 字段：`ModuleSettings.cjkKaraokeAnimationEnabled`
    - 默认值：`true`
@@ -36,9 +36,9 @@
 
 ## 已知边界
 
-- 当前方案是“复用 Apple 原生动画分支”，不是 AM++ 自己绘制的稳定实现；用户已观察到 CJK 仍可能出现动画错位、跳动或宽度问题。
-- 后续更稳妥的路线是：在 Apple adapter 完成逐词 View 绑定后，由 AM++ 自己创建 `ValueAnimator`/渐变遮罩，并处理 View 回收、行切换、混排字符和取消旧动画。
-- 该自绘路线尚未实现。不要只在整行 RecyclerView 上加动画；必须拿到实际词 View 和可靠的逐词时序。
+- 当前方案是“复用 Apple 原生动画分支”，不是 AM++ 自己绘制；AM++ 只阻止合并 CJK 词块进入原生长辉光分类。
+- 判断失败时默认不放行，保持 Apple 原始行为；带组合音标、补充字符或多 binding 的文字会被保守跳过。
+- Apple 版本、混淆类名和方法签名是私有契约；新增版本必须重新做 exact profile 和设备验证。
 - Apple 版本、混淆类名和方法签名是私有契约；新增版本必须重新做 exact profile 和设备验证。
 
 ## 继续维护步骤

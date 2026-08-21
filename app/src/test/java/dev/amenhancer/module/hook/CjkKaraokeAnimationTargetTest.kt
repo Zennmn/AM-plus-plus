@@ -2,6 +2,7 @@ package dev.amenhancer.module.hook
 
 import dev.amenhancer.module.ModuleConstants
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -13,6 +14,62 @@ class CjkKaraokeAnimationTargetTest {
         assertTrue(containsCjkKaraokeScript("カ"))
         assertTrue(containsCjkKaraokeScript("한"))
         assertTrue(!containsCjkKaraokeScript("lyrics"))
+    }
+
+    @Test
+    fun `single unmerged CJK word is allowed without duplicating AM trigger gates`() {
+        assertTrue(
+            isSingleUnmergedCjkWord(
+                CjkKaraokeWordTiming(
+                    text = "漢",
+                    nativeDurationMs = 200,
+                    cumulativeDurationMs = 200,
+                    cumulativeTextLength = 1,
+                    splitBindingCount = 0,
+                    isBackground = false,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `merged or split CJK chunks stay on Apple's original classifier`() {
+        val merged = CjkKaraokeWordTiming(
+            text = "漢字",
+            nativeDurationMs = 600,
+            cumulativeDurationMs = 1_200,
+            cumulativeTextLength = 2,
+            splitBindingCount = 0,
+            isBackground = false,
+        )
+        val split = merged.copy(
+            text = "漢",
+            cumulativeDurationMs = 600,
+            cumulativeTextLength = 1,
+            splitBindingCount = 2,
+        )
+
+        assertFalse(isSingleUnmergedCjkWord(merged))
+        assertFalse(isSingleUnmergedCjkWord(split))
+    }
+
+    @Test
+    fun `background and multi-code-point text are fail closed`() {
+        val background = CjkKaraokeWordTiming(
+            text = "한",
+            nativeDurationMs = 1_200,
+            cumulativeDurationMs = 1_200,
+            cumulativeTextLength = 1,
+            splitBindingCount = 0,
+            isBackground = true,
+        )
+        val combining = background.copy(
+            text = "が",
+            isBackground = false,
+        )
+
+        assertFalse(isSingleUnmergedCjkWord(background))
+        assertFalse(isSingleUnmergedCjkWord(combining))
     }
 
     @Test
