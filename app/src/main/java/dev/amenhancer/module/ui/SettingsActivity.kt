@@ -20,6 +20,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
+import android.view.inputmethod.EditorInfo
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -828,6 +829,9 @@ class SettingsActivity : Activity() {
         EditText(this).apply {
             hint = "搜索名称或 Apple Music ID"
             textSize = 14f
+            inputType = InputType.TYPE_CLASS_TEXT
+            imeOptions = EditorInfo.IME_ACTION_SEARCH
+            showSoftInputOnFocus = true
             setTextColor(palette.onSurface)
             setHintTextColor(palette.onSurfaceVariant)
             isSingleLine = true
