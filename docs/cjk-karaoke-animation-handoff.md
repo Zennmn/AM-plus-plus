@@ -7,7 +7,7 @@
 ## 当前分支与远端
 
 - 分支：`codex/cjk-karaoke-animation`
-- 功能基线：`47de18a fix: block merged CJK chunks from native glow`
+- 功能基线：`39e9b08 feat: isolate CJK karaoke animation feature`
 - 远端：[Zennmn/AM-plus-plus/tree/codex/cjk-karaoke-animation](https://github.com/Zennmn/AM-plus-plus/tree/codex/cjk-karaoke-animation)
 - 主分支基线：`main`（当前不包含本实验功能）
 - 当前分支已推送到 `origin`；不要把本分支代码直接合并到 `main`，除非完成新的设备验收。
@@ -24,10 +24,6 @@
    - 字段：`ModuleSettings.cjkKaraokeAnimationEnabled`
    - 默认值：`true`
    - 关闭后需要重启 Apple Music，feature 才不会注册 Hook。
-
-## 临时生命周期探针
-
-当前诊断提交会在 `AppleMusicCjkKaraokeAnimationTarget` 输出带 `[DEBUG-cjk-r1]` 前缀的日志，记录 `e.o/e.p`、Animator listener、词 View 的 alpha/translation/scale，以及动画结束或取消时的同一组状态。它还会给已发现的原生 Animator 加一个只读 `onAnimationEnd/onAnimationCancel` 观察 listener；这是临时诊断包，不应当作为长期发布包使用，拿到设备日志后应移除探针。
 
 ## 关键代码位置
 

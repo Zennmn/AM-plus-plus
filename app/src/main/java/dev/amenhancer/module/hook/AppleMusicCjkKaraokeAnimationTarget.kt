@@ -1,11 +1,8 @@
 package dev.amenhancer.module.hook
 
-import android.animation.Animator
-import android.animation.AnimatorListenerAdapter
 import java.util.concurrent.atomic.AtomicInteger
 import java.lang.reflect.Field
 import java.lang.reflect.Modifier
-import java.lang.reflect.Array as ReflectArray
 import java.util.Collections
 import java.util.Map as JavaMap
 import java.util.WeakHashMap
@@ -25,10 +22,6 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         WeakHashMap<Class<*>, kotlin.collections.Map<String, Field>>(),
     )
     private val rewriteLogCount = AtomicInteger()
-    private val traceEventCount = AtomicInteger()
-    private val observedAnimators = Collections.synchronizedMap(
-        WeakHashMap<Animator, Boolean>(),
-    )
 
     override fun install(): TargetCapabilityInstall {
         val a0Resolution = symbols.resolve(AppleMusicSymbols.CjkKaraokeAnimationMethod)
@@ -54,11 +47,7 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
                     // The host callback runs even when z.a0 throws; always
                     // release this thread's scope so a later g0 call cannot
                     // inherit a stale override.
-                    try {
-                        traceA0Boundary("after", param, isSingleWordScope())
-                    } finally {
-                        leaveA0Scope()
-                    }
+                    leaveA0Scope()
                 }
             }).also { installed ->
                 if (!installed) failures += "z.a0 hook was rejected"
@@ -107,30 +96,23 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         if (!containsCjkKaraokeScript(text)) return
 
         val languageSet = param.args.getOrNull(1) as? Set<*> ?: return
-        val originalResult = param.result
-        val setName = when {
-            isK0Set(languageSet) -> "k0"
-            isJ0Set(languageSet) -> "j0"
-            else -> null
-        }
         when {
-            setName == "k0" && param.result == true -> {
+            isK0Set(languageSet) && param.result == true -> {
                 // CJK is normally classified into k0, which blocks the
                 // rush branch.  Make that one result look like a default
                 // script only while a0 is running.
                 param.result = false
                 logRewrite(text, "k0 true -> false")
             }
-            setName == "j0" && containsHangul(text) && param.result != true -> {
+            isJ0Set(languageSet) && containsHangul(text) && param.result != true -> {
                 // i0 receives the j0 hit as its split/rush eligibility bit.
                 // Hangul belongs to k0 but not j0, so opt it into the same
                 // Apple animation only inside a0; g0 remains untouched.
                 param.result = true
                 logRewrite(text, "j0 false -> true")
             }
-            else -> Unit
+            else -> return
         }
-        traceHelperResult(text, setName, originalResult, param.result)
     }
 
     private fun logRewrite(text: CharSequence, change: String) {
@@ -164,9 +146,7 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     private fun enterA0Scope(param: ModernMethodHook.MethodHookParam) {
         runCatching {
             a0Depth.set((a0Depth.get() ?: 0) + 1)
-            val gate = readSingleWordGate(param)
-            a0Stack().add(gate)
-            traceA0Boundary("before", param, gate)
+            a0Stack().add(readSingleWordGate(param))
         }
             .onFailure { error -> ModernXposedRuntime.log("CJK karaoke a0 depth enter failed open", error) }
     }
@@ -199,321 +179,49 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     /** Reads only the host's grouping metadata; Apple retains all trigger gates. */
     private fun readSingleWordGate(param: ModernMethodHook.MethodHookParam): Boolean =
         runCatching {
-            val metadata = readWordMetadata(param) ?: return@runCatching false
+            val holder = param.args.getOrNull(0) ?: return@runCatching false
+            val wordId = (param.args.getOrNull(2) as? Number)?.toInt()
+                ?: return@runCatching false
+            val nativeDuration = (param.args.getOrNull(3) as? Number)?.toInt()
+                ?: return@runCatching false
+            val background = param.args.getOrNull(4) as? Boolean
+                ?: return@runCatching false
+            val mapName = if (background) "H" else "G"
+            val map = cachedFields(holder.javaClass)[mapName]
+                ?.let { field -> readField(field, holder) as? JavaMap<*, *> }
+                ?: return@runCatching false
+            val entry = map.get(Integer.valueOf(wordId)) ?: map.get(wordId)
+                ?: return@runCatching false
+            val text = cachedFields(entry.javaClass)["c"]
+                ?.let { field -> readField(field, entry) as? CharSequence }
+                ?: return@runCatching false
+            val cumulativeDuration = cachedFields(entry.javaClass)["f"]
+                ?.let { field -> (readField(field, entry) as? Number)?.toInt() }
+                ?: return@runCatching false
+            val cumulativeLength = cachedFields(entry.javaClass)["g"]
+                ?.let { field -> (readField(field, entry) as? Number)?.toInt() }
+                ?: return@runCatching false
+            val splitValue = cachedFields(entry.javaClass)["k"]
+                ?.let { field -> readField(field, entry) }
+            val splitCount = when (splitValue) {
+                null -> 0
+                is Collection<*> -> splitValue.size
+                else -> -1
+            }
             isSingleUnmergedCjkWord(
                 CjkKaraokeWordTiming(
-                    text = metadata.text,
-                    nativeDurationMs = metadata.nativeDurationMs,
-                    cumulativeDurationMs = metadata.cumulativeDurationMs,
-                    cumulativeTextLength = metadata.cumulativeTextLength,
-                    splitBindingCount = metadata.splitBindingCount,
-                    isBackground = metadata.background,
+                    text = text,
+                    nativeDurationMs = nativeDuration,
+                    cumulativeDurationMs = cumulativeDuration,
+                    cumulativeTextLength = cumulativeLength,
+                    splitBindingCount = splitCount,
+                    isBackground = background,
                 ),
             )
         }.getOrElse { error ->
             ModernXposedRuntime.log("CJK single-word gate failed closed: ${error.cjkShortMessage()}")
             false
         }
-
-    private fun readWordMetadata(param: ModernMethodHook.MethodHookParam): WordMetadata? {
-        val holder = param.args.getOrNull(0) ?: return null
-        val wordId = (param.args.getOrNull(2) as? Number)?.toInt() ?: return null
-        val nativeDuration = (param.args.getOrNull(3) as? Number)?.toInt() ?: return null
-        val background = param.args.getOrNull(4) as? Boolean ?: return null
-        val mapName = if (background) "H" else "G"
-        val map = cachedFields(holder.javaClass)[mapName]
-            ?.let { field -> readField(field, holder) as? JavaMap<*, *> }
-            ?: return null
-        val entry = map.get(Integer.valueOf(wordId)) ?: map.get(wordId) ?: return null
-        val fields = cachedFields(entry.javaClass)
-        val text = fields["c"]?.let { field -> readField(field, entry) as? CharSequence }
-            ?: return null
-        val cumulativeDuration = fields["f"]
-            ?.let { field -> (readField(field, entry) as? Number)?.toInt() }
-            ?: return null
-        val cumulativeLength = fields["g"]
-            ?.let { field -> (readField(field, entry) as? Number)?.toInt() }
-            ?: return null
-        val splitValue = fields["k"]?.let { field -> readField(field, entry) }
-        val splitCount = when (splitValue) {
-            null -> 0
-            is Collection<*> -> splitValue.size
-            else -> -1
-        }
-        return WordMetadata(
-            wordId = wordId,
-            nativeDurationMs = nativeDuration,
-            background = background,
-            entry = entry,
-            text = text,
-            cumulativeDurationMs = cumulativeDuration,
-            cumulativeTextLength = cumulativeLength,
-            splitBindingCount = splitCount,
-            nativeAnimator = fields["o"]?.let { field -> readField(field, entry) },
-            animatorList = fields["p"]?.let { field -> readField(field, entry) },
-            foregroundBinding = fields["i"]?.let { field -> readField(field, entry) },
-            backgroundBinding = fields["j"]?.let { field -> readField(field, entry) },
-            splitBindings = splitValue,
-        )
-    }
-
-    private fun traceA0Boundary(
-        phase: String,
-        param: ModernMethodHook.MethodHookParam,
-        gate: Boolean,
-    ) {
-        runCatching {
-            val metadata = readWordMetadata(param)
-            if (metadata == null) {
-                val wordId = (param.args.getOrNull(2) as? Number)?.toInt()
-                if (wordId != null) {
-                    trace(
-                        "a0-$phase metadata-unavailable word=$wordId " +
-                            "holder=${param.args.getOrNull(0)?.javaClass?.simpleName}",
-                    )
-                }
-                return@runCatching
-            }
-            val isCjk = containsCjkKaraokeScript(metadata.text)
-            val isNativeCandidate = !metadata.background &&
-                metadata.cumulativeDurationMs >= NATIVE_CANDIDATE_DURATION_MS &&
-                metadata.cumulativeTextLength <= NATIVE_CANDIDATE_LENGTH_MAX
-            if (!isCjk && !isNativeCandidate) return@runCatching
-            trace(
-                "a0-$phase word=${metadata.wordId} bg=${metadata.background} " +
-                    "gate=$gate text=${quoteTraceText(metadata.text)} " +
-                    "native=${metadata.nativeDurationMs} f=${metadata.cumulativeDurationMs} " +
-                    "g=${metadata.cumulativeTextLength} k=${metadata.splitBindingCount} " +
-                    "entry=${metadata.entry.javaClass.simpleName} " +
-                    "o=${describeAnimator(metadata.nativeAnimator)} " +
-                    "p=${describeAnimatorContainer(metadata.animatorList)} " +
-                    "bindings=${describeBindings(metadata)}",
-            )
-            if (phase == "after") observeAnimatorLifecycle(metadata)
-        }.onFailure { error ->
-            trace("a0-$phase trace failed: ${error.cjkShortMessage()}")
-        }
-    }
-
-    private fun traceHelperResult(
-        text: CharSequence,
-        setName: String?,
-        originalResult: Any?,
-        finalResult: Any?,
-    ) {
-        if (!isSingleWordScope() || setName == null) return
-        trace(
-            "helper set=$setName text=${quoteTraceText(text)} " +
-                "result=$originalResult->$finalResult depth=${a0Depth.get() ?: 0} " +
-                "gate=${a0Stack().lastOrNull() == true}",
-        )
-    }
-
-    private fun trace(message: String) {
-        if (traceEventCount.getAndIncrement() < MAX_TRACE_EVENTS) {
-            ModernXposedRuntime.log("[DEBUG-cjk-r1] $message")
-        }
-    }
-
-    private fun describeAnimator(value: Any?): String {
-        if (value == null) return "null"
-        val type = value.javaClass.simpleName.ifBlank { value.javaClass.name }
-        val started = invokeNoArg(value, "isStarted")
-        val running = invokeNoArg(value, "isRunning")
-        val duration = invokeNoArg(value, "getDuration")
-        val playTime = invokeNoArg(value, "getCurrentPlayTime")
-        val tag = readAnimatorTag(value)
-        val listeners = describeAnimatorListeners(value)
-        return "$type{started=$started,running=$running,duration=$duration,play=$playTime," +
-            "tag=$tag,listeners=$listeners}"
-    }
-
-    private fun describeAnimatorListeners(value: Any): String = runCatching {
-        val listeners = invokeNoArg(value, "getListeners") as? Collection<*> ?: return@runCatching "?"
-        listeners.take(MAX_TRACE_ITEMS).joinToString(
-            prefix = "[",
-            postfix = "]",
-        ) { listener -> listener?.javaClass?.simpleName ?: "null" }
-    }.getOrDefault("?")
-
-    private fun describeAnimatorContainer(value: Any?): String {
-        if (value == null) return "null"
-        return runCatching {
-            val items: List<Any?> = when (value) {
-                is Collection<*> -> value.take(MAX_TRACE_ITEMS)
-                else -> {
-                    val backing = readNamedField(value, "b")
-                    when {
-                        backing is Collection<*> -> backing.take(MAX_TRACE_ITEMS)
-                        backing?.javaClass?.isArray == true -> (0 until minOf(
-                            ReflectArray.getLength(backing),
-                            MAX_TRACE_ITEMS,
-                        )).map { index -> ReflectArray.get(backing, index) }
-                        else -> emptyList()
-                    }
-                }
-            }
-            val count = readNamedField(value, "c") ?: items.size
-            val details = items.joinToString(",") { item -> describeAnimator(item) }
-            "${value.javaClass.simpleName}{count=$count,items=[$details]}"
-        }.getOrElse { error -> "${value.javaClass.simpleName}{error=${error.cjkShortMessage()}}" }
-    }
-
-    private fun observeAnimatorLifecycle(metadata: WordMetadata) {
-        val candidates = buildList {
-            (metadata.nativeAnimator as? Animator)?.let(::add)
-            animatorItems(metadata.animatorList).forEach { item ->
-                (item as? Animator)?.let(::add)
-            }
-        }
-        candidates.forEach { animator ->
-            val shouldObserve = synchronized(observedAnimators) {
-                observedAnimators.put(animator, true) == null
-            }
-            if (!shouldObserve) return@forEach
-            runCatching {
-                animator.addListener(object : AnimatorListenerAdapter() {
-                    override fun onAnimationEnd(animation: Animator) {
-                        traceAnimatorEnd(metadata, animation, "end")
-                    }
-
-                    override fun onAnimationCancel(animation: Animator) {
-                        traceAnimatorEnd(metadata, animation, "cancel")
-                    }
-                })
-            }.onFailure { error ->
-                trace(
-                    "anim-observe-failed word=${metadata.wordId} " +
-                        "anim=${animationType(animator)} error=${error.cjkShortMessage()}",
-                )
-            }
-        }
-    }
-
-    private fun animatorItems(value: Any?): List<Any?> = runCatching {
-        when (value) {
-            is Collection<*> -> value.take(MAX_TRACE_ITEMS)
-            null -> emptyList()
-            else -> {
-                val backing = readNamedField(value, "b")
-                when {
-                    backing is Collection<*> -> backing.take(MAX_TRACE_ITEMS)
-                    backing?.javaClass?.isArray == true -> (0 until minOf(
-                        ReflectArray.getLength(backing),
-                        MAX_TRACE_ITEMS,
-                    )).map { index -> ReflectArray.get(backing, index) }
-                    else -> emptyList()
-                }
-            }
-        }
-    }.getOrDefault(emptyList())
-
-    private fun traceAnimatorEnd(metadata: WordMetadata, animation: Animator, phase: String) {
-        runCatching {
-            val live = readLiveMetadata(metadata)
-            trace(
-                "anim-$phase word=${metadata.wordId} text=${quoteTraceText(live.text)} " +
-                    "anim=${describeAnimator(animation)} " +
-                    "o=${describeAnimator(live.nativeAnimator)} " +
-                    "p=${describeAnimatorContainer(live.animatorList)} " +
-                    "bindings=${describeBindings(live)}",
-            )
-        }.onFailure { error ->
-            trace(
-                "anim-$phase word=${metadata.wordId} " +
-                    "anim=${animationType(animation)} live-state-failed=${error.cjkShortMessage()}",
-            )
-        }
-    }
-
-    private fun readLiveMetadata(original: WordMetadata): WordMetadata {
-        val fields = cachedFields(original.entry.javaClass)
-        return original.copy(
-            text = fields["c"]?.let { field -> readField(field, original.entry) as? CharSequence }
-                ?: original.text,
-            cumulativeDurationMs = fields["f"]
-                ?.let { field -> (readField(field, original.entry) as? Number)?.toInt() }
-                ?: original.cumulativeDurationMs,
-            cumulativeTextLength = fields["g"]
-                ?.let { field -> (readField(field, original.entry) as? Number)?.toInt() }
-                ?: original.cumulativeTextLength,
-            splitBindingCount = fields["k"]?.let { field -> splitCount(readField(field, original.entry)) }
-                ?: original.splitBindingCount,
-            nativeAnimator = fields["o"]?.let { field -> readField(field, original.entry) },
-            animatorList = fields["p"]?.let { field -> readField(field, original.entry) },
-            foregroundBinding = fields["i"]?.let { field -> readField(field, original.entry) },
-            backgroundBinding = fields["j"]?.let { field -> readField(field, original.entry) },
-            splitBindings = fields["k"]?.let { field -> readField(field, original.entry) },
-        )
-    }
-
-    private fun splitCount(value: Any?): Int = when (value) {
-        null -> 0
-        is Collection<*> -> value.size
-        else -> -1
-    }
-
-    private fun animationType(value: Any): String =
-        value.javaClass.simpleName.ifBlank { value.javaClass.name }
-
-    private fun describeBindings(metadata: WordMetadata): String {
-        val bindings = mutableListOf<Any?>().apply {
-            metadata.foregroundBinding?.let(::add)
-            metadata.backgroundBinding?.let(::add)
-            when (val split = metadata.splitBindings) {
-                is Collection<*> -> split.take(MAX_TRACE_ITEMS).forEach { add(it) }
-                else -> Unit
-            }
-        }
-        if (bindings.isEmpty()) return "[]"
-        return bindings.joinToString(prefix = "[", postfix = "]") { binding ->
-            val view = binding?.let { readNamedField(it, "U") }
-            "${binding?.javaClass?.simpleName ?: "null"}/${describeView(view)}"
-        }
-    }
-
-    private fun describeView(value: Any?): String {
-        if (value == null) return "view=null"
-        val type = value.javaClass.simpleName.ifBlank { value.javaClass.name }
-        return "$type{alpha=${invokeNoArg(value, "getAlpha")},ty=${invokeNoArg(value, "getTranslationY")}," +
-            "sx=${invokeNoArg(value, "getScaleX")},sy=${invokeNoArg(value, "getScaleY")}}"
-    }
-
-    private fun readAnimatorTag(value: Any?): Any? = value?.let { invokeNoArg(it, "getTag") }
-
-    private fun invokeNoArg(receiver: Any, methodName: String): Any? = runCatching {
-        receiver.javaClass.methods
-            .firstOrNull { it.name == methodName && it.parameterTypes.isEmpty() }
-            ?.invoke(receiver)
-    }.getOrNull()
-
-    private fun readNamedField(receiver: Any, name: String): Any? =
-        cachedFields(receiver.javaClass)[name]?.let { field -> readField(field, receiver) }
-
-    private fun quoteTraceText(text: CharSequence): String =
-        "\"${text.toString()
-            .replace("\\", "\\\\")
-            .replace("\r", "\\r")
-            .replace("\n", "\\n")
-            .replace("\t", "\\t")
-            .replace("\"", "\\\"")
-            .take(MAX_TRACE_TEXT)}\""
-
-    private data class WordMetadata(
-        val wordId: Int,
-        val nativeDurationMs: Int,
-        val background: Boolean,
-        val entry: Any,
-        val text: CharSequence,
-        val cumulativeDurationMs: Int,
-        val cumulativeTextLength: Int,
-        val splitBindingCount: Int,
-        val nativeAnimator: Any?,
-        val animatorList: Any?,
-        val foregroundBinding: Any?,
-        val backgroundBinding: Any?,
-        val splitBindings: Any?,
-    )
 
     private fun cachedFields(type: Class<*>): kotlin.collections.Map<String, Field> =
         synchronized(fieldCache) {
@@ -537,11 +245,6 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
 
     private companion object {
         const val MAX_REWRITE_LOGS = 3
-        const val MAX_TRACE_EVENTS = 180
-        const val MAX_TRACE_ITEMS = 6
-        const val MAX_TRACE_TEXT = 32
-        const val NATIVE_CANDIDATE_DURATION_MS = 1_000
-        const val NATIVE_CANDIDATE_LENGTH_MAX = 7
     }
 }
 
