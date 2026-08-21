@@ -15,10 +15,11 @@
 ## 已实现内容
 
 1. 仅对 Apple Music `6.5.2/1586` 解析并 Hook：
+   - `com.apple.android.music.player.z.g0`
    - `com.apple.android.music.player.z.a0`
    - `com.apple.android.music.utils.I0$a.a(CharSequence, Set)`
 2. AM++ 不接管 Apple 的 duration/length 触发条件。`z.a0` 前只读取当前 `z$a.G/H -> e` 的 grouping metadata：`e.f`（累计 duration）、`e.g`（累计字符数）、`e.c`（词文本）和 `e.k`（拆分 binding）。只有规范化后恰好一个 CJK Unicode 字符、`e.f` 等于当前 native duration、`e.g == 1` 且没有多 binding 时，才临时放开 `k0/j0`；合并词保留 Apple 原始分类，不会进入长辉光分支。
-3. 放行仍限定在 `z.a0` 的线程局部调用范围内，不会全局修改 Apple 的静态字符集合，也不会改变 `g0` 的原始 CJK 排版路径。
+3. 当前实验在 `z.g0` 的线程局部调用范围内，只把规范化后恰好一个 CJK Unicode 字符的 `j0/k0` 分类结果临时改为普通文字结果；多字符/合并文本保留 Apple 原始分类。随后 `z.a0` 仍只对单字未合并 entry 放行原生动画。不会全局修改 Apple 的静态字符集合。
 4. 设置页和嵌入式设置页都有独立开关：
    - key：`cjk_karaoke_animation_enabled`
    - 字段：`ModuleSettings.cjkKaraokeAnimationEnabled`
@@ -37,7 +38,7 @@
 
 ## 已知边界
 
-- 当前方案是“复用 Apple 原生动画分支”，不是 AM++ 自己绘制；AM++ 只阻止合并 CJK 词块进入原生长辉光分类。
+- 当前方案是“尝试复用 Apple 英语形状的 binding + Apple 原生动画分支”，不是 AM++ 自己绘制；`g0` 改写可能影响 CJK 行布局和 RecyclerView 回收，必须用设备验收，失败时直接回退本实验提交。
 - 判断失败时默认不放行，保持 Apple 原始行为；带组合音标、补充字符或多 binding 的文字会被保守跳过。
 - Apple 版本、混淆类名和方法签名是私有契约；新增版本必须重新做 exact profile 和设备验证。
 - Apple 版本、混淆类名和方法签名是私有契约；新增版本必须重新做 exact profile 和设备验证。
