@@ -32,6 +32,8 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
+import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -2144,7 +2146,16 @@ internal class EmbeddedSettingsHost private constructor(
             .create()
         dialog.setOnShowListener {
             dialogReady = true
-            dialog.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            dialog.window?.let { window ->
+                // Apple Music's host window marks injected AlertDialogs as
+                // ALT_FOCUSABLE_IM. That leaves the search EditText focused
+                // while InputMethodManager keeps serving the host RecyclerView.
+                // Let this dialog participate in IME focus and resize for the
+                // keyboard instead of relying on the host's window policy.
+                window.clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
+                window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+                window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            }
             syncBottomCloseButton()
             syncDialogLayout()
         }
@@ -2362,7 +2373,10 @@ internal class EmbeddedSettingsHost private constructor(
 
             val search = EditText(activity).apply {
                 hint = "搜索名称或 Apple Music ID"
-            textSize = embeddedTextSize(activity, 14f, 13f)
+                textSize = embeddedTextSize(activity, 14f, 13f)
+                inputType = InputType.TYPE_CLASS_TEXT
+                imeOptions = EditorInfo.IME_ACTION_SEARCH
+                showSoftInputOnFocus = true
                 isSingleLine = true
                 includeFontPadding = false
                 setText(customLyricsSearchQuery)

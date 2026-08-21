@@ -81,4 +81,26 @@ class CustomLyricsListPageStructuralRegressionTest {
         assertTrue(activity.contains("没有匹配的歌词"))
         assertTrue(activity.contains("已配置 \${manifest.entries.size} 首；更改后重开 Apple Music 生效"))
     }
+
+    @Test
+    fun `configures both custom lyrics search fields for text IME input`() {
+        val activity = projectFile("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
+        val embeddedHost = projectFile(
+            "app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsHost.kt",
+        )
+        val standaloneSearch = activity
+            .substringAfter("private fun customLyricsSearchInput(")
+            .substringBefore("private fun customLyricsEntriesRegion(")
+        val embeddedSearch = embeddedHost
+            .substringAfter("private fun renderEmbeddedCustomLyricsPage(")
+            .substringBefore("private fun embeddedCustomLyricsEntryRow(")
+
+        listOf(standaloneSearch, embeddedSearch).forEach { searchSource ->
+            assertTrue(searchSource.contains("inputType = InputType.TYPE_CLASS_TEXT"))
+            assertTrue(searchSource.contains("imeOptions = EditorInfo.IME_ACTION_SEARCH"))
+            assertTrue(searchSource.contains("showSoftInputOnFocus = true"))
+        }
+        assertTrue(embeddedHost.contains("clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)"))
+        assertTrue(embeddedHost.contains("setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)"))
+    }
 }
