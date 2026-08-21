@@ -25,17 +25,16 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     private val fieldCache = Collections.synchronizedMap(
         WeakHashMap<Class<*>, kotlin.collections.Map<String, Field>>(),
     )
-    private val cjkEntryStates = Collections.synchronizedMap(
-        WeakHashMap<Any, CjkEntryState>(),
-    )
     private val glowAnimators = Collections.synchronizedMap(
-        WeakHashMap<Animator, Boolean>(),
+        WeakHashMap<Animator, WeakReference<Any>>(),
+    )
+    private val activeGlowByView = Collections.synchronizedMap(
+        WeakHashMap<Any, WeakReference<Animator>>(),
     )
     private val trackedGlowViews = Collections.synchronizedMap(
         WeakHashMap<Any, Boolean>(),
     )
     private val rewriteLogCount = AtomicInteger()
-    private var specialEndHookInstalled = false
     private var glowEndHookInstalled = false
     private var glowViewEndHookInstalled = false
 
@@ -94,16 +93,14 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
             false
         }
 
-        // The special path owns its own z$c end callback.  Observe that
-        // callback instead of adding listeners to every Animator in e.p; the
-        // latter changes Apple's ordering and was shown to disturb all lyric
-        // animations on device.
-        specialEndHookInstalled = installSpecialEndHook(a0)
+        // Observe only the host's own glow child callback.  Do not add
+        // listeners to every Animator in e.p: that changes Apple's ordering
+        // and was shown to disturb all lyric animations on device.
         glowEndHookInstalled = installGlowAnimatorEndHook(a0)
         glowViewEndHookInstalled = installGlowViewEndHook(a0)
 
-        if (!a0Installed || !helperInstalled || !specialEndHookInstalled ||
-            !glowEndHookInstalled || !glowViewEndHookInstalled
+        if (!a0Installed || !helperInstalled || !glowEndHookInstalled ||
+            !glowViewEndHookInstalled
         ) {
             return TargetCapabilityInstall.Degraded(
                 failures.joinToString("; ").ifBlank { "CJK karaoke animation hooks were not installed" },
@@ -151,12 +148,15 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     private fun attachGlowEndListener(updateListener: Any?, animator: Animator?) {
         if (updateListener == null || animator == null) return
         val view = readNamedField(updateListener, "c") ?: return
-        if (!isTrackedCjkGlowView(view) && !isSingleCjkGlowView(view)) return
+        if (!isTrackedCjkGlowView(view)) return
         val shouldAttach = synchronized(glowAnimators) {
             if (glowAnimators.containsKey(animator)) {
                 false
             } else {
-                glowAnimators[animator] = true
+                glowAnimators[animator] = WeakReference(view)
+                synchronized(activeGlowByView) {
+                    activeGlowByView[view] = WeakReference(animator)
+                }
                 true
             }
         }
@@ -170,10 +170,7 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
             private fun cleanup() {
                 if (cleaned) return
                 cleaned = true
-                animatorRef.get()?.let { ended ->
-                    synchronized(glowAnimators) { glowAnimators.remove(ended) }
-                }
-                cleanupGlowView(viewRef.get())
+                cleanupGlowAnimator(animatorRef.get(), viewRef.get())
             }
 
             override fun onAnimationCancel(animation: Animator) = cleanup()
@@ -208,9 +205,10 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
             method,
             object : ModernMethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    param.thisObject
+                    val animator = param.args.getOrNull(0) as? Animator
+                    val fallbackView = param.thisObject
                         ?.let { readNamedField(it, "b") }
-                        ?.let(::cleanupGlowView)
+                    cleanupGlowAnimator(animator, fallbackView)
                 }
             },
         )
@@ -218,22 +216,18 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         ModernXposedRuntime.log("CJK karaoke z\$g view end hook unavailable", error)
     }.getOrDefault(false)
 
-    private fun cleanupGlowView(view: Any?) {
-        if (view == null) return
-        val tracked = isTrackedCjkGlowView(view)
-        if (!tracked && !isSingleCjkGlowView(view)) return
-        resetCjkGlowView(view)
-        if (tracked) {
-            synchronized(trackedGlowViews) { trackedGlowViews.remove(view) }
+    private fun cleanupGlowAnimator(animator: Animator?, fallbackView: Any?) {
+        if (animator == null) return
+        val view = synchronized(glowAnimators) {
+            glowAnimators.remove(animator)?.get()
+        } ?: fallbackView ?: return
+        val activeForView = synchronized(activeGlowByView) {
+            activeGlowByView[view]?.get()
         }
-    }
-
-    private fun isSingleCjkGlowView(view: Any): Boolean {
-        val text = invokeNoArg(view, "getText") as? CharSequence ?: return false
-        val normalized = text.toString().trim()
-        return normalized.isNotEmpty() &&
-            normalized.codePointCount(0, normalized.length) == 1 &&
-            containsCjkKaraokeScript(normalized)
+        if (activeForView != null && activeForView !== animator) return
+        if (isTrackedCjkGlowView(view)) resetCjkGlowView(view)
+        synchronized(activeGlowByView) { activeGlowByView.remove(view) }
+        synchronized(trackedGlowViews) { trackedGlowViews.remove(view) }
     }
 
     private fun isTrackedCjkGlowView(view: Any): Boolean =
@@ -247,92 +241,15 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         invokeNoArg(view, "invalidate")
     }
 
-    private fun installSpecialEndHook(a0: Executable): Boolean = runCatching {
-        val owner = a0.declaringClass
-        val cleanupType = Class.forName(
-            "${owner.name}\$c",
-            false,
-            owner.classLoader,
-        )
-        val method = cleanupType.declaredMethods
-            .filter { candidate ->
-                candidate.name == "onAnimationEnd" &&
-                    candidate.parameterTypes.size == 1 &&
-                    Animator::class.java.isAssignableFrom(candidate.parameterTypes[0])
-            }
-            .singleOrNull()
-            ?: return@runCatching false
-        specialEndHookInstalled = ModernXposedRuntime.hookMethod(
-            method,
-            object : ModernMethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    cleanupSpecialCjkEnd(param.thisObject)
-                }
-            },
-        )
-        specialEndHookInstalled
-    }.onFailure { error ->
-        ModernXposedRuntime.log("CJK karaoke z\$c end hook unavailable", error)
-    }.getOrDefault(false)
-
-    private fun cleanupSpecialCjkEnd(listener: Any?) {
-        if (!specialEndHookInstalled || listener == null) return
-        runCatching {
-            val entry = readNamedField(listener, "a") ?: return@runCatching
-            val state = synchronized(cjkEntryStates) { cjkEntryStates.remove(entry) }
-                ?: return@runCatching
-            if (!isCurrentCjkEntry(state)) return@runCatching
-            val text = readNamedField(entry, "c") as? CharSequence ?: return@runCatching
-            val background = readNamedField(entry, "h") as? Boolean ?: return@runCatching
-            val nativeDuration = (readNamedField(entry, "e") as? Number)?.toInt()
-                ?: return@runCatching
-            val timing = CjkKaraokeWordTiming(
-                text = text,
-                nativeDurationMs = nativeDuration,
-                cumulativeDurationMs = (readNamedField(entry, "f") as? Number)?.toInt()
-                    ?: return@runCatching,
-                cumulativeTextLength = (readNamedField(entry, "g") as? Number)?.toInt()
-                    ?: return@runCatching,
-                splitBindingCount = splitCount(readNamedField(entry, "k")),
-                isBackground = background,
-            )
-            if (!isSingleUnmergedCjkWord(timing)) return@runCatching
-
-            val expectedText = text.toString().trim()
-            foregroundEntryViews(entry)
-                .filter { view -> state.views.any { recorded -> recorded === view } }
-                .forEach { view ->
-                val currentText = invokeNoArg(view, "getText") as? CharSequence
-                if (currentText == null || currentText.toString().trim() != expectedText) {
-                    return@forEach
-                }
-                // z$c has already removed its outer AnimatorSet from e.p;
-                // only clear the properties written by z$f/z$g.
-                invokeMethod(view, "setScaleX", 1f)
-                invokeMethod(view, "setScaleY", 1f)
-                invokeNoArg(view, "resetPivot")
-                invokeMethod(view, "setShadowLayer", 0f, 0f, 0f, 0)
-                invokeNoArg(view, "invalidate")
-            }
-        }.onFailure { error ->
-            ModernXposedRuntime.log("CJK karaoke z\$c end cleanup failed", error)
-        }
-    }
-
-    private fun isCurrentCjkEntry(state: CjkEntryState): Boolean = runCatching {
-        val map = cachedFields(state.holder.javaClass)["G"]
-            ?.let { field -> readField(field, state.holder) as? JavaMap<*, *> }
-            ?: return@runCatching false
-        val current = map.get(Integer.valueOf(state.wordId)) ?: map.get(state.wordId)
-        current === state.entry
-    }.getOrDefault(false)
-
     private fun foregroundEntryViews(entry: Any): List<Any> {
-        val bindings = mutableListOf<Any?>()
-        readNamedField(entry, "i")?.let(bindings::add)
-        when (val split = readNamedField(entry, "k")) {
-            is Collection<*> -> split.forEach(bindings::add)
-            else -> Unit
+        // z.m0(e, foreground=false) returns the primary e.i binding when it
+        // exists and only falls back to e.k otherwise.  Mirror that choice so
+        // a recycled split binding cannot be mistaken for this glow target.
+        val primary = readNamedField(entry, "i")
+        val bindings: List<Any?> = if (primary != null) {
+            listOf(primary)
+        } else {
+            (readNamedField(entry, "k") as? Collection<*>)?.toList().orEmpty()
         }
         val views = mutableListOf<Any>()
         bindings.forEach { binding ->
@@ -340,12 +257,6 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
             if (views.none { it === view }) views += view
         }
         return views
-    }
-
-    private fun splitCount(value: Any?): Int = when (value) {
-        null -> 0
-        is Collection<*> -> value.size
-        else -> -1
     }
 
     private fun rewriteCjkK0Result(param: ModernMethodHook.MethodHookParam) {
@@ -408,7 +319,6 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
             val candidate = readSingleWordGateEntry(param)
             a0Stack().add(candidate != null)
             candidate?.let { state ->
-                synchronized(cjkEntryStates) { cjkEntryStates[state.entry] = state }
                 synchronized(trackedGlowViews) {
                     state.views.forEach { view -> trackedGlowViews[view] = true }
                 }
@@ -469,24 +379,20 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
                 ?: return@runCatching null
             val splitValue = cachedFields(entry.javaClass)["k"]
                 ?.let { field -> readField(field, entry) }
-            val splitCount = when (splitValue) {
-                null -> 0
-                is Collection<*> -> splitValue.size
-                else -> -1
-            }
             val timing = CjkKaraokeWordTiming(
                 text = text,
                 nativeDurationMs = nativeDuration,
                 cumulativeDurationMs = cumulativeDuration,
                 cumulativeTextLength = cumulativeLength,
-                splitBindingCount = splitCount,
+                splitBindingCount = when (splitValue) {
+                    null -> 0
+                    is Collection<*> -> splitValue.size
+                    else -> -1
+                },
                 isBackground = background,
             )
             if (!isSingleUnmergedCjkWord(timing)) return@runCatching null
             CjkEntryState(
-                holder = holder,
-                wordId = wordId,
-                entry = entry,
                 views = foregroundEntryViews(entry),
             )
         }.getOrElse { error ->
@@ -529,9 +435,6 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     }.getOrNull()
 
     private data class CjkEntryState(
-        val holder: Any,
-        val wordId: Int,
-        val entry: Any,
         val views: List<Any>,
     )
 
