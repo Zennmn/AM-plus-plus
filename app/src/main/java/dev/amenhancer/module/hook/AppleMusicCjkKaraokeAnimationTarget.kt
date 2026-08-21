@@ -8,8 +8,10 @@ import android.widget.TextView
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
+import java.util.Collections
 import java.util.IdentityHashMap
-import java.util.Map
+import java.util.Map as JavaMap
+import java.util.WeakHashMap
 
 /**
  * Apple Music 6.5.2 adapter for AM++'s own per-word karaoke animation.
@@ -28,6 +30,12 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     private val symbols: TargetSymbolResolver,
 ) : CjkKaraokeAnimationTarget {
     private val valueAnimator = CjkLyricValueAnimator()
+    private val fieldCache = Collections.synchronizedMap(
+        WeakHashMap<Class<*>, Map<String, Field>>(),
+    )
+    private val rootMethodCache = Collections.synchronizedMap(
+        WeakHashMap<Class<*>, Method?>(),
+    )
 
     override fun install(): TargetCapabilityInstall {
         val a0Resolution = symbols.resolve(AppleMusicSymbols.CjkKaraokeAnimationMethod)
@@ -155,9 +163,7 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     }
 
     private fun cancelNativeWordAnimator(entry: Any) {
-        val field = allFields(entry.javaClass)
-            .firstOrNull { candidate -> candidate.name == "o" }
-            ?: return
+        val field = cachedFields(entry.javaClass)["o"] ?: return
         val animator = readField(field, entry)
         if (animator is Animator) runCatching { animator.cancel() }
         runCatching {
@@ -262,9 +268,9 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     }
 
     private fun clearHolderAnimations(holder: Any) {
-        allFields(holder.javaClass)
+        cachedFields(holder.javaClass).values
             .mapNotNull { field -> readField(field, holder) }
-            .filterIsInstance<Map<*, *>>()
+            .filterIsInstance<JavaMap<*, *>>()
             .flatMap { map -> map.values().asSequence() }
             .filterNotNull()
             .flatMap { entry ->
@@ -292,8 +298,7 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     private fun findWordText(holder: Any, wordId: Int, background: Boolean): CharSequence? =
         findWordEntry(holder, wordId, background)
             ?.let { entry ->
-                allFields(entry.javaClass)
-                    .firstOrNull { field -> field.name == "c" }
+                cachedFields(entry.javaClass)["c"]
                     ?.let { field -> readField(field, entry) as? CharSequence }
             }
 
@@ -303,9 +308,8 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         // Map can therefore animate the wrong TextView when the same wordId
         // exists in more than one lyric track; G/H are the exact foreground
         // and background maps selected by z.a0.
-        val map = allFields(holder.javaClass)
-            .firstOrNull { field -> field.name == preferredMapName }
-            ?.let { field -> readField(field, holder) as? Map<*, *> }
+        val map = cachedFields(holder.javaClass)[preferredMapName]
+            ?.let { field -> readField(field, holder) as? JavaMap<*, *> }
             ?: return null
         val entry = runCatching { map[Integer.valueOf(wordId)] }.getOrNull()
             ?: runCatching { map[wordId] }.getOrNull()
@@ -314,8 +318,7 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
 
     private fun findEntryBindings(entry: Any, background: Boolean): List<Any> {
         val preferredBindingName = if (background) "j" else "i"
-        val directBinding = allFields(entry.javaClass)
-            .firstOrNull { field -> field.name == preferredBindingName }
+        val directBinding = cachedFields(entry.javaClass)[preferredBindingName]
             ?.let { field -> readField(field, entry) }
             ?.takeIf(::looksLikeViewBinding)
         if (directBinding != null) return listOf(directBinding)
@@ -323,8 +326,7 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         // z.m0 falls back to e.k when the host split one native word into a
         // character/whitespace binding list. This is the common CJK path.
         val splitBindings = (
-            allFields(entry.javaClass)
-                .firstOrNull { field -> field.name == "k" }
+            cachedFields(entry.javaClass)["k"]
                 ?.let { field -> readField(field, entry) as? Iterable<*> }
                 ?: emptyList<Any?>()
             )
@@ -339,33 +341,49 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         // Generated lyric bindings in 6.5.2 expose their word CustomTextView
         // as field U. We intentionally use the type, not only the obfuscated
         // name, so a generated binding rename remains fail-open.
-        allFields(binding.javaClass).forEach { field ->
+        cachedFields(binding.javaClass).values.forEach { field ->
             val value = readField(field, binding)
             if (value is TextView) return listOf(value)
         }
 
         // A future generated binding may only expose ViewDataBinding#getRoot.
         val root = runCatching {
-            binding.javaClass.methods.firstOrNull { method ->
-                method.name == "getRoot" && method.parameterCount == 0
-            }?.invoke(binding)
+            val rootMethod = synchronized(rootMethodCache) {
+                if (rootMethodCache.containsKey(binding.javaClass)) {
+                    rootMethodCache[binding.javaClass]
+                } else {
+                    binding.javaClass.methods.firstOrNull { method ->
+                        method.name == "getRoot" && method.parameterCount == 0
+                    }?.apply { isAccessible = true }
+                        .also { method -> rootMethodCache[binding.javaClass] = method }
+                }
+            }
+            rootMethod?.invoke(binding)
         }.getOrNull()
         return (root as? TextView)?.let(::listOf).orEmpty()
     }
 
     private fun looksLikeViewBinding(value: Any): Boolean =
         value.javaClass.name.contains("ViewDataBinding") ||
-            allFields(value.javaClass).any { field ->
+            cachedFields(value.javaClass).values.any { field ->
                 TextView::class.java.isAssignableFrom(field.type)
             }
 
-    private fun allFields(type: Class<*>): Sequence<Field> =
-        generateSequence(type) { it.superclass }
-            .flatMap { current -> current.declaredFields.asSequence() }
-            .filterNot { field -> Modifier.isStatic(field.modifiers) }
+    private fun cachedFields(type: Class<*>): Map<String, Field> = synchronized(fieldCache) {
+        fieldCache[type] ?: buildMap {
+            generateSequence(type) { it.superclass }
+                .flatMap { current -> current.declaredFields.asSequence() }
+                .filterNot { field -> Modifier.isStatic(field.modifiers) }
+                .forEach { field ->
+                    if (!containsKey(field.name)) {
+                        runCatching { field.isAccessible = true }
+                        put(field.name, field)
+                    }
+                }
+        }.also { fields -> fieldCache[type] = fields }
+    }
 
     private fun readField(field: Field, receiver: Any): Any? = runCatching {
-        field.isAccessible = true
         field.get(receiver)
     }.getOrNull()
 
