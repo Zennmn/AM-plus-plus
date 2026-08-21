@@ -1,5 +1,7 @@
 package dev.amenhancer.module.hook
 
+import android.animation.Animator
+import java.lang.reflect.Executable
 import java.util.concurrent.atomic.AtomicInteger
 import java.lang.reflect.Field
 import java.lang.reflect.Modifier
@@ -22,6 +24,7 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         WeakHashMap<Class<*>, kotlin.collections.Map<String, Field>>(),
     )
     private val rewriteLogCount = AtomicInteger()
+    private var specialEndHookInstalled = false
 
     override fun install(): TargetCapabilityInstall {
         val a0Resolution = symbols.resolve(AppleMusicSymbols.CjkKaraokeAnimationMethod)
@@ -78,6 +81,12 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
             false
         }
 
+        // The special path owns its own z$c end callback.  Observe that
+        // callback instead of adding listeners to every Animator in e.p; the
+        // latter changes Apple's ordering and was shown to disturb all lyric
+        // animations on device.
+        specialEndHookInstalled = installSpecialEndHook(a0)
+
         if (!a0Installed || !helperInstalled) {
             return TargetCapabilityInstall.Degraded(
                 failures.joinToString("; ").ifBlank { "CJK karaoke animation hooks were not installed" },
@@ -85,8 +94,96 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         }
 
         return TargetCapabilityInstall.Active(
-            "Installed exact 6.5.2/1586 single-unmerged-CJK guard around z.a0 + I0\$a.a",
+            "Installed exact 6.5.2/1586 single-unmerged-CJK guard with z\$c end cleanup",
         )
+    }
+
+    private fun installSpecialEndHook(a0: Executable): Boolean = runCatching {
+        val owner = a0.declaringClass
+        val cleanupType = Class.forName(
+            "${owner.name}\$c",
+            false,
+            owner.classLoader,
+        )
+        val method = cleanupType.declaredMethods
+            .filter { candidate ->
+                candidate.name == "onAnimationEnd" &&
+                    candidate.parameterTypes.size == 1 &&
+                    Animator::class.java.isAssignableFrom(candidate.parameterTypes[0])
+            }
+            .singleOrNull()
+            ?: return@runCatching false
+        specialEndHookInstalled = ModernXposedRuntime.hookMethod(
+            method,
+            object : ModernMethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    cleanupSpecialCjkEnd(param.thisObject)
+                }
+            },
+        )
+        specialEndHookInstalled
+    }.onFailure { error ->
+        ModernXposedRuntime.log("CJK karaoke z\$c end hook unavailable", error)
+    }.getOrDefault(false)
+
+    private fun cleanupSpecialCjkEnd(listener: Any?) {
+        if (!specialEndHookInstalled || listener == null) return
+        runCatching {
+            val entry = readNamedField(listener, "a") ?: return@runCatching
+            val text = readNamedField(entry, "c") as? CharSequence ?: return@runCatching
+            val background = readNamedField(entry, "h") as? Boolean ?: return@runCatching
+            val nativeDuration = (readNamedField(entry, "e") as? Number)?.toInt()
+                ?: return@runCatching
+            val timing = CjkKaraokeWordTiming(
+                text = text,
+                nativeDurationMs = nativeDuration,
+                cumulativeDurationMs = (readNamedField(entry, "f") as? Number)?.toInt()
+                    ?: return@runCatching,
+                cumulativeTextLength = (readNamedField(entry, "g") as? Number)?.toInt()
+                    ?: return@runCatching,
+                splitBindingCount = splitCount(readNamedField(entry, "k")),
+                isBackground = background,
+            )
+            if (!isSingleUnmergedCjkWord(timing)) return@runCatching
+
+            val expectedText = text.toString().trim()
+            foregroundEntryViews(entry).forEach { view ->
+                val currentText = invokeNoArg(view, "getText") as? CharSequence
+                if (currentText == null || currentText.toString().trim() != expectedText) {
+                    return@forEach
+                }
+                // z$c has already removed its outer AnimatorSet from e.p;
+                // only clear the properties written by z$f/z$g.
+                invokeMethod(view, "setScaleX", 1f)
+                invokeMethod(view, "setScaleY", 1f)
+                invokeNoArg(view, "resetPivot")
+                invokeMethod(view, "setShadowLayer", 0f, 0f, 0f, 0)
+                invokeNoArg(view, "invalidate")
+            }
+        }.onFailure { error ->
+            ModernXposedRuntime.log("CJK karaoke z\$c end cleanup failed", error)
+        }
+    }
+
+    private fun foregroundEntryViews(entry: Any): List<Any> {
+        val bindings = mutableListOf<Any?>()
+        readNamedField(entry, "i")?.let(bindings::add)
+        when (val split = readNamedField(entry, "k")) {
+            is Collection<*> -> split.forEach(bindings::add)
+            else -> Unit
+        }
+        val views = mutableListOf<Any>()
+        bindings.forEach { binding ->
+            val view = binding?.let { readNamedField(it, "U") } ?: return@forEach
+            if (views.none { it === view }) views += view
+        }
+        return views
+    }
+
+    private fun splitCount(value: Any?): Int = when (value) {
+        null -> 0
+        is Collection<*> -> value.size
+        else -> -1
     }
 
     private fun rewriteCjkK0Result(param: ModernMethodHook.MethodHookParam) {
@@ -241,6 +338,20 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
 
     private fun readField(field: Field, receiver: Any): Any? = runCatching {
         field.get(receiver)
+    }.getOrNull()
+
+    private fun readNamedField(receiver: Any, name: String): Any? =
+        cachedFields(receiver.javaClass)[name]?.let { field -> readField(field, receiver) }
+
+    private fun invokeNoArg(receiver: Any, methodName: String): Any? =
+        invokeMethod(receiver, methodName)
+
+    private fun invokeMethod(receiver: Any, methodName: String, vararg args: Any?): Any? = runCatching {
+        receiver.javaClass.methods
+            .firstOrNull { method ->
+                method.name == methodName && method.parameterTypes.size == args.size
+            }
+            ?.invoke(receiver, *args)
     }.getOrNull()
 
     private companion object {
