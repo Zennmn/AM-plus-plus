@@ -2,44 +2,43 @@
 
 ## 目的
 
-本分支保存 Apple Music 6.5.2/1586 的 CJK 长尾歌词动画实验。它不属于 `main` 稳定线，后续维护、设备验证或替换为 AM++ 自绘动画都从本分支继续。
+本分支保存 Apple Music 6.5.2/1586 的 CJK 逐词动画实验。它不属于 `main` 稳定线，后续维护、设备验证或替换动画策略都从本分支继续。
 
 ## 当前分支与远端
 
 - 分支：`codex/cjk-karaoke-animation`
-- 当前 HEAD：`38f923c docs: add CJK karaoke animation handoff`
-- 功能提交：`39e9b08 feat: isolate CJK karaoke animation feature`
 - 远端：[Zennmn/AM-plus-plus/tree/codex/cjk-karaoke-animation](https://github.com/Zennmn/AM-plus-plus/tree/codex/cjk-karaoke-animation)
 - 主分支基线：`main`（当前不包含本实验功能）
-- 当前分支已推送到 `origin`；不要把本分支代码直接合并到 `main`，除非完成新的设备验收。
+- 当前工作树中的 XAPK、`androguard.db*`、`.work/` 和 `github-lyrics-export-readable/` 均为未跟踪逆向输入，不应提交。
 
-## 已实现内容
+## 当前实现（AM++ 自绘 ValueAnimator）
 
-1. 仅对 Apple Music `6.5.2/1586` 解析并 Hook：
-   - `com.apple.android.music.player.z.a0`
-   - `com.apple.android.music.utils.I0$a.a(CharSequence, Set)`
-2. 在 `z.a0` 的线程局部调用范围内，临时放开 CJK 的 `k0/j0` 分类结果，以复用 Apple 原生 rush-gradient；不会全局修改 Apple 的静态字符集合，也不会改变 `g0` 的原始 CJK 排版路径。
-3. 设置页和嵌入式设置页都有独立开关：
-   - key：`cjk_karaoke_animation_enabled`
-   - 字段：`ModuleSettings.cjkKaraokeAnimationEnabled`
-   - 默认值：`true`
-   - 关闭后需要重启 Apple Music，feature 才不会注册 Hook。
+旧方案曾在 `z.a0` 调用期间 Hook `I0$a.a(CharSequence, Set)`，临时改写 Apple 的 `j0/k0` 分类结果来复用原生 rush-gradient。该方案已从运行时移除，当前不再 Hook `I0$a.a`，也不修改 Apple 的字符集合或原生动画判定。
+
+当前方案只把精确的 `z.a0(z$a, lineId, wordId, duration, isBackground)` 当作数据 seam：
+
+1. `z$a.G/H` 是前景/背景 karaoke 的 `ArrayMap<Integer, PlayerLyricsViewModel$e>`；只按 `wordId` 从对应的 G/H 读取，避免误取 pronunciation 的 I/J map。
+2. `e.i/e.j` 是单个词 binding；CJK 拆分时回退到 `e.k` binding 列表。
+3. generated binding 的 `CustomTextView`（6.5.2 中为字段 `U`）是实际逐词 View。AM++ 在 `z.a0` after-hook 中对这些 View 启动自己的 `ValueAnimator`，duration 直接来自该词的 `LyricsTiming`。
+4. 对 CJK 前景词，before/after 都会取消并清空宿主 `e.o` 及其 `e.p` 中带 `KARAOKE_WORD_LIFT_TAG` 的子动画；随后归一化被取消动画遗留的 translation/scale。`z.g0` 重建 flexbox、`z.p` RecyclerView rebind、`onDestroyView` 和 View detach 都会取消并恢复 AM++ 动画，避免 recycled View 残留。
+5. 背景人声不接管；混排词按实际 binding/TextView 的 CJK 内容过滤。宿主 binding 文本尚未异步完成时，使用 `e.c` 的 native wordText 判断脚本。
 
 ## 关键代码位置
 
-- Hook 实现：`app/src/main/java/dev/amenhancer/module/hook/AppleMusicCjkKaraokeAnimationTarget.kt`
+- 宿主 seam 与 binding 解析：`app/src/main/java/dev/amenhancer/module/hook/AppleMusicCjkKaraokeAnimationTarget.kt`
+- AM++ 动画控制器/时序策略：`app/src/main/java/dev/amenhancer/module/hook/CjkLyricValueAnimator.kt`
+- 动画策略 JVM 测试：`app/src/test/java/dev/amenhancer/module/hook/CjkLyricValueAnimatorTest.kt`
 - Feature gate：`app/src/main/java/dev/amenhancer/module/hook/CjkKaraokeAnimationFeature.kt`
 - 版本符号：`app/src/main/java/dev/amenhancer/module/hook/TargetSymbols.kt`
 - Feature 注册：`app/src/main/java/dev/amenhancer/module/hook/FeatureInstallation.kt`
-- 设置模型/schema：`app/src/main/java/dev/amenhancer/module/model/ModuleModels.kt`、`app/src/main/java/dev/amenhancer/module/config/ModuleSettingsSchema.kt`
-- 设置 UI：`app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt`、`app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsHost.kt`
+- 独立设置 key：`cjk_karaoke_animation_enabled`，字段 `ModuleSettings.cjkKaraokeAnimationEnabled`，默认值 `true`。
 
-## 已知边界
+## 已知边界与真机验证重点
 
-- 当前方案是“复用 Apple 原生动画分支”，不是 AM++ 自己绘制的稳定实现；用户已观察到 CJK 仍可能出现动画错位、跳动或宽度问题。
-- 后续更稳妥的路线是：在 Apple adapter 完成逐词 View 绑定后，由 AM++ 自己创建 `ValueAnimator`/渐变遮罩，并处理 View 回收、行切换、混排字符和取消旧动画。
-- 该自绘路线尚未实现。不要只在整行 RecyclerView 上加动画；必须拿到实际词 View 和可靠的逐词时序。
-- Apple 版本、混淆类名和方法签名是私有契约；新增版本必须重新做 exact profile 和设备验证。
+- 目前 exact profile 仍只针对 Apple Music `6.5.2/1586`；其它版本会 degraded，不会猜测混淆方法。
+- 这是第一版安全自绘实现：动画改动 TextView 的 alpha/translation/scale，尚未模拟 Apple 的渐变 mask 绘制；CJK 前景词会先取消宿主 word-lift/rush animator，以减少属性竞争。
+- `z.a0` 可能因宿主已有 `e.o` animator 提前 return；after-hook 仍使用 holder map 读取 binding，但若 binding 尚未生成会 fail-open。应重点测试：中文、日文、韩文、CJK+Latin 混排、长 duration 词、快速切歌、滚动回收和关闭开关后的重启行为。
+- 不要把动画降级为整行 RecyclerView 动画；逐词 binding seam 是本实验的核心。
 
 ## 继续维护步骤
 
@@ -67,7 +66,7 @@ git switch main
 - 逆向结论、DEX/smali/native 符号和行为矩阵：仓库根目录 `findings.md`
 - 时间线、测试、构建和分支操作记录：仓库根目录 `progress.md`
 - 当前阶段计划：仓库根目录 `task_plan.md`
-- Apple Music 6.5.2 输入包：工作区未跟踪的 `Apple+Music_6.5.2_APKPure.xapk`；不要把它或 `androguard.db*` 误加入提交。
+- Apple Music 6.5.2 输入包：未跟踪的 `Apple+Music_6.5.2_APKPure.xapk`；不要把它或 `androguard.db*` 加入提交。
 
 ## 建议后续调用的 skills
 

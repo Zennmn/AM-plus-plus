@@ -411,10 +411,10 @@ private object AppleMusicProfiles {
 
 internal object AppleMusicSymbols {
     /**
-     * Apple Music 6.5.2/1586's karaoke transition entry point
+     * Apple Music 6.5.2/1586's per-word binding/timing entry point
      * (`com.apple.android.music.player.z.a0(z$a, int, int, int, boolean)`).
-     * This is intentionally profile-only: a structural match on another
-     * obfuscated build could alter the host's animation state machine.
+     * AM++ uses it only as an exact wordId/duration seam for its own
+     * ValueAnimator; it does not rewrite Apple's Unicode classifier.
      */
     val CjkKaraokeAnimationMethod = methodSymbol(
         id = "cjk-karaoke-animation-method",
@@ -426,10 +426,9 @@ internal object AppleMusicSymbols {
     )
 
     /**
-     * Apple Music 6.5.2/1586's UnicodeBlock-set predicate
-     * (`com.apple.android.music.utils.I0$a.a(CharSequence, Set): boolean`).
-     * Like the animation entry point, this must never fall back to a guessed
-     * helper on 6.5.0/6.5.1 or an unknown host build.
+     * Retained reverse-engineering symbol for Apple Music 6.5.2/1586's
+     * UnicodeBlock-set predicate. The AM++ ValueAnimator target deliberately
+     * does not resolve or hook this helper.
      */
     val CjkUnicodeBlockPredicateMethod = methodSymbol(
         id = "cjk-unicode-block-predicate-method",

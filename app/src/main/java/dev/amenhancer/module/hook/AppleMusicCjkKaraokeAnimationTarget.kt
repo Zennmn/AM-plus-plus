@@ -1,194 +1,382 @@
 package dev.amenhancer.module.hook
 
-import java.util.concurrent.atomic.AtomicInteger
+import android.animation.Animator
+import android.util.Log
+import android.view.View
+import android.view.ViewGroup
+import android.widget.TextView
+import java.lang.reflect.Field
+import java.lang.reflect.Method
+import java.lang.reflect.Modifier
+import java.util.IdentityHashMap
+import java.util.Map
 
 /**
- * Narrow Apple Music 6.5.2/1586 adapter for the native karaoke rush-gradient
- * path.  The host's `z.a0` call is the only scope in which the UnicodeBlock
- * helper result is adjusted; normal `z.g0` layout calls therefore retain their
- * original CJK behavior.
+ * Apple Music 6.5.2 adapter for AM++'s own per-word karaoke animation.
+ *
+ * The old experiment changed Apple's Unicode-block predicate while `z.a0`
+ * was running. That made the host's private animation state machine decide
+ * whether CJK should be animated and was consequently hard to cancel when a
+ * lyric row was recycled. This target still uses the verified `z.a0` entry
+ * point, but only as a data seam: its arguments identify the current
+ * `wordId`, duration and background flag. The holder's exact word map then
+ * leads to the generated binding's `CustomTextView`, where AM++ starts and
+ * owns a `ValueAnimator`. For CJK foreground words the host's `e.o` animator
+ * is cancelled before/after the call so it cannot fight the AM++ properties.
  */
 internal class AppleMusicCjkKaraokeAnimationTarget(
     private val symbols: TargetSymbolResolver,
 ) : CjkKaraokeAnimationTarget {
-    private val a0Depth: ThreadLocal<Int> = ThreadLocal.withInitial { 0 }
-    private val rewriteLogCount = AtomicInteger()
+    private val valueAnimator = CjkLyricValueAnimator()
 
     override fun install(): TargetCapabilityInstall {
         val a0Resolution = symbols.resolve(AppleMusicSymbols.CjkKaraokeAnimationMethod)
-        val helperResolution = symbols.resolve(AppleMusicSymbols.CjkUnicodeBlockPredicateMethod)
         val a0 = a0Resolution.valueOrNull()
-        val helper = helperResolution.valueOrNull()
-        if (a0 == null || helper == null) {
-            return TargetCapabilityInstall.Degraded(
-                listOf(a0Resolution, helperResolution)
-                    .filterNot { it is TargetResolution.Found<*> }
-                    .joinToString { it.summary },
-            )
-        }
+            ?: return TargetCapabilityInstall.Degraded(a0Resolution.summary)
 
         val failures = mutableListOf<String>()
         val a0Installed = try {
             ModernXposedRuntime.hookMethod(a0, object : ModernMethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    enterA0Scope()
+                    runCatching { suppressNativeWordAnimator(param) }
+                        .onFailure { error ->
+                            Log.w(TAG, "CJK native animator suppression failed open", error)
+                        }
                 }
 
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    // The host callback runs even when z.a0 throws; always
-                    // release this thread's scope so a later g0 call cannot
-                    // inherit a stale override.
-                    leaveA0Scope()
+                    runCatching { animateCurrentWord(param) }
+                        .onFailure { error ->
+                            // A host binding change must never break Apple's
+                            // original callback or lyric layout.
+                            Log.w(TAG, "CJK word View animation failed open", error)
+                        }
                 }
             }).also { installed ->
                 if (!installed) failures += "z.a0 hook was rejected"
             }
         } catch (error: Throwable) {
             failures += "z.a0 hook failed: ${error.cjkShortMessage()}"
-            ModernXposedRuntime.log("CJK karaoke z.a0 hook failed", error)
+            Log.w(TAG, "CJK word View animation hook failed", error)
             false
         }
 
-        val helperInstalled = try {
-            ModernXposedRuntime.hookMethod(helper, object : ModernMethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    try {
-                        rewriteCjkK0Result(param)
-                    } catch (error: Throwable) {
-                        // A malformed host call must never break its original
-                        // helper result.  This is deliberately fail-open.
-                        ModernXposedRuntime.log("CJK karaoke UnicodeBlock helper failed open", error)
-                    }
-                }
-            }).also { installed ->
-                if (!installed) failures += "I0\$a.a hook was rejected"
-            }
-        } catch (error: Throwable) {
-            failures += "I0\$a.a hook failed: ${error.cjkShortMessage()}"
-            ModernXposedRuntime.log("CJK karaoke I0\$a.a hook failed", error)
-            false
-        }
+        // g0 removes and rebuilds the flexbox children. Clearing here avoids
+        // a detached/recycled CustomTextView retaining an in-flight animator
+        // if the platform keeps the object in its pool for a moment.
+        installWordLayoutRecycleHook(a0.declaringClass, failures)
+        installHolderRecycleHook(a0.declaringClass, a0.parameterTypes.firstOrNull(), failures)
+        installFragmentDestroyHook(failures)
 
-        if (!a0Installed || !helperInstalled) {
+        if (!a0Installed) {
             return TargetCapabilityInstall.Degraded(
-                failures.joinToString("; ").ifBlank { "CJK karaoke animation hooks were not installed" },
+                failures.joinToString("; ").ifBlank { "CJK ValueAnimator hook was not installed" },
             )
         }
 
         return TargetCapabilityInstall.Active(
-            "Installed exact Apple Music 6.5.2/1586 z.a0 + I0\$a.a CJK j0/k0 rush-gradient scope",
+            "Installed AM++ per-word ValueAnimator on exact 6.5.2/1586 z.a0 binding View",
         )
     }
 
-    private fun rewriteCjkK0Result(param: ModernMethodHook.MethodHookParam) {
-        if (!isInA0Scope()) return
+    private fun suppressNativeWordAnimator(param: ModernMethodHook.MethodHookParam) {
+        val background = param.args.getOrNull(4) as? Boolean ?: return
+        if (background) return
+        val holder = param.args.getOrNull(0) ?: return
+        val wordId = (param.args.getOrNull(2) as? Number)?.toInt() ?: return
+        val entry = findWordEntry(holder, wordId, background = false) ?: return
+        val wordText = findWordText(holder, wordId, background = false)
+        if (wordText?.let(::containsCjkKaraokeScript) != true) return
+        cancelNativeWordAnimator(entry)
+    }
 
-        val text = param.args.getOrNull(0) as? CharSequence ?: return
-        if (!containsCjkKaraokeScript(text)) return
+    private fun animateCurrentWord(param: ModernMethodHook.MethodHookParam) {
+        // z.a0(z$a holder, int lineId, int wordId, int duration, boolean bg)
+        val background = param.args.getOrNull(4) as? Boolean ?: return
+        val holder = param.args.getOrNull(0) ?: return
+        val wordId = (param.args.getOrNull(2) as? Number)?.toInt() ?: return
+        val duration = (param.args.getOrNull(3) as? Number)?.toLong() ?: return
 
-        val languageSet = param.args.getOrNull(1) as? Set<*> ?: return
-        when {
-            isK0Set(languageSet) && param.result == true -> {
-                // CJK is normally classified into k0, which blocks the
-                // rush branch.  Make that one result look like a default
-                // script only while a0 is running.
-                param.result = false
-                logRewrite(text, "k0 true -> false")
-            }
-            isJ0Set(languageSet) && containsHangul(text) && param.result != true -> {
-                // i0 receives the j0 hit as its split/rush eligibility bit.
-                // Hangul belongs to k0 but not j0, so opt it into the same
-                // Apple animation only inside a0; g0 remains untouched.
-                param.result = true
-                logRewrite(text, "j0 false -> true")
-            }
-            else -> return
+        // Background vocals have a separate binding map and are intentionally
+        // left to the host. The foreground map is z$a.G in this exact build.
+        if (background) return
+        val entry = findWordEntry(holder, wordId, background = false) ?: return
+        val seenTextViews = IdentityHashMap<TextView, Boolean>()
+        val textViews = findWordBindings(holder, wordId, background = false)
+            .flatMap(::findBindingTextViews)
+            .filter { view -> seenTextViews.put(view, true) == null }
+        if (textViews.isEmpty()) return
+
+        // The generated binding may apply its TextView text asynchronously.
+        // e.c is the native wordText already consumed by z.a0, so use it as
+        // the primary script signal and only fall back to the visible View.
+        val hostWordText = findWordText(holder, wordId, background = false)
+        val cjkViews = textViews.filter { textView ->
+            runCatching { textView.text }.getOrNull()?.let(::containsCjkKaraokeScript) == true
         }
-    }
-
-    private fun logRewrite(text: CharSequence, change: String) {
-        if (rewriteLogCount.getAndIncrement() < MAX_REWRITE_LOGS) {
-            ModernXposedRuntime.log(
-                "CJK karaoke a0 scope: I0\$a.a(${text.length} chars, $change); g0 unchanged",
-            )
+        if (hostWordText?.let(::containsCjkKaraokeScript) == true || cjkViews.isNotEmpty()) {
+            // The host may have created e.o during this invocation. Cancel it
+            // again after the original method and leave View properties to
+            // the AM++ animator below.
+            cancelNativeWordAnimator(entry)
         }
+        if (hostWordText?.let(::containsCjkKaraokeScript) != true && cjkViews.isEmpty()) {
+            // A recycled word View can be rebound to Latin text before the
+            // next CJK callback; restore it immediately in that case.
+            textViews.forEach(valueAnimator::clear)
+            return
+        }
+
+        // a0 is already called once per native word event. The duration is
+        // the word's own LyricsTiming duration, so long CJK tail words get a
+        // correspondingly longer AM++ animation without guessing line timing.
+        val targets = cjkViews.ifEmpty { textViews }
+        targets.forEach { view ->
+            // Native z$f/z$h may leave a cancelled lift at a non-zero
+            // translation/scale. Normalize only those properties before AM++
+            // captures its baseline; alpha is left untouched for host row
+            // dimming semantics.
+            runCatching {
+                view.translationY = 0f
+                view.scaleX = 1f
+                view.scaleY = 1f
+            }
+        }
+        valueAnimator.animateViews(
+            // The generated binding's root is the first word View. The
+            // explicit target list also covers z.m0's e.k fallback when
+            // Apple split one native word into several character bindings.
+            root = targets.first(),
+            targets = targets,
+            durationMs = duration,
+            wordIndex = 0,
+            wordCount = targets.size,
+        )
     }
 
-    private fun isK0Set(languageSet: Set<*>): Boolean = runCatching {
-        // z.k0 always contains HANGUL_SYLLABLES.  This marker distinguishes
-        // it from the host's j0/l0 sets without touching either set globally.
-        languageSet.contains(Character.UnicodeBlock.HANGUL_SYLLABLES)
-    }.getOrElse { error ->
-        ModernXposedRuntime.log("CJK karaoke k0 marker check failed open", error)
-        false
-    }
-
-    private fun isJ0Set(languageSet: Set<*>): Boolean = runCatching {
-        languageSet.contains(Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS) &&
-            languageSet.contains(Character.UnicodeBlock.HIRAGANA) &&
-            languageSet.contains(Character.UnicodeBlock.KATAKANA) &&
-            !languageSet.contains(Character.UnicodeBlock.HANGUL_SYLLABLES) &&
-            !languageSet.contains(Character.UnicodeBlock.THAI)
-    }.getOrElse { error ->
-        ModernXposedRuntime.log("CJK karaoke j0 marker check failed open", error)
-        false
-    }
-
-    private fun enterA0Scope() {
-        runCatching { a0Depth.set((a0Depth.get() ?: 0) + 1) }
-            .onFailure { error -> ModernXposedRuntime.log("CJK karaoke a0 depth enter failed open", error) }
-    }
-
-    private fun leaveA0Scope() {
+    private fun cancelNativeWordAnimator(entry: Any) {
+        val field = allFields(entry.javaClass)
+            .firstOrNull { candidate -> candidate.name == "o" }
+            ?: return
+        val animator = readField(field, entry)
+        if (animator is Animator) runCatching { animator.cancel() }
         runCatching {
-            val depth = a0Depth.get() ?: 0
-            if (depth <= 1) {
-                a0Depth.remove()
-            } else {
-                a0Depth.set(depth - 1)
-            }
-        }.onFailure { error -> ModernXposedRuntime.log("CJK karaoke a0 depth cleanup failed open", error) }
+            field.isAccessible = true
+            field.set(entry, null)
+        }
+        // The host also keeps child word-lift animators in e.p. Its verified
+        // e.a() cleanup only cancels entries tagged KARAOKE_WORD_LIFT_TAG,
+        // so it cannot touch the AM++ ValueAnimator (which is not in e.p).
+        runCatching {
+            entry.javaClass.methods.firstOrNull { method ->
+                method.name == "a" && method.parameterCount == 0
+            }?.invoke(entry)
+        }
     }
 
-    private fun isInA0Scope(): Boolean = runCatching { (a0Depth.get() ?: 0) > 0 }
-        .getOrElse { error ->
-            ModernXposedRuntime.log("CJK karaoke a0 depth read failed open", error)
-            false
+    private fun installWordLayoutRecycleHook(owner: Class<*>, failures: MutableList<String>) {
+        val g0 = findWordLayoutMethod(owner) ?: return
+        try {
+            ModernXposedRuntime.hookMethod(g0, object : ModernMethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    // g0 rebuilds one FullWidthAlphaGradientFlexboxLayout at
+                    // a time. Clear only that layout's current children so a
+                    // neighboring visible line keeps its own animation.
+                    (param.args.getOrNull(2) as? View)?.let(::clearViewTree)
+                }
+            })
+        } catch (error: Throwable) {
+            // This is an optional safety hook. z.a0 remains useful even if
+            // an OEM build changes the layout method's return type.
+            failures += "z.g0 recycle hook failed: ${error.cjkShortMessage()}"
+            Log.w(TAG, "CJK z.g0 recycle hook failed open", error)
         }
+    }
+
+    private fun clearViewTree(view: View) {
+        valueAnimator.clear(view)
+        if (view is ViewGroup) {
+            for (index in 0 until view.childCount) {
+                runCatching { view.getChildAt(index) }.getOrNull()?.let(::clearViewTree)
+            }
+        }
+    }
+
+    private fun installFragmentDestroyHook(failures: MutableList<String>) {
+        val fragment = symbols.resolve(AppleMusicSymbols.LyricsFragment).valueOrNull() ?: return
+        try {
+            val declaringClass = generateSequence(fragment) { it.superclass }
+                .firstOrNull { type ->
+                    type.declaredMethods.any { method ->
+                        method.name == "onDestroyView" && method.parameterCount == 0
+                    }
+                } ?: return
+            ModernXposedRuntime.hookAllMethods(
+                declaringClass,
+                "onDestroyView",
+                object : ModernMethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        valueAnimator.clearAll()
+                    }
+                },
+            )
+        } catch (error: Throwable) {
+            failures += "lyrics onDestroyView cleanup failed: ${error.cjkShortMessage()}"
+            Log.w(TAG, "CJK lyrics lifecycle cleanup failed open", error)
+        }
+    }
+
+    /**
+     * z.p(RecyclerView$D,int) is the RecyclerView rebind seam in the verified
+     * build; its runtime holder is cast to z$a. It can recycle an attached
+     * word View without calling g0 first, so only that holder is cleared here.
+     */
+    private fun installHolderRecycleHook(
+        owner: Class<*>,
+        holderClass: Class<*>?,
+        failures: MutableList<String>,
+    ) {
+        if (holderClass == null) return
+        val recycle = owner.declaredMethods.firstOrNull { method ->
+            val holderParameter = method.parameterTypes.firstOrNull()
+            method.name == "p" &&
+                method.parameterTypes.size == 2 &&
+                holderParameter != null &&
+                (
+                    holderParameter == holderClass ||
+                        holderParameter.name.contains("RecyclerView\$D") ||
+                        holderParameter.isAssignableFrom(holderClass)
+                    ) &&
+                method.parameterTypes[1] == Int::class.javaPrimitiveType
+        } ?: return
+        try {
+            ModernXposedRuntime.hookMethod(recycle, object : ModernMethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    param.args.getOrNull(0)?.let(::clearHolderAnimations)
+                }
+            })
+        } catch (error: Throwable) {
+            failures += "z.p recycle hook failed: ${error.cjkShortMessage()}"
+            Log.w(TAG, "CJK z.p recycle hook failed open", error)
+        }
+    }
+
+    private fun clearHolderAnimations(holder: Any) {
+        allFields(holder.javaClass)
+            .mapNotNull { field -> readField(field, holder) }
+            .filterIsInstance<Map<*, *>>()
+            .flatMap { map -> map.values().asSequence() }
+            .filterNotNull()
+            .flatMap { entry ->
+                listOf(false, true).asSequence()
+                    .flatMap { background -> findEntryBindings(entry, background).asSequence() }
+            }
+            .flatMap(::findBindingTextViews)
+            .forEach(valueAnimator::clear)
+    }
+
+    private fun findWordLayoutMethod(owner: Class<*>): Method? = owner.declaredMethods
+        .firstOrNull { method ->
+            method.name == "g0" &&
+                method.parameterTypes.size == 7 &&
+                method.parameterTypes[0].name.endsWith("LyricsWordVector") &&
+                method.parameterTypes[2].name.contains("FullWidthAlphaGradientFlexboxLayout")
+        }
+        ?.apply { isAccessible = true }
+
+    private fun findWordBindings(holder: Any, wordId: Int, background: Boolean): List<Any> {
+        val entry = findWordEntry(holder, wordId, background) ?: return emptyList()
+        return findEntryBindings(entry, background)
+    }
+
+    private fun findWordText(holder: Any, wordId: Int, background: Boolean): CharSequence? =
+        findWordEntry(holder, wordId, background)
+            ?.let { entry ->
+                allFields(entry.javaClass)
+                    .firstOrNull { field -> field.name == "c" }
+                    ?.let { field -> readField(field, entry) as? CharSequence }
+            }
+
+    private fun findWordEntry(holder: Any, wordId: Int, background: Boolean): Any? {
+        val preferredMapName = if (background) "H" else "G"
+        // z$a also owns I/J pronunciation maps. Falling back to an arbitrary
+        // Map can therefore animate the wrong TextView when the same wordId
+        // exists in more than one lyric track; G/H are the exact foreground
+        // and background maps selected by z.a0.
+        val map = allFields(holder.javaClass)
+            .firstOrNull { field -> field.name == preferredMapName }
+            ?.let { field -> readField(field, holder) as? Map<*, *> }
+            ?: return null
+        val entry = runCatching { map[Integer.valueOf(wordId)] }.getOrNull()
+            ?: runCatching { map[wordId] }.getOrNull()
+        return entry
+    }
+
+    private fun findEntryBindings(entry: Any, background: Boolean): List<Any> {
+        val preferredBindingName = if (background) "j" else "i"
+        val directBinding = allFields(entry.javaClass)
+            .firstOrNull { field -> field.name == preferredBindingName }
+            ?.let { field -> readField(field, entry) }
+            ?.takeIf(::looksLikeViewBinding)
+        if (directBinding != null) return listOf(directBinding)
+
+        // z.m0 falls back to e.k when the host split one native word into a
+        // character/whitespace binding list. This is the common CJK path.
+        val splitBindings = (
+            allFields(entry.javaClass)
+                .firstOrNull { field -> field.name == "k" }
+                ?.let { field -> readField(field, entry) as? Iterable<*> }
+                ?: emptyList<Any?>()
+            )
+            .filterNotNull()
+            .filter(::looksLikeViewBinding)
+        return splitBindings
+    }
+
+    private fun findBindingTextViews(binding: Any): List<TextView> {
+        if (binding is TextView) return listOf(binding)
+
+        // Generated lyric bindings in 6.5.2 expose their word CustomTextView
+        // as field U. We intentionally use the type, not only the obfuscated
+        // name, so a generated binding rename remains fail-open.
+        allFields(binding.javaClass).forEach { field ->
+            val value = readField(field, binding)
+            if (value is TextView) return listOf(value)
+        }
+
+        // A future generated binding may only expose ViewDataBinding#getRoot.
+        val root = runCatching {
+            binding.javaClass.methods.firstOrNull { method ->
+                method.name == "getRoot" && method.parameterCount == 0
+            }?.invoke(binding)
+        }.getOrNull()
+        return (root as? TextView)?.let(::listOf).orEmpty()
+    }
+
+    private fun looksLikeViewBinding(value: Any): Boolean =
+        value.javaClass.name.contains("ViewDataBinding") ||
+            allFields(value.javaClass).any { field ->
+                TextView::class.java.isAssignableFrom(field.type)
+            }
+
+    private fun allFields(type: Class<*>): Sequence<Field> =
+        generateSequence(type) { it.superclass }
+            .flatMap { current -> current.declaredFields.asSequence() }
+            .filterNot { field -> Modifier.isStatic(field.modifiers) }
+
+    private fun readField(field: Field, receiver: Any): Any? = runCatching {
+        field.isAccessible = true
+        field.get(receiver)
+    }.getOrNull()
 
     private companion object {
-        const val MAX_REWRITE_LOGS = 3
+        const val TAG = "AMPP-CJK-KARAOKE"
     }
 }
 
 /** Returns true for the CJK blocks used by the host's karaoke classifier. */
-internal fun containsCjkKaraokeScript(text: CharSequence): Boolean {
-    for (index in text.indices) {
-        when (Character.UnicodeBlock.of(text[index])) {
-            Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS,
-            Character.UnicodeBlock.HIRAGANA,
-            Character.UnicodeBlock.KATAKANA,
-            Character.UnicodeBlock.HANGUL_SYLLABLES,
-            Character.UnicodeBlock.HANGUL_JAMO,
-            Character.UnicodeBlock.HANGUL_COMPATIBILITY_JAMO,
-            -> return true
-        }
-    }
-    return false
-}
-
-private fun containsHangul(text: CharSequence): Boolean {
-    for (index in text.indices) {
-        when (Character.UnicodeBlock.of(text[index])) {
-            Character.UnicodeBlock.HANGUL_SYLLABLES,
-            Character.UnicodeBlock.HANGUL_JAMO,
-            Character.UnicodeBlock.HANGUL_COMPATIBILITY_JAMO,
-            -> return true
-            else -> Unit
-        }
-    }
-    return false
-}
+internal fun containsCjkKaraokeScript(text: CharSequence): Boolean =
+    defaultCjkLyricScriptPredicate(text)
 
 private fun Throwable.cjkShortMessage(): String = buildString {
     append(javaClass.simpleName.ifBlank { javaClass.name })
