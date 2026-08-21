@@ -87,6 +87,7 @@ class CjkKaraokeAnimationTargetTest {
         )
         val exactMethods = listOf(
             exact652.resolve(AppleMusicSymbols.CjkKaraokeAnimationMethod),
+            exact652.resolve(AppleMusicSymbols.CjkKaraokeBindingsMethod),
             exact652.resolve(AppleMusicSymbols.CjkUnicodeBlockPredicateMethod),
         )
         exactMethods.forEach { resolution ->
@@ -117,10 +118,17 @@ private class FixtureTargetClassSource(
 
 private class CjkAnimationFixture {
     class a
+    class e
 
     @Suppress("UNUSED_PARAMETER")
     fun a0(holder: a, first: Int, second: Int, third: Int, background: Boolean) {
         // Signature-only fixture for the profile resolver.
+    }
+
+    companion object {
+        @JvmStatic
+        @Suppress("UNUSED_PARAMETER")
+        fun m0(entry: e, background: Boolean): List<Any> = emptyList()
     }
 }
 
