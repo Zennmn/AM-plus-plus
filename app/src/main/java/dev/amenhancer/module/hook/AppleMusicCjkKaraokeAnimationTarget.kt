@@ -23,6 +23,9 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     private val fieldCache = Collections.synchronizedMap(
         WeakHashMap<Class<*>, kotlin.collections.Map<String, Field>>(),
     )
+    private val cjkEntryStates = Collections.synchronizedMap(
+        WeakHashMap<Any, CjkEntryState>(),
+    )
     private val rewriteLogCount = AtomicInteger()
     private var specialEndHookInstalled = false
 
@@ -130,6 +133,9 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         if (!specialEndHookInstalled || listener == null) return
         runCatching {
             val entry = readNamedField(listener, "a") ?: return@runCatching
+            val state = synchronized(cjkEntryStates) { cjkEntryStates.remove(entry) }
+                ?: return@runCatching
+            if (!isCurrentCjkEntry(state)) return@runCatching
             val text = readNamedField(entry, "c") as? CharSequence ?: return@runCatching
             val background = readNamedField(entry, "h") as? Boolean ?: return@runCatching
             val nativeDuration = (readNamedField(entry, "e") as? Number)?.toInt()
@@ -147,7 +153,9 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
             if (!isSingleUnmergedCjkWord(timing)) return@runCatching
 
             val expectedText = text.toString().trim()
-            foregroundEntryViews(entry).forEach { view ->
+            foregroundEntryViews(entry)
+                .filter { view -> state.views.any { recorded -> recorded === view } }
+                .forEach { view ->
                 val currentText = invokeNoArg(view, "getText") as? CharSequence
                 if (currentText == null || currentText.toString().trim() != expectedText) {
                     return@forEach
@@ -164,6 +172,14 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
             ModernXposedRuntime.log("CJK karaoke z\$c end cleanup failed", error)
         }
     }
+
+    private fun isCurrentCjkEntry(state: CjkEntryState): Boolean = runCatching {
+        val map = cachedFields(state.holder.javaClass)["G"]
+            ?.let { field -> readField(field, state.holder) as? JavaMap<*, *> }
+            ?: return@runCatching false
+        val current = map.get(Integer.valueOf(state.wordId)) ?: map.get(state.wordId)
+        current === state.entry
+    }.getOrDefault(false)
 
     private fun foregroundEntryViews(entry: Any): List<Any> {
         val bindings = mutableListOf<Any?>()
@@ -243,7 +259,11 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     private fun enterA0Scope(param: ModernMethodHook.MethodHookParam) {
         runCatching {
             a0Depth.set((a0Depth.get() ?: 0) + 1)
-            a0Stack().add(readSingleWordGate(param))
+            val candidate = readSingleWordGateEntry(param)
+            a0Stack().add(candidate != null)
+            candidate?.let { state ->
+                synchronized(cjkEntryStates) { cjkEntryStates[state.entry] = state }
+            }
         }
             .onFailure { error -> ModernXposedRuntime.log("CJK karaoke a0 depth enter failed open", error) }
     }
@@ -274,30 +294,30 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         a0SingleWordStack.get() ?: mutableListOf<Boolean>().also(a0SingleWordStack::set)
 
     /** Reads only the host's grouping metadata; Apple retains all trigger gates. */
-    private fun readSingleWordGate(param: ModernMethodHook.MethodHookParam): Boolean =
+    private fun readSingleWordGateEntry(param: ModernMethodHook.MethodHookParam): CjkEntryState? =
         runCatching {
-            val holder = param.args.getOrNull(0) ?: return@runCatching false
+            val holder = param.args.getOrNull(0) ?: return@runCatching null
             val wordId = (param.args.getOrNull(2) as? Number)?.toInt()
-                ?: return@runCatching false
+                ?: return@runCatching null
             val nativeDuration = (param.args.getOrNull(3) as? Number)?.toInt()
-                ?: return@runCatching false
+                ?: return@runCatching null
             val background = param.args.getOrNull(4) as? Boolean
-                ?: return@runCatching false
+                ?: return@runCatching null
             val mapName = if (background) "H" else "G"
             val map = cachedFields(holder.javaClass)[mapName]
                 ?.let { field -> readField(field, holder) as? JavaMap<*, *> }
-                ?: return@runCatching false
+                ?: return@runCatching null
             val entry = map.get(Integer.valueOf(wordId)) ?: map.get(wordId)
-                ?: return@runCatching false
+                ?: return@runCatching null
             val text = cachedFields(entry.javaClass)["c"]
                 ?.let { field -> readField(field, entry) as? CharSequence }
-                ?: return@runCatching false
+                ?: return@runCatching null
             val cumulativeDuration = cachedFields(entry.javaClass)["f"]
                 ?.let { field -> (readField(field, entry) as? Number)?.toInt() }
-                ?: return@runCatching false
+                ?: return@runCatching null
             val cumulativeLength = cachedFields(entry.javaClass)["g"]
                 ?.let { field -> (readField(field, entry) as? Number)?.toInt() }
-                ?: return@runCatching false
+                ?: return@runCatching null
             val splitValue = cachedFields(entry.javaClass)["k"]
                 ?.let { field -> readField(field, entry) }
             val splitCount = when (splitValue) {
@@ -305,19 +325,24 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
                 is Collection<*> -> splitValue.size
                 else -> -1
             }
-            isSingleUnmergedCjkWord(
-                CjkKaraokeWordTiming(
-                    text = text,
-                    nativeDurationMs = nativeDuration,
-                    cumulativeDurationMs = cumulativeDuration,
-                    cumulativeTextLength = cumulativeLength,
-                    splitBindingCount = splitCount,
-                    isBackground = background,
-                ),
+            val timing = CjkKaraokeWordTiming(
+                text = text,
+                nativeDurationMs = nativeDuration,
+                cumulativeDurationMs = cumulativeDuration,
+                cumulativeTextLength = cumulativeLength,
+                splitBindingCount = splitCount,
+                isBackground = background,
+            )
+            if (!isSingleUnmergedCjkWord(timing)) return@runCatching null
+            CjkEntryState(
+                holder = holder,
+                wordId = wordId,
+                entry = entry,
+                views = foregroundEntryViews(entry),
             )
         }.getOrElse { error ->
             ModernXposedRuntime.log("CJK single-word gate failed closed: ${error.cjkShortMessage()}")
-            false
+            null
         }
 
     private fun cachedFields(type: Class<*>): kotlin.collections.Map<String, Field> =
@@ -353,6 +378,13 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
             }
             ?.invoke(receiver, *args)
     }.getOrNull()
+
+    private data class CjkEntryState(
+        val holder: Any,
+        val wordId: Int,
+        val entry: Any,
+        val views: List<Any>,
+    )
 
     private companion object {
         const val MAX_REWRITE_LOGS = 3

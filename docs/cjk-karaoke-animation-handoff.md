@@ -24,6 +24,7 @@
    - 字段：`ModuleSettings.cjkKaraokeAnimationEnabled`
    - 默认值：`true`
    - 关闭后需要重启 Apple Music，feature 才不会注册 Hook。
+5. CJK 特殊路径的清理只挂在宿主自己的 `z$c.onAnimationEnd` 上；它要求回调中的 `e` 仍是 `G[wordId]` 当前 entry，并且 binding `U` 仍是 `a0` 时记录的同一 View，才清除该词的 scale/pivot/shadow。不会遍历或删除 `e.p`，也不会恢复 alpha、translation 或英语动画状态。
 
 ## 关键代码位置
 
