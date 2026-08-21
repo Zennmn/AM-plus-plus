@@ -10,16 +10,14 @@ import java.util.Map as JavaMap
 import java.util.WeakHashMap
 
 /**
- * Narrow Apple Music 6.5.2/1586 adapter for the native karaoke path. The host
- * owns all duration/length trigger conditions; this experiment only makes a
- * single unmerged CJK word use the ordinary (Latin-shaped) binding inputs
- * before Apple constructs its own animator.
+ * Narrow Apple Music 6.5.2/1586 adapter for the native karaoke rush-gradient
+ * path. The host owns all duration/length trigger conditions; AM++ only
+ * allows its CJK classifier override for one unmerged native CJK word.
  */
 internal class AppleMusicCjkKaraokeAnimationTarget(
     private val symbols: TargetSymbolResolver,
 ) : CjkKaraokeAnimationTarget {
     private val a0Depth: ThreadLocal<Int> = ThreadLocal.withInitial { 0 }
-    private val g0Depth: ThreadLocal<Int> = ThreadLocal.withInitial { 0 }
     private val a0SingleWordStack: ThreadLocal<MutableList<Boolean>> =
         ThreadLocal.withInitial { mutableListOf() }
     private val fieldCache = Collections.synchronizedMap(
@@ -33,39 +31,18 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
 
     override fun install(): TargetCapabilityInstall {
         val a0Resolution = symbols.resolve(AppleMusicSymbols.CjkKaraokeAnimationMethod)
-        val layoutResolution = symbols.resolve(AppleMusicSymbols.CjkKaraokeLayoutMethod)
         val helperResolution = symbols.resolve(AppleMusicSymbols.CjkUnicodeBlockPredicateMethod)
         val a0 = a0Resolution.valueOrNull()
-        val layout = layoutResolution.valueOrNull()
         val helper = helperResolution.valueOrNull()
-        if (a0 == null || layout == null || helper == null) {
+        if (a0 == null || helper == null) {
             return TargetCapabilityInstall.Degraded(
-                listOf(a0Resolution, layoutResolution, helperResolution)
+                listOf(a0Resolution, helperResolution)
                     .filterNot { it is TargetResolution.Found<*> }
                     .joinToString { it.summary },
             )
         }
 
         val failures = mutableListOf<String>()
-        val layoutInstalled = try {
-            ModernXposedRuntime.hookMethod(layout, object : ModernMethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    enterG0Scope()
-                }
-
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    // g0 may throw while inflating a line; never leak the
-                    // classifier override into a later line or a0 callback.
-                    leaveG0Scope()
-                }
-            }).also { installed ->
-                if (!installed) failures += "z.g0 hook was rejected"
-            }
-        } catch (error: Throwable) {
-            failures += "z.g0 hook failed: ${error.cjkShortMessage()}"
-            ModernXposedRuntime.log("CJK karaoke z.g0 hook failed", error)
-            false
-        }
         val a0Installed = try {
             ModernXposedRuntime.hookMethod(a0, object : ModernMethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
@@ -91,7 +68,7 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
             ModernXposedRuntime.hookMethod(helper, object : ModernMethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     try {
-                        rewriteCjkClassifierResult(param)
+                        rewriteCjkK0Result(param)
                     } catch (error: Throwable) {
                         // A malformed host call must never break its original
                         // helper result.  This is deliberately fail-open.
@@ -113,14 +90,14 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         // animations on device.
         specialEndHookInstalled = installSpecialEndHook(a0)
 
-        if (!layoutInstalled || !a0Installed || !helperInstalled || !specialEndHookInstalled) {
+        if (!a0Installed || !helperInstalled) {
             return TargetCapabilityInstall.Degraded(
                 failures.joinToString("; ").ifBlank { "CJK karaoke animation hooks were not installed" },
             )
         }
 
         return TargetCapabilityInstall.Active(
-            "Installed exact 6.5.2/1586 single-unmerged-CJK ordinary-layout experiment",
+            "Installed exact 6.5.2/1586 single-unmerged-CJK guard with z\$c end cleanup",
         )
     }
 
@@ -225,52 +202,27 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         else -> -1
     }
 
-    private fun rewriteCjkClassifierResult(param: ModernMethodHook.MethodHookParam) {
+    private fun rewriteCjkK0Result(param: ModernMethodHook.MethodHookParam) {
+        if (!isSingleWordScope()) return
+
         val text = param.args.getOrNull(0) as? CharSequence ?: return
-        val languageSet = param.args.getOrNull(1) as? Set<*> ?: return
-        if (isG0Scope()) {
-            rewriteOrdinaryLayoutResult(param, text, languageSet)
-        } else if (isSingleWordScope()) {
-            rewriteCjkAnimationResult(param, text, languageSet)
-        }
-    }
-
-    /**
-     * g0 has already grouped/merged multi-character CJK chunks by the time
-     * a0 runs. Only a single trimmed Unicode code point is eligible for this
-     * experiment; merged text stays on Apple's original layout path.
-     */
-    private fun rewriteOrdinaryLayoutResult(
-        param: ModernMethodHook.MethodHookParam,
-        text: CharSequence,
-        languageSet: Set<*>,
-    ) {
-        if (!isSingleCjkCodePoint(text)) return
-        if (!isK0Set(languageSet) && !isJ0Set(languageSet)) return
-        if (param.result == true) {
-            param.result = false
-            logRewrite(text, "g0 CJK classifier true -> false")
-        }
-    }
-
-    private fun rewriteCjkAnimationResult(
-        param: ModernMethodHook.MethodHookParam,
-        text: CharSequence,
-        languageSet: Set<*>,
-    ) {
         if (!containsCjkKaraokeScript(text)) return
+
+        val languageSet = param.args.getOrNull(1) as? Set<*> ?: return
         when {
             isK0Set(languageSet) && param.result == true -> {
-                // Keep Apple's duration/length gates, but opt this one CJK
-                // word into the same outer branch used by Latin candidates.
+                // CJK is normally classified into k0, which blocks the
+                // rush branch.  Make that one result look like a default
+                // script only while a0 is running.
                 param.result = false
-                logRewrite(text, "a0 k0 true -> false")
+                logRewrite(text, "k0 true -> false")
             }
             isJ0Set(languageSet) && containsHangul(text) && param.result != true -> {
+                // i0 receives the j0 hit as its split/rush eligibility bit.
                 // Hangul belongs to k0 but not j0, so opt it into the same
-                // Apple animation only inside a0.
+                // Apple animation only inside a0; g0 remains untouched.
                 param.result = true
-                logRewrite(text, "a0 j0 false -> true")
+                logRewrite(text, "j0 false -> true")
             }
             else -> return
         }
@@ -279,7 +231,7 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     private fun logRewrite(text: CharSequence, change: String) {
         if (rewriteLogCount.getAndIncrement() < MAX_REWRITE_LOGS) {
             ModernXposedRuntime.log(
-                "CJK karaoke classifier: I0\$a.a(${text.length} chars, $change)",
+                "CJK karaoke a0 scope: I0\$a.a(${text.length} chars, $change); g0 unchanged",
             )
         }
     }
@@ -303,32 +255,6 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         ModernXposedRuntime.log("CJK karaoke j0 marker check failed open", error)
         false
     }
-
-    private fun isSingleCjkCodePoint(text: CharSequence): Boolean {
-        val normalized = text.toString().trim()
-        if (normalized.isEmpty() || normalized.codePointCount(0, normalized.length) != 1) {
-            return false
-        }
-        return containsCjkKaraokeScript(normalized)
-    }
-
-    private fun enterG0Scope() {
-        runCatching { g0Depth.set((g0Depth.get() ?: 0) + 1) }
-            .onFailure { error -> ModernXposedRuntime.log("CJK karaoke g0 depth enter failed open", error) }
-    }
-
-    private fun leaveG0Scope() {
-        runCatching {
-            val depth = g0Depth.get() ?: 0
-            if (depth <= 1) g0Depth.remove() else g0Depth.set(depth - 1)
-        }.onFailure { error -> ModernXposedRuntime.log("CJK karaoke g0 depth cleanup failed open", error) }
-    }
-
-    private fun isG0Scope(): Boolean = runCatching { (g0Depth.get() ?: 0) > 0 }
-        .getOrElse { error ->
-            ModernXposedRuntime.log("CJK karaoke g0 scope read failed open", error)
-            false
-        }
 
     private fun enterA0Scope(param: ModernMethodHook.MethodHookParam) {
         runCatching {

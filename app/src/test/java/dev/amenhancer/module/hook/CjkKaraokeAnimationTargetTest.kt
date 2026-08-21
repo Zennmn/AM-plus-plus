@@ -87,7 +87,6 @@ class CjkKaraokeAnimationTargetTest {
         )
         val exactMethods = listOf(
             exact652.resolve(AppleMusicSymbols.CjkKaraokeAnimationMethod),
-            exact652.resolve(AppleMusicSymbols.CjkKaraokeLayoutMethod),
             exact652.resolve(AppleMusicSymbols.CjkUnicodeBlockPredicateMethod),
         )
         exactMethods.forEach { resolution ->
@@ -123,17 +122,6 @@ private class CjkAnimationFixture {
     fun a0(holder: a, first: Int, second: Int, third: Int, background: Boolean) {
         // Signature-only fixture for the profile resolver.
     }
-
-    @Suppress("UNUSED_PARAMETER")
-    fun g0(
-        first: Any,
-        map: android.util.ArrayMap<*, *>,
-        third: Any,
-        line: Int,
-        width: Int,
-        background: Boolean,
-        rtl: Boolean,
-    ): android.util.ArrayMap<Any, Any> = android.util.ArrayMap()
 }
 
 private class CjkHelperFixture {

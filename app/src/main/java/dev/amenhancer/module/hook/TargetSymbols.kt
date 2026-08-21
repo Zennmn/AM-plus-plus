@@ -263,7 +263,6 @@ internal enum class TargetSymbolId {
     STORE_FRONT_LANGUAGE_ARRAY_METHOD,
     CJK_KARAOKE_ANIMATION_OWNER,
     CJK_KARAOKE_ANIMATION_METHOD,
-    CJK_KARAOKE_LAYOUT_METHOD,
     CJK_UNICODE_BLOCK_HELPER_OWNER,
     CJK_UNICODE_BLOCK_HELPER_METHOD,
 }
@@ -392,7 +391,6 @@ private object AppleMusicProfiles {
             TargetSymbolId.LYRICS_ITEM_UPDATE_METHOD to "o2",
             TargetSymbolId.STORE_FRONT_LANGUAGE_ARRAY_METHOD to "b",
             TargetSymbolId.CJK_KARAOKE_ANIMATION_METHOD to "a0",
-            TargetSymbolId.CJK_KARAOKE_LAYOUT_METHOD to "g0",
             TargetSymbolId.CJK_UNICODE_BLOCK_HELPER_METHOD to "a",
         ),
         exactFields = mapOf(
@@ -440,23 +438,6 @@ internal object AppleMusicSymbols {
         exactMethodId = TargetSymbolId.CJK_UNICODE_BLOCK_HELPER_METHOD,
         fallbackOwner = { false },
         contract = ::isCjkUnicodeBlockPredicateMethod,
-    )
-
-    /**
-     * Apple Music 6.5.2/1586's lyric line binding/layout builder
-     * (`com.apple.android.music.player.z.g0(...)`).  The experiment hooks
-     * this before the Unicode predicate is consulted so a single CJK word
-     * can use the same ordinary binding shape as a Latin word.  It is kept
-     * exact-profile only because this method owns the host's RecyclerView
-     * binding/recycling state.
-     */
-    val CjkKaraokeLayoutMethod = methodSymbol(
-        id = "cjk-karaoke-layout-method",
-        profileOwner = TargetSymbolId.CJK_KARAOKE_ANIMATION_OWNER,
-        profilePolicy = ProfilePolicy.EXACT_REQUIRED,
-        exactMethodId = TargetSymbolId.CJK_KARAOKE_LAYOUT_METHOD,
-        fallbackOwner = { false },
-        contract = ::isCjkKaraokeLayoutMethod,
     )
 
     val PlayerController = classSymbol(
@@ -1816,17 +1797,6 @@ private fun isCjkUnicodeBlockPredicateMethod(method: Method): Boolean =
             arrayOf(CharSequence::class.java, java.util.Set::class.java),
         ) &&
         method.returnType == Boolean::class.javaPrimitiveType
-
-private fun isCjkKaraokeLayoutMethod(method: Method): Boolean =
-    !Modifier.isStatic(method.modifiers) &&
-        method.name == "g0" &&
-        method.parameterTypes.size == 7 &&
-        method.parameterTypes[1].name == "android.util.ArrayMap" &&
-        method.parameterTypes[3] == Int::class.javaPrimitiveType &&
-        method.parameterTypes[4] == Int::class.javaPrimitiveType &&
-        method.parameterTypes[5] == Boolean::class.javaPrimitiveType &&
-        method.parameterTypes[6] == Boolean::class.javaPrimitiveType &&
-        method.returnType.name == "android.util.ArrayMap"
 
 private fun classSymbol(
     id: String,
