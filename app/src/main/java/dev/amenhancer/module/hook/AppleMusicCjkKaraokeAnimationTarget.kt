@@ -37,14 +37,12 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
 
     override fun install(): TargetCapabilityInstall {
         val a0Resolution = symbols.resolve(AppleMusicSymbols.CjkKaraokeAnimationMethod)
-        val bindingsResolution = symbols.resolve(AppleMusicSymbols.CjkKaraokeBindingsMethod)
         val helperResolution = symbols.resolve(AppleMusicSymbols.CjkUnicodeBlockPredicateMethod)
         val a0 = a0Resolution.valueOrNull()
-        val bindings = bindingsResolution.valueOrNull()
         val helper = helperResolution.valueOrNull()
-        if (a0 == null || bindings == null || helper == null) {
+        if (a0 == null || helper == null) {
             return TargetCapabilityInstall.Degraded(
-                listOf(a0Resolution, bindingsResolution, helperResolution)
+                listOf(a0Resolution, helperResolution)
                     .filterNot { it is TargetResolution.Found<*> }
                     .joinToString { it.summary },
             )
@@ -69,26 +67,6 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         } catch (error: Throwable) {
             failures += "z.a0 hook failed: ${error.cjkShortMessage()}"
             ModernXposedRuntime.log("CJK karaoke z.a0 hook failed", error)
-            false
-        }
-
-        val bindingsInstalled = try {
-            ModernXposedRuntime.hookMethod(bindings, object : ModernMethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    try {
-                        collapseSingleCjkBindings(param)
-                    } catch (error: Throwable) {
-                        // A malformed entry must retain Apple's original
-                        // binding list and therefore fail open.
-                        ModernXposedRuntime.log("CJK karaoke binding collapse failed open", error)
-                    }
-                }
-            }).also { installed ->
-                if (!installed) failures += "z.m0 hook was rejected"
-            }
-        } catch (error: Throwable) {
-            failures += "z.m0 hook failed: ${error.cjkShortMessage()}"
-            ModernXposedRuntime.log("CJK karaoke z.m0 hook failed", error)
             false
         }
 
@@ -119,16 +97,14 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         specialEndHookInstalled = installSpecialEndHook(a0)
         glowEndHookInstalled = installGlowAnimatorEndHook(a0)
 
-        if (!a0Installed || !bindingsInstalled || !helperInstalled ||
-            !specialEndHookInstalled || !glowEndHookInstalled
-        ) {
+        if (!a0Installed || !helperInstalled || !specialEndHookInstalled || !glowEndHookInstalled) {
             return TargetCapabilityInstall.Degraded(
                 failures.joinToString("; ").ifBlank { "CJK karaoke animation hooks were not installed" },
             )
         }
 
         return TargetCapabilityInstall.Active(
-            "Installed exact 6.5.2/1586 single-unmerged-CJK English-shaped glow",
+            "Installed exact 6.5.2/1586 single-unmerged-CJK glow end cleanup",
         )
     }
 
@@ -316,28 +292,6 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         null -> 0
         is Collection<*> -> value.size
         else -> -1
-    }
-
-    /**
-     * English words normally produce one foreground binding.  For the
-     * single-word CJK entries admitted by the gate, keep only that same
-     * primary binding in the list consumed by z.a0.  The entry's backing
-     * fields and all host timing gates remain untouched; merged CJK chunks
-     * and every non-foreground call retain Apple's original list.
-     */
-    private fun collapseSingleCjkBindings(param: ModernMethodHook.MethodHookParam) {
-        if (!isSingleWordScope()) return
-        if (param.args.getOrNull(1) as? Boolean == true) return
-        val entry = param.args.getOrNull(0) ?: return
-        val state = synchronized(cjkEntryStates) { cjkEntryStates[entry] } ?: return
-        val primary = readNamedField(entry, "i") ?: return
-        val original = param.result as? List<*> ?: return
-        if (original.size <= 1 || original.none { it === primary }) return
-        val collapsed = ArrayList<Any>(1)
-        collapsed += primary
-        param.result = collapsed
-        val text = readNamedField(state.entry, "c") as? CharSequence ?: return
-        logRewrite(text, "m0 bindings ${original.size} -> 1")
     }
 
     private fun rewriteCjkK0Result(param: ModernMethodHook.MethodHookParam) {

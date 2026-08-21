@@ -263,7 +263,6 @@ internal enum class TargetSymbolId {
     STORE_FRONT_LANGUAGE_ARRAY_METHOD,
     CJK_KARAOKE_ANIMATION_OWNER,
     CJK_KARAOKE_ANIMATION_METHOD,
-    CJK_KARAOKE_BINDINGS_METHOD,
     CJK_UNICODE_BLOCK_HELPER_OWNER,
     CJK_UNICODE_BLOCK_HELPER_METHOD,
 }
@@ -392,7 +391,6 @@ private object AppleMusicProfiles {
             TargetSymbolId.LYRICS_ITEM_UPDATE_METHOD to "o2",
             TargetSymbolId.STORE_FRONT_LANGUAGE_ARRAY_METHOD to "b",
             TargetSymbolId.CJK_KARAOKE_ANIMATION_METHOD to "a0",
-            TargetSymbolId.CJK_KARAOKE_BINDINGS_METHOD to "m0",
             TargetSymbolId.CJK_UNICODE_BLOCK_HELPER_METHOD to "a",
         ),
         exactFields = mapOf(
@@ -425,16 +423,6 @@ internal object AppleMusicSymbols {
         exactMethodId = TargetSymbolId.CJK_KARAOKE_ANIMATION_METHOD,
         fallbackOwner = { false },
         contract = ::isCjkKaraokeAnimationMethod,
-    )
-
-    /** Exact 6.5.2/1586 binding list used by z.a0 before it builds glow animators. */
-    val CjkKaraokeBindingsMethod = methodSymbol(
-        id = "cjk-karaoke-bindings-method",
-        profileOwner = TargetSymbolId.CJK_KARAOKE_ANIMATION_OWNER,
-        profilePolicy = ProfilePolicy.EXACT_REQUIRED,
-        exactMethodId = TargetSymbolId.CJK_KARAOKE_BINDINGS_METHOD,
-        fallbackOwner = { false },
-        contract = ::isCjkKaraokeBindingsMethod,
     )
 
     /**
@@ -1801,14 +1789,6 @@ private fun isCjkKaraokeAnimationMethod(method: Method): Boolean =
         method.parameterTypes[3] == Int::class.javaPrimitiveType &&
         method.parameterTypes[4] == Boolean::class.javaPrimitiveType &&
         method.returnType == Void.TYPE
-
-private fun isCjkKaraokeBindingsMethod(method: Method): Boolean =
-    Modifier.isStatic(method.modifiers) &&
-        method.name == "m0" &&
-        method.parameterTypes.size == 2 &&
-        method.parameterTypes[0].name.endsWith("\$e") &&
-        method.parameterTypes[1] == Boolean::class.javaPrimitiveType &&
-        java.util.List::class.java.isAssignableFrom(method.returnType)
 
 private fun isCjkUnicodeBlockPredicateMethod(method: Method): Boolean =
     Modifier.isStatic(method.modifiers) &&
