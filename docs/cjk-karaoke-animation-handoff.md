@@ -7,7 +7,8 @@
 ## 当前分支与远端
 
 - 分支：`codex/cjk-karaoke-animation`
-- 当前提交：`39e9b08 feat: isolate CJK karaoke animation feature`
+- 当前 HEAD：`38f923c docs: add CJK karaoke animation handoff`
+- 功能提交：`39e9b08 feat: isolate CJK karaoke animation feature`
 - 远端：[Zennmn/AM-plus-plus/tree/codex/cjk-karaoke-animation](https://github.com/Zennmn/AM-plus-plus/tree/codex/cjk-karaoke-animation)
 - 主分支基线：`main`（当前不包含本实验功能）
 - 当前分支已推送到 `origin`；不要把本分支代码直接合并到 `main`，除非完成新的设备验收。
