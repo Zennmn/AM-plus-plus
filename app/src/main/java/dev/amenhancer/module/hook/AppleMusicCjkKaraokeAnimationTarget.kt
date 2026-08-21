@@ -119,16 +119,18 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         // e.c is the native wordText already consumed by z.a0, so use it as
         // the primary script signal and only fall back to the visible View.
         val hostWordText = findWordText(holder, wordId, background = false)
+        val hostIsCjk = hostWordText?.let(::containsCjkKaraokeScript)
         val cjkViews = textViews.filter { textView ->
             runCatching { textView.text }.getOrNull()?.let(::containsCjkKaraokeScript) == true
         }
-        if (hostWordText?.let(::containsCjkKaraokeScript) == true || cjkViews.isNotEmpty()) {
+        val currentWordIsCjk = hostIsCjk ?: cjkViews.isNotEmpty()
+        if (currentWordIsCjk) {
             // The host may have created e.o during this invocation. Cancel it
             // again after the original method and leave View properties to
             // the AM++ animator below.
             cancelNativeWordAnimator(entry)
         }
-        if (hostWordText?.let(::containsCjkKaraokeScript) != true && cjkViews.isEmpty()) {
+        if (!currentWordIsCjk) {
             // A recycled word View can be rebound to Latin text before the
             // next CJK callback; restore it immediately in that case.
             textViews.forEach(valueAnimator::clear)
@@ -268,9 +270,9 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     }
 
     private fun clearHolderAnimations(holder: Any) {
-        cachedFields(holder.javaClass).values
-            .mapNotNull { field -> readField(field, holder) }
-            .filterIsInstance<JavaMap<*, *>>()
+        listOf("G", "H")
+            .mapNotNull { mapName -> cachedFields(holder.javaClass)[mapName] }
+            .mapNotNull { field -> readField(field, holder) as? JavaMap<*, *> }
             .flatMap { map -> map.values().asSequence() }
             .filterNotNull()
             .flatMap { entry ->
