@@ -383,6 +383,7 @@ class EmbeddedSettingsEntryStructuralRegressionTest {
             VisibleSetting("平板底栏补偿", "navigationCompensationEnabled"),
             VisibleSetting("手机液态玻璃底栏", "phoneLiquidGlassEnabled"),
             VisibleSetting("双向歌词模糊", "futureBlurEnabled"),
+            VisibleSetting("CJK 长尾歌词动画", "cjkKaraokeAnimationEnabled"),
             VisibleSetting("歌词模糊半径偏移", "lyricBlurRadiusOffsetPx"),
             VisibleSetting("歌曲名显示修正", "titleCorrectionEnabled"),
             VisibleSetting("目标语言", "titleCorrectionTargetLanguage"),

@@ -276,6 +276,7 @@ private fun productionFeatureInstallationModule(
                 feature = FutureLyricBlurFeature(),
                 registerResources = { LyricCreditsRowResourceHook.install() },
             ),
+            FeatureInstallationPlan(feature = CjkKaraokeAnimationFeature()),
             FeatureInstallationPlan(
                 feature = LyricsTypefaceFeature(),
                 registerResources = lyricsTypefaceSession::registerResources,

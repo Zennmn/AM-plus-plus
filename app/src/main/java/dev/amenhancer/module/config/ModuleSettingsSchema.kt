@@ -17,6 +17,10 @@ internal object ModuleSettingsSchema {
             default = false,
         ),
         futureBlurEnabled = values.boolean(KEY_FUTURE_BLUR, default = true),
+        cjkKaraokeAnimationEnabled = values.boolean(
+            KEY_CJK_KARAOKE_ANIMATION_ENABLED,
+            default = true,
+        ),
         navigationCompensationEnabled = values.boolean(
             KEY_NAVIGATION_COMPENSATION,
             default = false,
@@ -62,6 +66,7 @@ internal object ModuleSettingsSchema {
             KEY_DISABLE_EDITORIAL_VIDEO_ON_TABLET to settings.disableEditorialVideoOnTablet,
             KEY_PHONE_LIQUID_GLASS to settings.phoneLiquidGlassEnabled,
             KEY_FUTURE_BLUR to settings.futureBlurEnabled,
+            KEY_CJK_KARAOKE_ANIMATION_ENABLED to settings.cjkKaraokeAnimationEnabled,
             KEY_NAVIGATION_COMPENSATION to settings.navigationCompensationEnabled,
             KEY_LYRIC_BLUR_RADIUS_OFFSET to settings.lyricBlurRadiusOffsetPx.coerceIn(
                 ModuleSettings.MIN_LYRIC_BLUR_RADIUS_OFFSET_PX,
@@ -186,6 +191,7 @@ internal object ModuleSettingsSchema {
         KEY_DISABLE_EDITORIAL_VIDEO_ON_TABLET,
         KEY_PHONE_LIQUID_GLASS,
         KEY_FUTURE_BLUR,
+        KEY_CJK_KARAOKE_ANIMATION_ENABLED,
         KEY_NAVIGATION_COMPENSATION,
         KEY_LYRIC_BLUR_RADIUS_OFFSET,
         KEY_TITLE_CORRECTION_ENABLED,
@@ -212,6 +218,7 @@ internal object ModuleSettingsSchema {
         "disable_editorial_video_on_tablet"
     private const val KEY_PHONE_LIQUID_GLASS = "phone_liquid_glass_enabled"
     private const val KEY_FUTURE_BLUR = "future_blur_enabled"
+    private const val KEY_CJK_KARAOKE_ANIMATION_ENABLED = "cjk_karaoke_animation_enabled"
     private const val KEY_NAVIGATION_COMPENSATION = "navigation_compensation_enabled"
     private const val KEY_LYRIC_BLUR_RADIUS_OFFSET = "lyric_blur_radius_offset_px"
     private const val KEY_TITLE_CORRECTION_ENABLED = "title_correction_enabled"

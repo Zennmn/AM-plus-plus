@@ -105,6 +105,7 @@ class OrdinarySettingsWritePolicyTest {
                 "disable_editorial_video_on_tablet" to false,
                 "phone_liquid_glass_enabled" to true,
                 "future_blur_enabled" to false,
+                "cjk_karaoke_animation_enabled" to true,
                 "navigation_compensation_enabled" to false,
                 "lyric_blur_radius_offset_px" to 6,
                 "title_correction_enabled" to false,

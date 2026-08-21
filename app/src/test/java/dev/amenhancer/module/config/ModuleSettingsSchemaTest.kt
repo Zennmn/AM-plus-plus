@@ -17,6 +17,7 @@ class ModuleSettingsSchemaTest {
                 disableEditorialVideoOnTablet = true,
                 phoneLiquidGlassEnabled = false,
                 futureBlurEnabled = true,
+                cjkKaraokeAnimationEnabled = true,
                 navigationCompensationEnabled = false,
                 lyricBlurRadiusOffsetPx = 0,
                 titleCorrectionEnabled = false,
@@ -45,6 +46,7 @@ class ModuleSettingsSchemaTest {
                 "disable_editorial_video_on_tablet" to false,
                 "phone_liquid_glass_enabled" to true,
                 "future_blur_enabled" to false,
+                "cjk_karaoke_animation_enabled" to true,
                 "navigation_compensation_enabled" to false,
                 "lyric_blur_radius_offset_px" to 6,
                 "title_correction_enabled" to false,
@@ -78,6 +80,7 @@ class ModuleSettingsSchemaTest {
                 "disable_editorial_video_on_tablet" to true,
                 "phone_liquid_glass_enabled" to true,
                 "future_blur_enabled" to true,
+                "cjk_karaoke_animation_enabled" to true,
                 "navigation_compensation_enabled" to false,
                 "lyric_blur_radius_offset_px" to 0,
                 "title_correction_enabled" to false,
@@ -141,6 +144,7 @@ class ModuleSettingsSchemaTest {
                 disableEditorialVideoOnTablet = false,
                 phoneLiquidGlassEnabled = false,
                 futureBlurEnabled = false,
+                cjkKaraokeAnimationEnabled = true,
                 navigationCompensationEnabled = false,
                 lyricBlurRadiusOffsetPx = 0,
                 titleCorrectionEnabled = false,
@@ -243,6 +247,29 @@ class ModuleSettingsSchemaTest {
         assertEquals(
             true,
             ModuleSettingsSchema.decode(encoded).navigationCompensationEnabled,
+        )
+    }
+
+    @Test
+    fun `cjk karaoke animation defaults on and round trips`() {
+        assertEquals(
+            true,
+            ModuleSettingsSchema.decode(emptyMap<String, Any?>()).cjkKaraokeAnimationEnabled,
+        )
+        assertEquals(
+            true,
+            ModuleSettingsSchema.decode(
+                mapOf("cjk_karaoke_animation_enabled" to "not-a-boolean"),
+            ).cjkKaraokeAnimationEnabled,
+        )
+
+        val encoded = ModuleSettingsSchema.encodeOrdinarySettings(
+            ModuleSettings(cjkKaraokeAnimationEnabled = false),
+        )
+        assertEquals(false, encoded["cjk_karaoke_animation_enabled"])
+        assertEquals(
+            false,
+            ModuleSettingsSchema.decode(encoded).cjkKaraokeAnimationEnabled,
         )
     }
 
