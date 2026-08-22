@@ -24,7 +24,7 @@
    - 字段：`ModuleSettings.cjkKaraokeAnimationEnabled`
    - 默认值：`true`
    - 关闭后需要重启 Apple Music，feature 才不会注册 Hook。
-5. CJK 特殊路径的清理只挂在宿主自己的 `z$g.onAnimationEnd` 上；`z$g.b` 是该辉光 ValueAnimator 的真实 `CustomTextView`。AM++ 在 `a0` 入口按宿主 `z.m0(false)` 的 `e.i` 优先/e.k 回退规则记录 View，并以 Animator→View 和 View→当前 Animator 的弱引用关联，只有对应的真实子动画结束且 View 没有被新动画接管时，才清除 scale/shadow/pivot。不会遍历或删除 `e.p`，也不会恢复 alpha、translation 或改写英语动画时序。
+5. CJK 特殊路径的清理只挂在宿主自己的 `z$g.onAnimationEnd` 上；`z$g.b` 是该辉光 ValueAnimator 的真实 `CustomTextView`。AM++ 在 `a0` 返回后确认宿主 `e.p` 新增了特殊 Animator，才按宿主 `z.m0(false)` 的 `e.i` 优先/e.k 回退规则记录 View，并以 Animator→View 和 View→当前 Animator 的弱引用关联；duration/length 门槛未创建辉光时不会留下追踪项。只有对应的真实子动画结束且 View 没有被新动画接管时，才清除 scale/shadow/pivot。不会遍历或删除 `e.p`，也不会恢复 alpha、translation 或改写英语动画时序。
 
 ## 关键代码位置
 

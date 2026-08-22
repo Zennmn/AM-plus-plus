@@ -9,12 +9,39 @@ import org.junit.Test
 
 class CjkKaraokeAnimationTargetTest {
     @Test
+    fun `only a newly created special animator commits a CJK glow baseline`() {
+        val existing = Any()
+
+        assertFalse(hasNewCjkGlowAnimator(listOf(existing), listOf(existing)))
+        assertTrue(hasNewCjkGlowAnimator(listOf(existing), listOf(existing, Any())))
+    }
+
+    @Test
+    fun `CJK classifier scope is gated by complete hook installation`() {
+        val source = targetSource()
+        val scope = source.substringAfter("private fun isSingleWordScope")
+            .substringBefore("private fun a0Stack")
+
+        assertTrue(source.contains("@Volatile\n    private var hooksReady = false"))
+        assertTrue(scope.contains("hooksReady"))
+        assertTrue(source.contains("val hooksInstalled = a0Installed && helperInstalled"))
+        assertTrue(source.contains("hooksReady = hooksInstalled"))
+    }
+
+    @Test
+    fun `candidate view is committed only after a0 confirms a new special animator`() {
+        val source = targetSource()
+        val enter = source.substringAfter("private fun enterA0Scope")
+            .substringBefore("private fun completeA0Scope")
+
+        assertFalse(enter.contains("trackedGlowViews"))
+        assertTrue(source.contains("completeA0Scope"))
+        assertTrue(source.contains("hasNewCjkGlowAnimator"))
+    }
+
+    @Test
     fun `glow cleanup leaves host-owned vertical position untouched`() {
-        val source = sequenceOf(
-            File("src/main/java/dev/amenhancer/module/hook/AppleMusicCjkKaraokeAnimationTarget.kt"),
-            File("app/src/main/java/dev/amenhancer/module/hook/AppleMusicCjkKaraokeAnimationTarget.kt"),
-        ).firstOrNull(File::isFile)?.readText()
-            ?: error("AppleMusicCjkKaraokeAnimationTarget.kt was not found")
+        val source = targetSource()
         val cleanup = source.substringAfter("private fun resetCjkGlowView")
             .substringBefore("private fun captureCjkGlowBaseline")
 
@@ -22,6 +49,12 @@ class CjkKaraokeAnimationTargetTest {
         assertFalse(cleanup.contains("baseline.translationY"))
         assertFalse(source.contains("val translationY: Float"))
     }
+
+    private fun targetSource(): String = sequenceOf(
+        File("src/main/java/dev/amenhancer/module/hook/AppleMusicCjkKaraokeAnimationTarget.kt"),
+        File("app/src/main/java/dev/amenhancer/module/hook/AppleMusicCjkKaraokeAnimationTarget.kt"),
+    ).firstOrNull(File::isFile)?.readText()?.replace("\r\n", "\n")
+        ?: error("AppleMusicCjkKaraokeAnimationTarget.kt was not found")
 
     @Test
     fun `predicate recognizes host CJK script blocks but not latin text`() {

@@ -21,7 +21,7 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     private val symbols: TargetSymbolResolver,
 ) : CjkKaraokeAnimationTarget {
     private val a0Depth: ThreadLocal<Int> = ThreadLocal.withInitial { 0 }
-    private val a0SingleWordStack: ThreadLocal<MutableList<Boolean>> =
+    private val a0SingleWordStack: ThreadLocal<MutableList<CjkEntryState?>> =
         ThreadLocal.withInitial { mutableListOf() }
     private val fieldCache = Collections.synchronizedMap(
         WeakHashMap<Class<*>, kotlin.collections.Map<String, Field>>(),
@@ -44,8 +44,14 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     private var glowEndHookInstalled = false
     private var glowViewEndHookInstalled = false
     private var glowTimingHookInstalled = false
+    @Volatile
+    private var hooksReady = false
 
     override fun install(): TargetCapabilityInstall {
+        hooksReady = false
+        glowEndHookInstalled = false
+        glowViewEndHookInstalled = false
+        glowTimingHookInstalled = false
         val a0Resolution = symbols.resolve(AppleMusicSymbols.CjkKaraokeAnimationMethod)
         val helperResolution = symbols.resolve(AppleMusicSymbols.CjkUnicodeBlockPredicateMethod)
         val a0 = a0Resolution.valueOrNull()
@@ -69,6 +75,7 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
                     // The host callback runs even when z.a0 throws; always
                     // release this thread's scope so a later classifier call cannot
                     // inherit a stale override.
+                    completeA0Scope(param)
                     leaveA0Scope()
                 }
             }).also { installed ->
@@ -107,9 +114,12 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         glowViewEndHookInstalled = installGlowViewEndHook(a0)
         glowTimingHookInstalled = installGlowTimingHook(a0)
 
-        if (!a0Installed || !helperInstalled || !glowEndHookInstalled ||
-            !glowViewEndHookInstalled || !glowTimingHookInstalled
-        ) {
+        val hooksInstalled = a0Installed && helperInstalled && glowEndHookInstalled &&
+            glowViewEndHookInstalled && glowTimingHookInstalled
+        hooksReady = hooksInstalled
+        if (!hooksInstalled) {
+            // Hooks cannot be removed reliably through the modern runtime.  Keep
+            // any partially registered callbacks inert until every seam is ready.
             return TargetCapabilityInstall.Degraded(
                 failures.joinToString("; ").ifBlank { "CJK karaoke animation hooks were not installed" },
             )
@@ -196,7 +206,7 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     }.getOrDefault(false)
 
     private fun attachGlowEndListener(updateListener: Any?, animator: Animator?) {
-        if (updateListener == null || animator == null) return
+        if (!hooksReady || updateListener == null || animator == null) return
         val alreadyTracked = synchronized(glowAnimators) { glowAnimators.containsKey(animator) }
         if (alreadyTracked) return
         val view = inspectedGlowView(updateListener) ?: return
@@ -397,23 +407,39 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     }
 
     private fun enterA0Scope(param: ModernMethodHook.MethodHookParam) {
+        if (!hooksReady) return
         runCatching {
             a0Depth.set((a0Depth.get() ?: 0) + 1)
             val candidate = readSingleWordGateEntry(param)
-            a0Stack().add(candidate != null)
-            candidate?.let { state ->
-                synchronized(trackedGlowViews) {
-                    state.views.forEach { view ->
-                        if (!trackedGlowViews.containsKey(view)) {
-                            captureCjkGlowBaseline(view)?.let { baseline ->
-                                trackedGlowViews[view] = baseline
-                            }
+            a0Stack().add(candidate)
+        }
+            .onFailure { error -> ModernXposedRuntime.log("CJK karaoke a0 depth enter failed open", error) }
+    }
+
+    /**
+     * Commit a baseline only after the host has added a new special-path
+     * Animator to the entry.  A single-word candidate can still be rejected by
+     * Apple's duration/length gates, in which case its recycled View must not
+     * remain globally classified as a CJK glow target.
+     */
+    private fun completeA0Scope(param: ModernMethodHook.MethodHookParam) {
+        if (!hooksReady || param.throwable != null) return
+        runCatching {
+            val state = a0Stack().lastOrNull() ?: return@runCatching
+            val after = specialAnimatorSnapshot(state.entry)
+            if (!hasNewCjkGlowAnimator(state.specialAnimatorsBefore, after)) return@runCatching
+            synchronized(trackedGlowViews) {
+                state.views.forEach { view ->
+                    if (!trackedGlowViews.containsKey(view)) {
+                        captureCjkGlowBaseline(view)?.let { baseline ->
+                            trackedGlowViews[view] = baseline
                         }
                     }
                 }
             }
+        }.onFailure { error ->
+            ModernXposedRuntime.log("CJK karaoke glow baseline commit failed open", error)
         }
-            .onFailure { error -> ModernXposedRuntime.log("CJK karaoke a0 depth enter failed open", error) }
     }
 
     private fun leaveA0Scope() {
@@ -431,15 +457,15 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     }
 
     private fun isSingleWordScope(): Boolean = runCatching {
-        (a0Depth.get() ?: 0) > 0 && a0Stack().lastOrNull() == true
+        hooksReady && (a0Depth.get() ?: 0) > 0 && a0Stack().lastOrNull() != null
     }
         .getOrElse { error ->
             ModernXposedRuntime.log("CJK karaoke single-word gate read failed open", error)
             false
         }
 
-    private fun a0Stack(): MutableList<Boolean> =
-        a0SingleWordStack.get() ?: mutableListOf<Boolean>().also(a0SingleWordStack::set)
+    private fun a0Stack(): MutableList<CjkEntryState?> =
+        a0SingleWordStack.get() ?: mutableListOf<CjkEntryState?>().also(a0SingleWordStack::set)
 
     /** Reads only the host's grouping metadata; Apple retains all trigger gates. */
     private fun readSingleWordGateEntry(param: ModernMethodHook.MethodHookParam): CjkEntryState? =
@@ -482,7 +508,9 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
             )
             if (!isSingleUnmergedCjkWord(timing)) return@runCatching null
             CjkEntryState(
+                entry = entry,
                 views = foregroundEntryViews(entry),
+                specialAnimatorsBefore = specialAnimatorSnapshot(entry),
             )
         }.getOrElse { error ->
             ModernXposedRuntime.log("CJK single-word gate failed closed: ${error.cjkShortMessage()}")
@@ -512,6 +540,13 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     private fun readNamedField(receiver: Any, name: String): Any? =
         cachedFields(receiver.javaClass)[name]?.let { field -> readField(field, receiver) }
 
+    private fun specialAnimatorSnapshot(entry: Any): List<Any> = when (
+        val value = readNamedField(entry, "p")
+    ) {
+        is Collection<*> -> value.filterIsInstance<Animator>().map { it as Any }
+        else -> emptyList()
+    }
+
     private fun invokeNoArg(receiver: Any, methodName: String): Any? =
         invokeMethod(receiver, methodName)
 
@@ -524,7 +559,9 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     }.getOrNull()
 
     private data class CjkEntryState(
+        val entry: Any,
         val views: List<Any>,
+        val specialAnimatorsBefore: List<Any>,
     )
 
     private data class CjkGlowBaseline(
@@ -537,6 +574,11 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         const val MAX_TIMING_REWRITE_LOGS = 3
     }
 }
+
+internal fun hasNewCjkGlowAnimator(
+    before: Collection<Any>,
+    after: Collection<Any>,
+): Boolean = after.any { candidate -> before.none { previous -> previous === candidate } }
 
 /** Returns true for the CJK blocks used by the host's karaoke classifier. */
 internal fun containsCjkKaraokeScript(text: CharSequence): Boolean {
