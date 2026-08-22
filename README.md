@@ -59,7 +59,7 @@ AM++ 是一个通过 libxposed API 102 注入 Apple Music 的增强模块，目�
 | 平板禁用动态视频 | 开启 | 仅抑制平板横屏下的 Editorial Video，静态预览和普通 Music Video 不受影响。 |
 | 双向歌词模糊 | 开启 | 当前高亮歌词保持清晰，历史歌词和后续歌词按距离逐渐模糊；手动滚动停止约 1 秒后恢复。 |
 | 歌词模糊半径调节 | `0px` | 可在设置中对模糊半径增加或减少 `-10..10px`。 |
-| 自定义歌词注入 | 关闭 | 按 Apple Music ID 替换 TTML，支持手动 TTML、AMLL 和网易云逐字歌词导入。 |
+| 自定义歌词注入 | 关闭 | 按 Apple Music ID 替换 TTML，支持手动 TTML、AMLL、AM-Lyrics 和 Lunabeat 导入。 |
 | 歌词字体替换 | 关闭 | 导入 TTF/OTF 后应用到播放器歌词布局，可恢复原字体；示例使用 MiSans。 |
 | 手机液态玻璃 | 关闭 | 手机底栏和 mini-player 的实时模糊、半透明材质与选中胶囊，目前为 WIP。 |
 | 平板底栏补偿 | 关闭 | 平板底栏显示异常时使用的兼容性选项。 |
@@ -145,7 +145,7 @@ Apple Music 功能修改后都需要强制停止并重新打开目标应用。�
 
 1. 进入设置页的“自定义歌词”。
 2. 点击“获取 ID”，从当前正在 Apple Music 播放的歌曲读取 Apple Music ID、标题和艺术家；也可以手动填写 ID。
-3. 选择一种歌词来源：粘贴或导入本地 TTML、按 Apple Music ID 从 AMLL 导入，或输入网易云歌曲 ID 导入逐字 YRC 歌词。
+3. 选择一种歌词来源：粘贴或导入本地 TTML，或按 Apple Music ID 从 AMLL、AM-Lyrics、Lunabeat 导入。
 4. 保存映射并启用对应歌曲。
 5. 强制停止并重新打开 Apple Music，使替换生效。
 
@@ -155,7 +155,9 @@ Apple Music 功能修改后都需要强制停止并重新打开目标应用。�
 
 从 AMLL 导入时，如果取回的 TTML 是 AMLL 格式，模块会先自动转换为 Apple Music 格式再填入编辑框。
 
-AMLL 和网易云导入属于用户主动操作，可能需要网络连接；模块不会在播放过程中自动请求歌词服务。
+AMLL、AM-Lyrics 和 Lunabeat 导入属于用户主动操作，可能需要网络连接；模块不会在播放过程中自动请求歌词服务。
+
+Lunabeat 会缓存 manifest 和歌曲索引，优先使用本地索引；仅当远端 revision 发生变化时重新下载歌曲索引。索引更新失败时继续使用旧缓存。
 
 ### 歌词字体
 
@@ -246,7 +248,7 @@ assembleRelease
 
 ## 隐私与权限
 
-- 模块声明了 `INTERNET` 权限，仅用于设置页中用户主动触发的 AMLL 或网易云歌词导入。
+- 模块声明了 `INTERNET` 权限，仅用于设置页中用户主动触发的 AMLL、AM-Lyrics 或 Lunabeat 歌词导入。
 - 模块不会在播放过程中自动联网识别歌曲或请求歌词。
 - 模块不申请存储或通知运行时权限；本地文件通过 Android 文件选择器读取。
 - 首次迁移前的配置来源于 Xposed 框架 remote preferences/remote file；嵌入设置启用后，普通设置、歌词索引和字体文件保存在 Apple Music 宿主私有目录中。

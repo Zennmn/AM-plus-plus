@@ -102,7 +102,7 @@ class SettingsUiStructuralRegressionTest {
         val manifest = projectFile("app/src/main/AndroidManifest.xml")
 
         assertTrue(activity.contains("从 AMLL 导入"))
-        assertTrue(activity.contains("从网易云导入"))
+        assertTrue(activity.contains("从 Lunabeat 导入"))
         assertTrue(activity.contains("从 GitHub 导入"))
         assertTrue(activity.contains("同步 GitHub 源"))
         assertTrue(activity.contains("CustomLyricsManager(ModuleApplication.serviceSnapshot, store).syncFromGitHub"))

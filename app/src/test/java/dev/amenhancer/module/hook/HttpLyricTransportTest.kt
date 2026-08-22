@@ -6,7 +6,6 @@ import java.net.InetSocketAddress
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -14,7 +13,6 @@ class HttpLyricTransportTest {
 
     private lateinit var server: HttpServer
     private lateinit var baseUrl: String
-    private var lastRequestContentType: String? = null
 
     @Before
     fun startServer() {
@@ -37,10 +35,13 @@ class HttpLyricTransportTest {
                 "/ok" -> respond(exchange, 200, "hello world")
                 "/missing" -> respond(exchange, 404, "not found")
                 "/large" -> respond(exchange, 200, "x".repeat(200))
-                "/echo" -> {
-                    lastRequestContentType = exchange.requestHeaders.getFirst("Content-Type")
-                    val body = exchange.requestBody.readBytes().toString(Charsets.UTF_8)
-                    respond(exchange, 200, "echo:$body")
+                "/etag" -> {
+                    exchange.responseHeaders.add("ETag", "\"v1\"")
+                    if (exchange.requestHeaders.getFirst("If-None-Match") == "\"v1\"") {
+                        exchange.sendResponseHeaders(304, -1)
+                    } else {
+                        respond(exchange, 200, "manifest")
+                    }
                 }
                 else -> respond(exchange, 500, "unexpected")
             }
@@ -74,12 +75,17 @@ class HttpLyricTransportTest {
     }
 
     @Test
-    fun `postForm sends the form body and returns the response`() {
-        val transport = HttpLyricTransport(maxResponseBytes = 1024)
+    fun `get response carries etag and honors conditional requests`() {
+        val transport = HttpLyricTransport(maxResponseBytes = 64)
 
-        val response = transport.postForm("$baseUrl/echo", "params=ABCD1234")
+        val first = transport.getResponse("$baseUrl/etag")
+        assertEquals(200, first?.statusCode)
+        assertEquals("\"v1\"", first?.etag)
+        assertEquals("manifest", first?.body?.toString(Charsets.UTF_8))
 
-        assertEquals("echo:params=ABCD1234", response)
-        assertTrue(lastRequestContentType.orEmpty().startsWith("application/x-www-form-urlencoded"))
+        val second = transport.getResponse("$baseUrl/etag", first?.etag)
+        assertEquals(304, second?.statusCode)
+        assertNull(second?.body)
     }
+
 }

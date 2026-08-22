@@ -52,9 +52,10 @@ import dev.amenhancer.module.config.EmbeddedConfigurationSession
 import dev.amenhancer.module.CurrentSongDetails
 import dev.amenhancer.module.hook.AmLyricsClient
 import dev.amenhancer.module.hook.AmllTtmlClient
+import dev.amenhancer.module.hook.FileLunabeatCatalogCache
 import dev.amenhancer.module.hook.HttpLyricTransport
 import dev.amenhancer.module.hook.ModernXposedRuntime
-import dev.amenhancer.module.hook.NeteaseLyricClient
+import dev.amenhancer.module.hook.LunabeatClient
 import dev.amenhancer.module.lyrics.CustomLyricsDraft
 import dev.amenhancer.module.lyrics.CustomLyricsMultiIdDraft
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImportResult
@@ -65,6 +66,7 @@ import dev.amenhancer.module.lyrics.CustomLyricsSyncResult
 import dev.amenhancer.module.model.CustomLyricsEntry
 import dev.amenhancer.module.model.CustomLyricsSources
 import dev.amenhancer.module.model.ModuleSettings
+import java.io.File
 import java.lang.ref.WeakReference
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Method
@@ -1063,7 +1065,6 @@ internal interface EmbeddedSettingsController {
     fun importOnlineLyrics(
         source: EmbeddedOnlineSource,
         appleMusicId: Long,
-        neteaseSongId: Long?,
         displayName: String,
     ): EmbeddedActionResult = EmbeddedActionResult.Failed("在线导入不可用")
 
@@ -2651,8 +2652,8 @@ internal class EmbeddedSettingsHost private constructor(
 
     private fun embeddedCustomLyricsSourceName(source: String): String = when (source) {
         CustomLyricsSources.AMLL -> "AMLL"
-        CustomLyricsSources.NETEASE -> "网易云 YRC"
         CustomLyricsSources.AM_LYRICS -> "AM-Lyrics 仓库"
+        CustomLyricsSources.LUNABEAT -> "Lunabeat"
         else -> "手动 TTML"
     }
 
@@ -3840,22 +3841,17 @@ internal class EmbeddedSettingsHost private constructor(
             listOf(
                 "AMLL" to EmbeddedOnlineSource.AMLL,
                 "AM Lyrics" to EmbeddedOnlineSource.AM_LYRICS,
-                "网易云" to EmbeddedOnlineSource.NETEASE,
+                "Lunabeat" to EmbeddedOnlineSource.LUNABEAT,
             ).forEach { (label, source) ->
                 onlineRow.addView(Button(activity).apply {
                     text = label
                     setOnClickListener {
-                        if (source == EmbeddedOnlineSource.NETEASE) {
-                            promptNeteaseImport(activity, song)
-                        } else {
-                            runAsync(activity) {
-                                controller.importOnlineLyrics(
-                                    source,
-                                    song.appleMusicId,
-                                    null,
-                                    song.title.orEmpty().ifBlank { song.appleMusicId.toString() },
-                                )
-                            }
+                        runAsync(activity) {
+                            controller.importOnlineLyrics(
+                                source,
+                                song.appleMusicId,
+                                song.title.orEmpty().ifBlank { song.appleMusicId.toString() },
+                            )
                         }
                     }
                 }, embeddedActionButtonParams(activity))
@@ -3935,11 +3931,6 @@ internal class EmbeddedSettingsHost private constructor(
             hint = "显示名称",
             initial = entry?.displayName ?: song?.title.orEmpty(),
         )
-        val neteaseIdInput = embeddedLyricsEditorInput(
-            activity = activity,
-            hint = "网易云歌曲 ID（仅网易云导入时需要）",
-            numeric = true,
-        )
         val ttmlInput = embeddedLyricsEditorInput(
             activity = activity,
             hint = "TTML 内容",
@@ -3960,8 +3951,6 @@ internal class EmbeddedSettingsHost private constructor(
                 activity = activity,
                 source = sourceToImport,
                 appleMusicIdInput = idInput,
-                neteaseSongIdInput = neteaseIdInput,
-                displayNameInput = nameInput,
                 ttmlInput = ttmlInput,
             ) { importedSource ->
                 source = importedSource
@@ -3974,10 +3963,6 @@ internal class EmbeddedSettingsHost private constructor(
             dp(activity, 56),
         ).apply { bottomMargin = dp(activity, 2) })
         fields.addView(nameInput, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            dp(activity, 56),
-        ).apply { bottomMargin = dp(activity, 2) })
-        fields.addView(neteaseIdInput, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             dp(activity, 56),
         ).apply { bottomMargin = dp(activity, 2) })
@@ -4012,10 +3997,10 @@ internal class EmbeddedSettingsHost private constructor(
                         importOnline(EmbeddedOnlineSource.AMLL)
                     },
                     EmbeddedLyricsEditorAction(
-                        label = "从网易云导入",
-                        compactLabel = "网易云导入",
+                        label = "从 Lunabeat 导入",
+                        compactLabel = "Lunabeat 导入",
                     ) {
-                        importOnline(EmbeddedOnlineSource.NETEASE)
+                        importOnline(EmbeddedOnlineSource.LUNABEAT)
                     },
                     EmbeddedLyricsEditorAction(
                         label = "从 GitHub 导入",
@@ -4186,27 +4171,20 @@ internal class EmbeddedSettingsHost private constructor(
         activity: Activity,
         source: EmbeddedOnlineSource,
         appleMusicIdInput: EditText,
-        neteaseSongIdInput: EditText,
-        displayNameInput: EditText,
         ttmlInput: EditText,
         onImported: (String) -> Unit,
     ) {
         val appleMusicId = appleMusicIdInput.text.toString().toLongOrNull()
-        val neteaseSongId = neteaseSongIdInput.text.toString().toLongOrNull()
         when (source) {
             EmbeddedOnlineSource.AMLL,
             EmbeddedOnlineSource.AM_LYRICS,
+            EmbeddedOnlineSource.LUNABEAT,
             -> if (appleMusicId == null || appleMusicId <= 0L) {
                 appleMusicIdInput.error = "请输入正整数 Apple Music ID"
                 return
             }
-            EmbeddedOnlineSource.NETEASE -> if (neteaseSongId == null || neteaseSongId <= 0L) {
-                neteaseSongIdInput.error = "请输入正整数网易云歌曲 ID"
-                return
-            }
         }
 
-        val displayName = displayNameInput.text.toString()
         Toast.makeText(activity, "正在获取歌词…", Toast.LENGTH_SHORT).show()
         worker.execute {
             val result = runCatching {
@@ -4214,10 +4192,7 @@ internal class EmbeddedSettingsHost private constructor(
                 when (source) {
                     EmbeddedOnlineSource.AMLL -> importer.importAmll(requireNotNull(appleMusicId))
                     EmbeddedOnlineSource.AM_LYRICS -> importer.importAmLyrics(requireNotNull(appleMusicId))
-                    EmbeddedOnlineSource.NETEASE -> importer.importNetease(
-                        requireNotNull(neteaseSongId),
-                        displayName,
-                    )
+                    EmbeddedOnlineSource.LUNABEAT -> importer.importLunabeat(requireNotNull(appleMusicId))
                 }
             }.getOrElse {
                 CustomLyricsOnlineImportResult.Failed(
@@ -4248,37 +4223,18 @@ internal class EmbeddedSettingsHost private constructor(
     private fun embeddedOnlineLyricsImporter(): CustomLyricsOnlineImporter = CustomLyricsOnlineImporter(
         fetchAmll = AmllTtmlClient(HttpLyricTransport())::fetch,
         fetchAmLyrics = AmLyricsClient(HttpLyricTransport())::fetch,
-        fetchNeteaseYrc = NeteaseLyricClient(HttpLyricTransport())::fetchYrc,
+        fetchLunabeat = LunabeatClient(
+            indexTransport = HttpLyricTransport(maxResponseBytes = LunabeatClient.INDEX_MAX_BYTES),
+            lyricsTransport = HttpLyricTransport(),
+            cache = FileLunabeatCatalogCache(File(application.filesDir, "ampp-lunabeat-cache")),
+        )::fetch,
     )
 
     private fun embeddedLyricsSourceName(source: String): String = when (source) {
         CustomLyricsSources.AMLL -> "AMLL"
-        CustomLyricsSources.NETEASE -> "网易云 YRC"
         CustomLyricsSources.AM_LYRICS -> "AM-Lyrics 仓库"
+        CustomLyricsSources.LUNABEAT -> "Lunabeat"
         else -> "手动 TTML"
-    }
-
-    private fun promptNeteaseImport(activity: Activity, song: CurrentSongDetails) {
-        val input = EditText(activity).apply {
-            hint = "网易云歌曲 ID"
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-        }
-        AlertDialog.Builder(activity)
-            .setTitle("从网易云导入")
-            .setView(input)
-            .setNegativeButton("取消", null)
-            .setPositiveButton("导入") { _, _ ->
-                val neteaseId = input.text.toString().toLongOrNull()
-                runAsync(activity) {
-                    controller.importOnlineLyrics(
-                        EmbeddedOnlineSource.NETEASE,
-                        song.appleMusicId,
-                        neteaseId,
-                        song.title.orEmpty().ifBlank { song.appleMusicId.toString() },
-                    )
-                }
-            }
-            .show()
     }
 
     private fun launchSafPicker(

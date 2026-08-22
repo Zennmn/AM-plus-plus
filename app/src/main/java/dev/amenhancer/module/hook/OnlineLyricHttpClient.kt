@@ -4,17 +4,21 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /** Network surface used by the lyric clients; faked in unit tests. */
+internal data class LyricHttpResponse(
+    val statusCode: Int,
+    val body: ByteArray?,
+    val etag: String? = null,
+)
+
 internal interface LyricHttpTransport {
     fun get(url: String): String?
 
     /** Raw response bytes for callers that must verify remote size and hash. */
     fun getBytes(url: String): ByteArray? = get(url)?.toByteArray(Charsets.UTF_8)
 
-    fun postForm(
-        url: String,
-        body: String,
-        extraHeaders: Map<String, String> = emptyMap(),
-    ): String?
+    /** Optional response metadata used by catalog clients for conditional GET. */
+    fun getResponse(url: String, ifNoneMatch: String? = null): LyricHttpResponse? =
+        getBytes(url)?.let { bytes -> LyricHttpResponse(HttpURLConnection.HTTP_OK, bytes) }
 }
 
 /**
@@ -30,48 +34,40 @@ internal class HttpLyricTransport(
 ) : LyricHttpTransport {
 
     override fun get(url: String): String? =
-        getBytes(url)?.toString(Charsets.UTF_8)
+        getResponse(url)?.takeIf { it.statusCode == HttpURLConnection.HTTP_OK }
+            ?.body?.toString(Charsets.UTF_8)
 
-    override fun getBytes(url: String): ByteArray? = requestBytes(method = "GET", url = url, body = null)
+    override fun getBytes(url: String): ByteArray? =
+        getResponse(url)?.takeIf { it.statusCode == HttpURLConnection.HTTP_OK }?.body
 
-    override fun postForm(
-        url: String,
-        body: String,
-        extraHeaders: Map<String, String>,
-    ): String? = requestBytes(
-        method = "POST",
-        url = url,
-        body = body,
-        extraHeaders = extraHeaders + FORM_HEADERS,
-    )?.toString(Charsets.UTF_8)
+    override fun getResponse(url: String, ifNoneMatch: String?): LyricHttpResponse? =
+        requestResponse(url, ifNoneMatch)
 
-    private fun requestBytes(
-        method: String,
-        url: String,
-        body: String?,
-        extraHeaders: Map<String, String> = emptyMap(),
-    ): ByteArray? = runCatching {
+    private fun requestResponse(url: String, ifNoneMatch: String?): LyricHttpResponse? = runCatching {
         val connection = URL(url).openConnection() as HttpURLConnection
         try {
-            connection.requestMethod = method
+            connection.requestMethod = "GET"
             connection.connectTimeout = connectTimeoutMs
             connection.readTimeout = readTimeoutMs
             connection.instanceFollowRedirects = true
             connection.setRequestProperty("User-Agent", USER_AGENT)
             connection.setRequestProperty("Accept", "text/plain, application/json;q=0.9, */*;q=0.5")
-            extraHeaders.forEach { (name, value) -> connection.setRequestProperty(name, value) }
-            if (body != null) {
-                connection.doOutput = true
-                connection.outputStream.use { output ->
-                    output.write(body.toByteArray(Charsets.UTF_8))
-                }
+            if (!ifNoneMatch.isNullOrBlank()) {
+                connection.setRequestProperty("If-None-Match", ifNoneMatch)
             }
-            if (connection.responseCode != HttpURLConnection.HTTP_OK) return null
-            readBounded(connection)
+            val status = connection.responseCode
+            if (status == HttpURLConnection.HTTP_NOT_MODIFIED) {
+                return@runCatching LyricHttpResponse(status, body = null, etag = connection.etag())
+            }
+            if (status != HttpURLConnection.HTTP_OK) return@runCatching null
+            val bytes = readBounded(connection) ?: return@runCatching null
+            LyricHttpResponse(status, bytes, connection.etag())
         } finally {
             connection.disconnect()
         }
     }.getOrNull()
+
+    private fun HttpURLConnection.etag(): String? = getHeaderField("ETag")?.trim()
 
     private fun readBounded(connection: HttpURLConnection): ByteArray? {
         val buffer = java.io.ByteArrayOutputStream()
@@ -92,8 +88,5 @@ internal class HttpLyricTransport(
         const val DEFAULT_READ_TIMEOUT_MS = 15_000
         const val DEFAULT_MAX_RESPONSE_BYTES = 1 shl 20
         private const val USER_AGENT = "AMPlusPlus/1.2.1"
-        private val FORM_HEADERS = mapOf(
-            "Content-Type" to "application/x-www-form-urlencoded; charset=UTF-8",
-        )
     }
 }

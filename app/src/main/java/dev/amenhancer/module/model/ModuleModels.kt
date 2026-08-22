@@ -60,8 +60,8 @@ data class CustomLyricsManifest(
 object CustomLyricsSources {
     const val MANUAL = "manual"
     const val AMLL = "amll-ttml-db"
-    const val NETEASE = "netease-yrc"
     const val AM_LYRICS = "am-lyrics"
+    const val LUNABEAT = "lunabeat-ttml-hub"
 }
 
 enum class FeatureState {

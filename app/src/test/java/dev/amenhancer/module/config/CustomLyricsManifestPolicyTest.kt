@@ -58,6 +58,15 @@ class CustomLyricsManifestPolicyTest {
         assertEquals(CustomLyricsSources.AM_LYRICS, sanitized.entries.single().source)
     }
 
+    @Test
+    fun `removed provider entries remain usable as manual lyrics`() {
+        val sanitized = CustomLyricsManifestPolicy.sanitize(
+            CustomLyricsManifest(listOf(entry(42L, "lyrics_removed", "removed-provider"))),
+        )
+
+        assertEquals(CustomLyricsSources.MANUAL, sanitized.entries.single().source)
+    }
+
     private fun entry(
         appleMusicId: Long,
         fileId: String,
