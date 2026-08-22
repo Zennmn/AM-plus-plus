@@ -121,7 +121,10 @@ internal class AppleMusicCustomLyricsTarget(
                     mainHandler.post { readyReapply.onReplacementPublished(appleMusicId) }
                 },
                 publisher = runtime.publisher,
-                isAllowed = { appleMusicId -> appleMusicId !in runtime.suppressedIds },
+                isAllowed = { appleMusicId ->
+                    appleMusicId !in runtime.suppressedIds &&
+                        session.readyReplacementFor(appleMusicId) == null
+                },
                 executor = runtime.executor,
                 logger = ModernXposedRuntime::log,
             )
@@ -148,7 +151,18 @@ internal class AppleMusicCustomLyricsTarget(
                 override fun afterHookedMethod(param: MethodHookParam) {
                     runCatching {
                         val ttml = param.args.getOrNull(0) as? String ?: return@runCatching
-                        timingObservations.record(param.result, TtmlTimingPolicy.metadataOf(ttml))
+                        val pointer = param.result
+                        val metadata = TtmlTimingPolicy.metadataOf(ttml)
+                        val appleMusicId = pointer?.let(parser::adamIdOf)
+                        timingObservations.record(pointer, metadata, appleMusicId)
+                        if (
+                            appleMusicId != null &&
+                            currentSong.current()?.details?.appleMusicId == appleMusicId &&
+                            shouldTryAutoLyricsForMetadata(metadata) &&
+                            session.readyReplacementFor(appleMusicId) == null
+                        ) {
+                            autoSession?.ensureRequested(appleMusicId)
+                        }
                     }.onFailure { error ->
                         ModernXposedRuntime.log("custom lyrics TTML timing observation failed: $error")
                     }
@@ -179,14 +193,18 @@ internal class AppleMusicCustomLyricsTarget(
                                 original = original,
                                 metadata = timingMetadata,
                             )
-                        val autoReplacement = if (autoEligible) {
-                            autoSession?.replacementFor(adamId)
-                        } else {
-                            autoSession?.takeoverReplacementFor(
-                                appleMusicId = adamId,
-                                original = original,
-                                metadata = timingMetadata,
-                            )
+                        val autoReplacement = when {
+                            shouldPrepareAutomaticLyrics(manualReplacement, autoEligible) -> {
+                                autoSession?.replacementFor(adamId)
+                            }
+                            manualReplacement == null -> {
+                                autoSession?.takeoverReplacementFor(
+                                    appleMusicId = adamId,
+                                    original = original,
+                                    metadata = timingMetadata,
+                                )
+                            }
+                            else -> null
                         }
                         // User-managed mappings always win; automatic sources are
                         // only a fallback for a missing/non-Word pointer or an
@@ -322,8 +340,15 @@ internal class AppleMusicCustomLyricsTarget(
         }.isSuccess
         session.start()
         currentSong.addListener { current ->
-            autoSession?.onSongChanged(current?.details?.appleMusicId)
-            current?.details?.appleMusicId?.let(session::ensureRequested)
+            val appleMusicId = current?.details?.appleMusicId
+            autoSession?.onSongChanged(appleMusicId)
+            appleMusicId?.let { id ->
+                timingObservations.metadataOfAppleMusicId(id)
+                    ?.takeIf(::shouldTryAutoLyricsForMetadata)
+                    ?.takeIf { session.readyReplacementFor(id) == null }
+                    ?.let { autoSession?.ensureRequested(id) }
+            }
+            appleMusicId?.let(session::ensureRequested)
         }
         if (!availabilityHooked) {
             return TargetCapabilityInstall.Degraded(
@@ -384,8 +409,15 @@ internal fun shouldTryAutoLyrics(
     original: Any?,
     metadata: TtmlDocumentMetadata?,
 ): Boolean = original == null ||
-    metadata?.timingMode == TtmlTimingMode.NON_WORD ||
-    metadata?.needsTranslationFallback == true
+    shouldTryAutoLyricsForMetadata(metadata)
+
+internal fun shouldTryAutoLyricsForMetadata(metadata: TtmlDocumentMetadata?): Boolean =
+    metadata?.timingMode == TtmlTimingMode.NON_WORD || metadata?.needsTranslationFallback == true
+
+internal fun shouldPrepareAutomaticLyrics(
+    manualReplacement: Any?,
+    autoEligible: Boolean,
+): Boolean = manualReplacement == null && autoEligible
 
 internal fun shouldExposeCustomLyrics(
     nativeLyricsAvailable: Boolean,

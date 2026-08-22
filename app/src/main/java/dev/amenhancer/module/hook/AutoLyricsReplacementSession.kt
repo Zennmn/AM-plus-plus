@@ -311,6 +311,7 @@ internal class AutoLyricsReplacementSession(
             generation += 1L
             activeSongKnown = appleMusicId != null
             activeAppleMusicId = appleMusicId
+            pending.clear()
             failedUntil.clear()
             activeTakeovers.clear()
         }
@@ -525,7 +526,9 @@ internal class AutoLyricsReplacementSession(
         synchronized(lock) { isCurrentRequestLocked(appleMusicId, requestGeneration) }
 
     private fun isCurrentRequestLocked(appleMusicId: Long, requestGeneration: Long): Boolean =
-        generation == requestGeneration && isCurrentSongLocked(appleMusicId)
+        generation == requestGeneration &&
+            isCurrentSongLocked(appleMusicId) &&
+            isAllowed(appleMusicId)
 
     private fun removePointerIf(appleMusicId: Long, pointer: Any?) {
         if (pointer == null) return

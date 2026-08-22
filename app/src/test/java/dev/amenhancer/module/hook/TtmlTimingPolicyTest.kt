@@ -103,6 +103,21 @@ class TtmlTimingPolicyTest {
     }
 
     @Test
+    fun `identity registry associates observed metadata with the Apple Music ID`() {
+        val pointer = Any()
+        val metadata = TtmlDocumentMetadata(
+            timingMode = TtmlTimingMode.NON_WORD,
+            language = "en",
+            hasTranslation = false,
+        )
+        val registry = TtmlTimingObservationRegistry()
+
+        registry.record(pointer, metadata, appleMusicId = 42L)
+
+        assertEquals(metadata, registry.metadataOfAppleMusicId(42L))
+    }
+
+    @Test
     fun `registry evicts oldest observation`() {
         val registry = TtmlTimingObservationRegistry(maxEntries = 1)
         val first = Any()

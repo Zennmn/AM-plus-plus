@@ -57,4 +57,11 @@ class AutoLyricsPolicyTest {
             ),
         )
     }
+
+    @Test
+    fun `ready manual replacement suppresses automatic preparation`() {
+        assertFalse(shouldPrepareAutomaticLyrics(Any(), autoEligible = true))
+        assertTrue(shouldPrepareAutomaticLyrics(null, autoEligible = true))
+        assertFalse(shouldPrepareAutomaticLyrics(null, autoEligible = false))
+    }
 }

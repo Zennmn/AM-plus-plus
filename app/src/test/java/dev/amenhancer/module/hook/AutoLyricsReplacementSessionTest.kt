@@ -117,6 +117,30 @@ class AutoLyricsReplacementSessionTest {
     }
 
     @Test
+    fun `a manual replacement becoming ready cancels the queued automatic lookup`() {
+        val queued = QueuedExecutor()
+        var allowed = true
+        var fetches = 0
+        val session = session(
+            queued = queued,
+            fetch = {
+                fetches += 1
+                AutoLyricsCandidate("amll", WORD_TTML)
+            },
+            parse = { Pointer() },
+            isAllowed = { allowed },
+        )
+
+        session.onSongChanged(42L)
+        session.ensureRequested(42L)
+        allowed = false
+        queued.runAll()
+
+        assertEquals(0, fetches)
+        assertTrue(session.isTracking(42L).not())
+    }
+
+    @Test
     fun `already applied takeover survives unknown refresh but yields to better native Word lyrics`() {
         val queued = QueuedExecutor()
         val pointer = Pointer()
@@ -179,6 +203,7 @@ class AutoLyricsReplacementSessionTest {
         fetch: (Long) -> AutoLyricsCandidate?,
         parse: (String) -> Any?,
         onPublished: (Long) -> Unit = {},
+        isAllowed: (Long) -> Boolean = { true },
     ): AutoLyricsReplacementSession {
         return AutoLyricsReplacementSession(
             fetchCandidate = fetch,
@@ -192,6 +217,7 @@ class AutoLyricsReplacementSessionTest {
                 true
             },
             onReplacementPublished = onPublished,
+            isAllowed = isAllowed,
             executor = queued,
             logger = {},
         )

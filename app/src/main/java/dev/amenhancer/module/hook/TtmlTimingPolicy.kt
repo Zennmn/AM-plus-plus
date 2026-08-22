@@ -1,5 +1,7 @@
 package dev.amenhancer.module.hook
 
+import java.util.LinkedHashMap
+
 /**
  * The native SongInfo surface does not expose Apple's root timing attribute.
  * Keep the raw-TTML check small and deterministic so the parser seam can bind
@@ -129,8 +131,21 @@ internal class TtmlTimingObservationRegistry(
     )
 
     private val observations = ArrayDeque<Observation>()
+    private val idObservations = object : LinkedHashMap<Long, TtmlDocumentMetadata>(
+        maxEntries.coerceAtLeast(1),
+        0.75f,
+        true,
+    ) {
+        override fun removeEldestEntry(
+            eldest: MutableMap.MutableEntry<Long, TtmlDocumentMetadata>?,
+        ): Boolean = size > maxEntries.coerceAtLeast(1)
+    }
 
-    fun record(pointer: Any?, metadata: TtmlDocumentMetadata) {
+    fun record(
+        pointer: Any?,
+        metadata: TtmlDocumentMetadata,
+        appleMusicId: Long? = null,
+    ) {
         if (pointer == null) return
         synchronized(observations) {
             sweepCleared()
@@ -140,6 +155,7 @@ internal class TtmlTimingObservationRegistry(
             }
             while (observations.size >= maxEntries.coerceAtLeast(1)) observations.removeFirst()
             observations.addLast(Observation(java.lang.ref.WeakReference(pointer), metadata))
+            appleMusicId?.takeIf { it > 0L }?.let { idObservations[it] = metadata }
         }
     }
 
@@ -158,6 +174,12 @@ internal class TtmlTimingObservationRegistry(
             sweepCleared()
             return observations.firstOrNull { it.pointer.get() === pointer }?.metadata
         }
+    }
+
+    /** Returns the latest observed native TTML metadata for a verified song ID. */
+    fun metadataOfAppleMusicId(appleMusicId: Long): TtmlDocumentMetadata? {
+        if (appleMusicId <= 0L) return null
+        synchronized(observations) { return idObservations[appleMusicId] }
     }
 
     fun modeOf(pointer: Any?): TtmlTimingMode? {
