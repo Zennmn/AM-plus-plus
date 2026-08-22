@@ -299,9 +299,11 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         synchronized(trackedGlowViews) { trackedGlowViews.containsKey(view) }
 
     private fun resetCjkGlowView(view: Any, baseline: CjkGlowBaseline) {
+        // translationY belongs to Apple's lyric layout/rebind state.  The glow
+        // listener never owns it, so restoring a captured value here races a
+        // later host layout pass and can make a word jump to a lower baseline.
         invokeMethod(view, "setScaleX", baseline.scaleX)
         invokeMethod(view, "setScaleY", baseline.scaleY)
-        invokeMethod(view, "setTranslationY", baseline.translationY)
         invokeNoArg(view, "resetPivot")
         invokeMethod(view, "setShadowLayer", 0f, 0f, 0f, 0)
         invokeNoArg(view, "invalidate")
@@ -311,8 +313,6 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         CjkGlowBaseline(
             scaleX = (invokeNoArg(view, "getScaleX") as? Number)?.toFloat() ?: return@runCatching null,
             scaleY = (invokeNoArg(view, "getScaleY") as? Number)?.toFloat() ?: return@runCatching null,
-            translationY = (invokeNoArg(view, "getTranslationY") as? Number)
-                ?.toFloat() ?: return@runCatching null,
         )
     }.getOrNull()
 
@@ -530,7 +530,6 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     private data class CjkGlowBaseline(
         val scaleX: Float,
         val scaleY: Float,
-        val translationY: Float,
     )
 
     private companion object {

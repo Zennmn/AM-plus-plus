@@ -1,12 +1,28 @@
 package dev.amenhancer.module.hook
 
 import dev.amenhancer.module.ModuleConstants
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CjkKaraokeAnimationTargetTest {
+    @Test
+    fun `glow cleanup leaves host-owned vertical position untouched`() {
+        val source = sequenceOf(
+            File("src/main/java/dev/amenhancer/module/hook/AppleMusicCjkKaraokeAnimationTarget.kt"),
+            File("app/src/main/java/dev/amenhancer/module/hook/AppleMusicCjkKaraokeAnimationTarget.kt"),
+        ).firstOrNull(File::isFile)?.readText()
+            ?: error("AppleMusicCjkKaraokeAnimationTarget.kt was not found")
+        val cleanup = source.substringAfter("private fun resetCjkGlowView")
+            .substringBefore("private fun captureCjkGlowBaseline")
+
+        assertFalse(cleanup.contains("setTranslationY"))
+        assertFalse(cleanup.contains("baseline.translationY"))
+        assertFalse(source.contains("val translationY: Float"))
+    }
+
     @Test
     fun `predicate recognizes host CJK script blocks but not latin text`() {
         assertTrue(containsCjkKaraokeScript("漢"))
