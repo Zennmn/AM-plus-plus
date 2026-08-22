@@ -226,8 +226,11 @@ internal class LunabeatClient(
                 val title = raw.optString("title").trim()
                 val artists = parseStrings(raw.optJSONArray("artists")) ?: return null
                 val album = raw.optString("album").trim()
-                val sourceIds = raw.optJSONObject("sourceIds") ?: return null
-                val appleMusicIds = parseIds(sourceIds.opt("appleMusicId")) ?: return null
+                // TTML Hub also publishes entries without a platform ID for
+                // text-search/future metadata use. They must not invalidate
+                // the entire catalog needed for exact Apple Music matches.
+                val sourceIds = raw.optJSONObject("sourceIds")
+                val appleMusicIds = parseIds(sourceIds?.opt("appleMusicId")) ?: return null
                 val path = raw.optString("path").trim().takeIf(::isSafePath) ?: return null
                 val sha256 = raw.optString("sha256").trim()
                     .takeIf(SHA256_PATTERN::matches) ?: return null
@@ -247,6 +250,7 @@ internal class LunabeatClient(
         }
 
         private fun parseIds(value: Any?): List<Long>? {
+            if (value == null) return emptyList()
             val values: List<Any?> = when (value) {
                 is JSONArray -> buildList<Any?> {
                     for (index in 0 until value.length()) add(value.opt(index))

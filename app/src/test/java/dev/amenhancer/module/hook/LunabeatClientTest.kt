@@ -140,6 +140,20 @@ class LunabeatClientTest {
     }
 
     @Test
+    fun `catalog keeps exact id songs when unrelated entries omit apple music ids`() {
+        val catalogIndex =
+            """{"schemaVersion":2,"revision":"r1","songs":[
+                {"title":"No Apple ID","artists":["Artist"],"path":"lyrics/no-id.ttml","sha256":"$sha256"},
+                {"title":"Target","artists":["Artist"],"sourceIds":{"appleMusicId":["42"]},"path":"lyrics/42.ttml","sha256":"$sha256"}
+            ]}"""
+
+        val catalog = LunabeatClient.parseCatalog(manifest("r1"), catalogIndex)
+
+        assertNotNull(catalog)
+        assertEquals("Target", catalog?.entryFor(42L)?.title)
+    }
+
+    @Test
     fun `invalid id and unsafe path fail without network lyric fetch`() {
         val cache = FakeCache(
             LunabeatCatalogCacheSnapshot(manifest("r1"), index("r1", "lyrics/../outside.ttml")),
