@@ -113,4 +113,16 @@ class CustomLyricsItemUpdateStructuralRegressionTest {
         assertFalse(coordinator.contains("onResume"))
         assertFalse(coordinator.contains("mLyricsResult"))
     }
+
+    @Test
+    fun `automatic fallback is prewarmed from observed native metadata and manual ready wins`() {
+        val target = projectFile(
+            "app/src/main/java/dev/amenhancer/module/hook/AppleMusicCustomLyricsTarget.kt",
+        )
+
+        assertTrue(target.contains("metadataOfAppleMusicId(id)"))
+        assertTrue(target.contains("shouldTryAutoLyricsForMetadata(metadata)"))
+        assertTrue(target.contains("session.readyReplacementFor(appleMusicId) == null"))
+        assertTrue(target.contains("shouldPrepareAutomaticLyrics(manualReplacement, autoEligible)"))
+    }
 }

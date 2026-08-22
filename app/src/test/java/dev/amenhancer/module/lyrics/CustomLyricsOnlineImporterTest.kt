@@ -15,7 +15,7 @@ class CustomLyricsOnlineImporterTest {
         val importer = CustomLyricsOnlineImporter(
             fetchAmll = { id -> requestedId = id; ttml },
             fetchAmLyrics = { error("must not fetch AM-Lyrics") },
-            fetchNeteaseYrc = { error("must not fetch NetEase") },
+            fetchLunabeat = { error("must not fetch Lunabeat") },
         )
 
         val result = importer.importAmll(42L)
@@ -29,22 +29,21 @@ class CustomLyricsOnlineImporterTest {
     }
 
     @Test
-    fun `netease import needs an explicit netease id and serializes word timing`() {
+    fun `lunabeat import uses the supplied apple music id and source`() {
         var requestedId = 0L
         val importer = CustomLyricsOnlineImporter(
             fetchAmll = { error("must not fetch AMLL") },
             fetchAmLyrics = { error("must not fetch AM-Lyrics") },
-            fetchNeteaseYrc = { id ->
-                requestedId = id
-                LyricDocument(listOf(LyricLine(0, 1_000, listOf(LyricWord("word", 0, 1_000)))))
-            },
+            fetchLunabeat = { id -> requestedId = id; ttml },
         )
 
-        val result = importer.importNetease(99L, "Song")
+        val result = importer.importLunabeat(99L)
 
         assertEquals(99L, requestedId)
-        assertTrue(result is CustomLyricsOnlineImportResult.Imported)
-        assertEquals(CustomLyricsSources.NETEASE, (result as CustomLyricsOnlineImportResult.Imported).source)
+        assertEquals(
+            CustomLyricsOnlineImportResult.Imported(ttml, CustomLyricsSources.LUNABEAT),
+            result,
+        )
     }
 
     @Test
@@ -53,7 +52,7 @@ class CustomLyricsOnlineImporterTest {
         val importer = CustomLyricsOnlineImporter(
             fetchAmll = { error("must not fetch AMLL") },
             fetchAmLyrics = { id -> requestedId = id; ttml },
-            fetchNeteaseYrc = { error("must not fetch NetEase") },
+            fetchLunabeat = { error("must not fetch Lunabeat") },
         )
 
         val result = importer.importAmLyrics(7335408332109193189L)
@@ -70,7 +69,7 @@ class CustomLyricsOnlineImporterTest {
         val importer = CustomLyricsOnlineImporter(
             fetchAmll = { error("must not fetch AMLL") },
             fetchAmLyrics = { "not ttml" },
-            fetchNeteaseYrc = { error("must not fetch NetEase") },
+            fetchLunabeat = { error("must not fetch Lunabeat") },
         )
 
         assertTrue(importer.importAmLyrics(0L) is CustomLyricsOnlineImportResult.Failed)
@@ -92,7 +91,7 @@ class CustomLyricsOnlineImporterTest {
         val importer = CustomLyricsOnlineImporter(
             fetchAmll = { amllFormat },
             fetchAmLyrics = { error("must not fetch AM-Lyrics") },
-            fetchNeteaseYrc = { error("must not fetch NetEase") },
+            fetchLunabeat = { error("must not fetch Lunabeat") },
         )
 
         val result = importer.importAmll(42L)
@@ -127,7 +126,7 @@ class CustomLyricsOnlineImporterTest {
         val importer = CustomLyricsOnlineImporter(
             fetchAmll = { appleFormat },
             fetchAmLyrics = { error("must not fetch AM-Lyrics") },
-            fetchNeteaseYrc = { error("must not fetch NetEase") },
+            fetchLunabeat = { error("must not fetch Lunabeat") },
         )
 
         val result = importer.importAmll(42L)

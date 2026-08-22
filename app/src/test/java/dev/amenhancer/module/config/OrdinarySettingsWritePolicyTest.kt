@@ -110,6 +110,7 @@ class OrdinarySettingsWritePolicyTest {
                 "title_correction_enabled" to false,
                 "title_correction_target_language" to "tr-TR",
                 "custom_lyrics_enabled" to false,
+                "automatic_lyrics_enabled" to true,
                 "schema_version" to ModuleConstants.CONFIG_SCHEMA_VERSION,
             ),
             encoded,

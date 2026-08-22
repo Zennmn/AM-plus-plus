@@ -14,9 +14,10 @@ internal object CustomLyricsManifestPolicy {
     private val sha256Pattern = Regex("[0-9a-fA-F]{64}")
     private val allowedSources = setOf(
         CustomLyricsSources.MANUAL,
+        CustomLyricsSources.AUTO_CACHE,
         CustomLyricsSources.AMLL,
-        CustomLyricsSources.NETEASE,
         CustomLyricsSources.AM_LYRICS,
+        CustomLyricsSources.LUNABEAT,
     )
 
     fun sanitize(manifest: CustomLyricsManifest): CustomLyricsManifest {
@@ -46,10 +47,12 @@ internal object CustomLyricsManifestPolicy {
         if (!isValidFileId(raw.fileId)) return null
         if (raw.sizeBytes !in 1L..TtmlInputPolicy.MAX_TTML_BYTES.toLong()) return null
         if (!isValidSha256(raw.sha256)) return null
-        if (raw.source !in allowedSources) return null
         return raw.copy(
             displayName = sanitizeDisplayName(raw.displayName),
             sha256 = raw.sha256.lowercase(),
+            // Entries created by removed/unknown providers remain usable as
+            // manually managed TTML instead of disappearing on read.
+            source = raw.source.takeIf(allowedSources::contains) ?: CustomLyricsSources.MANUAL,
         )
     }
 }

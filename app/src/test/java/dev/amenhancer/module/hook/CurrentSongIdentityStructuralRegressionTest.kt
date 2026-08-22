@@ -83,11 +83,9 @@ class CurrentSongIdentityStructuralRegressionTest {
         assertTrue(adaptation.contains("currentSong: CurrentSongIdentityCache = CurrentSongIdentityCache()"))
         assertTrue(adaptation.contains("currentSong = currentSong"))
         assertTrue(adaptation.contains("currentSongIdentity = AppleMusicCurrentSongIdentityTarget("))
-        assertTrue(
-            adaptation.contains(
-                "customLyrics = AppleMusicCustomLyricsTarget(config, resolver, currentSong)",
-            ),
-        )
+        assertTrue(adaptation.contains("customLyrics = AppleMusicCustomLyricsTarget("))
+        assertTrue(adaptation.contains("autoLyricsRuntime = autoLyricsRuntime"))
+        assertTrue(adaptation.contains("settings.customLyricsEnabled && settings.automaticLyricsEnabled"))
         assertTrue(adaptation.contains("internal fun interface CurrentSongIdentityTarget"))
         assertTrue(installation.contains("FeatureInstallationPlan(feature = CurrentSongIdentityFeature())"))
         assertTrue(

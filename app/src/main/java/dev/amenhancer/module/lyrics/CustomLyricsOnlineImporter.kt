@@ -17,7 +17,7 @@ internal sealed interface CustomLyricsOnlineImportResult {
 internal class CustomLyricsOnlineImporter(
     private val fetchAmll: (Long) -> String?,
     private val fetchAmLyrics: (Long) -> String?,
-    private val fetchNeteaseYrc: (Long) -> LyricDocument?,
+    private val fetchLunabeat: (Long) -> String?,
 ) {
     fun importAmll(appleMusicId: Long): CustomLyricsOnlineImportResult {
         if (appleMusicId <= 0L) return CustomLyricsOnlineImportResult.Failed("Apple Music ID 必须是正整数")
@@ -44,16 +44,13 @@ internal class CustomLyricsOnlineImporter(
         return CustomLyricsOnlineImportResult.Imported(ttml, CustomLyricsSources.AM_LYRICS)
     }
 
-    fun importNetease(
-        neteaseSongId: Long,
-        title: String,
-    ): CustomLyricsOnlineImportResult {
-        if (neteaseSongId <= 0L) return CustomLyricsOnlineImportResult.Failed("网易云歌曲 ID 必须是正整数")
-        val document = runCatching { fetchNeteaseYrc(neteaseSongId) }.getOrNull()
-            ?: return CustomLyricsOnlineImportResult.Failed("网易云未找到逐字歌词")
-        val ttml = WordTtmlSerializer.serialize(document, title.takeIf(String::isNotBlank))
+    fun importLunabeat(appleMusicId: Long): CustomLyricsOnlineImportResult {
+        if (appleMusicId <= 0L) return CustomLyricsOnlineImportResult.Failed(
+            "Apple Music ID 必须是正整数",
+        )
+        val ttml = runCatching { fetchLunabeat(appleMusicId) }.getOrNull()
             ?.takeIf(TtmlInputPolicy::isAcceptable)
-            ?: return CustomLyricsOnlineImportResult.Failed("网易云歌词无法转换为有效 TTML")
-        return CustomLyricsOnlineImportResult.Imported(ttml, CustomLyricsSources.NETEASE)
+            ?: return CustomLyricsOnlineImportResult.Failed("Lunabeat 未找到可用 TTML")
+        return CustomLyricsOnlineImportResult.Imported(ttml, CustomLyricsSources.LUNABEAT)
     }
 }

@@ -43,8 +43,9 @@ import dev.amenhancer.module.font.SafFontImporter
 import dev.amenhancer.module.hook.AmLyricsClient
 import dev.amenhancer.module.hook.AmLyricsIndexEntry
 import dev.amenhancer.module.hook.AmllTtmlClient
+import dev.amenhancer.module.hook.FileLunabeatCatalogCache
 import dev.amenhancer.module.hook.HttpLyricTransport
-import dev.amenhancer.module.hook.NeteaseLyricClient
+import dev.amenhancer.module.hook.LunabeatClient
 import dev.amenhancer.module.lyrics.CustomLyricsBatchSaveResult
 import dev.amenhancer.module.lyrics.CustomLyricsBackupResult
 import dev.amenhancer.module.lyrics.CustomLyricsFilePolicy
@@ -634,6 +635,18 @@ class SettingsActivity : Activity() {
                 enabled = writable,
             ) { enabled ->
                 store.saveSettings(store.settings().copy(customLyricsEnabled = enabled))
+                // Rebuild this card so the dependent automatic-lyrics switch
+                // immediately follows the parent custom-lyrics toggle.
+                content.post { render() }
+            })
+            addView(insetDivider())
+            addView(settingRow(
+                title = "自动实时补全",
+                summary = "非逐字歌词自动查找 AMLL、Lunabeat 和我的仓库 · 关闭后仅使用已配置歌词",
+                checked = settings.automaticLyricsEnabled,
+                enabled = writable && settings.customLyricsEnabled,
+            ) { enabled ->
+                store.saveSettings(store.settings().copy(automaticLyricsEnabled = enabled))
             })
         }
 
@@ -1077,7 +1090,6 @@ class SettingsActivity : Activity() {
             hint = "显示名称（可选）",
             initial = existing?.primary?.displayName.orEmpty(),
         )
-        val neteaseId = lyricEditorInput(hint = "网易云歌曲 ID（仅网易云导入时需要）", numeric = true)
         val ttml = lyricEditorInput(
             hint = "TTML 内容",
             initial = initialTtml,
@@ -1094,7 +1106,6 @@ class SettingsActivity : Activity() {
         updateSourceLabel()
         form.addView(appleMusicId)
         form.addView(displayName)
-        form.addView(neteaseId)
         form.addView(sourceLabel)
         form.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1109,8 +1120,8 @@ class SettingsActivity : Activity() {
             )
             addView(spacer(8), LinearLayout.LayoutParams(dp(8), dp(1)))
             addView(
-                fontActionButton("从网易云导入", true) {
-                    importFromNetease(neteaseId, displayName, ttml) { importedSource ->
+                fontActionButton("从 Lunabeat 导入", true) {
+                    importFromLunabeat(appleMusicId, ttml) { importedSource ->
                         source = importedSource
                         updateSourceLabel()
                     }
@@ -1234,7 +1245,13 @@ class SettingsActivity : Activity() {
     private fun onlineLyricsImporter(): CustomLyricsOnlineImporter = CustomLyricsOnlineImporter(
         fetchAmll = AmllTtmlClient(HttpLyricTransport())::fetch,
         fetchAmLyrics = AmLyricsClient(HttpLyricTransport())::fetch,
-        fetchNeteaseYrc = NeteaseLyricClient(HttpLyricTransport())::fetchYrc,
+        fetchLunabeat = LunabeatClient(
+            indexTransport = HttpLyricTransport(maxResponseBytes = LunabeatClient.INDEX_MAX_BYTES),
+            lyricsTransport = HttpLyricTransport(),
+            cache = FileLunabeatCatalogCache(
+                java.io.File(filesDir, "ampp-lunabeat-cache"),
+            ),
+        )::fetch,
     )
 
     private fun syncCustomLyricsFromGitHub() {
@@ -1352,23 +1369,18 @@ class SettingsActivity : Activity() {
         }
     }
 
-    private fun importFromNetease(
-        neteaseIdInput: EditText,
-        displayNameInput: EditText,
+    private fun importFromLunabeat(
+        appleMusicIdInput: EditText,
         ttmlInput: EditText,
         onImported: (String) -> Unit,
     ) {
-        val neteaseSongId = parsePositiveId(neteaseIdInput.text.toString())
-        if (neteaseSongId == null) {
-            neteaseIdInput.error = "请输入正整数网易云歌曲 ID"
+        val appleMusicId = CustomLyricsIdParser.parsePrimary(appleMusicIdInput.text.toString())
+        if (appleMusicId == null) {
+            appleMusicIdInput.error = "请输入一个或多个正整数 Apple Music ID（用逗号分隔）"
             return
         }
-        val displayName = displayNameInput.text.toString()
         backgroundExecutor.execute {
-            val result = onlineLyricsImporter().importNetease(
-                neteaseSongId,
-                displayName,
-            )
+            val result = onlineLyricsImporter().importLunabeat(appleMusicId)
             showOnlineImportResult(result, ttmlInput, onImported)
         }
     }
@@ -1527,12 +1539,11 @@ class SettingsActivity : Activity() {
             .show()
     }
 
-    private fun parsePositiveId(value: String): Long? = value.trim().toLongOrNull()?.takeIf { it > 0L }
-
     private fun customLyricsSourceName(source: String): String = when (source) {
+        CustomLyricsSources.AUTO_CACHE -> "自动缓存"
         CustomLyricsSources.AMLL -> "AMLL"
-        CustomLyricsSources.NETEASE -> "网易云 YRC"
         CustomLyricsSources.AM_LYRICS -> "AM-Lyrics 仓库"
+        CustomLyricsSources.LUNABEAT -> "Lunabeat"
         else -> "手动 TTML"
     }
 

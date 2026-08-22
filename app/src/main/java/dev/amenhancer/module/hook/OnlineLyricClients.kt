@@ -1,9 +1,8 @@
 package dev.amenhancer.module.hook
 
-import dev.amenhancer.module.lyrics.LyricDocument
-import dev.amenhancer.module.lyrics.NeteaseEapi
 import dev.amenhancer.module.lyrics.TtmlInputPolicy
-import dev.amenhancer.module.lyrics.YrcParser
+import dev.amenhancer.module.lyrics.AmllTtmlFormatConverter
+import dev.amenhancer.module.model.CustomLyricsSources
 import java.net.URLEncoder
 import org.json.JSONArray
 import org.json.JSONObject
@@ -18,6 +17,50 @@ internal class AmllTtmlClient(private val transport: LyricHttpTransport) {
     companion object {
         const val AMLL_TTML_DB_BASE =
             "https://raw.githubusercontent.com/amll-dev/amll-ttml-db/refs/heads/main"
+    }
+}
+
+/** One automatic source in the fixed playback lookup order. */
+internal data class AutoLyricsSource(
+    val name: String,
+    val fetch: (Long) -> String?,
+)
+
+/**
+ * Fetches the first structurally valid Word-TTML candidate. Source-specific
+ * conversion stays here so the playback session only handles validation,
+ * native parsing, caching, and publication.
+ */
+internal class AutoLyricsSourceResolver(
+    private val sources: List<AutoLyricsSource>,
+) {
+    fun fetch(appleMusicId: Long): AutoLyricsCandidate? {
+        if (appleMusicId <= 0L) return null
+        sources.forEach { source ->
+            val ttml = runCatching { source.fetch(appleMusicId) }.getOrNull() ?: return@forEach
+            if (!TtmlInputPolicy.isAcceptable(ttml) || !TtmlTimingPolicy.isWord(ttml)) {
+                return@forEach
+            }
+            return AutoLyricsCandidate(source.name, ttml)
+        }
+        return null
+    }
+
+    companion object {
+        /** Wires the fixed AMLL → Lunabeat → user's repository priority. */
+        fun fixed(
+            amll: AmllTtmlClient,
+            amLyrics: AmLyricsClient,
+            lunabeat: LunabeatClient,
+        ): AutoLyricsSourceResolver = AutoLyricsSourceResolver(
+            listOf(
+                AutoLyricsSource(CustomLyricsSources.AMLL) { raw ->
+                    amll.fetch(raw)?.let { AmllTtmlFormatConverter.toAppleFormat(it).ttml }
+                },
+                AutoLyricsSource(CustomLyricsSources.LUNABEAT, lunabeat::fetch),
+                AutoLyricsSource(CustomLyricsSources.AM_LYRICS, amLyrics::fetch),
+            ),
+        )
     }
 }
 
@@ -157,44 +200,5 @@ internal class AmLyricsClient(private val transport: LyricHttpTransport) {
         return segments.joinToString("/") { segment ->
             URLEncoder.encode(segment, Charsets.UTF_8.name()).replace("+", "%20")
         }
-    }
-}
-
-/**
- * NetEase lyric client.
- *
- * The word-level YRC track is only available through the EAPI endpoint behind
- * `/lyric/new` — the plain `GET /api/song/lyric` response carries no `yrc` —
- * so this user-triggered import fetches an explicitly supplied NetEase song
- * ID through a bounded EAPI POST (`/api/song/lyric/v1`, see [NeteaseEapi]).
- * No cookies, tokens or account state are sent or persisted.
- *
- * A response without a usable `yrc` yields `null`; word timing is never
- * fabricated from `lrc`.
- */
-internal class NeteaseLyricClient(private val transport: LyricHttpTransport) {
-
-    fun fetchYrc(songId: Long): LyricDocument? {
-        val response = transport.postForm(
-            url = NeteaseEapi.LYRIC_V1_URL,
-            body = "params=${NeteaseEapi.lyricV1Params(songId)}",
-            extraHeaders = NETEASE_HEADERS,
-        ) ?: return null
-        return runCatching {
-            val root = JSONObject(response)
-            if (root.optInt("code", -1) != 200) return@runCatching null
-            val yrc = root.optJSONObject("yrc")?.optString("lyric").orEmpty()
-            YrcParser.parse(yrc)
-        }.getOrNull()
-    }
-
-    private companion object {
-        val NETEASE_HEADERS = mapOf(
-            "Origin" to "https://music.163.com",
-            "Referer" to "https://music.163.com",
-            "User-Agent" to
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) " +
-                "Chrome/60.0.3112.90 Safari/537.36",
-        )
     }
 }

@@ -14,7 +14,8 @@ import dev.amenhancer.module.hook.AmLyricsClient
 import dev.amenhancer.module.hook.AmLyricsIndexEntry
 import dev.amenhancer.module.hook.AmllTtmlClient
 import dev.amenhancer.module.hook.HttpLyricTransport
-import dev.amenhancer.module.hook.NeteaseLyricClient
+import dev.amenhancer.module.hook.FileLunabeatCatalogCache
+import dev.amenhancer.module.hook.LunabeatClient
 import dev.amenhancer.module.lyrics.CustomLyricsDraft
 import dev.amenhancer.module.lyrics.CustomLyricsBatchSaveResult
 import dev.amenhancer.module.lyrics.CustomLyricsFilePolicy
@@ -37,7 +38,7 @@ import java.io.FileOutputStream
 internal enum class EmbeddedOnlineSource {
     AMLL,
     AM_LYRICS,
-    NETEASE,
+    LUNABEAT,
 }
 
 internal sealed interface EmbeddedActionResult {
@@ -179,22 +180,22 @@ internal class EmbeddedRuntimeSettingsController(
     override fun importOnlineLyrics(
         source: EmbeddedOnlineSource,
         appleMusicId: Long,
-        neteaseSongId: Long?,
         displayName: String,
     ): EmbeddedActionResult {
-        val transport = HttpLyricTransport()
+        val lunabeat = LunabeatClient(
+            indexTransport = HttpLyricTransport(maxResponseBytes = LunabeatClient.INDEX_MAX_BYTES),
+            lyricsTransport = HttpLyricTransport(),
+            cache = FileLunabeatCatalogCache(File(appContext.filesDir, "ampp-lunabeat-cache")),
+        )
         val importer = CustomLyricsOnlineImporter(
-            fetchAmll = AmllTtmlClient(transport)::fetch,
-            fetchAmLyrics = AmLyricsClient(transport)::fetch,
-            fetchNeteaseYrc = NeteaseLyricClient(transport)::fetchYrc,
+            fetchAmll = AmllTtmlClient(HttpLyricTransport())::fetch,
+            fetchAmLyrics = AmLyricsClient(HttpLyricTransport())::fetch,
+            fetchLunabeat = lunabeat::fetch,
         )
         val imported = when (source) {
             EmbeddedOnlineSource.AMLL -> importer.importAmll(appleMusicId)
             EmbeddedOnlineSource.AM_LYRICS -> importer.importAmLyrics(appleMusicId)
-            EmbeddedOnlineSource.NETEASE -> importer.importNetease(
-                neteaseSongId ?: return EmbeddedActionResult.Failed("需要网易云歌曲 ID"),
-                displayName,
-            )
+            EmbeddedOnlineSource.LUNABEAT -> importer.importLunabeat(appleMusicId)
         }
         return when (imported) {
             is CustomLyricsOnlineImportResult.Failed -> EmbeddedActionResult.Failed(imported.message)

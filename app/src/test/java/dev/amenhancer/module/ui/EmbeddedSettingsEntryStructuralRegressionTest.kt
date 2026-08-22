@@ -365,7 +365,7 @@ class EmbeddedSettingsEntryStructuralRegressionTest {
         val host = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsHost.kt")
 
         assertTrue(host.contains("从 AMLL 导入"))
-        assertTrue(host.contains("从网易云导入"))
+        assertTrue(host.contains("从 Lunabeat 导入"))
         assertTrue(host.contains("从 GitHub 导入"))
         assertTrue(host.contains("CustomLyricsOnlineImporter"))
         assertTrue(host.contains("importEmbeddedOnlineLyrics"))
@@ -466,6 +466,7 @@ class EmbeddedSettingsEntryStructuralRegressionTest {
             "选择字体",
             "恢复原字体",
             "自定义歌词替换",
+            "自动实时补全",
             "添加歌词",
             "备份歌词",
             "恢复备份",
@@ -491,6 +492,21 @@ class EmbeddedSettingsEntryStructuralRegressionTest {
             "embedded custom-lyrics toggle binding",
         )
         assertSourceContains(
+            host,
+            "pageRefresh?.invoke()",
+            "embedded custom-lyrics toggle refresh",
+        )
+        assertSourceContains(
+            activity,
+            "settings.automaticLyricsEnabled",
+            "standalone automatic-lyrics toggle binding",
+        )
+        assertSourceContains(
+            host,
+            "settings.automaticLyricsEnabled",
+            "embedded automatic-lyrics toggle binding",
+        )
+        assertSourceContains(
             activity,
             "settings.fontManifest",
             "standalone font manifest binding",
@@ -507,7 +523,7 @@ class EmbeddedSettingsEntryStructuralRegressionTest {
         val activity = projectFile("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
         val host = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsHost.kt")
 
-        listOf("从 AMLL 导入", "从网易云导入", "从 GitHub 导入").forEach { title ->
+        listOf("从 AMLL 导入", "从 Lunabeat 导入", "从 GitHub 导入").forEach { title ->
             assertSourceContains(activity, "\"$title\"", "SettingsActivity editor action $title")
             assertSourceContains(host, "\"$title\"", "EmbeddedSettingsHost editor action $title")
         }
@@ -549,7 +565,7 @@ class EmbeddedSettingsEntryStructuralRegressionTest {
             "导入 TTML",
             "获取 ID",
             "从 AMLL 导入",
-            "从网易云导入",
+            "从 Lunabeat 导入",
             "从 GitHub 导入",
             "当前来源：",
         ).forEach { marker ->
@@ -565,7 +581,7 @@ class EmbeddedSettingsEntryStructuralRegressionTest {
             "val compactRow = actions.size >= 3",
             "listOf(actions.take(2), actions.drop(2))",
             "compactLabel = \"AMLL 导入\"",
-            "compactLabel = \"网易云导入\"",
+            "compactLabel = \"Lunabeat 导入\"",
             "compactLabel = \"GitHub 导入\"",
             "useCompactLabels = rows.size > 1 && rowIndex == rows.lastIndex",
             "LinearLayout.LayoutParams(\n                    ViewGroup.LayoutParams.WRAP_CONTENT,\n                    dp(activity, 32),",
