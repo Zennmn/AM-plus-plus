@@ -17,6 +17,9 @@ internal data class TargetAdaptation(
     val dualPane: DualPaneTarget,
     val editorialVideo: EditorialVideoTarget,
     val bidirectionalLyricBlur: BidirectionalLyricBlurTarget,
+    val cjkKaraokeAnimation: CjkKaraokeAnimationTarget = CjkKaraokeAnimationTarget {
+        TargetCapabilityInstall.Degraded("CJK karaoke animation target was not configured")
+    },
     val lyricsTypeface: LyricsTypefaceTarget = LyricsTypefaceTarget {
         TargetCapabilityInstall.Degraded("Lyrics typeface target was not configured")
     },
@@ -95,6 +98,7 @@ internal data class TargetAdaptation(
                 dualPane = AppleMusicDualPaneTarget(resolver, build),
                 editorialVideo = AppleMusicEditorialVideoTarget(application, resolver),
                 bidirectionalLyricBlur = AppleMusicBidirectionalLyricBlurTarget(resolver),
+                cjkKaraokeAnimation = AppleMusicCjkKaraokeAnimationTarget(resolver),
                 lyricsTypeface = AppleMusicLyricsTypefaceTarget(
                     symbols = resolver,
                     session = lyricsTypefaceSession,
@@ -143,6 +147,10 @@ internal fun interface EditorialVideoTarget {
 }
 
 internal fun interface BidirectionalLyricBlurTarget {
+    fun install(): TargetCapabilityInstall
+}
+
+internal fun interface CjkKaraokeAnimationTarget {
     fun install(): TargetCapabilityInstall
 }
 

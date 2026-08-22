@@ -2240,6 +2240,18 @@ internal class EmbeddedSettingsHost private constructor(
             addView(embeddedDivider(activity))
             addView(embeddedSettingRow(
                 activity,
+                "CJK 长尾歌词动画",
+                "CJK 歌词启用原生 rush-gradient 动画 · 重开 Apple Music 后生效",
+                settings.cjkKaraokeAnimationEnabled,
+                iconTint = EmbeddedSettingsPalette.accent,
+                iconDrawable = EmbeddedGlyphDrawable(
+                    EmbeddedGlyphKind.Music,
+                    EmbeddedSettingsPalette.accent,
+                ),
+            ) { onSettingsChanged(settings.copy(cjkKaraokeAnimationEnabled = it)) })
+            addView(embeddedDivider(activity))
+            addView(embeddedSettingRow(
+                activity,
                 "歌曲名显示修正",
                 "修正部分歌曲名称无法正确显示的问题",
                 settings.titleCorrectionEnabled,

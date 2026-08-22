@@ -9,6 +9,8 @@ data class ModuleSettings(
     val disableEditorialVideoOnTablet: Boolean = true,
     val phoneLiquidGlassEnabled: Boolean = false,
     val futureBlurEnabled: Boolean = true,
+    /** Enables the native rush-gradient adaptation for CJK karaoke lyrics. */
+    val cjkKaraokeAnimationEnabled: Boolean = true,
     val navigationCompensationEnabled: Boolean = false,
     val lyricBlurRadiusOffsetPx: Int = 0,
     val titleCorrectionEnabled: Boolean = false,

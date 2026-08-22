@@ -261,6 +261,10 @@ internal enum class TargetSymbolId {
     MEDIA_ENTITY_TO_SONG_CONVERTER,
     STORE_FRONT_LANGUAGE_ARRAY_OWNER,
     STORE_FRONT_LANGUAGE_ARRAY_METHOD,
+    CJK_KARAOKE_ANIMATION_OWNER,
+    CJK_KARAOKE_ANIMATION_METHOD,
+    CJK_UNICODE_BLOCK_HELPER_OWNER,
+    CJK_UNICODE_BLOCK_HELPER_METHOD,
 }
 
 private object AppleMusicProfiles {
@@ -378,12 +382,16 @@ private object AppleMusicProfiles {
             TargetSymbolId.LYRICS_AVAILABILITY_OWNER to "com.apple.android.music.player.e1",
             TargetSymbolId.MEDIA_ENTITY_TO_SONG_CONVERTER to "y8.B",
             TargetSymbolId.STORE_FRONT_LANGUAGE_ARRAY_OWNER to "J5.a",
+            TargetSymbolId.CJK_KARAOKE_ANIMATION_OWNER to "com.apple.android.music.player.z",
+            TargetSymbolId.CJK_UNICODE_BLOCK_HELPER_OWNER to "com.apple.android.music.utils.I0\$a",
         ),
         exactMethods = mapOf(
             TargetSymbolId.PLAYER_ACTIVITY_CREATE_STACKED_NAVIGATION_HOLDER to "k1",
             TargetSymbolId.PLAYER_ACTIVITY_ROOT to "n0",
             TargetSymbolId.LYRICS_ITEM_UPDATE_METHOD to "o2",
             TargetSymbolId.STORE_FRONT_LANGUAGE_ARRAY_METHOD to "b",
+            TargetSymbolId.CJK_KARAOKE_ANIMATION_METHOD to "a0",
+            TargetSymbolId.CJK_UNICODE_BLOCK_HELPER_METHOD to "a",
         ),
         exactFields = mapOf(
             TargetSymbolId.PLAYER_ACTIVITY_BEHAVIOR_FIELD to "c1",
@@ -402,6 +410,36 @@ private object AppleMusicProfiles {
 }
 
 internal object AppleMusicSymbols {
+    /**
+     * Apple Music 6.5.2/1586's karaoke transition entry point
+     * (`com.apple.android.music.player.z.a0(z$a, int, int, int, boolean)`).
+     * This is intentionally profile-only: a structural match on another
+     * obfuscated build could alter the host's animation state machine.
+     */
+    val CjkKaraokeAnimationMethod = methodSymbol(
+        id = "cjk-karaoke-animation-method",
+        profileOwner = TargetSymbolId.CJK_KARAOKE_ANIMATION_OWNER,
+        profilePolicy = ProfilePolicy.EXACT_REQUIRED,
+        exactMethodId = TargetSymbolId.CJK_KARAOKE_ANIMATION_METHOD,
+        fallbackOwner = { false },
+        contract = ::isCjkKaraokeAnimationMethod,
+    )
+
+    /**
+     * Apple Music 6.5.2/1586's UnicodeBlock-set predicate
+     * (`com.apple.android.music.utils.I0$a.a(CharSequence, Set): boolean`).
+     * Like the animation entry point, this must never fall back to a guessed
+     * helper on 6.5.0/6.5.1 or an unknown host build.
+     */
+    val CjkUnicodeBlockPredicateMethod = methodSymbol(
+        id = "cjk-unicode-block-predicate-method",
+        profileOwner = TargetSymbolId.CJK_UNICODE_BLOCK_HELPER_OWNER,
+        profilePolicy = ProfilePolicy.EXACT_REQUIRED,
+        exactMethodId = TargetSymbolId.CJK_UNICODE_BLOCK_HELPER_METHOD,
+        fallbackOwner = { false },
+        contract = ::isCjkUnicodeBlockPredicateMethod,
+    )
+
     val PlayerController = classSymbol(
         id = "player-controller",
         profileId = TargetSymbolId.PLAYER_CONTROLLER,
@@ -1740,6 +1778,25 @@ internal object AppleMusicSymbols {
         "com.apple.android.music.mediaapi.models.internals.Title"
 
 }
+
+private fun isCjkKaraokeAnimationMethod(method: Method): Boolean =
+    !Modifier.isStatic(method.modifiers) &&
+        method.name == "a0" &&
+        method.parameterTypes.size == 5 &&
+        method.parameterTypes[0].name.endsWith("\$a") &&
+        method.parameterTypes[1] == Int::class.javaPrimitiveType &&
+        method.parameterTypes[2] == Int::class.javaPrimitiveType &&
+        method.parameterTypes[3] == Int::class.javaPrimitiveType &&
+        method.parameterTypes[4] == Boolean::class.javaPrimitiveType &&
+        method.returnType == Void.TYPE
+
+private fun isCjkUnicodeBlockPredicateMethod(method: Method): Boolean =
+    Modifier.isStatic(method.modifiers) &&
+        method.name == "a" &&
+        method.parameterTypes.contentEquals(
+            arrayOf(CharSequence::class.java, java.util.Set::class.java),
+        ) &&
+        method.returnType == Boolean::class.javaPrimitiveType
 
 private fun classSymbol(
     id: String,

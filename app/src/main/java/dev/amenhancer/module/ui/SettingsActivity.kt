@@ -411,6 +411,15 @@ class SettingsActivity : Activity() {
                 store.saveSettings(store.settings().copy(futureBlurEnabled = enabled))
             })
             addView(insetDivider())
+            addView(settingRow(
+                title = "CJK 长尾歌词动画",
+                summary = "CJK 歌词启用原生 rush-gradient 动画 · 修改后重开 Apple Music",
+                checked = settings.cjkKaraokeAnimationEnabled,
+                enabled = writable,
+            ) { enabled ->
+                store.saveSettings(store.settings().copy(cjkKaraokeAnimationEnabled = enabled))
+            })
+            addView(insetDivider())
             addView(blurRadiusOffsetRow(
                 offsetPx = settings.lyricBlurRadiusOffsetPx,
                 enabled = writable,
