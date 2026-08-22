@@ -263,6 +263,7 @@ class SettingsUiStructuralRegressionTest {
         assertTrue(activity.contains("settings.automaticLyricsEnabled"))
         assertTrue(activity.contains("automaticLyricsEnabled = enabled"))
         assertTrue(activity.contains("customLyricsEnabled = enabled"))
+        assertTrue(activity.contains("content.post { render() }"))
         assertTrue(activity.contains("customLyricsCard(settings.customLyricsManifest"))
         assertTrue(activity.contains("override fun onBackPressed()"))
         assertTrue(activity.contains("showPage(SettingsPage.MAIN)"))

@@ -635,6 +635,9 @@ class SettingsActivity : Activity() {
                 enabled = writable,
             ) { enabled ->
                 store.saveSettings(store.settings().copy(customLyricsEnabled = enabled))
+                // Rebuild this card so the dependent automatic-lyrics switch
+                // immediately follows the parent custom-lyrics toggle.
+                content.post { render() }
             })
             addView(insetDivider())
             addView(settingRow(

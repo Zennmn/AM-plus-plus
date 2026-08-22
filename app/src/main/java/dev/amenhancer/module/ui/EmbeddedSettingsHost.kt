@@ -2341,7 +2341,12 @@ internal class EmbeddedSettingsHost private constructor(
                 EmbeddedSettingsPalette.accent,
             ),
             compactWidePadding = true,
-        ) { onSettingsChanged(settings.copy(customLyricsEnabled = it)) })
+        ) {
+            onSettingsChanged(settings.copy(customLyricsEnabled = it))
+            // Re-render so the dependent automatic-lyrics switch changes its
+            // enabled state without leaving the custom-lyrics page.
+            pageRefresh?.invoke()
+        })
         parent.addView(embeddedSpacer(activity, if (isEmbeddedPhone(activity)) 10 else 14))
         parent.addView(embeddedSettingRow(
             activity,

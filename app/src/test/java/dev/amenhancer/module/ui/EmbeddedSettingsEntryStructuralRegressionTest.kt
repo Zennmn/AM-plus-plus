@@ -492,6 +492,11 @@ class EmbeddedSettingsEntryStructuralRegressionTest {
             "embedded custom-lyrics toggle binding",
         )
         assertSourceContains(
+            host,
+            "pageRefresh?.invoke()",
+            "embedded custom-lyrics toggle refresh",
+        )
+        assertSourceContains(
             activity,
             "settings.automaticLyricsEnabled",
             "standalone automatic-lyrics toggle binding",

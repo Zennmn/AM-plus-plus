@@ -129,9 +129,10 @@ internal fun createAutoLyricsRuntime(
         1,
         0L,
         TimeUnit.MILLISECONDS,
-        ArrayBlockingQueue(4),
+        // Keep only one queued task; a newer song must replace stale work.
+        ArrayBlockingQueue(1),
         { runnable -> Thread(runnable, "ampp-auto-lyrics").apply { isDaemon = true } },
-        ThreadPoolExecutor.AbortPolicy(),
+        ThreadPoolExecutor.DiscardOldestPolicy(),
     )
     runCatching {
         executor.execute {
@@ -305,18 +306,25 @@ internal class AutoLyricsReplacementSession(
     private var activeAppleMusicId: Long? = null
     private val activeTakeovers = mutableSetOf<Long>()
 
-    /** Invalidates in-flight results and native pointers when playback changes. */
+    /** Invalidates in-flight results and native pointers only when playback changes. */
     fun onSongChanged(appleMusicId: Long?) {
-        synchronized(lock) {
-            generation += 1L
-            activeSongKnown = appleMusicId != null
-            activeAppleMusicId = appleMusicId
-            pending.clear()
-            failedUntil.clear()
-            activeTakeovers.clear()
+        val changed = synchronized(lock) {
+            val sameSong = activeSongKnown == (appleMusicId != null) &&
+                activeAppleMusicId == appleMusicId
+            if (!sameSong) {
+                generation += 1L
+                activeSongKnown = appleMusicId != null
+                activeAppleMusicId = appleMusicId
+                pending.clear()
+                failedUntil.clear()
+                activeTakeovers.clear()
+            }
+            !sameSong
         }
-        synchronized(pointers) {
-            pointers.clear()
+        if (changed) {
+            synchronized(pointers) {
+                pointers.clear()
+            }
         }
     }
 
@@ -442,31 +450,43 @@ internal class AutoLyricsReplacementSession(
                     }
                 }
             }
-            if (!isCurrentRequest(appleMusicId, requestGeneration)) {
+            if (!published || preparedCandidate == null ||
+                !isCurrentRequest(appleMusicId, requestGeneration)
+            ) {
                 removePointerIf(appleMusicId, preparedPointer)
+                if (!published || preparedCandidate == null) {
+                    markFailedIfCurrent(appleMusicId, requestGeneration)
+                }
                 return
             }
-            if (published && preparedCandidate != null) {
-                when (runCatching {
-                    publisher?.publish(appleMusicId, preparedCandidate!!)
-                }.getOrNull()) {
-                    AutoLyricsPublishResult.PUBLISHED,
-                    AutoLyricsPublishResult.ALREADY_CONFIGURED,
-                    -> runCatching { cache.delete(appleMusicId) }
-                    else -> Unit
-                }
+            val publishResult = publisher?.let {
+                runCatching { it.publish(appleMusicId, preparedCandidate!!) }
+                    .getOrDefault(AutoLyricsPublishResult.FAILED)
             }
-            if (!published) {
-                synchronized(lock) {
-                    if (isCurrentRequestLocked(appleMusicId, requestGeneration)) {
-                        failedUntil[appleMusicId] = nowMs() + retryCooldownMs
+            when (publishResult) {
+                null,
+                AutoLyricsPublishResult.PUBLISHED -> {
+                    if (publishResult == AutoLyricsPublishResult.PUBLISHED) {
+                        runCatching { cache.delete(appleMusicId) }
+                    }
+                    if (isCurrentRequest(appleMusicId, requestGeneration)) {
+                        onReplacementPublished?.invoke(appleMusicId)
+                        synchronized(lock) {
+                            if (isCurrentRequestLocked(appleMusicId, requestGeneration)) {
+                                failedUntil.remove(appleMusicId)
+                            }
+                        }
+                    } else {
+                        removePointerIf(appleMusicId, preparedPointer)
                     }
                 }
-            } else {
-                synchronized(lock) {
-                    if (isCurrentRequestLocked(appleMusicId, requestGeneration)) {
-                        failedUntil.remove(appleMusicId)
-                    }
+                AutoLyricsPublishResult.ALREADY_CONFIGURED -> {
+                    runCatching { cache.delete(appleMusicId) }
+                    removePointerIf(appleMusicId, preparedPointer)
+                }
+                AutoLyricsPublishResult.FAILED -> {
+                    removePointerIf(appleMusicId, preparedPointer)
+                    markFailedIfCurrent(appleMusicId, requestGeneration)
                 }
             }
         } finally {
@@ -506,9 +526,15 @@ internal class AutoLyricsReplacementSession(
                 true
             }
         }
-        if (!accepted) return null
-        onReplacementPublished?.invoke(appleMusicId)
-        return pointer
+        return pointer.takeIf { accepted }
+    }
+
+    private fun markFailedIfCurrent(appleMusicId: Long, requestGeneration: Long) {
+        synchronized(lock) {
+            if (isCurrentRequestLocked(appleMusicId, requestGeneration)) {
+                failedUntil[appleMusicId] = nowMs() + retryCooldownMs
+            }
+        }
     }
 
     private fun isPrepared(pointer: Any?, appleMusicId: Long): Boolean = runCatching {

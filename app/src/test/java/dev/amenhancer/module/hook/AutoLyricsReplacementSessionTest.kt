@@ -117,6 +117,55 @@ class AutoLyricsReplacementSessionTest {
     }
 
     @Test
+    fun `repeated metadata for the same song keeps the pending lookup and pointer`() {
+        val queued = QueuedExecutor()
+        val pointer = Pointer()
+        var fetches = 0
+        val session = session(
+            queued = queued,
+            fetch = {
+                fetches += 1
+                AutoLyricsCandidate("amll", WORD_TTML)
+            },
+            parse = { pointer },
+        )
+
+        session.onSongChanged(42L)
+        session.ensureRequested(42L)
+        session.onSongChanged(42L)
+        queued.runAll()
+
+        assertEquals(1, fetches)
+        assertSame(pointer, session.readyReplacementFor(42L))
+    }
+
+    @Test
+    fun `already configured publisher never publishes an automatic ready late replacement`() {
+        val queued = QueuedExecutor()
+        var published = 0
+        val session = AutoLyricsReplacementSession(
+            fetchCandidate = { AutoLyricsCandidate("amll", WORD_TTML) },
+            cache = MemoryCache(),
+            parseTtml = { Pointer() },
+            isAlive = { it is Pointer && it.live },
+            verifyPtr = { it is Pointer && it.live },
+            readAdamId = { (it as Pointer).adamId },
+            bindAdamId = { value, id -> (value as Pointer).adamId = id; true },
+            onReplacementPublished = { published += 1 },
+            publisher = { _, _ -> AutoLyricsPublishResult.ALREADY_CONFIGURED },
+            executor = queued,
+            logger = {},
+        )
+
+        session.onSongChanged(42L)
+        session.ensureRequested(42L)
+        queued.runAll()
+
+        assertEquals(0, published)
+        assertEquals(null, session.readyReplacementFor(42L))
+    }
+
+    @Test
     fun `a manual replacement becoming ready cancels the queued automatic lookup`() {
         val queued = QueuedExecutor()
         var allowed = true

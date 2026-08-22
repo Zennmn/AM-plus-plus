@@ -71,6 +71,11 @@ internal class AppleMusicCustomLyricsTarget(
         }
         val mainHandler = Handler(Looper.getMainLooper())
         lateinit var readyReapply: CustomLyricsReadyReapply
+        val configuredManualIds = runCatching {
+            config.customLyricsManifest().entries
+                .filter(CustomLyricsEntry::enabled)
+                .mapTo(mutableSetOf(), CustomLyricsEntry::appleMusicId)
+        }.getOrDefault(emptySet())
         val session = CustomLyricsReplacementSession(
             index = CustomLyricsIndexProvider {
                 config.customLyricsManifest().entries.associateBy(
@@ -123,6 +128,8 @@ internal class AppleMusicCustomLyricsTarget(
                 publisher = runtime.publisher,
                 isAllowed = { appleMusicId ->
                     appleMusicId !in runtime.suppressedIds &&
+                        appleMusicId !in configuredManualIds &&
+                        !session.isMapped(appleMusicId) &&
                         session.readyReplacementFor(appleMusicId) == null
                 },
                 executor = runtime.executor,
@@ -341,6 +348,7 @@ internal class AppleMusicCustomLyricsTarget(
         session.start()
         currentSong.addListener { current ->
             val appleMusicId = current?.details?.appleMusicId
+            appleMusicId?.let(session::ensureRequested)
             autoSession?.onSongChanged(appleMusicId)
             appleMusicId?.let { id ->
                 timingObservations.metadataOfAppleMusicId(id)
@@ -348,7 +356,6 @@ internal class AppleMusicCustomLyricsTarget(
                     ?.takeIf { session.readyReplacementFor(id) == null }
                     ?.let { autoSession?.ensureRequested(id) }
             }
-            appleMusicId?.let(session::ensureRequested)
         }
         if (!availabilityHooked) {
             return TargetCapabilityInstall.Degraded(
