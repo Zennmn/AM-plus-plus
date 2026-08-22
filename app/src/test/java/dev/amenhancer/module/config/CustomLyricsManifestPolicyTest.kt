@@ -59,6 +59,15 @@ class CustomLyricsManifestPolicyTest {
     }
 
     @Test
+    fun `sanitize keeps automatic cache source for configured display`() {
+        val sanitized = CustomLyricsManifestPolicy.sanitize(
+            CustomLyricsManifest(listOf(entry(42L, "lyrics_auto", CustomLyricsSources.AUTO_CACHE))),
+        )
+
+        assertEquals(CustomLyricsSources.AUTO_CACHE, sanitized.entries.single().source)
+    }
+
+    @Test
     fun `removed provider entries remain usable as manual lyrics`() {
         val sanitized = CustomLyricsManifestPolicy.sanitize(
             CustomLyricsManifest(listOf(entry(42L, "lyrics_removed", "removed-provider"))),

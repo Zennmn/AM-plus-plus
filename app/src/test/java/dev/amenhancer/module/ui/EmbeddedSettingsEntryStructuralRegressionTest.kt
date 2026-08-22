@@ -466,6 +466,7 @@ class EmbeddedSettingsEntryStructuralRegressionTest {
             "选择字体",
             "恢复原字体",
             "自定义歌词替换",
+            "自动实时补全",
             "添加歌词",
             "备份歌词",
             "恢复备份",
@@ -489,6 +490,16 @@ class EmbeddedSettingsEntryStructuralRegressionTest {
             host,
             "settings.customLyricsEnabled",
             "embedded custom-lyrics toggle binding",
+        )
+        assertSourceContains(
+            activity,
+            "settings.automaticLyricsEnabled",
+            "standalone automatic-lyrics toggle binding",
+        )
+        assertSourceContains(
+            host,
+            "settings.automaticLyricsEnabled",
+            "embedded automatic-lyrics toggle binding",
         )
         assertSourceContains(
             activity,

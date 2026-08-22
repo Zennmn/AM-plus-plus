@@ -15,6 +15,8 @@ data class ModuleSettings(
     /** BCP-47 language used for Apple Music Catalog title lookups; AMTool defaults to Turkish. */
     val titleCorrectionTargetLanguage: String = CatalogLanguagePolicy.DEFAULT_TARGET_LANGUAGE,
     val customLyricsEnabled: Boolean = false,
+    /** Enables background AMLL/Lunabeat/user-repository lyric completion. */
+    val automaticLyricsEnabled: Boolean = true,
     val fontManifest: LyricsFontManifest = LyricsFontManifest.disabled(),
     val customLyricsManifest: CustomLyricsManifest = CustomLyricsManifest.empty(),
     val schemaVersion: Int = ModuleConstants.CONFIG_SCHEMA_VERSION,
@@ -59,6 +61,7 @@ data class CustomLyricsManifest(
 
 object CustomLyricsSources {
     const val MANUAL = "manual"
+    const val AUTO_CACHE = "auto-cache"
     const val AMLL = "amll-ttml-db"
     const val AM_LYRICS = "am-lyrics"
     const val LUNABEAT = "lunabeat-ttml-hub"

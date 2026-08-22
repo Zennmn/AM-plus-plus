@@ -50,6 +50,7 @@ class ModuleSettingsSchemaTest {
                 "title_correction_enabled" to false,
                 "title_correction_target_language" to "tr-TR",
                 "custom_lyrics_enabled" to false,
+                "automatic_lyrics_enabled" to true,
                 "lyrics_font_enabled" to false,
                 "lyrics_font_file_id" to "",
                 "lyrics_font_display_name" to "",
@@ -83,6 +84,7 @@ class ModuleSettingsSchemaTest {
                 "title_correction_enabled" to false,
                 "title_correction_target_language" to "tr-TR",
                 "custom_lyrics_enabled" to false,
+                "automatic_lyrics_enabled" to true,
                 "lyrics_font_enabled" to false,
                 "lyrics_font_file_id" to "",
                 "lyrics_font_display_name" to "",
@@ -196,6 +198,22 @@ class ModuleSettingsSchemaTest {
         assertEquals(
             true,
             ModuleSettingsSchema.decode(encoded).customLyricsEnabled,
+        )
+    }
+
+    @Test
+    fun `automatic lyrics defaults to enabled and round trips`() {
+        assertEquals(
+            true,
+            ModuleSettingsSchema.decode(emptyMap<String, Any?>()).automaticLyricsEnabled,
+        )
+        val encoded = ModuleSettingsSchema.encodeOrdinarySettings(
+            ModuleSettings(automaticLyricsEnabled = false),
+        )
+        assertEquals(false, encoded["automatic_lyrics_enabled"])
+        assertEquals(
+            false,
+            ModuleSettingsSchema.decode(encoded).automaticLyricsEnabled,
         )
     }
 

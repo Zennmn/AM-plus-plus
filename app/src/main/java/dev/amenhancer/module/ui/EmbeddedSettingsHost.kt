@@ -2343,6 +2343,19 @@ internal class EmbeddedSettingsHost private constructor(
             compactWidePadding = true,
         ) { onSettingsChanged(settings.copy(customLyricsEnabled = it)) })
         parent.addView(embeddedSpacer(activity, if (isEmbeddedPhone(activity)) 10 else 14))
+        parent.addView(embeddedSettingRow(
+            activity,
+            "自动实时补全",
+            "非逐字歌词自动查找 AMLL、Lunabeat 和我的仓库，关闭后仅使用已配置歌词",
+            settings.automaticLyricsEnabled,
+            enabled = settings.customLyricsEnabled,
+            iconDrawable = EmbeddedGlyphDrawable(
+                EmbeddedGlyphKind.Exchange,
+                EmbeddedSettingsPalette.accent,
+            ),
+            compactWidePadding = true,
+        ) { onSettingsChanged(settings.copy(automaticLyricsEnabled = it)) })
+        parent.addView(embeddedSpacer(activity, if (isEmbeddedPhone(activity)) 10 else 14))
 
         val lyricsContent = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
@@ -2651,6 +2664,7 @@ internal class EmbeddedSettingsHost private constructor(
     }
 
     private fun embeddedCustomLyricsSourceName(source: String): String = when (source) {
+        CustomLyricsSources.AUTO_CACHE -> "自动缓存"
         CustomLyricsSources.AMLL -> "AMLL"
         CustomLyricsSources.AM_LYRICS -> "AM-Lyrics 仓库"
         CustomLyricsSources.LUNABEAT -> "Lunabeat"
@@ -2982,12 +2996,15 @@ internal class EmbeddedSettingsHost private constructor(
         iconTint: Int = EmbeddedSettingsPalette.accent,
         iconDrawable: Drawable? = null,
         compactWidePadding: Boolean = false,
+        enabled: Boolean = true,
         onEnableConfirmation: ((onConfirmed: () -> Unit) -> Unit)? = null,
         onChanged: (Boolean) -> Unit,
     ): View = LinearLayout(activity).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         minimumHeight = embeddedSettingRowHeight(activity, compactWidePadding)
+        isEnabled = enabled
+        alpha = if (enabled) 1f else 0.58f
         val horizontalPadding = when {
             isEmbeddedPhone(activity) -> 12
             compactWidePadding -> 8
@@ -3037,6 +3054,7 @@ internal class EmbeddedSettingsHost private constructor(
         addView(labels, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         val toggle = Switch(activity).apply {
             isChecked = checked
+            isEnabled = enabled
             minimumWidth = dp(activity, 44)
             minimumHeight = dp(activity, 44)
             thumbTintList = embeddedSwitchThumbColors()
@@ -4231,6 +4249,7 @@ internal class EmbeddedSettingsHost private constructor(
     )
 
     private fun embeddedLyricsSourceName(source: String): String = when (source) {
+        CustomLyricsSources.AUTO_CACHE -> "自动缓存"
         CustomLyricsSources.AMLL -> "AMLL"
         CustomLyricsSources.AM_LYRICS -> "AM-Lyrics 仓库"
         CustomLyricsSources.LUNABEAT -> "Lunabeat"

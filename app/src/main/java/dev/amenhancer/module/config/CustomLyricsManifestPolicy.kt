@@ -14,6 +14,7 @@ internal object CustomLyricsManifestPolicy {
     private val sha256Pattern = Regex("[0-9a-fA-F]{64}")
     private val allowedSources = setOf(
         CustomLyricsSources.MANUAL,
+        CustomLyricsSources.AUTO_CACHE,
         CustomLyricsSources.AMLL,
         CustomLyricsSources.AM_LYRICS,
         CustomLyricsSources.LUNABEAT,

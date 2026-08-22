@@ -1,6 +1,8 @@
 package dev.amenhancer.module.hook
 
 import dev.amenhancer.module.lyrics.TtmlInputPolicy
+import dev.amenhancer.module.lyrics.AmllTtmlFormatConverter
+import dev.amenhancer.module.model.CustomLyricsSources
 import java.net.URLEncoder
 import org.json.JSONArray
 import org.json.JSONObject
@@ -15,6 +17,50 @@ internal class AmllTtmlClient(private val transport: LyricHttpTransport) {
     companion object {
         const val AMLL_TTML_DB_BASE =
             "https://raw.githubusercontent.com/amll-dev/amll-ttml-db/refs/heads/main"
+    }
+}
+
+/** One automatic source in the fixed playback lookup order. */
+internal data class AutoLyricsSource(
+    val name: String,
+    val fetch: (Long) -> String?,
+)
+
+/**
+ * Fetches the first structurally valid Word-TTML candidate. Source-specific
+ * conversion stays here so the playback session only handles validation,
+ * native parsing, caching, and publication.
+ */
+internal class AutoLyricsSourceResolver(
+    private val sources: List<AutoLyricsSource>,
+) {
+    fun fetch(appleMusicId: Long): AutoLyricsCandidate? {
+        if (appleMusicId <= 0L) return null
+        sources.forEach { source ->
+            val ttml = runCatching { source.fetch(appleMusicId) }.getOrNull() ?: return@forEach
+            if (!TtmlInputPolicy.isAcceptable(ttml) || !TtmlTimingPolicy.isWord(ttml)) {
+                return@forEach
+            }
+            return AutoLyricsCandidate(source.name, ttml)
+        }
+        return null
+    }
+
+    companion object {
+        /** Wires the fixed AMLL → Lunabeat → user's repository priority. */
+        fun fixed(
+            amll: AmllTtmlClient,
+            amLyrics: AmLyricsClient,
+            lunabeat: LunabeatClient,
+        ): AutoLyricsSourceResolver = AutoLyricsSourceResolver(
+            listOf(
+                AutoLyricsSource(CustomLyricsSources.AMLL) { raw ->
+                    amll.fetch(raw)?.let { AmllTtmlFormatConverter.toAppleFormat(it).ttml }
+                },
+                AutoLyricsSource(CustomLyricsSources.LUNABEAT, lunabeat::fetch),
+                AutoLyricsSource(CustomLyricsSources.AM_LYRICS, amLyrics::fetch),
+            ),
+        )
     }
 }
 

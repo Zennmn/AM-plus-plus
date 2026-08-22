@@ -2,6 +2,7 @@ package dev.amenhancer.module.hook
 
 import android.app.Application
 import dev.amenhancer.module.config.TargetConfigClient
+import dev.amenhancer.module.model.CustomLyricsEntry
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -78,6 +79,16 @@ internal data class TargetAdaptation(
                 ))
                 missCoordinator.get()?.prewarm()
             }
+            val autoLyricsRuntime = (settings.customLyricsEnabled && settings.automaticLyricsEnabled)
+                .takeIf { it }
+                ?.let {
+                    val suppressedAutoIds = runCatching {
+                        config.customLyricsManifest().entries
+                            .filterNot { entry -> entry.enabled }
+                            .mapTo(mutableSetOf(), CustomLyricsEntry::appleMusicId)
+                    }.getOrDefault(emptySet())
+                    createAutoLyricsRuntime(application, suppressedAutoIds)
+                }
             return TargetAdaptation(
                 identity = build.displayName,
                 currentSong = currentSong,
@@ -88,7 +99,12 @@ internal data class TargetAdaptation(
                     symbols = resolver,
                     session = lyricsTypefaceSession,
                 ),
-                customLyrics = AppleMusicCustomLyricsTarget(config, resolver, currentSong),
+                customLyrics = AppleMusicCustomLyricsTarget(
+                    config = config,
+                    symbols = resolver,
+                    currentSong = currentSong,
+                    autoLyricsRuntime = autoLyricsRuntime,
+                ),
                 currentSongIdentity = AppleMusicCurrentSongIdentityTarget(
                     application,
                     resolver,

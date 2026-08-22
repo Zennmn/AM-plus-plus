@@ -636,6 +636,15 @@ class SettingsActivity : Activity() {
             ) { enabled ->
                 store.saveSettings(store.settings().copy(customLyricsEnabled = enabled))
             })
+            addView(insetDivider())
+            addView(settingRow(
+                title = "自动实时补全",
+                summary = "非逐字歌词自动查找 AMLL、Lunabeat 和我的仓库 · 关闭后仅使用已配置歌词",
+                checked = settings.automaticLyricsEnabled,
+                enabled = writable && settings.customLyricsEnabled,
+            ) { enabled ->
+                store.saveSettings(store.settings().copy(automaticLyricsEnabled = enabled))
+            })
         }
 
     private fun fontCard(manifest: LyricsFontManifest, writable: Boolean): View =
@@ -1528,6 +1537,7 @@ class SettingsActivity : Activity() {
     }
 
     private fun customLyricsSourceName(source: String): String = when (source) {
+        CustomLyricsSources.AUTO_CACHE -> "自动缓存"
         CustomLyricsSources.AMLL -> "AMLL"
         CustomLyricsSources.AM_LYRICS -> "AM-Lyrics 仓库"
         CustomLyricsSources.LUNABEAT -> "Lunabeat"
