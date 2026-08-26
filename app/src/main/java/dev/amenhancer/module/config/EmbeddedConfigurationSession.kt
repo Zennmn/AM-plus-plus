@@ -18,6 +18,7 @@ internal interface ConfigurationReader {
 /** Host-private storage adapter used only by the embedded artifact. */
 internal interface EmbeddedConfigurationStorage : ConfigurationReader {
     fun writeValues(values: Map<String, Any>, synchronous: Boolean): Boolean
+    fun removeValues(keys: Set<String>, synchronous: Boolean = true): Boolean = true
     fun writeFile(name: String, bytes: ByteArray): Boolean
     fun deleteFile(name: String): Boolean
 
@@ -72,6 +73,9 @@ internal class EmbeddedConfigurationSession(
     },
     private val writable: Boolean = true,
 ) : ConfigurationReader {
+    init {
+        if (writable) storage.removeValues(ModuleSettingsSchema.obsoleteKeys, synchronous = true)
+    }
     private val indexRepository = CustomLyricsIndexRepository(
         newIndexFileId = newIndexFileId,
         openFile = storage::openFile,

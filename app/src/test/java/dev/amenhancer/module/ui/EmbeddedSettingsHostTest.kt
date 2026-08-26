@@ -185,17 +185,4 @@ class EmbeddedSettingsControllerContractTest {
         assertEquals(updated, controller.currentSettings())
     }
 
-    @Test
-    fun `refresh seam fails open for controllers without a host target`() {
-        val controller = object : EmbeddedSettingsController {
-            override fun currentSettings(): ModuleSettings = ModuleSettings()
-
-            override fun saveOrdinarySettings(settings: ModuleSettings): Boolean = true
-        }
-        var callbackCalled = false
-
-        assertFalse(controller.requestLibraryRefresh { callbackCalled = true })
-        controller.cancelLibraryRefresh()
-        assertFalse(callbackCalled)
-    }
 }

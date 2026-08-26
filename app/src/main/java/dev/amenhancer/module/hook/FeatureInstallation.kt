@@ -53,7 +53,6 @@ internal object FeatureInstallation {
                     lyricsTypefaceSession = lyricsTypefaceSession,
                     currentSong = currentSong,
                     registerCurrentSongResponder = false,
-                    useLibraryRefreshPermission = false,
                 ),
             )
         }
@@ -282,9 +281,8 @@ private fun productionFeatureInstallationModule(
                 registerResources = lyricsTypefaceSession::registerResources,
             ),
             FeatureInstallationPlan(feature = CurrentSongIdentityFeature()),
-            FeatureInstallationPlan(feature = LibraryRefreshFeature()),
-            FeatureInstallationPlan(feature = TitleCorrectionFeature()),
             FeatureInstallationPlan(feature = CatalogLanguageFeature()),
+            FeatureInstallationPlan(feature = TitleCorrectionFeature()),
             FeatureInstallationPlan(feature = CustomLyricsFeature()),
         ),
         installLayoutInflationHooks = LayoutInflationRegistry::install,

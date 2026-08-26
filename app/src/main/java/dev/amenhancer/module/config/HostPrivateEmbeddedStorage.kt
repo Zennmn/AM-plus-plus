@@ -45,6 +45,15 @@ internal class HostPrivateEmbeddedStorage(
         }
     }
 
+    override fun removeValues(keys: Set<String>, synchronous: Boolean): Boolean {
+        val editor = preferences.edit()
+        keys.forEach(editor::remove)
+        return if (synchronous) editor.commit() else {
+            editor.apply()
+            true
+        }
+    }
+
     override fun openFile(name: String): InputStream? {
         val file = file(name) ?: return null
         return runCatching { file.takeIf(File::isFile)?.let(::FileInputStream) }.getOrNull()

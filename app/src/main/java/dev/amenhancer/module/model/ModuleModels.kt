@@ -14,8 +14,8 @@ data class ModuleSettings(
     val navigationCompensationEnabled: Boolean = false,
     val lyricBlurRadiusOffsetPx: Int = 0,
     val titleCorrectionEnabled: Boolean = false,
-    /** BCP-47 language used for Apple Music Catalog title lookups; AMTool defaults to Turkish. */
-    val titleCorrectionTargetLanguage: String = CatalogLanguagePolicy.DEFAULT_TARGET_LANGUAGE,
+    /** Optional BCP-47 language for ordinary Apple Music Catalog requests. */
+    val titleCorrectionTargetLanguage: String = CatalogLanguagePolicy.DISABLED_TARGET_LANGUAGE,
     val customLyricsEnabled: Boolean = false,
     /** Enables background AMLL/Lunabeat/user-repository lyric completion. */
     val automaticLyricsEnabled: Boolean = true,

@@ -9,12 +9,6 @@ internal class TitleCorrectionFeature : FeatureHook {
         if (!context.config.settings().titleCorrectionEnabled) {
             return FeatureInstallResult.disabled()
         }
-        return context.target.titleCorrection.install().toFeatureInstallResult()
+        return context.target.hleMetadata.install().toFeatureInstallResult()
     }
-}
-internal class LibraryRefreshFeature : FeatureHook {
-    override val key: String = ModuleConstants.FEATURE_LIBRARY_REFRESH
-
-    override fun install(context: HookContext): FeatureInstallResult =
-        context.target.libraryRefresh.install().toFeatureInstallResult()
 }
