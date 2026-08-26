@@ -96,6 +96,7 @@ internal class AppleLibrarySurfaceHooks(
     private val runtime: AppleMusicProviderRuntime,
     private val metadataStore: AppleMetadataOverrideStore,
     private val host: AppleLibrarySurfaceHost,
+    private val refreshQueue: AppleInAppMetadataRefreshQueue? = null,
 ) {
     private companion object {
         const val MAX_VISIBLE_RESOLUTION_IDS = 12
@@ -883,12 +884,12 @@ internal class AppleLibrarySurfaceHooks(
                 wasEmpty
             }
             if (!shouldPost) return@forEach
-            runtime.mainHandler.post {
+            val refreshWork: () -> Unit = refreshWork@{
                 val pendingAliases = synchronized(composeRefreshPending) {
                     composeRefreshPending.remove(state).orEmpty()
                 }
                 val activeAliases = pendingAliases.filterKeys(host::isRefreshableMediaId)
-                if (activeAliases.isEmpty()) return@post
+                if (activeAliases.isEmpty()) return@refreshWork
                 runCatching {
                     val observeTarget = checkNotNull(composeObserveTarget) {
                         "Compose observeAsState target unavailable"
@@ -938,6 +939,17 @@ internal class AppleLibrarySurfaceHooks(
                     )
                 }
             }
+            val queue = refreshQueue
+            if (queue == null) {
+                runtime.mainHandler.post(refreshWork)
+            } else {
+                queue.enqueueAction(
+                    kind = AppleMetadataRefreshKind.LIBRARY_COMPOSE_REBIND,
+                    mediaId = mediaId,
+                    target = state,
+                    alias = alias,
+                ) { refreshWork() }
+            }
         }
         return targets.size
     }
@@ -960,7 +972,15 @@ internal class AppleLibrarySurfaceHooks(
     ) {
         val refresh = Runnable { drainControllerRefresh(controller) }
         if (dispatch.delayMillis == 0L) {
-            runtime.mainHandler.post(refresh)
+            val queue = refreshQueue
+            if (queue == null) {
+                runtime.mainHandler.post(refresh)
+            } else {
+                queue.enqueueAction(
+                    kind = AppleMetadataRefreshKind.LIBRARY_CONTROLLER_REBIND,
+                    target = controller,
+                ) { refresh.run() }
+            }
         } else {
             runtime.mainHandler.postDelayed(refresh, dispatch.delayMillis)
         }
@@ -1043,8 +1063,6 @@ internal class AppleLibrarySurfaceHooks(
                             "event=library_epoxy_rebuild, contentIds=$activeMediaIds, " +
                             "controller=${controller.javaClass.name}"
                     )
-                    runtime.mainHandler.post {
-                    }
                 }
             }.onFailure {
                 ProviderLogger.error(
@@ -1142,10 +1160,22 @@ internal class AppleLibrarySurfaceHooks(
     }
 
     private fun postVisibleResolution(state: Any) {
-        runtime.mainHandler.post {
-            Choreographer.getInstance().postFrameCallback {
-                drainVisibleResolution(state)
+        val queue = refreshQueue
+        if (queue == null) {
+            runtime.mainHandler.post {
+                Choreographer.getInstance().postFrameCallback {
+                    drainVisibleResolution(state)
+                }
             }
+        } else {
+            val pending = synchronized(composeVisibleResolutionPending) {
+                composeVisibleResolutionPending[state].orEmpty().toSet()
+            }
+            queue.enqueueAction(
+                kind = AppleMetadataRefreshKind.VISIBLE_RESOLUTION,
+                mediaIds = pending,
+                target = state,
+            ) { drainVisibleResolution(state) }
         }
     }
 

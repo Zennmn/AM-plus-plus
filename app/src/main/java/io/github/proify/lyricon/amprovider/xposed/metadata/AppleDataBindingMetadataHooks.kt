@@ -155,6 +155,7 @@ internal fun isDataBindingRefreshCurrent(
 internal class AppleDataBindingMetadataHooks(
     private val runtime: AppleMusicProviderRuntime,
     private val host: AppleDataBindingMetadataHost,
+    private val refreshQueue: AppleInAppMetadataRefreshQueue? = null,
 ) {
     private companion object {
         const val MAX_GENERIC_RECYCLER_MEDIA_IDS = 512
@@ -383,7 +384,7 @@ internal class AppleDataBindingMetadataHooks(
                         return@installHook
                     }
                     registerGenericRecyclerBinding(capture, root)
-                    root.postOnAnimation {
+                    val visibleWork = visibleWork@{
                         val visible = isRootVisible(root)
                         val mediaIds = recyclerRootMediaIds[root].orEmpty()
                         if (!shouldScheduleVisibleRecyclerMetadata(
@@ -391,9 +392,9 @@ internal class AppleDataBindingMetadataHooks(
                                 currentMediaIds = mediaIds,
                                 visible = visible,
                             )
-                        ) return@postOnAnimation
+                        ) return@visibleWork
                         recyclerRootVisibleResolutionIds[root] = mediaIds
-                        captureBoundRoot(root, visible = true)
+                        captureBoundRoot(root)
                         host.enrichEntitiesForResolution(mediaIds)
                         host.markMetadataVisible(mediaIds)
                         host.scheduleMetadataResolution(
@@ -409,6 +410,17 @@ internal class AppleDataBindingMetadataHooks(
                                     "position=${capture.position}"
                             )
                         }
+                    }
+                    val queue = refreshQueue
+                    if (queue == null) {
+                        root.postOnAnimation(visibleWork)
+                    } else {
+                        queue.enqueueAction(
+                            kind = AppleMetadataRefreshKind.VISIBLE_RESOLUTION,
+                            mediaIds = recyclerRootMediaIds[root].orEmpty(),
+                            priority = AppleInternalCatalogResolver.RequestPriority.VISIBLE,
+                            target = root,
+                        ) { visibleWork() }
                     }
                 },
             )
@@ -665,12 +677,15 @@ internal class AppleDataBindingMetadataHooks(
                 }
             }
             if (!shouldPost) return@forEach
-            runtime.mainHandler.post {
+            if (pendingRefresh == null) {
+                synchronized(pendingRefreshes) { pendingRefreshes.remove(binding) }
+            }
+            val refreshWork: () -> Unit = refreshWork@{
                 fun abandon() {
                     pendingRefresh?.let { clearPendingRefresh(binding, it) }
                 }
                 if (pendingRefresh != null && pendingRefreshes[binding] != pendingRefresh) {
-                    return@post
+                    return@refreshWork
                 }
                 if (
                     !isDataBindingRefreshCurrent(
@@ -685,7 +700,7 @@ internal class AppleDataBindingMetadataHooks(
                     )
                 ) {
                     abandon()
-                    return@post
+                    return@refreshWork
                 }
                 val previousAppliedAlias = appliedAliases[binding]
                 val root = bindingRootViews[binding]?.get()
@@ -740,6 +755,18 @@ internal class AppleDataBindingMetadataHooks(
                     )
                 }
             }
+            val queue = refreshQueue
+            if (queue == null) {
+                runtime.mainHandler.post(refreshWork)
+            } else {
+                queue.enqueueAction(
+                    kind = AppleMetadataRefreshKind.DATA_BINDING_REBIND,
+                    mediaId = mediaId,
+                    target = binding,
+                    generation = bindGeneration,
+                    alias = alias,
+                ) { refreshWork() }
+            }
         }
         return targets.size
     }
@@ -763,7 +790,7 @@ internal class AppleDataBindingMetadataHooks(
                 return@forEach
             }
             targets += 1
-            runtime.mainHandler.post {
+            val notifyWork = {
                 if (shouldRefreshExactBoundTarget(
                         host.isCurrentSurfaceMediaId(mediaId),
                         boundRootContainsMediaId(root, mediaId),
@@ -779,6 +806,17 @@ internal class AppleDataBindingMetadataHooks(
                             )
                         }
                 }
+            }
+            val queue = refreshQueue
+            if (queue == null) {
+                runtime.mainHandler.post(notifyWork)
+            } else {
+                queue.enqueueAction(
+                    kind = AppleMetadataRefreshKind.GENERIC_RECYCLER_NOTIFY,
+                    mediaId = mediaId,
+                    target = adapter,
+                    slot = ref.position,
+                ) { notifyWork() }
             }
         }
         return targets
@@ -822,16 +860,25 @@ internal class AppleDataBindingMetadataHooks(
             }
         }
         if (!shouldPost) return
-        root.postOnAnimation {
-            val current = synchronized(visibleResolutionPosts) { visibleResolutionPosts[binding] }
-            if (current != pending) return@postOnAnimation
-            synchronized(visibleResolutionPosts) { visibleResolutionPosts.remove(binding) }
-            if (
-                bindingMediaIds[binding] != mediaId ||
-                generation(binding) != pending.bindGeneration ||
-                !isRootVisible(root)
-            ) return@postOnAnimation
-            resolveVisible(binding, mediaId, pending.originalResolutionMode)
+        val queue = refreshQueue
+        if (queue == null) {
+            root.postOnAnimation {
+                val current = synchronized(visibleResolutionPosts) { visibleResolutionPosts[binding] }
+                if (current != pending) return@postOnAnimation
+                synchronized(visibleResolutionPosts) { visibleResolutionPosts.remove(binding) }
+                if (
+                    bindingMediaIds[binding] != mediaId ||
+                    generation(binding) != pending.bindGeneration ||
+                    !isRootVisible(root)
+                ) return@postOnAnimation
+                resolveVisible(binding, mediaId, pending.originalResolutionMode)
+            }
+        } else {
+            queue.enqueueAction(
+                kind = AppleMetadataRefreshKind.VISIBLE_RESOLUTION,
+                mediaIds = listOf(mediaId),
+                priority = AppleInternalCatalogResolver.RequestPriority.VISIBLE,
+            ) { drainQueuedVisibleResolutions() }
         }
     }
 
@@ -862,6 +909,13 @@ internal class AppleDataBindingMetadataHooks(
         mediaId: String,
         originalResolutionMode: InAppOriginalResolutionMode = host.originalResolutionMode(binding),
     ) {
+        resolveVisibleMediaId(mediaId, originalResolutionMode)
+    }
+
+    private fun resolveVisibleMediaId(
+        mediaId: String,
+        originalResolutionMode: InAppOriginalResolutionMode,
+    ) {
         host.enrichEntitiesForResolution(listOf(mediaId))
         host.markMetadataVisible(listOf(mediaId))
         host.effectiveAlias(mediaId)?.let { refreshDataBindings(mediaId, it) }
@@ -870,6 +924,34 @@ internal class AppleDataBindingMetadataHooks(
             AppleInternalCatalogResolver.RequestPriority.VISIBLE,
             originalResolutionMode,
         )
+    }
+
+    private fun drainQueuedVisibleResolutions() {
+        val resolved = LinkedHashMap<String, InAppOriginalResolutionMode>()
+        val pendingEntries = synchronized(visibleResolutionPosts) {
+            visibleResolutionPosts.entries.toList().also { entries ->
+                entries.forEach { (binding, pending) ->
+                    visibleResolutionPosts.remove(binding)
+                    val root = bindingRootViews[binding]?.get()
+                    if (
+                        bindingMediaIds[binding] == pending.mediaId &&
+                        generation(binding) == pending.bindGeneration &&
+                        root != null &&
+                        isRootVisible(root)
+                    ) {
+                        val previous = resolved[pending.mediaId]
+                        resolved[pending.mediaId] = if (
+                            previous == null ||
+                            previous.ordinal < pending.originalResolutionMode.ordinal
+                        ) pending.originalResolutionMode else previous
+                    }
+                }
+            }
+        }
+        // Keep the local snapshot referenced so the synchronized iteration above remains
+        // explicit and easy to audit; all accepted requests have already been grouped by ID.
+        if (pendingEntries.isEmpty()) return
+        resolved.forEach { (mediaId, mode) -> resolveVisibleMediaId(mediaId, mode) }
     }
 
     private fun resolvedMediaId(binding: Any): String? {

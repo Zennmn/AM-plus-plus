@@ -90,12 +90,62 @@ class HleMetadataIntegrationStructuralTest {
     }
 
     @Test
-    fun `artist and data binding callbacks preserve HLE return contracts`() {
+    fun `typed host adapters preserve HLE callback contracts`() {
         val bridge = source("app/src/main/java/dev/amenhancer/module/hook/HleMetadataSurfaceBridge.kt")
-        assertTrue(bridge.contains("\"registerLibraryEntity\" -> registerArtistLibraryEntity(args)"))
+        assertTrue(bridge.contains("createHostAdapters()"))
+        assertTrue(bridge.contains("private inline fun <T> hostCall"))
+        listOf(
+            "AppleMetadataSurfaceHost",
+            "AppleLibrarySurfaceHost",
+            "AppleDataBindingMetadataHost",
+            "AppleCollectionSurfaceHost",
+            "AppleArtistSurfaceHost",
+            "AppleMediaApiMetadataHost",
+            "AppleInAppMetadataResolutionHost",
+            "AppleListenNowHost",
+            "AppleVisibleMetadataDiagnosticsHost",
+            "ApplePlaybackItemConversionHost",
+            "AppleInAppArtworkContinuityHost",
+        ).forEach { host ->
+            assertTrue("missing typed host $host", bridge.contains("$host"))
+        }
+        assertFalse(bridge.contains("Proxy.newProxyInstance"))
+        assertFalse(bridge.contains("Array<out Any?>"))
+        assertFalse(bridge.contains("surfaceValue"))
+        assertFalse(bridge.contains("dataBindingValue"))
         assertTrue(bridge.contains("mediaApiMetadataCoordinator.registerLibraryEntity"))
-        assertTrue(bridge.contains("val effective = alias(mediaId) ?: return false"))
-        assertFalse(bridge.contains("val effective = alias(mediaId) ?: return null"))
+        assertTrue(bridge.contains("requestResolution = false"))
+        assertTrue(bridge.contains("retainEntityRef = true"))
+    }
+
+    @Test
+    fun `visible refresh paths share one frame queue while playback stays immediate`() {
+        val queue = source(
+            "app/src/main/java/io/github/proify/lyricon/amprovider/xposed/metadata/AppleInAppMetadataRefreshQueue.kt",
+        )
+        assertTrue(queue.contains("MetadataFrameScheduler"))
+        assertTrue(queue.contains("VISIBLE_RESOLUTION"))
+        assertTrue(queue.contains("higherPriority"))
+        assertTrue(queue.contains("higherResolutionMode"))
+        assertTrue(queue.contains("frameScheduler.postFrame"))
+        val binding = source(
+            "app/src/main/java/io/github/proify/lyricon/amprovider/xposed/metadata/AppleDataBindingMetadataHooks.kt",
+        )
+        val library = source(
+            "app/src/main/java/io/github/proify/lyricon/amprovider/xposed/metadata/AppleLibrarySurfaceHooks.kt",
+        )
+        val listenNow = source(
+            "app/src/main/java/io/github/proify/lyricon/amprovider/xposed/metadata/AppleListenNowHooks.kt",
+        )
+        assertTrue(binding.contains("AppleMetadataRefreshKind.DATA_BINDING_REBIND"))
+        assertTrue(binding.contains("AppleMetadataRefreshKind.GENERIC_RECYCLER_NOTIFY"))
+        assertTrue(library.contains("AppleMetadataRefreshKind.LIBRARY_CONTROLLER_REBIND"))
+        assertTrue(library.contains("AppleMetadataRefreshKind.LIBRARY_COMPOSE_REBIND"))
+        assertTrue(listenNow.contains("AppleMetadataRefreshKind.LISTEN_NOW_REBIND"))
+        val applier = source(
+            "app/src/main/java/io/github/proify/lyricon/amprovider/xposed/metadata/AppleInAppMetadataApplier.kt",
+        )
+        assertTrue(applier.contains("runtime.mainHandler.post"))
     }
 
     @Test

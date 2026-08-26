@@ -87,6 +87,7 @@ internal class AppleMediaApiMetadataCoordinator(
     private val librarySurfaceHooks: AppleLibrarySurfaceHooks,
     private val artistSurfaceHooks: AppleArtistSurfaceHooks,
     private val host: AppleMediaApiMetadataHost,
+    private val refreshQueue: AppleInAppMetadataRefreshQueue? = null,
 ) {
     private val libraryEntityRuntimeClasses by lazy {
         runtime.hookResolver.resolveClasses(AppleMusicHookPoint.LIBRARY_ENTITY_CLASSES)
@@ -95,6 +96,26 @@ internal class AppleMediaApiMetadataCoordinator(
         runtime.hookResolver.resolveClass(
             AppleMusicHookPoint.MEDIA_API_REPOSITORY_HOLDER_CLASS
         ).target
+    }
+
+    private fun dispatchSurfaceWork(
+        mediaId: String,
+        controller: Any,
+        work: () -> Unit,
+    ) {
+        val queue = refreshQueue
+        if (queue == null) {
+            runtime.mainHandler.post(work)
+        } else {
+            queue.enqueueAction(
+                kind = AppleMetadataRefreshKind.RECENT_SEARCH_BINDING,
+                mediaId = mediaId,
+                target = controller,
+                priority = AppleInternalCatalogResolver.RequestPriority.VISIBLE,
+                originalResolutionMode = InAppOriginalResolutionMode.ORIGINAL_FIRST,
+                action = work,
+            )
+        }
     }
 
     fun entityCatalogId(entity: Any, knownAttributes: Any? = null): String? =
@@ -428,7 +449,7 @@ internal class AppleMediaApiMetadataCoordinator(
         }
         if (!visible) return
 
-        runtime.mainHandler.post {
+        val visibleWork = {
             host.markMetadataVisible(listOf(mediaId))
             host.effectiveAlias(mediaId)?.let { alias ->
                 host.applyAliasToMetadataRefs(
@@ -457,6 +478,11 @@ internal class AppleMediaApiMetadataCoordinator(
                 )
             }
         }
+        dispatchSurfaceWork(
+            mediaId = mediaId,
+            controller = controller,
+            work = visibleWork,
+        )
     }
 
     private fun libraryEntityAssociationKeys(

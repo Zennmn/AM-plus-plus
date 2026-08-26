@@ -85,6 +85,7 @@ internal class AppleCollectionSurfaceHooks(
     private val librarySurfaceHooks: AppleLibrarySurfaceHooks,
     private val dataBindingHooks: AppleDataBindingMetadataHooks,
     private val host: AppleCollectionSurfaceHost,
+    private val refreshQueue: AppleInAppMetadataRefreshQueue? = null,
 ) {
     private companion object {
         const val MAX_PLAYLIST_ROW_MEDIA_IDS = 512
@@ -122,6 +123,31 @@ internal class AppleCollectionSurfaceHooks(
     private var playlistExplicitTitleFormatterClass: Class<*>? = null
     @Volatile
     private var playlistExplicitTitleFormatterMethod: String? = null
+
+    private fun dispatchSurfaceWork(
+        kind: AppleMetadataRefreshKind,
+        mediaId: String? = null,
+        target: Any? = null,
+        priority: AppleInternalCatalogResolver.RequestPriority =
+            AppleInternalCatalogResolver.RequestPriority.BACKGROUND,
+        originalResolutionMode: InAppOriginalResolutionMode =
+            InAppOriginalResolutionMode.AFTER_LOCALIZED,
+        work: () -> Unit,
+    ) {
+        val queue = refreshQueue
+        if (queue == null) {
+            runtime.mainHandler.post(work)
+        } else {
+            queue.enqueueAction(
+                kind = kind,
+                mediaId = mediaId,
+                priority = priority,
+                originalResolutionMode = originalResolutionMode,
+                target = target,
+                action = work,
+            )
+        }
+    }
 
     fun installHooks() {
         val resolvedClasses = runCatching {
@@ -716,11 +742,11 @@ internal class AppleCollectionSurfaceHooks(
         }
         if (!shouldPost) return
 
-        runtime.mainHandler.post {
+        val pageWork = pageWork@{
             val pageMediaIds = synchronized(collectionPageBoundResolutionStates) {
                 collectionPageBoundResolutionStates[controller]?.pagePreload?.drain().orEmpty()
             }
-            if (pageMediaIds.isEmpty()) return@post
+            if (pageMediaIds.isEmpty()) return@pageWork
             host.markMetadataVisible(pageMediaIds)
             host.enrichLibraryEntitiesForResolution(pageMediaIds)
             pageMediaIds.forEach { mediaId ->
@@ -739,6 +765,14 @@ internal class AppleCollectionSurfaceHooks(
                     AppleMetadataResolutionEngine.collectionPageOriginalResolutionMode(pageType),
             )
         }
+        dispatchSurfaceWork(
+            kind = AppleMetadataRefreshKind.COLLECTION_PAGE_RESOLUTION,
+            target = controller,
+            priority = AppleInternalCatalogResolver.RequestPriority.ACTIVE_PAGE,
+            originalResolutionMode =
+                AppleMetadataResolutionEngine.collectionPageOriginalResolutionMode(pageType),
+            work = pageWork,
+        )
     }
 
     private fun onCollectionPageRowBound(mediaId: String, entity: Any, pageType: String) {
@@ -754,7 +788,7 @@ internal class AppleCollectionSurfaceHooks(
         }
         if (!shouldResolve) return
 
-        runtime.mainHandler.post {
+        val rowWork = {
             host.markMetadataVisible(listOf(mediaId))
             host.enrichLibraryEntitiesForResolution(listOf(mediaId))
             val alias = host.effectiveAlias(mediaId)
@@ -784,6 +818,15 @@ internal class AppleCollectionSurfaceHooks(
                 )
             }
         }
+        dispatchSurfaceWork(
+            kind = AppleMetadataRefreshKind.VISIBLE_RESOLUTION,
+            mediaId = mediaId,
+            target = entity,
+            priority = AppleInternalCatalogResolver.RequestPriority.VISIBLE,
+            originalResolutionMode =
+                AppleMetadataResolutionEngine.collectionPageOriginalResolutionMode(pageType),
+            work = rowWork,
+        )
     }
 
     private fun onAlbumHeaderFinalBound(
@@ -794,7 +837,7 @@ internal class AppleCollectionSurfaceHooks(
     ) {
         val shouldResolve = albumHeaderFinalBoundResolutionIds[model] != mediaId
         albumHeaderFinalBoundResolutionIds[model] = mediaId
-        runtime.mainHandler.post {
+        val headerWork = {
             host.markMetadataVisible(listOf(mediaId))
             host.enrichLibraryEntitiesForResolution(listOf(mediaId))
             val alias = host.effectiveAlias(mediaId)
@@ -840,6 +883,14 @@ internal class AppleCollectionSurfaceHooks(
                 )
             }
         }
+        dispatchSurfaceWork(
+            kind = AppleMetadataRefreshKind.VISIBLE_RESOLUTION,
+            mediaId = mediaId,
+            target = model,
+            priority = AppleInternalCatalogResolver.RequestPriority.VISIBLE,
+            originalResolutionMode = InAppOriginalResolutionMode.ORIGINAL_FIRST,
+            work = headerWork,
+        )
     }
 
     private fun collectionTarget(role: String): AppleMusicHookTarget? =

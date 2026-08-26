@@ -197,6 +197,7 @@ internal class AppleListenNowHooks(
     private val metadataStore: AppleMetadataOverrideStore,
     private val catalogResolver: AppleInternalCatalogResolver,
     private val host: AppleListenNowHost,
+    private val refreshQueue: AppleInAppMetadataRefreshQueue? = null,
 ) {
     private companion object {
         const val MAX_LISTEN_NOW_ARTWORK_CONTINUITY_ENTRIES = 1_024
@@ -703,14 +704,24 @@ internal class AppleListenNowHooks(
                     "contentType=${state.builderKey?.contentType}",
             )
         }
-        runtime.mainHandler.post {
+        val bindWork = bindWork@{
             if (inAppListenNowModelBuildStatesByLiveData[liveData] !== state ||
                 state.catalogId != mediaId
-            ) return@post
+            ) return@bindWork
             state.entity.get()?.let { entity ->
                 primeInAppListenNowMetadata(entity, resolvedCatalogId = mediaId)
             }
             registerResolvedInAppListenNowBinding(state, mediaId)
+        }
+        val queue = refreshQueue
+        if (queue == null) {
+            runtime.mainHandler.post(bindWork)
+        } else {
+            queue.enqueueAction(
+                kind = AppleMetadataRefreshKind.LISTEN_NOW_REBIND,
+                mediaId = mediaId,
+                target = liveData,
+            ) { bindWork() }
         }
     }
 
@@ -786,9 +797,9 @@ internal class AppleListenNowHooks(
             }
             if (!shouldPost) return@forEach
             scheduledTargets += 1
-            runtime.mainHandler.post {
+            val refreshWork: () -> Unit = refreshWork@{
                 if (inAppListenNowDataBindingPendingRefreshes[binding] != pending) {
-                    return@post
+                    return@refreshWork
                 }
                 fun clearPending() {
                     synchronized(inAppListenNowDataBindingPendingRefreshes) {
@@ -805,7 +816,7 @@ internal class AppleListenNowHooks(
                     )
                 ) {
                     clearPending()
-                    return@post
+                    return@refreshWork
                 }
                 runCatching {
                     val values = host.aliasValues(mediaId, alias, binding)
@@ -830,6 +841,18 @@ internal class AppleListenNowHooks(
                     )
                 }
                 clearPending()
+            }
+            val queue = refreshQueue
+            if (queue == null) {
+                runtime.mainHandler.post(refreshWork)
+            } else {
+                queue.enqueueAction(
+                    kind = AppleMetadataRefreshKind.LISTEN_NOW_REBIND,
+                    mediaId = mediaId,
+                    target = binding,
+                    generation = bindGeneration,
+                    alias = alias,
+                ) { refreshWork() }
             }
         }
         return scheduledTargets

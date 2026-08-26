@@ -88,6 +88,7 @@ internal class AppleArtistSurfaceHooks(
     private val librarySurfaceHooks: AppleLibrarySurfaceHooks,
     private val dataBindingHooks: AppleDataBindingMetadataHooks,
     private val host: AppleArtistSurfaceHost,
+    private val refreshQueue: AppleInAppMetadataRefreshQueue? = null,
 ) {
     private val pageBuildData = Collections.synchronizedMap(WeakHashMap<Any, ArtistPageBuildData>())
     private val topSongModels = WeakIdentityMap<Any, ArtistTopSongModelSnapshot>()
@@ -112,6 +113,31 @@ internal class AppleArtistSurfaceHooks(
 
     @Volatile
     private var latestProfileController: Any? = null
+
+    private fun dispatchSurfaceWork(
+        kind: AppleMetadataRefreshKind,
+        mediaId: String? = null,
+        target: Any? = null,
+        priority: AppleInternalCatalogResolver.RequestPriority =
+            AppleInternalCatalogResolver.RequestPriority.BACKGROUND,
+        originalResolutionMode: InAppOriginalResolutionMode =
+            InAppOriginalResolutionMode.AFTER_LOCALIZED,
+        work: () -> Unit,
+    ) {
+        val queue = refreshQueue
+        if (queue == null) {
+            runtime.mainHandler.post(work)
+        } else {
+            queue.enqueueAction(
+                kind = kind,
+                mediaId = mediaId,
+                priority = priority,
+                originalResolutionMode = originalResolutionMode,
+                target = target,
+                action = work,
+            )
+        }
+    }
 
     fun installTopSongHooks() {
         val classes = artistClasses() ?: return
@@ -283,7 +309,7 @@ internal class AppleArtistSurfaceHooks(
                 after = { chain, _ ->
                     val controller = chain.thisObject ?: return@installHook
                     val mediaId = profileMediaIds[controller] ?: return@installHook
-                    runtime.mainHandler.post {
+                    val profileWork = {
                         host.markMetadataVisible(listOf(mediaId))
                         host.enrichLibraryEntitiesForResolution(listOf(mediaId))
                         host.effectiveAlias(mediaId)?.let { alias ->
@@ -301,6 +327,14 @@ internal class AppleArtistSurfaceHooks(
                             )
                         }
                     }
+                    dispatchSurfaceWork(
+                        kind = AppleMetadataRefreshKind.ARTIST_BINDING,
+                        mediaId = mediaId,
+                        target = controller,
+                        priority = AppleInternalCatalogResolver.RequestPriority.VISIBLE,
+                        originalResolutionMode = InAppOriginalResolutionMode.ORIGINAL_FIRST,
+                        work = profileWork,
+                    )
                 },
             )
             runtime.hookRegistrar.installHook(
@@ -811,7 +845,7 @@ internal class AppleArtistSurfaceHooks(
     ) {
         val shouldResolve = finalBoundResolutionIds[model] != mediaId
         finalBoundResolutionIds[model] = mediaId
-        runtime.mainHandler.post {
+        val finalBindWork = {
             host.markMetadataVisible(listOf(mediaId))
             host.enrichLibraryEntitiesForResolution(listOf(mediaId))
             val alias = host.effectiveAlias(mediaId)
@@ -846,6 +880,14 @@ internal class AppleArtistSurfaceHooks(
                 )
             }
         }
+        dispatchSurfaceWork(
+            kind = AppleMetadataRefreshKind.ARTIST_BINDING,
+            mediaId = mediaId,
+            target = model,
+            priority = AppleInternalCatalogResolver.RequestPriority.VISIBLE,
+            originalResolutionMode = InAppOriginalResolutionMode.ORIGINAL_FIRST,
+            work = finalBindWork,
+        )
     }
 
     private fun associateTopSongWithProfileArtist(controller: Any, mediaId: String) {
