@@ -247,6 +247,13 @@ internal class HleMetadataSurfaceBridge(
     fun media3MetadataDetails(metadata: Any): String =
         media3MetadataCoordinator.details(metadata)
 
+    fun effectiveAlias(mediaId: String): AppleInternalCatalogResolver.Alias? =
+        if (::resolutionCoordinator.isInitialized) {
+            resolutionCoordinator.effectiveAlias(mediaId)
+        } else {
+            metadataStore.originalMetadata(mediaId) ?: metadataStore.configuredMetadata(mediaId)
+        }
+
     fun applyAliasToPlaybackItem(
         playbackItem: Any,
         alias: AppleInternalCatalogResolver.Alias,
@@ -365,12 +372,24 @@ internal class HleMetadataSurfaceBridge(
         metadataRegistrationCoordinator.rawContentItemValue(contentItem, runtimeMember)
 
     fun knownValues(mediaId: String, field: VisibleTextField): Set<String> = buildSet {
-        metadataStore.accountMetadata(mediaId)?.let { addAll(listOfNotNull(it.title, it.artist)) }
-        alias(mediaId)?.let { value ->
-            when (field) {
-                VisibleTextField.TITLE -> add(value.title)
-                VisibleTextField.ARTIST -> add(value.artist)
-                VisibleTextField.ALBUM -> add(value.album)
+        val account = metadataStore.accountMetadata(mediaId)
+        val value = alias(mediaId)
+        when (field) {
+            VisibleTextField.TITLE -> Unit
+            VisibleTextField.ARTIST -> {
+                account?.artist?.let(::add)
+                value?.artist?.let(::add)
+                registry.livePlaybackItemRefs(mediaId).forEach { ref ->
+                    ref.originalArtist?.toString()?.let(::add)
+                }
+            }
+            VisibleTextField.ALBUM -> {
+                value?.album?.let(::add)
+                registry.livePlaybackItemRefs(mediaId).forEach { ref ->
+                    ref.originalCollectionName
+                        ?.takeIf(String::isNotBlank)
+                        ?.let(::add)
+                }
             }
         }
     }
@@ -1532,7 +1551,7 @@ internal class HleMetadataSurfaceBridge(
     )
 
     private fun alias(mediaId: String?): AppleInternalCatalogResolver.Alias? =
-        mediaId?.let { metadataStore.originalMetadata(it) ?: metadataStore.configuredMetadata(it) }
+        mediaId?.let(::effectiveAlias)
 
     private fun markVisible(ids: Collection<String>) {
         surfaceRuntime.markVisible(ids)

@@ -116,6 +116,9 @@ internal class HleMetadataRuntime(
     private var bridgeKnownValues: (String, io.github.proify.lyricon.amprovider.xposed.VisibleTextField) -> Set<String> =
         { _, _ -> emptySet() }
     private var bridgeHasLivePlaybackItem: (String) -> Boolean = { false }
+    private var bridgeEffectiveAlias: (String) -> AppleInternalCatalogResolver.Alias? = { mediaId ->
+        metadataStore.originalMetadata(mediaId) ?: metadataStore.configuredMetadata(mediaId)
+    }
     private var bridgeMedia3MetadataId: (Any, String?, Boolean) -> String? =
         { _, fallback, trustedFallback ->
             fallback?.takeIf { trustedFallback && it.isNotBlank() && it.all(Char::isDigit) }
@@ -403,6 +406,7 @@ internal class HleMetadataRuntime(
         bridgeRawContentItemValue = surfaceBridge::rawContentItemValue
         bridgeKnownValues = surfaceBridge::knownValues
         bridgeHasLivePlaybackItem = surfaceBridge::hasLivePlaybackItem
+        bridgeEffectiveAlias = surfaceBridge::effectiveAlias
         bridgeMedia3MetadataId = surfaceBridge::media3MetadataId
         bridgeMedia3MetadataDetails = surfaceBridge::media3MetadataDetails
         bridgeIsCurrentMetadataSurfaceMediaId = surfaceBridge::isCurrentMetadataSurfaceMediaId
@@ -495,5 +499,5 @@ internal class HleMetadataRuntime(
     }
 
     private fun effectiveAlias(mediaId: String): AppleInternalCatalogResolver.Alias? =
-        metadataStore.originalMetadata(mediaId) ?: metadataStore.configuredMetadata(mediaId)
+        bridgeEffectiveAlias(mediaId)
 }

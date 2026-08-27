@@ -143,6 +143,20 @@ class HleMetadataIntegrationStructuralTest {
     }
 
     @Test
+    fun `all HLE hosts use merged aliases and preserve original album candidates`() {
+        val runtime = source("app/src/main/java/dev/amenhancer/module/hook/HleMetadataRuntime.kt")
+        val bridge = source("app/src/main/java/dev/amenhancer/module/hook/HleMetadataSurfaceBridge.kt")
+
+        assertTrue(runtime.contains("bridgeEffectiveAlias(mediaId)"))
+        assertTrue(runtime.contains("bridgeEffectiveAlias = surfaceBridge::effectiveAlias"))
+        assertTrue(bridge.contains("fun effectiveAlias(mediaId: String)"))
+        assertTrue(bridge.contains("resolutionCoordinator.effectiveAlias(mediaId)"))
+        assertTrue(bridge.contains("VisibleTextField.ALBUM"))
+        assertTrue(bridge.contains("registry.livePlaybackItemRefs(mediaId)"))
+        assertTrue(bridge.contains("originalCollectionName"))
+    }
+
+    @Test
     fun `visible refresh paths share one frame queue while playback stays immediate`() {
         val queue = source(
             "app/src/main/java/io/github/proify/lyricon/amprovider/xposed/metadata/AppleInAppMetadataRefreshQueue.kt",
