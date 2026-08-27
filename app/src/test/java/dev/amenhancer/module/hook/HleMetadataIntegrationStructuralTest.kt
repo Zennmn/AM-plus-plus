@@ -157,6 +157,27 @@ class HleMetadataIntegrationStructuralTest {
     }
 
     @Test
+    fun `action sheet and data binding hosts delegate stateful HLE policies`() {
+        val runtime = source("app/src/main/java/dev/amenhancer/module/hook/HleMetadataRuntime.kt")
+        val bridge = source("app/src/main/java/dev/amenhancer/module/hook/HleMetadataSurfaceBridge.kt")
+
+        val actionSheet = runtime
+            .substringAfter("actionSheetMetadataHooks = AppleActionSheetMetadataHooks")
+            .substringBefore("runCatching { actionSheetMetadataHooks.installHooks() }")
+        assertTrue(actionSheet.contains("surfaceBridge.shouldRequestOverride(mediaId)"))
+        assertTrue(
+            actionSheet.indexOf("surfaceBridge.shouldRequestOverride(mediaId)") <
+                actionSheet.indexOf("metadataStore.originalMetadata(mediaId) == null"),
+        )
+
+        val dataBinding = bridge
+            .substringAfter("dataBinding = object : AppleDataBindingMetadataHost")
+            .substringBefore("collection = object : AppleCollectionSurfaceHost")
+        assertTrue(dataBinding.contains("bridge.isCurrentMetadataSurfaceMediaId(mediaId)"))
+        assertFalse(dataBinding.contains("mediaId == bridge.playbackCoordinator.currentMetadataId()"))
+    }
+
+    @Test
     fun `visible refresh paths share one frame queue while playback stays immediate`() {
         val queue = source(
             "app/src/main/java/io/github/proify/lyricon/amprovider/xposed/metadata/AppleInAppMetadataRefreshQueue.kt",

@@ -729,7 +729,7 @@ internal class HleMetadataSurfaceBridge(
 
                 override fun isCurrentSurfaceMediaId(mediaId: String): Boolean =
                     bridge.hostCall("dataBinding.isCurrentSurfaceMediaId", false) {
-                        mediaId == bridge.playbackCoordinator.currentMetadataId()
+                        bridge.isCurrentMetadataSurfaceMediaId(mediaId)
                     }
 
                 override fun hasVisibleConsumer(mediaId: String): Boolean =

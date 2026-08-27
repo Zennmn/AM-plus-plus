@@ -354,7 +354,11 @@ internal class HleMetadataRuntime(
                     field: io.github.proify.lyricon.amprovider.xposed.VisibleTextField,
                 ): Set<String> = bridgeKnownValues(mediaId, field)
                 override fun shouldRequestOverride(mediaId: String) =
-                    metadataStore.originalMetadata(mediaId) == null
+                    if (::surfaceBridge.isInitialized) {
+                        surfaceBridge.shouldRequestOverride(mediaId)
+                    } else {
+                        metadataStore.originalMetadata(mediaId) == null
+                    }
                 override fun ensureOverride(
                     mediaId: String,
                     priority: AppleInternalCatalogResolver.RequestPriority,
