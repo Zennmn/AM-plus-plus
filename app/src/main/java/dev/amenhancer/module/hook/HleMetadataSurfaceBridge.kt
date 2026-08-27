@@ -238,6 +238,15 @@ internal class HleMetadataSurfaceBridge(
         analyzeMetadata = analyzeMetadata,
     )
 
+    fun media3MetadataId(
+        metadata: Any,
+        fallback: String?,
+        trustedFallback: Boolean,
+    ): String? = media3MetadataCoordinator.mediaId(metadata, fallback, trustedFallback)
+
+    fun media3MetadataDetails(metadata: Any): String =
+        media3MetadataCoordinator.details(metadata)
+
     fun applyAliasToPlaybackItem(
         playbackItem: Any,
         alias: AppleInternalCatalogResolver.Alias,
@@ -309,6 +318,9 @@ internal class HleMetadataSurfaceBridge(
     ) = metadataApplier.applyAliasToContainerItem(containerItem, kind, alias, notifyChange)
 
     fun markMetadataVisible(mediaIds: Collection<String>) = surfaceRuntime.markVisible(mediaIds)
+
+    fun isCurrentMetadataSurfaceMediaId(mediaId: String): Boolean =
+        surfaceRuntime.isCurrentMediaId(mediaId)
 
     fun setPlaybackMediaId(mediaId: String) = surfaceRuntime.setPlaybackMediaId(mediaId)
 

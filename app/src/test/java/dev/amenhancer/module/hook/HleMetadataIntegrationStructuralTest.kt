@@ -119,6 +119,30 @@ class HleMetadataIntegrationStructuralTest {
     }
 
     @Test
+    fun `queue host delegates media3 identity and surface scope to HLE runtime`() {
+        val runtime = source("app/src/main/java/dev/amenhancer/module/hook/HleMetadataRuntime.kt")
+        val bridge = source("app/src/main/java/dev/amenhancer/module/hook/HleMetadataSurfaceBridge.kt")
+
+        assertFalse(runtime.contains("metadata as? android.media.MediaMetadata"))
+        assertTrue(runtime.contains("bridgeMedia3MetadataId(metadata, fallback, trustedFallback)"))
+        assertTrue(runtime.contains("bridgeMedia3MetadataDetails(metadata)"))
+        assertTrue(runtime.contains("bridgeIsCurrentMetadataSurfaceMediaId(mediaId)"))
+        assertTrue(runtime.contains("bridgeMedia3MetadataId = surfaceBridge::media3MetadataId"))
+        assertTrue(runtime.contains("bridgeMedia3MetadataDetails = surfaceBridge::media3MetadataDetails"))
+        assertTrue(
+            runtime.contains(
+                "bridgeIsCurrentMetadataSurfaceMediaId = surfaceBridge::isCurrentMetadataSurfaceMediaId",
+            ),
+        )
+        assertTrue(bridge.contains("fun media3MetadataId("))
+        assertTrue(bridge.contains("media3MetadataCoordinator.mediaId("))
+        assertTrue(bridge.contains("fun media3MetadataDetails("))
+        assertTrue(bridge.contains("media3MetadataCoordinator.details(metadata)"))
+        assertTrue(bridge.contains("fun isCurrentMetadataSurfaceMediaId("))
+        assertTrue(bridge.contains("surfaceRuntime.isCurrentMediaId(mediaId)"))
+    }
+
+    @Test
     fun `visible refresh paths share one frame queue while playback stays immediate`() {
         val queue = source(
             "app/src/main/java/io/github/proify/lyricon/amprovider/xposed/metadata/AppleInAppMetadataRefreshQueue.kt",

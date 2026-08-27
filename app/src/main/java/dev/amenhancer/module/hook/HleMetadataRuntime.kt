@@ -116,6 +116,14 @@ internal class HleMetadataRuntime(
     private var bridgeKnownValues: (String, io.github.proify.lyricon.amprovider.xposed.VisibleTextField) -> Set<String> =
         { _, _ -> emptySet() }
     private var bridgeHasLivePlaybackItem: (String) -> Boolean = { false }
+    private var bridgeMedia3MetadataId: (Any, String?, Boolean) -> String? =
+        { _, fallback, trustedFallback ->
+            fallback?.takeIf { trustedFallback && it.isNotBlank() && it.all(Char::isDigit) }
+        }
+    private var bridgeMedia3MetadataDetails: (Any) -> String = { metadata -> metadata.javaClass.name }
+    private var bridgeIsCurrentMetadataSurfaceMediaId: (String) -> Boolean = { mediaId ->
+        ::playbackCoordinator.isInitialized && mediaId == playbackCoordinator.currentMetadataId()
+    }
 
     fun install(): TargetCapabilityInstall {
         runtime.attach(application, hookResolver)
@@ -252,12 +260,13 @@ internal class HleMetadataRuntime(
                     identity: io.github.proify.lyricon.amprovider.xposed.ActivePlaybackMediaIdentity,
                     details: String,
                 ) = ProviderLogger.diagnostic("$event: $details")
-                override fun media3MetadataId(metadata: Any, fallback: String?, trustedFallback: Boolean): String? =
-                    (metadata as? android.media.MediaMetadata)
-                        ?.getString(android.media.MediaMetadata.METADATA_KEY_MEDIA_ID)
-                        ?.takeIf { it.all(Char::isDigit) }
-                        ?: fallback?.takeIf { it.all(Char::isDigit) }
-                override fun media3MetadataDetails(metadata: Any): String = metadata.javaClass.name
+                override fun media3MetadataId(
+                    metadata: Any,
+                    fallback: String?,
+                    trustedFallback: Boolean,
+                ): String? = bridgeMedia3MetadataId(metadata, fallback, trustedFallback)
+                override fun media3MetadataDetails(metadata: Any): String =
+                    bridgeMedia3MetadataDetails(metadata)
                 override fun registerMetadata(
                     mediaId: String,
                     metadata: Any,
@@ -309,7 +318,7 @@ internal class HleMetadataRuntime(
                 ): String? = null
                 override fun markMetadataVisible(mediaIds: Collection<String>) = bridgeMarkMetadataVisible(mediaIds)
                 override fun isCurrentMetadataSurfaceMediaId(mediaId: String) =
-                    mediaId == playbackCoordinator.currentMetadataId()
+                    bridgeIsCurrentMetadataSurfaceMediaId(mediaId)
                 override fun hasLivePlaybackItem(mediaId: String) = bridgeHasLivePlaybackItem(mediaId)
             },
         )
@@ -394,6 +403,9 @@ internal class HleMetadataRuntime(
         bridgeRawContentItemValue = surfaceBridge::rawContentItemValue
         bridgeKnownValues = surfaceBridge::knownValues
         bridgeHasLivePlaybackItem = surfaceBridge::hasLivePlaybackItem
+        bridgeMedia3MetadataId = surfaceBridge::media3MetadataId
+        bridgeMedia3MetadataDetails = surfaceBridge::media3MetadataDetails
+        bridgeIsCurrentMetadataSurfaceMediaId = surfaceBridge::isCurrentMetadataSurfaceMediaId
 
         return TargetCapabilityInstall.Active(
             "HLE metadata runtime installed for ${version.displayName}; " +
