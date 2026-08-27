@@ -148,13 +148,7 @@ internal class HleMetadataRuntime(
             preferences = { null },
             metadataStore = metadataStore,
             effectiveMetadataAlias = ::effectiveAlias,
-            activePlaybackIdentity = {
-                io.github.proify.lyricon.amprovider.xposed.ActivePlaybackMediaIdentity(
-                    mediaId = playbackCoordinator.currentMetadataId(),
-                    source = "ampp_hle",
-                    candidates = playbackCoordinator.currentMetadataId().orEmpty(),
-                )
-            },
+            activePlaybackIdentity = { this@HleMetadataRuntime.activePlaybackIdentity() },
             logMetadataIdentity = { event, _, details ->
                 ProviderLogger.diagnostic("$event: $details")
             },
@@ -253,11 +247,7 @@ internal class HleMetadataRuntime(
             metadataStore = metadataStore,
             host = object : AppleQueueMetadataHost {
                 override fun activePlaybackIdentity() =
-                    io.github.proify.lyricon.amprovider.xposed.ActivePlaybackMediaIdentity(
-                        mediaId = playbackCoordinator.currentMetadataId(),
-                        source = "ampp_hle",
-                        candidates = playbackCoordinator.currentMetadataId().orEmpty(),
-                    )
+                    this@HleMetadataRuntime.activePlaybackIdentity()
                 override fun logMetadataIdentity(
                     event: String,
                     identity: io.github.proify.lyricon.amprovider.xposed.ActivePlaybackMediaIdentity,
@@ -332,11 +322,7 @@ internal class HleMetadataRuntime(
             runtime = runtime,
             host = object : AppleActionSheetMetadataHost {
                 override fun activePlaybackIdentity() =
-                    io.github.proify.lyricon.amprovider.xposed.ActivePlaybackMediaIdentity(
-                        mediaId = playbackCoordinator.currentMetadataId(),
-                        source = "ampp_hle",
-                        candidates = playbackCoordinator.currentMetadataId().orEmpty(),
-                    )
+                    this@HleMetadataRuntime.activePlaybackIdentity()
                 override fun markMetadataVisible(mediaIds: Collection<String>) = bridgeMarkMetadataVisible(mediaIds)
                 override fun rawContentItemValue(
                     contentItem: Any,
@@ -420,6 +406,22 @@ internal class HleMetadataRuntime(
                 "original metadata + persistent SQLite cache enabled",
         )
     }
+
+    private fun activePlaybackIdentity(): io.github.proify.lyricon.amprovider.xposed.ActivePlaybackMediaIdentity =
+        if (::surfaceBridge.isInitialized) {
+            surfaceBridge.activePlaybackIdentity()
+        } else {
+            val mediaId = if (::playbackCoordinator.isInitialized) {
+                playbackCoordinator.currentMetadataId()
+            } else {
+                null
+            }
+            io.github.proify.lyricon.amprovider.xposed.ActivePlaybackMediaIdentity(
+                mediaId = mediaId,
+                source = "ampp_hle",
+                candidates = mediaId.orEmpty(),
+            )
+        }
 
     private fun playbackHost() = object : ApplePlaybackMetadataCoordinatorHost {
         override fun activePlayer(): Any? = playbackHooks.activePlayer()

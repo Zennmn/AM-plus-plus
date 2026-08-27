@@ -178,6 +178,33 @@ class HleMetadataIntegrationStructuralTest {
     }
 
     @Test
+    fun `framework queue and action sheet identities share the media3 fallback chain`() {
+        val runtime = source("app/src/main/java/dev/amenhancer/module/hook/HleMetadataRuntime.kt")
+        val bridge = source("app/src/main/java/dev/amenhancer/module/hook/HleMetadataSurfaceBridge.kt")
+
+        assertTrue(
+            runtime
+                .substringAfter("frameworkHooks = AppleFrameworkMetadataHooks")
+                .substringBefore("frameworkHooks.installMediaSessionMetadata()")
+                .contains("this@HleMetadataRuntime.activePlaybackIdentity()"),
+        )
+        assertTrue(
+            runtime
+                .substringAfter("queueMetadataHooks = AppleQueueMetadataHooks")
+                .substringBefore("runCatching { queueMetadataHooks.installHooks() }")
+                .contains("this@HleMetadataRuntime.activePlaybackIdentity()"),
+        )
+        assertTrue(
+            runtime
+                .substringAfter("actionSheetMetadataHooks = AppleActionSheetMetadataHooks")
+                .substringBefore("runCatching { actionSheetMetadataHooks.installHooks() }")
+                .contains("this@HleMetadataRuntime.activePlaybackIdentity()"),
+        )
+        assertTrue(bridge.contains("fun activePlaybackIdentity(): ActivePlaybackMediaIdentity"))
+        assertTrue(bridge.contains("media3MetadataCoordinator.activePlaybackIdentity()"))
+    }
+
+    @Test
     fun `visible refresh paths share one frame queue while playback stays immediate`() {
         val queue = source(
             "app/src/main/java/io/github/proify/lyricon/amprovider/xposed/metadata/AppleInAppMetadataRefreshQueue.kt",

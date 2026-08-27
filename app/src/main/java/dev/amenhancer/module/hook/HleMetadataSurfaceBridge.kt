@@ -247,6 +247,18 @@ internal class HleMetadataSurfaceBridge(
     fun media3MetadataDetails(metadata: Any): String =
         media3MetadataCoordinator.details(metadata)
 
+    fun activePlaybackIdentity(): ActivePlaybackMediaIdentity =
+        if (::media3MetadataCoordinator.isInitialized) {
+            media3MetadataCoordinator.activePlaybackIdentity()
+        } else {
+            val mediaId = playbackCoordinator.currentMetadataId()
+            ActivePlaybackMediaIdentity(
+                mediaId = mediaId,
+                source = "queue",
+                candidates = mediaId.orEmpty(),
+            )
+        }
+
     fun effectiveAlias(mediaId: String): AppleInternalCatalogResolver.Alias? =
         if (::resolutionCoordinator.isInitialized) {
             resolutionCoordinator.effectiveAlias(mediaId)
