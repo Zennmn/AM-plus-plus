@@ -168,38 +168,6 @@ internal class CustomLyricsManager(
         ).merge(state.manifest, policy) { onFile -> CustomLyricsBackupCodec.decode(input, onFile) }
     }
 
-    /**
-     * Synchronizes an enabled GitHub snapshot into the local index. The
-     * transaction owns merge/rollback semantics; this facade only binds it to
-     * the existing remote-file pointer and mutation lock.
-     */
-    fun syncFromGitHub(
-        plan: List<CustomLyricsSyncPlanEntry>,
-        loadTtml: (CustomLyricsSyncPlanEntry) -> CustomLyricsSyncLoadResult,
-        isCancelled: () -> Boolean = { false },
-        onProgress: (CustomLyricsSyncProgress) -> Unit = {},
-    ): CustomLyricsSyncResult = synchronized(mutationLock) {
-        if (!isWritable()) return CustomLyricsSyncResult.Failed("libxposed remote file 服务不可用")
-        val state = configStore.indexState(snapshot)
-        if (!state.canCommit) {
-            return CustomLyricsSyncResult.Failed("歌词索引文件不可读，无法同步")
-        }
-        CustomLyricsSyncTransaction(
-            fileIdFactory = ::newFileId,
-            writeRemoteFile = ::writeRemoteFile,
-            publishManifest = { manifest -> commitIndex(state, manifest) },
-            deleteRemoteFile = { fileId ->
-                if (ModuleApplication.isCurrentSnapshot(snapshot)) snapshot.deleteRemoteFile(fileId)
-            },
-        ).sync(
-            oldManifest = state.manifest,
-            plan = plan,
-            loadTtml = loadTtml,
-            isCancelled = isCancelled,
-            onProgress = onProgress,
-        )
-    }
-
     private fun readRemoteFile(fileId: String): ByteArray? {
         if (!isWritable()) return null
         val descriptor = snapshot.openRemoteFile(fileId) ?: return null

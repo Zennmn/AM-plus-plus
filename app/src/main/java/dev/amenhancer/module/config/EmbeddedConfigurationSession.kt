@@ -115,6 +115,40 @@ internal class EmbeddedConfigurationSession(
         }
     }
 
+    /**
+     * Captures the currently published lyrics index for a long-running update.
+     * The returned state is immutable and can safely cross the network worker
+     * boundary; callers must pass it back to [commitCustomLyricsIfUnchanged].
+     */
+    internal fun customLyricsIndexState(): CustomLyricsIndexState =
+        indexRepository.state(storage.values())
+
+    /**
+     * Compare-and-swap variant used by the lyrics updater. A background source
+     * scan must never publish over an edit made after its baseline snapshot.
+     */
+    internal fun commitCustomLyricsIfUnchanged(
+        expected: CustomLyricsIndexState,
+        manifest: CustomLyricsManifest,
+        allowRecovery: Boolean = false,
+    ): CustomLyricsIndexCommitResult = if (!writable) {
+        CustomLyricsIndexCommitResult.Failed("嵌入配置迁移未完成，当前仅可读")
+    } else {
+        synchronized(INDEX_MUTATION_LOCK) {
+            val current = indexRepository.state(storage.values())
+            if (current != expected) {
+                return@synchronized CustomLyricsIndexCommitResult.Failed(
+                    "歌词索引在更新期间已被修改，请重试",
+                )
+            }
+            indexRepository.commit(
+                state = current,
+                next = manifest,
+                allowRecovery = allowRecovery,
+            )
+        }
+    }
+
     internal fun <T> withCustomLyricsMutation(block: () -> T): T =
         synchronized(INDEX_MUTATION_LOCK, block)
 

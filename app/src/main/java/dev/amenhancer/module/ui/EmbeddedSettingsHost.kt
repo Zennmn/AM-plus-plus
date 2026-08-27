@@ -60,8 +60,8 @@ import dev.amenhancer.module.lyrics.CustomLyricsMultiIdDraft
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImportResult
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImporter
 import dev.amenhancer.module.lyrics.CustomLyricsRestorePolicy
-import dev.amenhancer.module.lyrics.CustomLyricsSyncProgress
-import dev.amenhancer.module.lyrics.CustomLyricsSyncResult
+import dev.amenhancer.module.lyrics.CustomLyricsUpdateProgress
+import dev.amenhancer.module.lyrics.CustomLyricsUpdateResult
 import dev.amenhancer.module.model.CustomLyricsEntry
 import dev.amenhancer.module.model.CustomLyricsSources
 import dev.amenhancer.module.model.ModuleSettings
@@ -1048,10 +1048,10 @@ internal interface EmbeddedSettingsController {
         displayName: String,
     ): EmbeddedActionResult = EmbeddedActionResult.Failed("在线导入不可用")
 
-    fun syncFromGitHub(
+    fun updateLyrics(
         isCancelled: () -> Boolean = { false },
-        onProgress: (CustomLyricsSyncProgress) -> Unit = {},
-    ): CustomLyricsSyncResult = CustomLyricsSyncResult.Failed("GitHub 同步不可用")
+        onProgress: (CustomLyricsUpdateProgress) -> Unit = {},
+    ): CustomLyricsUpdateResult = CustomLyricsUpdateResult.Failed("歌词更新不可用")
 }
 
 internal class EmbeddedSessionSettingsController(
@@ -2353,7 +2353,7 @@ internal class EmbeddedSettingsHost private constructor(
                             arrayOf("application/ttml+xml", "application/xml", "text/xml", "text/plain"),
                         )
                     },
-                    onGithub = { syncEmbeddedGitHub(activity) },
+                    onUpdate = { updateEmbeddedLyrics(activity) },
                     onBackup = { anchor -> showEmbeddedBackupRestoreMenu(activity, anchor) },
                 ),
                 LinearLayout.LayoutParams(
@@ -2652,17 +2652,17 @@ internal class EmbeddedSettingsHost private constructor(
         else -> "手动 TTML"
     }
 
-    private fun syncEmbeddedGitHub(activity: Activity) {
+    private fun updateEmbeddedLyrics(activity: Activity) {
         val cancelled = AtomicBoolean(false)
         val progress = TextView(activity).apply {
-            text = "正在读取 GitHub 索引…"
+            text = "正在检查歌词…"
             textSize = 15f
             setTextColor(EmbeddedSettingsPalette.onSurface)
             setSingleLine(false)
             setPadding(dp(activity, 24), dp(activity, 8), dp(activity, 24), dp(activity, 8))
         }
         val dialog = AlertDialog.Builder(activity)
-            .setTitle("同步 GitHub 源")
+            .setTitle("歌词更新")
             .setView(progress)
             .setNegativeButton("取消") { _, _ -> cancelled.set(true) }
             .create()
@@ -2671,44 +2671,46 @@ internal class EmbeddedSettingsHost private constructor(
         dialog.show()
         worker.execute {
             val result = runCatching {
-                controller.syncFromGitHub(
+                controller.updateLyrics(
                     isCancelled = cancelled::get,
                     onProgress = { update ->
                         mainHandler.post {
                             if (dialog.isShowing) {
                                 progress.text =
-                                    "正在同步 ${update.processedEntries}/${update.totalEntries} 条 GitHub 歌词…"
+                                    "正在检查 ${update.checkedEntries}/${update.totalEntries} 条歌词…\n" +
+                                        "更新 ${update.updatedEntries} · 无变化 ${update.unchangedEntries} · " +
+                                        "跳过 ${update.skippedEntries} · 失败 ${update.failedEntries}"
                             }
                         }
                     },
                 )
             }.getOrElse { error ->
-                CustomLyricsSyncResult.Failed(
-                    "同步 GitHub 源失败：${error.message.orEmpty()}",
+                CustomLyricsUpdateResult.Failed(
+                    "歌词更新失败：${error.message.orEmpty()}",
                 )
             }
             mainHandler.post {
                 if (dialog.isShowing) dialog.dismiss()
                 val current = currentActivity() ?: return@post
                 when (result) {
-                    is CustomLyricsSyncResult.Synced -> Toast.makeText(
+                    is CustomLyricsUpdateResult.Updated -> Toast.makeText(
                         current,
-                        "GitHub 同步完成：新增 ${result.importedIds} 个 ID，覆盖 " +
-                            "${result.overwrittenIds} 个 ID，保留 ${result.preservedIds} 个本地 ID",
+                        "歌词更新完成：检查 ${result.checked} 条，更新 ${result.updated} 条，" +
+                            "无变化 ${result.unchanged} 条，跳过 ${result.skipped} 条，失败 ${result.failed} 条",
                         Toast.LENGTH_LONG,
                     ).show()
-                    CustomLyricsSyncResult.Cancelled -> Toast.makeText(
+                    CustomLyricsUpdateResult.Cancelled -> Toast.makeText(
                         current,
-                        "GitHub 同步已取消",
+                        "歌词更新已取消",
                         Toast.LENGTH_SHORT,
                     ).show()
-                    is CustomLyricsSyncResult.Failed -> Toast.makeText(
+                    is CustomLyricsUpdateResult.Failed -> Toast.makeText(
                         current,
                         result.message,
                         Toast.LENGTH_LONG,
                     ).show()
                 }
-                if (result is CustomLyricsSyncResult.Synced) pageRefresh?.invoke()
+                if (result is CustomLyricsUpdateResult.Updated) pageRefresh?.invoke()
             }
         }
     }
@@ -3409,7 +3411,7 @@ internal class EmbeddedSettingsHost private constructor(
         activity: Activity,
         onAdd: () -> Unit,
         onTtml: () -> Unit,
-        onGithub: () -> Unit,
+        onUpdate: () -> Unit,
         onBackup: (View) -> Unit,
     ): View {
         val container = LinearLayout(activity).apply {
@@ -3466,13 +3468,13 @@ internal class EmbeddedSettingsHost private constructor(
         )
         container.addView(embeddedCompactLyricsActionDivider(activity))
         addAction(
-            label = "GitHub",
-            description = "GitHub 同步",
-            icon = embeddedSvgDrawable(EmbeddedSvgIcon.GitHubSync) ?: EmbeddedGlyphDrawable(
-                EmbeddedGlyphKind.Github,
+            label = "更新",
+            description = "歌词更新",
+            icon = EmbeddedGlyphDrawable(
+                EmbeddedGlyphKind.Refresh,
                 EmbeddedSettingsPalette.accent,
             ),
-            onClick = { onGithub() },
+            onClick = { onUpdate() },
         )
         container.addView(embeddedCompactLyricsActionDivider(activity))
         addAction(

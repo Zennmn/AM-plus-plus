@@ -103,4 +103,18 @@ class CustomLyricsListPageStructuralRegressionTest {
         assertTrue(embeddedHost.contains("clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)"))
         assertTrue(embeddedHost.contains("setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)"))
     }
+
+    @Test
+    fun `embedded custom lyrics page exposes update instead of github bulk sync`() {
+        val embeddedHost = projectFile(
+            "app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsHost.kt",
+        )
+
+        assertTrue(embeddedHost.contains("onUpdate = { updateEmbeddedLyrics(activity) }"))
+        assertTrue(embeddedHost.contains("label = \"更新\""))
+        assertTrue(embeddedHost.contains("description = \"歌词更新\""))
+        assertTrue(embeddedHost.contains("private fun updateEmbeddedLyrics(activity: Activity)"))
+        assertFalse(embeddedHost.contains("syncEmbeddedGitHub"))
+        assertFalse(embeddedHost.contains("syncFromGitHub"))
+    }
 }

@@ -40,7 +40,6 @@ import dev.amenhancer.module.config.ConfigStore
 import dev.amenhancer.module.font.FontImportResult
 import dev.amenhancer.module.font.SafFontImporter
 import dev.amenhancer.module.hook.AmLyricsClient
-import dev.amenhancer.module.hook.AmLyricsIndexEntry
 import dev.amenhancer.module.hook.AmllTtmlClient
 import dev.amenhancer.module.hook.FileLunabeatCatalogCache
 import dev.amenhancer.module.hook.HttpLyricTransport
@@ -57,9 +56,6 @@ import dev.amenhancer.module.lyrics.CustomLyricsOnlineImportResult
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImporter
 import dev.amenhancer.module.lyrics.CustomLyricsRestoreResult
 import dev.amenhancer.module.lyrics.CustomLyricsRestorePolicy
-import dev.amenhancer.module.lyrics.CustomLyricsSyncLoadResult
-import dev.amenhancer.module.lyrics.CustomLyricsSyncPlanEntry
-import dev.amenhancer.module.lyrics.CustomLyricsSyncResult
 import dev.amenhancer.module.model.CustomLyricsEntry
 import dev.amenhancer.module.model.CustomLyricsManifest
 import dev.amenhancer.module.model.CustomLyricsSources
@@ -67,7 +63,6 @@ import dev.amenhancer.module.model.LyricsFontManifest
 import dev.amenhancer.module.model.ModuleSettings
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
 
 internal object BlurRadiusSeekBarPersistencePolicy {
     fun shouldPersistProgressChange(fromUser: Boolean, trackingTouch: Boolean): Boolean =
@@ -750,16 +745,6 @@ class SettingsActivity : Activity() {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding(dp(12), 0, dp(12), dp(12))
                 addView(
-                    fontActionButton("同步 GitHub 源", writable) {
-                        syncCustomLyricsFromGitHub()
-                    },
-                    LinearLayout.LayoutParams(0, dp(48), 1f),
-                )
-            })
-            addView(LinearLayout(this@SettingsActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                setPadding(dp(12), 0, dp(12), dp(12))
-                addView(
                     fontActionButton("备份歌词", writable) { chooseCustomLyricsBackupDestination() },
                     LinearLayout.LayoutParams(0, dp(48), 1f),
                 )
@@ -1200,89 +1185,6 @@ class SettingsActivity : Activity() {
             ),
         )::fetch,
     )
-
-    private fun syncCustomLyricsFromGitHub() {
-        if (!ModuleApplication.serviceSnapshot.isRemoteFileAvailable) {
-            toast("libxposed remote file 服务不可用")
-            return
-        }
-        val cancelled = AtomicBoolean(false)
-        val progress = TextView(this).apply {
-            text = "正在读取 GitHub 索引…"
-            textSize = 15f
-            setTextColor(palette.onSurface)
-            setPadding(dp(24), dp(8), dp(24), dp(8))
-        }
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("同步 GitHub 源")
-            .setView(progress)
-            .setNegativeButton("取消") { _, _ -> cancelled.set(true) }
-            .create()
-        dialog.setOnCancelListener { cancelled.set(true) }
-        dialog.setCanceledOnTouchOutside(false)
-        dialog.show()
-
-        backgroundExecutor.execute {
-            val result = runCatching {
-                val client = AmLyricsClient(HttpLyricTransport())
-                val index = client.fetchIndex()
-                    ?: return@runCatching CustomLyricsSyncResult.Failed(
-                        "GitHub 索引无效或读取失败",
-                    )
-                val enabledEntries = index.entries.filter(AmLyricsIndexEntry::enabled)
-                val plan = enabledEntries.map { entry ->
-                    CustomLyricsSyncPlanEntry(
-                        key = entry.path,
-                        appleMusicIds = entry.allAppleMusicIds,
-                        displayName = entry.displayName,
-                    )
-                }
-                val entriesByPath = enabledEntries.associateBy(AmLyricsIndexEntry::path)
-                CustomLyricsManager(ModuleApplication.serviceSnapshot, store).syncFromGitHub(
-                    plan = plan,
-                    loadTtml = { source ->
-                        if (cancelled.get()) {
-                            CustomLyricsSyncLoadResult.Cancelled
-                        } else {
-                            val entry = entriesByPath[source.key]
-                            if (entry == null) {
-                                CustomLyricsSyncLoadResult.Failed("GitHub 索引条目已变化")
-                            } else {
-                                client.fetchTtml(entry)?.let(CustomLyricsSyncLoadResult::Loaded)
-                                    ?: CustomLyricsSyncLoadResult.Failed(
-                                        "下载 GitHub 歌词失败：${source.displayName}",
-                                    )
-                            }
-                        }
-                    },
-                    isCancelled = cancelled::get,
-                    onProgress = { update ->
-                        runOnUiThread {
-                            if (!isFinishing && !isDestroyed && !cancelled.get()) {
-                                progress.text = "正在同步 ${update.processedEntries} / " +
-                                    "${update.totalEntries} 首（已映射 ${update.importedIds + update.overwrittenIds} 个 ID）"
-                            }
-                        }
-                    },
-                )
-            }.getOrElse { error ->
-                CustomLyricsSyncResult.Failed("同步 GitHub 源失败：${error.message.orEmpty()}")
-            }
-            runOnUiThread {
-                if (isFinishing || isDestroyed) return@runOnUiThread
-                if (dialog.isShowing) dialog.dismiss()
-                when (result) {
-                    is CustomLyricsSyncResult.Synced -> toast(
-                        "GitHub 同步完成：新增 ${result.importedIds} 个 ID，覆盖 " +
-                            "${result.overwrittenIds} 个 ID，保留 ${result.preservedIds} 个本地 ID",
-                    )
-                    CustomLyricsSyncResult.Cancelled -> toast("GitHub 同步已取消")
-                    is CustomLyricsSyncResult.Failed -> toast(result.message)
-                }
-                if (result is CustomLyricsSyncResult.Synced) render()
-            }
-        }
-    }
 
     private fun importFromAmll(
         appleMusicIdInput: EditText,

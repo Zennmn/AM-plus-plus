@@ -15,11 +15,10 @@ import dev.amenhancer.module.lyrics.CustomLyricsRestorePolicy
 import dev.amenhancer.module.lyrics.CustomLyricsRestoreResult
 import dev.amenhancer.module.lyrics.CustomLyricsRestoreTransaction
 import dev.amenhancer.module.lyrics.CustomLyricsSaveResult
-import dev.amenhancer.module.lyrics.CustomLyricsSyncLoadResult
-import dev.amenhancer.module.lyrics.CustomLyricsSyncPlanEntry
-import dev.amenhancer.module.lyrics.CustomLyricsSyncProgress
-import dev.amenhancer.module.lyrics.CustomLyricsSyncResult
-import dev.amenhancer.module.lyrics.CustomLyricsSyncTransaction
+import dev.amenhancer.module.lyrics.CustomLyricsUpdateCoordinator
+import dev.amenhancer.module.lyrics.CustomLyricsUpdateProgress
+import dev.amenhancer.module.lyrics.CustomLyricsUpdateResult
+import dev.amenhancer.module.lyrics.CustomLyricsUpdateSources
 import dev.amenhancer.module.model.CustomLyricsEntry
 import dev.amenhancer.module.model.CustomLyricsManifest
 import dev.amenhancer.module.model.CustomLyricsSources
@@ -301,42 +300,32 @@ internal class EmbeddedContentManager(
     }
 
     /**
-     * Synchronizes an enabled GitHub snapshot into host-private storage.
-     *
-     * The transaction owns the all-or-nothing merge and rollback behavior;
-     * this facade only resolves the current host index and binds the existing
-     * session file/pointer protocol to that transaction.  Keeping the network
-     * callbacks outside this class also lets callers cancel or report progress
-     * without making the storage layer aware of an Android lifecycle.
+     * Checks every remotely managed entry and atomically publishes only the
+     * bodies whose canonical UTF-8 bytes changed. Network work is deliberately
+     * outside [mutationLock]; the final compare-and-swap protects concurrent
+     * manual edits and automatic cache writes from being overwritten.
      */
-    fun syncFromGitHub(
-        plan: List<CustomLyricsSyncPlanEntry>,
-        loadTtml: (CustomLyricsSyncPlanEntry) -> CustomLyricsSyncLoadResult,
+    fun updateLyrics(
+        sources: CustomLyricsUpdateSources,
         isCancelled: () -> Boolean = { false },
-        onProgress: (CustomLyricsSyncProgress) -> Unit = {},
-    ): CustomLyricsSyncResult = synchronized(mutationLock) {
-        session.withCustomLyricsMutation {
-            val state = CustomLyricsIndexRepository.state(session.values(), session::openFile)
-            if (!state.canCommit) {
-                return@withCustomLyricsMutation CustomLyricsSyncResult.Failed(
-                    "歌词索引文件不可读，无法同步",
-                )
-            }
-            CustomLyricsSyncTransaction(
-                fileIdFactory = { fileIdFactory("lyrics") },
-                writeRemoteFile = session::writeFile,
-                publishManifest = { next ->
-                    session.commitCustomLyrics(next) is CustomLyricsIndexCommitResult.Committed
-                },
-                deleteRemoteFile = { fileId -> session.deleteFile(fileId) },
-            ).sync(
-                oldManifest = state.manifest,
-                plan = plan,
-                loadTtml = loadTtml,
-                isCancelled = isCancelled,
-                onProgress = onProgress,
-            )
+        onProgress: (CustomLyricsUpdateProgress) -> Unit = {},
+    ): CustomLyricsUpdateResult {
+        val baseline = synchronized(mutationLock) { session.customLyricsIndexState() }
+        if (!baseline.canCommit) {
+            return CustomLyricsUpdateResult.Failed("歌词索引文件不可读，无法更新")
         }
+        return CustomLyricsUpdateCoordinator(sources).update(
+            oldManifest = baseline.manifest,
+            fileIdFactory = { fileIdFactory("lyrics") },
+            writeRemoteFile = session::writeFile,
+            publishManifest = { next ->
+                session.commitCustomLyricsIfUnchanged(baseline, next) is CustomLyricsIndexCommitResult.Committed
+            },
+            deleteRemoteFile = { fileId -> session.deleteFile(fileId) },
+            isBaselineCurrent = { session.customLyricsIndexState() == baseline },
+            isCancelled = isCancelled,
+            onProgress = onProgress,
+        )
     }
 
     private fun currentLyricsManifest(): CustomLyricsManifest =
