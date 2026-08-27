@@ -33,15 +33,13 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import dev.amenhancer.module.ModuleApplication
-import dev.amenhancer.module.LibraryRefreshProtocol
 import dev.amenhancer.module.R
 import dev.amenhancer.module.XposedServiceSnapshot
-import dev.amenhancer.module.config.ConfigStore
 import dev.amenhancer.module.config.CatalogLanguagePolicy
+import dev.amenhancer.module.config.ConfigStore
 import dev.amenhancer.module.font.FontImportResult
 import dev.amenhancer.module.font.SafFontImporter
 import dev.amenhancer.module.hook.AmLyricsClient
-import dev.amenhancer.module.hook.AmLyricsIndexEntry
 import dev.amenhancer.module.hook.AmllTtmlClient
 import dev.amenhancer.module.hook.FileLunabeatCatalogCache
 import dev.amenhancer.module.hook.HttpLyricTransport
@@ -58,9 +56,6 @@ import dev.amenhancer.module.lyrics.CustomLyricsOnlineImportResult
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImporter
 import dev.amenhancer.module.lyrics.CustomLyricsRestoreResult
 import dev.amenhancer.module.lyrics.CustomLyricsRestorePolicy
-import dev.amenhancer.module.lyrics.CustomLyricsSyncLoadResult
-import dev.amenhancer.module.lyrics.CustomLyricsSyncPlanEntry
-import dev.amenhancer.module.lyrics.CustomLyricsSyncResult
 import dev.amenhancer.module.model.CustomLyricsEntry
 import dev.amenhancer.module.model.CustomLyricsManifest
 import dev.amenhancer.module.model.CustomLyricsSources
@@ -68,7 +63,6 @@ import dev.amenhancer.module.model.LyricsFontManifest
 import dev.amenhancer.module.model.ModuleSettings
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
 
 internal object BlurRadiusSeekBarPersistencePolicy {
     fun shouldPersistProgressChange(fromUser: Boolean, trackingTouch: Boolean): Boolean =
@@ -86,8 +80,6 @@ class SettingsActivity : Activity() {
     private lateinit var settingsScroll: ScrollView
     private lateinit var palette: Palette
     private lateinit var currentSongIdentityRequester: CurrentSongIdentityRequester
-    private lateinit var libraryRefreshRequester: LibraryRefreshRequester
-    private var libraryRefreshDialog: AlertDialog? = null
     private lateinit var topBarTitle: TextView
     private lateinit var topBarBackButton: ImageView
     private val backgroundExecutor: ExecutorService get() = settingsExecutor
@@ -107,7 +99,6 @@ class SettingsActivity : Activity() {
         store = ConfigStore(this)
         launcherIconController = LauncherIconController(this)
         currentSongIdentityRequester = CurrentSongIdentityRequester(this)
-        libraryRefreshRequester = LibraryRefreshRequester(this)
         palette = Palette.resolve(this)
         awaitingCustomTtmlPickerResult = savedInstanceState?.getBoolean(
             STATE_AWAITING_CUSTOM_TTML_PICKER,
@@ -134,7 +125,6 @@ class SettingsActivity : Activity() {
 
     override fun onDestroy() {
         if (::currentSongIdentityRequester.isInitialized) currentSongIdentityRequester.cancel()
-        if (::libraryRefreshRequester.isInitialized) libraryRefreshRequester.cancel()
         super.onDestroy()
     }
 
@@ -429,7 +419,7 @@ class SettingsActivity : Activity() {
             addView(insetDivider())
             addView(settingRow(
                 title = "歌曲名显示修正",
-                summary = "将部分 Catalog 请求改为目标语言并回填标题 · 修改后重开 Apple Music",
+                summary = "按 HyperLyrics-Enhanced 策略恢复原地区原名，并创建持久化检索库；目标语言仅改写底层 Catalog 请求 · 修改后重开 Apple Music",
                 checked = settings.titleCorrectionEnabled,
                 enabled = writable,
             ) { enabled ->
@@ -441,12 +431,6 @@ class SettingsActivity : Activity() {
                 summary = CatalogLanguagePolicy.displayName(settings.titleCorrectionTargetLanguage),
                 enabled = writable,
             ) { showTargetLanguagePicker() })
-            addView(insetDivider())
-            addView(actionRow(
-                title = "刷新资料库",
-                summary = "同步 Apple Music 资料库并刷新歌曲、专辑和歌手信息",
-                enabled = writable,
-            ) { requestLibraryRefresh() })
             addView(insetDivider())
             addView(customLyricsNavigationRow(settings.customLyricsManifest))
         }
@@ -489,73 +473,14 @@ class SettingsActivity : Activity() {
         setOnClickListener { if (enabled) onClick() }
     }
 
-    private fun requestLibraryRefresh() {
-        if (!libraryRefreshRequester.request { result ->
-                runOnUiThread {
-                    if (isFinishing || isDestroyed) return@runOnUiThread
-                    libraryRefreshDialog?.takeIf { it.isShowing }?.dismiss()
-                    libraryRefreshDialog = null
-                    when (result.resultCode) {
-                        LibraryRefreshProtocol.RESULT_COMPLETED -> toast(
-                            result.message ?: "资料库刷新完成",
-                        )
-                        LibraryRefreshProtocol.RESULT_CANCELLED -> toast(
-                            result.message ?: "已停止刷新资料库",
-                        )
-                        else -> toast(result.message ?: "资料库刷新失败")
-                    }
-                }
-            }
-        ) {
-            toast("刷新资料库请求正在进行")
-            return
-        }
-        showLibraryRefreshProgress()
-    }
-
-    /** AMTool-style cancellable progress dialog while the target refreshes. */
-    private fun showLibraryRefreshProgress() {
-        val progress = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(20), dp(12), dp(20), dp(12))
-            addView(ProgressBar(this@SettingsActivity), LinearLayout.LayoutParams(dp(28), dp(28)))
-            addView(TextView(this@SettingsActivity).apply {
-                text = "正在刷新资料库，请稍候…"
-                textSize = 15f
-                setTextColor(palette.onSurface)
-                setPadding(dp(16), 0, 0, 0)
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        }
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("刷新资料库")
-            .setView(progress)
-            .setNegativeButton("停止") { _, _ -> stopLibraryRefresh() }
-            .create()
-        dialog.setOnCancelListener { stopLibraryRefresh() }
-        dialog.setCanceledOnTouchOutside(false)
-        libraryRefreshDialog = dialog
-        dialog.show()
-    }
-
-    private fun stopLibraryRefresh() {
-        libraryRefreshDialog?.takeIf { it.isShowing }?.dismiss()
-        libraryRefreshDialog = null
-        libraryRefreshRequester.cancel()
-        toast("已停止刷新资料库")
-    }
-
     private fun showTargetLanguagePicker() {
         val current = CatalogLanguagePolicy.normalize(store.settings().titleCorrectionTargetLanguage)
-        // AMTool 1.2 presets, verified from AMTool_1.2.apk; a stored custom tag
-        // leaves the list unchecked (selected = -1) and is kept as-is.
-        val tags = listOf("zh-CN", "zh-TW", "ja-JP", "en-US", "tr-TR")
+        val tags = listOf("", "zh-CN", "zh-TW", "ja-JP", "ko-KR", "en-US", "tr-TR")
         val labels = tags.map { CatalogLanguagePolicy.displayName(it) }.toTypedArray()
-        val selected = tags.indexOf(current)
         AlertDialog.Builder(this)
             .setTitle("目标语言")
-            .setSingleChoiceItems(labels, selected) { dialog, which ->
-                saveTargetLanguage(tags[which])
+            .setSingleChoiceItems(labels, tags.indexOf(current)) { dialog, which ->
+                tags.getOrNull(which)?.let(::saveTargetLanguage)
                 dialog.dismiss()
             }
             .setNeutralButton("自定义") { _, _ -> showTargetLanguageEditor(current) }
@@ -565,7 +490,7 @@ class SettingsActivity : Activity() {
 
     private fun showTargetLanguageEditor(current: String) {
         val input = EditText(this).apply {
-            hint = "例如 tr-TR"
+            hint = "例如 ja-JP"
             inputType = InputType.TYPE_CLASS_TEXT
             setText(current)
             setSelectAllOnFocus(true)
@@ -573,13 +498,13 @@ class SettingsActivity : Activity() {
         }
         AlertDialog.Builder(this)
             .setTitle("自定义目标语言")
-            .setMessage("请输入 BCP-47 语言标签（例如 zh-CN）；空值或非法值无法保存")
+            .setMessage("请输入 BCP-47 语言标签（例如 zh-CN）；留空请在上一级选择“跟随 Apple Music”")
             .setView(input)
             .setNegativeButton("取消", null)
             .setPositiveButton("保存") { _, _ ->
                 val raw = input.text?.toString().orEmpty()
                 if (!CatalogLanguagePolicy.isValid(raw)) {
-                    toast("目标语言格式无效，例如 tr-TR")
+                    toast("目标语言格式无效，例如 ja-JP")
                 } else {
                     saveTargetLanguage(raw)
                 }
@@ -589,8 +514,16 @@ class SettingsActivity : Activity() {
 
     private fun saveTargetLanguage(raw: String) {
         val normalized = CatalogLanguagePolicy.normalize(raw)
-        store.saveSettings(store.settings().copy(titleCorrectionTargetLanguage = normalized))
-        toast("目标语言已设为 ${CatalogLanguagePolicy.displayName(normalized)}；重启 Apple Music 后刷新资料库")
+        store.saveSettings(
+            store.settings().copy(titleCorrectionTargetLanguage = normalized),
+        )
+        val message = if (normalized.isBlank()) {
+            "目标语言已恢复为跟随 Apple Music；重开 Apple Music 后生效"
+        } else {
+            "目标语言已设为 " + CatalogLanguagePolicy.displayName(normalized) +
+                "；重开 Apple Music 后生效"
+        }
+        toast(message)
         render()
     }
 
@@ -805,16 +738,6 @@ class SettingsActivity : Activity() {
                 setPadding(dp(12), 0, dp(12), dp(12))
                 addView(
                     fontActionButton("添加歌词", writable) { showCustomLyricsEditor() },
-                    LinearLayout.LayoutParams(0, dp(48), 1f),
-                )
-            })
-            addView(LinearLayout(this@SettingsActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                setPadding(dp(12), 0, dp(12), dp(12))
-                addView(
-                    fontActionButton("同步 GitHub 源", writable) {
-                        syncCustomLyricsFromGitHub()
-                    },
                     LinearLayout.LayoutParams(0, dp(48), 1f),
                 )
             })
@@ -1262,89 +1185,6 @@ class SettingsActivity : Activity() {
             ),
         )::fetch,
     )
-
-    private fun syncCustomLyricsFromGitHub() {
-        if (!ModuleApplication.serviceSnapshot.isRemoteFileAvailable) {
-            toast("libxposed remote file 服务不可用")
-            return
-        }
-        val cancelled = AtomicBoolean(false)
-        val progress = TextView(this).apply {
-            text = "正在读取 GitHub 索引…"
-            textSize = 15f
-            setTextColor(palette.onSurface)
-            setPadding(dp(24), dp(8), dp(24), dp(8))
-        }
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("同步 GitHub 源")
-            .setView(progress)
-            .setNegativeButton("取消") { _, _ -> cancelled.set(true) }
-            .create()
-        dialog.setOnCancelListener { cancelled.set(true) }
-        dialog.setCanceledOnTouchOutside(false)
-        dialog.show()
-
-        backgroundExecutor.execute {
-            val result = runCatching {
-                val client = AmLyricsClient(HttpLyricTransport())
-                val index = client.fetchIndex()
-                    ?: return@runCatching CustomLyricsSyncResult.Failed(
-                        "GitHub 索引无效或读取失败",
-                    )
-                val enabledEntries = index.entries.filter(AmLyricsIndexEntry::enabled)
-                val plan = enabledEntries.map { entry ->
-                    CustomLyricsSyncPlanEntry(
-                        key = entry.path,
-                        appleMusicIds = entry.allAppleMusicIds,
-                        displayName = entry.displayName,
-                    )
-                }
-                val entriesByPath = enabledEntries.associateBy(AmLyricsIndexEntry::path)
-                CustomLyricsManager(ModuleApplication.serviceSnapshot, store).syncFromGitHub(
-                    plan = plan,
-                    loadTtml = { source ->
-                        if (cancelled.get()) {
-                            CustomLyricsSyncLoadResult.Cancelled
-                        } else {
-                            val entry = entriesByPath[source.key]
-                            if (entry == null) {
-                                CustomLyricsSyncLoadResult.Failed("GitHub 索引条目已变化")
-                            } else {
-                                client.fetchTtml(entry)?.let(CustomLyricsSyncLoadResult::Loaded)
-                                    ?: CustomLyricsSyncLoadResult.Failed(
-                                        "下载 GitHub 歌词失败：${source.displayName}",
-                                    )
-                            }
-                        }
-                    },
-                    isCancelled = cancelled::get,
-                    onProgress = { update ->
-                        runOnUiThread {
-                            if (!isFinishing && !isDestroyed && !cancelled.get()) {
-                                progress.text = "正在同步 ${update.processedEntries} / " +
-                                    "${update.totalEntries} 首（已映射 ${update.importedIds + update.overwrittenIds} 个 ID）"
-                            }
-                        }
-                    },
-                )
-            }.getOrElse { error ->
-                CustomLyricsSyncResult.Failed("同步 GitHub 源失败：${error.message.orEmpty()}")
-            }
-            runOnUiThread {
-                if (isFinishing || isDestroyed) return@runOnUiThread
-                if (dialog.isShowing) dialog.dismiss()
-                when (result) {
-                    is CustomLyricsSyncResult.Synced -> toast(
-                        "GitHub 同步完成：新增 ${result.importedIds} 个 ID，覆盖 " +
-                            "${result.overwrittenIds} 个 ID，保留 ${result.preservedIds} 个本地 ID",
-                    )
-                    CustomLyricsSyncResult.Cancelled -> toast("GitHub 同步已取消")
-                    is CustomLyricsSyncResult.Failed -> toast(result.message)
-                }
-                if (result is CustomLyricsSyncResult.Synced) render()
-            }
-        }
-    }
 
     private fun importFromAmll(
         appleMusicIdInput: EditText,

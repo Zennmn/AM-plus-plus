@@ -49,6 +49,8 @@ internal object ModernXposedRuntime {
         this.module = module
     }
 
+    fun activeModule(): XposedModule? = module
+
     fun hookMethod(executable: Executable, callback: ModernMethodHook): Boolean {
         val activeModule = module ?: error("Modern Xposed runtime is not attached")
         activeModule.hook(executable).intercept { chain ->

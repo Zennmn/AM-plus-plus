@@ -142,6 +142,7 @@ internal object EmbeddedConfigurationMigration {
                 copiedFileIds = copied,
             )
         }
+        destination.removeValues(ModuleSettingsSchema.obsoleteKeys, synchronous = true)
         EmbeddedConfigurationMigrationResult.Migrated(copiedFileIds = copied)
     }
 

@@ -113,8 +113,11 @@ class ConfigStore(context: Context) {
                 LEGACY_PREFERENCES_NAME,
                 Context.MODE_PRIVATE,
             )
-            val upgraded = ModuleSettingsSchema.upgrade(destination.all, legacy.all) ?: return
-            writeValues(destination, upgraded, synchronous = true)
+            val upgraded = ModuleSettingsSchema.upgrade(destination.all, legacy.all)
+            if (upgraded != null) writeValues(destination, upgraded, synchronous = true)
+            val editor = destination.edit()
+            ModuleSettingsSchema.obsoleteKeys.forEach(editor::remove)
+            editor.commit()
         }
 
         private fun writeValues(

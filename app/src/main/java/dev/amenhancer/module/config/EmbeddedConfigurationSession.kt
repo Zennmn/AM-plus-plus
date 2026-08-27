@@ -18,6 +18,7 @@ internal interface ConfigurationReader {
 /** Host-private storage adapter used only by the embedded artifact. */
 internal interface EmbeddedConfigurationStorage : ConfigurationReader {
     fun writeValues(values: Map<String, Any>, synchronous: Boolean): Boolean
+    fun removeValues(keys: Set<String>, synchronous: Boolean = true): Boolean = true
     fun writeFile(name: String, bytes: ByteArray): Boolean
     fun deleteFile(name: String): Boolean
 
@@ -72,6 +73,9 @@ internal class EmbeddedConfigurationSession(
     },
     private val writable: Boolean = true,
 ) : ConfigurationReader {
+    init {
+        if (writable) storage.removeValues(ModuleSettingsSchema.obsoleteKeys, synchronous = true)
+    }
     private val indexRepository = CustomLyricsIndexRepository(
         newIndexFileId = newIndexFileId,
         openFile = storage::openFile,
@@ -105,6 +109,40 @@ internal class EmbeddedConfigurationSession(
         synchronized(INDEX_MUTATION_LOCK) {
             indexRepository.commit(
                 state = indexRepository.state(storage.values()),
+                next = manifest,
+                allowRecovery = allowRecovery,
+            )
+        }
+    }
+
+    /**
+     * Captures the currently published lyrics index for a long-running update.
+     * The returned state is immutable and can safely cross the network worker
+     * boundary; callers must pass it back to [commitCustomLyricsIfUnchanged].
+     */
+    internal fun customLyricsIndexState(): CustomLyricsIndexState =
+        indexRepository.state(storage.values())
+
+    /**
+     * Compare-and-swap variant used by the lyrics updater. A background source
+     * scan must never publish over an edit made after its baseline snapshot.
+     */
+    internal fun commitCustomLyricsIfUnchanged(
+        expected: CustomLyricsIndexState,
+        manifest: CustomLyricsManifest,
+        allowRecovery: Boolean = false,
+    ): CustomLyricsIndexCommitResult = if (!writable) {
+        CustomLyricsIndexCommitResult.Failed("嵌入配置迁移未完成，当前仅可读")
+    } else {
+        synchronized(INDEX_MUTATION_LOCK) {
+            val current = indexRepository.state(storage.values())
+            if (current != expected) {
+                return@synchronized CustomLyricsIndexCommitResult.Failed(
+                    "歌词索引在更新期间已被修改，请重试",
+                )
+            }
+            indexRepository.commit(
+                state = current,
                 next = manifest,
                 allowRecovery = allowRecovery,
             )

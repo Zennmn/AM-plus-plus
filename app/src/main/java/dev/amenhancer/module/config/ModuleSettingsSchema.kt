@@ -6,6 +6,9 @@ import dev.amenhancer.module.model.LyricsFontManifest
 import dev.amenhancer.module.model.ModuleSettings
 
 internal object ModuleSettingsSchema {
+    /** Kept for storage callers; all previously obsolete settings are now gone. */
+    internal val obsoleteKeys: Set<String> = emptySet()
+
     fun decode(values: Map<String, *>): ModuleSettings = ModuleSettings(
         dualPaneEnabled = values.boolean(KEY_DUAL_PANE, default = true),
         disableEditorialVideoOnTablet = values.boolean(
@@ -34,11 +37,9 @@ internal object ModuleSettingsSchema {
             KEY_TITLE_CORRECTION_ENABLED,
             default = false,
         ),
-        titleCorrectionTargetLanguage = if (values.containsKey(KEY_TITLE_CORRECTION_TARGET_LANGUAGE)) {
-            CatalogLanguagePolicy.normalize(values.string(KEY_TITLE_CORRECTION_TARGET_LANGUAGE))
-        } else {
-            CatalogLanguagePolicy.DEFAULT_TARGET_LANGUAGE
-        },
+        titleCorrectionTargetLanguage = CatalogLanguagePolicy.normalize(
+            values.string(KEY_TITLE_CORRECTION_TARGET_LANGUAGE),
+        ),
         customLyricsEnabled = values.boolean(
             KEY_CUSTOM_LYRICS_ENABLED,
             default = values.boolean(KEY_LEGACY_ONLINE_LYRIC_REPLACEMENT, default = false),
@@ -136,7 +137,7 @@ internal object ModuleSettingsSchema {
 
     /** Avoid turning an unrelated/empty remote group into a completed migration. */
     fun hasMigratableValues(values: Map<String, *>): Boolean =
-        values.keys.any { it in settingKeys || it in indexPointerKeys }
+        values.keys.any { it in settingKeys || it in obsoleteKeys || it in indexPointerKeys }
 
     /** Legacy v1 preference-string manifest, kept for pre-migration reads. */
     fun decodeLegacyCustomLyricsManifest(values: Map<String, *>): CustomLyricsManifest =

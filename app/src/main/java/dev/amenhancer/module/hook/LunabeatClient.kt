@@ -135,6 +135,11 @@ internal class LunabeatClient(
         if (appleMusicId <= 0L) return null
         val catalog = loadCatalog() ?: return null
         val song = catalog.entryFor(appleMusicId) ?: return null
+        return fetch(song)
+    }
+
+    /** Fetches one already-resolved catalog song without reloading the catalog. */
+    fun fetch(song: LunabeatSong): String? {
         val encodedPath = encodePath(song.path) ?: return null
         val bytes = lyricsTransport.getBytes("$LYRICS_BASE/$encodedPath") ?: return null
         if (bytes.size > TtmlInputPolicy.MAX_TTML_BYTES) return null

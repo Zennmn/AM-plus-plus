@@ -45,7 +45,6 @@ import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
-import dev.amenhancer.module.LibraryRefreshProtocol
 import dev.amenhancer.module.ModuleConstants
 import dev.amenhancer.module.config.CatalogLanguagePolicy
 import dev.amenhancer.module.config.EmbeddedConfigurationSession
@@ -61,8 +60,8 @@ import dev.amenhancer.module.lyrics.CustomLyricsMultiIdDraft
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImportResult
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImporter
 import dev.amenhancer.module.lyrics.CustomLyricsRestorePolicy
-import dev.amenhancer.module.lyrics.CustomLyricsSyncProgress
-import dev.amenhancer.module.lyrics.CustomLyricsSyncResult
+import dev.amenhancer.module.lyrics.CustomLyricsUpdateProgress
+import dev.amenhancer.module.lyrics.CustomLyricsUpdateResult
 import dev.amenhancer.module.model.CustomLyricsEntry
 import dev.amenhancer.module.model.CustomLyricsSources
 import dev.amenhancer.module.model.ModuleSettings
@@ -792,15 +791,6 @@ private val EMBEDDED_FONT_MIME_TYPES = arrayOf(
     "application/vnd.ms-opentype",
 )
 
-/** AMTool-compatible language choices shared by the standalone settings UI. */
-private val EMBEDDED_CATALOG_LANGUAGE_TAGS = listOf(
-    "zh-CN",
-    "zh-TW",
-    "ja-JP",
-    "en-US",
-    "tr-TR",
-)
-
 /** Stable, locale-aware signals for the fixed Apple Music settings surface. */
 internal object EmbeddedSettingsTextPolicy {
     private val classNameMarkers = listOf(
@@ -1022,16 +1012,6 @@ internal interface EmbeddedSettingsController {
 
     fun saveOrdinarySettings(settings: ModuleSettings): Boolean
 
-    /**
-     * Starts the host-process library refresh and reports its terminal result
-     * on the caller's UI handler.  The default keeps lightweight test/fallback
-     * controllers fail-open when the Apple Music refresh target is unavailable.
-     */
-    fun requestLibraryRefresh(onResult: (LibraryRefreshResult) -> Unit): Boolean = false
-
-    /** Cancels the in-flight host refresh, if any. */
-    fun cancelLibraryRefresh() = Unit
-
     fun currentSongDetails(): CurrentSongDetails? = null
     fun lyricsEntries(): List<CustomLyricsEntry> = emptyList()
     fun readLyrics(appleMusicId: Long): String? = null
@@ -1068,10 +1048,10 @@ internal interface EmbeddedSettingsController {
         displayName: String,
     ): EmbeddedActionResult = EmbeddedActionResult.Failed("在线导入不可用")
 
-    fun syncFromGitHub(
+    fun updateLyrics(
         isCancelled: () -> Boolean = { false },
-        onProgress: (CustomLyricsSyncProgress) -> Unit = {},
-    ): CustomLyricsSyncResult = CustomLyricsSyncResult.Failed("GitHub 同步不可用")
+        onProgress: (CustomLyricsUpdateProgress) -> Unit = {},
+    ): CustomLyricsUpdateResult = CustomLyricsUpdateResult.Failed("歌词更新不可用")
 }
 
 internal class EmbeddedSessionSettingsController(
@@ -1104,7 +1084,6 @@ internal class EmbeddedSettingsHost private constructor(
     private var activityReference: WeakReference<Activity>? = null
     private var dialogReference: WeakReference<Dialog>? = null
     private var pageRefresh: (() -> Unit)? = null
-    private var libraryRefreshDialog: AlertDialog? = null
     private val customLyricsListState = CustomLyricsListState()
     private var customLyricsSearchQuery = ""
     private var pendingTtmlImport: ((String) -> Unit)? = null
@@ -2117,7 +2096,6 @@ internal class EmbeddedSettingsHost private constructor(
                         page = EmbeddedSettingsPage.CUSTOM_LYRICS
                         renderPage()
                     },
-                    onRefreshLibrary = { requestLibraryRefresh(activity) },
                     onChooseFont = {
                         launchSafPicker(
                             activity,
@@ -2180,7 +2158,6 @@ internal class EmbeddedSettingsHost private constructor(
         lyricsCount: Int,
         onSettingsChanged: (ModuleSettings) -> Unit,
         onOpenCustomLyrics: () -> Unit,
-        onRefreshLibrary: () -> Unit,
         onChooseFont: () -> Unit,
         onClearFont: () -> Unit,
     ) {
@@ -2253,7 +2230,7 @@ internal class EmbeddedSettingsHost private constructor(
             addView(embeddedSettingRow(
                 activity,
                 "歌曲名显示修正",
-                "修正部分歌曲名称无法正确显示的问题",
+                "按 HLE 原地区策略修正歌曲信息，并创建持久化检索库；目标语言仅改写底层 Catalog 请求",
                 settings.titleCorrectionEnabled,
                 iconTint = EmbeddedSettingsPalette.accent,
                 iconDrawable = EmbeddedGlyphDrawable(
@@ -2277,22 +2254,9 @@ internal class EmbeddedSettingsHost private constructor(
                     current = settings.titleCorrectionTargetLanguage,
                 ) { target ->
                     onSettingsChanged(settings.copy(titleCorrectionTargetLanguage = target))
-                    // Re-render only after a picker selection so the summary
-                    // reflects the persisted canonical tag immediately.
                     pageRefresh?.invoke()
                 }
             })
-            addView(embeddedDivider(activity))
-            addView(embeddedNavigationRow(
-                activity,
-                "刷新资料库",
-                "重新同步 Apple Music 资料库与缓存",
-                iconDrawable = EmbeddedGlyphDrawable(
-                    EmbeddedGlyphKind.Refresh,
-                    EmbeddedSettingsPalette.accent,
-                ),
-                onClick = onRefreshLibrary,
-            ))
             addView(embeddedDivider(activity))
             addView(embeddedNavigationRow(
                 activity,
@@ -2389,7 +2353,7 @@ internal class EmbeddedSettingsHost private constructor(
                             arrayOf("application/ttml+xml", "application/xml", "text/xml", "text/plain"),
                         )
                     },
-                    onGithub = { syncEmbeddedGitHub(activity) },
+                    onUpdate = { updateEmbeddedLyrics(activity) },
                     onBackup = { anchor -> showEmbeddedBackupRestoreMenu(activity, anchor) },
                 ),
                 LinearLayout.LayoutParams(
@@ -2688,17 +2652,17 @@ internal class EmbeddedSettingsHost private constructor(
         else -> "手动 TTML"
     }
 
-    private fun syncEmbeddedGitHub(activity: Activity) {
+    private fun updateEmbeddedLyrics(activity: Activity) {
         val cancelled = AtomicBoolean(false)
         val progress = TextView(activity).apply {
-            text = "正在读取 GitHub 索引…"
+            text = "正在检查歌词…"
             textSize = 15f
             setTextColor(EmbeddedSettingsPalette.onSurface)
             setSingleLine(false)
             setPadding(dp(activity, 24), dp(activity, 8), dp(activity, 24), dp(activity, 8))
         }
         val dialog = AlertDialog.Builder(activity)
-            .setTitle("同步 GitHub 源")
+            .setTitle("歌词更新")
             .setView(progress)
             .setNegativeButton("取消") { _, _ -> cancelled.set(true) }
             .create()
@@ -2707,130 +2671,48 @@ internal class EmbeddedSettingsHost private constructor(
         dialog.show()
         worker.execute {
             val result = runCatching {
-                controller.syncFromGitHub(
+                controller.updateLyrics(
                     isCancelled = cancelled::get,
                     onProgress = { update ->
                         mainHandler.post {
                             if (dialog.isShowing) {
                                 progress.text =
-                                    "正在同步 ${update.processedEntries}/${update.totalEntries} 条 GitHub 歌词…"
+                                    "正在检查 ${update.checkedEntries}/${update.totalEntries} 条歌词…\n" +
+                                        "更新 ${update.updatedEntries} · 无变化 ${update.unchangedEntries} · " +
+                                        "跳过 ${update.skippedEntries} · 失败 ${update.failedEntries}"
                             }
                         }
                     },
                 )
             }.getOrElse { error ->
-                CustomLyricsSyncResult.Failed(
-                    "同步 GitHub 源失败：${error.message.orEmpty()}",
+                CustomLyricsUpdateResult.Failed(
+                    "歌词更新失败：${error.message.orEmpty()}",
                 )
             }
             mainHandler.post {
                 if (dialog.isShowing) dialog.dismiss()
                 val current = currentActivity() ?: return@post
                 when (result) {
-                    is CustomLyricsSyncResult.Synced -> Toast.makeText(
+                    is CustomLyricsUpdateResult.Updated -> Toast.makeText(
                         current,
-                        "GitHub 同步完成：新增 ${result.importedIds} 个 ID，覆盖 " +
-                            "${result.overwrittenIds} 个 ID，保留 ${result.preservedIds} 个本地 ID",
+                        "歌词更新完成：检查 ${result.checked} 条，更新 ${result.updated} 条，" +
+                            "无变化 ${result.unchanged} 条，跳过 ${result.skipped} 条，失败 ${result.failed} 条",
                         Toast.LENGTH_LONG,
                     ).show()
-                    CustomLyricsSyncResult.Cancelled -> Toast.makeText(
+                    CustomLyricsUpdateResult.Cancelled -> Toast.makeText(
                         current,
-                        "GitHub 同步已取消",
+                        "歌词更新已取消",
                         Toast.LENGTH_SHORT,
                     ).show()
-                    is CustomLyricsSyncResult.Failed -> Toast.makeText(
+                    is CustomLyricsUpdateResult.Failed -> Toast.makeText(
                         current,
                         result.message,
                         Toast.LENGTH_LONG,
                     ).show()
                 }
-                if (result is CustomLyricsSyncResult.Synced) pageRefresh?.invoke()
+                if (result is CustomLyricsUpdateResult.Updated) pageRefresh?.invoke()
             }
         }
-    }
-
-    /**
-     * Requests the refresh through the controller's in-process protocol.  The
-     * native target owns all reflection, waiting and Catalog backfill work;
-     * this host only keeps a cancellable progress surface on the UI thread.
-     */
-    private fun requestLibraryRefresh(activity: Activity) {
-        if (libraryRefreshDialog?.isShowing == true) return
-
-        val completed = AtomicBoolean(false)
-        val progress = TextView(activity).apply {
-            text = "正在触发 Apple Music 资料库同步…"
-            textSize = 15f
-            setTextColor(EmbeddedSettingsPalette.onSurface)
-            setSingleLine(false)
-            setPadding(dp(activity, 24), dp(activity, 12), dp(activity, 24), dp(activity, 12))
-        }
-        lateinit var dialog: AlertDialog
-        fun finish(result: LibraryRefreshResult) {
-            if (!completed.compareAndSet(false, true)) return
-            if (libraryRefreshDialog === dialog) {
-                dialog.dismiss()
-            }
-            val current = currentActivity() ?: return
-            val message = result.message.orEmpty().ifBlank {
-                when (result.resultCode) {
-                    LibraryRefreshProtocol.RESULT_COMPLETED -> "资料库刷新完成"
-                    LibraryRefreshProtocol.RESULT_CANCELLED -> "已停止刷新资料库"
-                    LibraryRefreshProtocol.RESULT_UNAVAILABLE -> "资料库刷新不可用"
-                    else -> "资料库刷新失败"
-                }
-            }
-            Toast.makeText(
-                current,
-                message,
-                if (result.resultCode == LibraryRefreshProtocol.RESULT_COMPLETED) {
-                    Toast.LENGTH_LONG
-                } else {
-                    Toast.LENGTH_SHORT
-                },
-            ).show()
-        }
-
-        dialog = AlertDialog.Builder(activity)
-            .setTitle("刷新资料库")
-            .setView(progress)
-            .setNegativeButton("取消") { _, _ ->
-                completed.set(true)
-                controller.cancelLibraryRefresh()
-            }
-            .create()
-        dialog.setCanceledOnTouchOutside(false)
-        dialog.setOnCancelListener {
-            if (completed.compareAndSet(false, true)) controller.cancelLibraryRefresh()
-        }
-        dialog.setOnDismissListener {
-            if (libraryRefreshDialog === dialog) libraryRefreshDialog = null
-            if (completed.compareAndSet(false, true)) controller.cancelLibraryRefresh()
-        }
-        libraryRefreshDialog = dialog
-
-        val requested = runCatching {
-            controller.requestLibraryRefresh(::finish)
-        }.getOrElse { error ->
-            finish(
-                LibraryRefreshResult(
-                    LibraryRefreshProtocol.RESULT_FAILED,
-                    "无法向 Apple Music 发送刷新请求：${error.message.orEmpty()}",
-                ),
-            )
-            false
-        }
-        if (!requested) {
-            if (!completed.get()) {
-                completed.set(true)
-                if (libraryRefreshDialog === dialog) dialog.dismiss()
-                Toast.makeText(activity, "刷新和补查正在进行或不可用", Toast.LENGTH_SHORT).show()
-            }
-            return
-        }
-        // A sendBroadcast failure can synchronously complete the requester;
-        // do not show a stale progress dialog after that callback has arrived.
-        if (!completed.get() && !dialog.isShowing) dialog.show()
     }
 
     private fun embeddedStatusCard(activity: Activity, song: CurrentSongDetails?): View =
@@ -3219,16 +3101,13 @@ internal class EmbeddedSettingsHost private constructor(
         onSelected: (String) -> Unit,
     ) {
         val normalizedCurrent = CatalogLanguagePolicy.normalize(current)
-        val tags = EMBEDDED_CATALOG_LANGUAGE_TAGS
+        val tags = listOf("", "zh-CN", "zh-TW", "ja-JP", "ko-KR", "en-US", "tr-TR")
         val labels = tags.map { CatalogLanguagePolicy.displayName(it) }.toTypedArray()
-        val selected = tags.indexOf(normalizedCurrent)
         AlertDialog.Builder(activity)
             .setTitle("目标语言")
-            .setSingleChoiceItems(labels, selected) { dialog, which ->
-                tags.getOrNull(which)?.let { tag ->
-                    onSelected(tag)
-                    dialog.dismiss()
-                }
+            .setSingleChoiceItems(labels, tags.indexOf(normalizedCurrent)) { dialog, which ->
+                tags.getOrNull(which)?.let(onSelected)
+                dialog.dismiss()
             }
             .setNeutralButton("自定义") { _, _ ->
                 showEmbeddedTargetLanguageEditor(activity, normalizedCurrent, onSelected)
@@ -3243,7 +3122,7 @@ internal class EmbeddedSettingsHost private constructor(
         onSelected: (String) -> Unit,
     ) {
         val input = EditText(activity).apply {
-            hint = "例如 tr-TR"
+            hint = "例如 ja-JP"
             inputType = InputType.TYPE_CLASS_TEXT
             setText(current)
             setSelectAllOnFocus(true)
@@ -3251,13 +3130,13 @@ internal class EmbeddedSettingsHost private constructor(
         }
         AlertDialog.Builder(activity)
             .setTitle("自定义目标语言")
-            .setMessage("请输入 BCP-47 语言标签（例如 zh-CN）；空值或非法值无法保存")
+            .setMessage("请输入 BCP-47 语言标签（例如 zh-CN）；留空请在上一级选择“跟随 Apple Music”")
             .setView(input)
             .setNegativeButton("取消", null)
             .setPositiveButton("保存") { _, _ ->
                 val raw = input.text?.toString().orEmpty()
                 if (!CatalogLanguagePolicy.isValid(raw)) {
-                    Toast.makeText(activity, "目标语言格式无效，例如 tr-TR", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(activity, "目标语言格式无效，例如 ja-JP", Toast.LENGTH_SHORT).show()
                 } else {
                     onSelected(CatalogLanguagePolicy.normalize(raw))
                 }
@@ -3532,7 +3411,7 @@ internal class EmbeddedSettingsHost private constructor(
         activity: Activity,
         onAdd: () -> Unit,
         onTtml: () -> Unit,
-        onGithub: () -> Unit,
+        onUpdate: () -> Unit,
         onBackup: (View) -> Unit,
     ): View {
         val container = LinearLayout(activity).apply {
@@ -3589,13 +3468,13 @@ internal class EmbeddedSettingsHost private constructor(
         )
         container.addView(embeddedCompactLyricsActionDivider(activity))
         addAction(
-            label = "GitHub",
-            description = "GitHub 同步",
-            icon = embeddedSvgDrawable(EmbeddedSvgIcon.GitHubSync) ?: EmbeddedGlyphDrawable(
-                EmbeddedGlyphKind.Github,
+            label = "更新",
+            description = "歌词更新",
+            icon = EmbeddedGlyphDrawable(
+                EmbeddedGlyphKind.Refresh,
                 EmbeddedSettingsPalette.accent,
             ),
-            onClick = { onGithub() },
+            onClick = { onUpdate() },
         )
         container.addView(embeddedCompactLyricsActionDivider(activity))
         addAction(
@@ -4431,12 +4310,7 @@ internal class EmbeddedSettingsHost private constructor(
     }
 
     private fun dismissDialog() {
-        // A settings host teardown must stop any in-flight native refresh
-        // before releasing the progress dialog and its callback closure.
-        controller.cancelLibraryRefresh()
         pendingTtmlImport = null
-        libraryRefreshDialog?.dismiss()
-        libraryRefreshDialog = null
         dialogReference?.get()?.dismiss()
         dialogReference = null
         pageRefresh = null
