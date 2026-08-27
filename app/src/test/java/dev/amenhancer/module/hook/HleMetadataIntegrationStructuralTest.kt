@@ -149,6 +149,20 @@ class HleMetadataIntegrationStructuralTest {
     }
 
     @Test
+    fun `listen now release artwork lookup avoids diagnostics cache scans`() {
+        val listenNow = source(
+            "app/src/main/java/io/github/proify/lyricon/amprovider/xposed/metadata/AppleListenNowHooks.kt",
+        )
+        assertTrue(
+            listenNow.contains(
+                "val cachedArtwork = synchronized(inAppListenNowArtworkContinuityCache)",
+            ),
+        )
+        assertTrue(listenNow.contains("if (BuildConfig.DEBUG) {\n                        val cacheDiagnostics"))
+        assertFalse(listenNow.contains("InAppListenNowArtworkCacheProbe"))
+    }
+
+    @Test
     fun `generic profile top songs use the direct relationship and h1 binding seam`() {
         val artist = source(
             "app/src/main/java/io/github/proify/lyricon/amprovider/xposed/metadata/AppleArtistSurfaceHooks.kt",

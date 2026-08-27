@@ -333,11 +333,15 @@ internal class AppleListenNowHooks(
                         }
                         return@installHook
                     }
-                    val cacheProbe = synchronized(inAppListenNowArtworkContinuityCache) {
-                        InAppListenNowArtworkCacheProbe(
-                            exact = inAppListenNowArtworkContinuityCache[key],
-                            cacheSize = inAppListenNowArtworkContinuityCache.size,
-                            sameBaseArtworkHashes = inAppListenNowArtworkContinuityCache.keys
+                    // This hook runs once per homepage card. Release behavior only needs the
+                    // exact LRU entry; scanning up to 1,024 keys to prepare disabled diagnostics
+                    // was an O(cache-size) main-thread cost on every empty-artwork bind.
+                    val cachedArtwork = synchronized(inAppListenNowArtworkContinuityCache) {
+                        inAppListenNowArtworkContinuityCache[key]
+                    }
+                    if (BuildConfig.DEBUG) {
+                        val cacheDiagnostics = synchronized(inAppListenNowArtworkContinuityCache) {
+                            val sameBaseArtworkHashes = inAppListenNowArtworkContinuityCache.keys
                                 .asSequence()
                                 .filter { candidate ->
                                     candidate.id == key.id &&
@@ -346,27 +350,26 @@ internal class AppleListenNowHooks(
                                 }
                                 .map { candidate -> candidate.artworkIdentity.hashCode() }
                                 .distinct()
-                                .toList(),
-                        )
-                    }
-                    if (BuildConfig.DEBUG) {
+                                .toList()
+                            inAppListenNowArtworkContinuityCache.size to sameBaseArtworkHashes
+                        }
                         host.logMetadataIdentity(
                             event = "listen_now_artwork_cache_lookup",
                             details = "contentId=${key.id}, persistentId=${key.persistentId}, " +
                                 "contentType=${key.contentType}, artworkHash=" +
                                 "${key.artworkIdentity.hashCode()}, exactHit=" +
-                                "${cacheProbe.exact != null}, cacheSize=${cacheProbe.cacheSize}, " +
-                                "sameBaseArtworkHashes=${cacheProbe.sameBaseArtworkHashes}",
+                                "${cachedArtwork != null}, cacheSize=${cacheDiagnostics.first}, " +
+                                "sameBaseArtworkHashes=${cacheDiagnostics.second}",
                         )
                     }
                     val restoredUrls = selectInAppArtworkContinuityUrls(
                         currentUrls = currentUrls,
-                        cachedUrls = cacheProbe.exact?.urls,
-                        cachedAtUptimeMillis = cacheProbe.exact?.capturedAtUptimeMillis,
+                        cachedUrls = cachedArtwork?.urls,
+                        cachedAtUptimeMillis = cachedArtwork?.capturedAtUptimeMillis,
                         nowUptimeMillis = SystemClock.uptimeMillis(),
                         ttlMillis = LISTEN_NOW_ARTWORK_CONTINUITY_TTL_MS,
                     ) ?: run {
-                        if (cacheProbe.exact != null) {
+                        if (cachedArtwork != null) {
                             synchronized(inAppListenNowArtworkContinuityCache) {
                                 inAppListenNowArtworkContinuityCache.remove(key)
                             }

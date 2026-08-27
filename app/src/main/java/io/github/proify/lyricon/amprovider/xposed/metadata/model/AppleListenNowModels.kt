@@ -77,12 +77,6 @@ internal data class InAppListenNowArtworkIdentity(
     val key: InAppListenNowArtworkContinuityKey?,
 )
 
-internal data class InAppListenNowArtworkCacheProbe(
-    val exact: InAppArtworkContinuityEntry?,
-    val cacheSize: Int,
-    val sameBaseArtworkHashes: List<Int>,
-)
-
 internal data class InAppListenNowSeededArtwork(
     val key: InAppListenNowArtworkContinuityKey,
     val urls: List<String>,
