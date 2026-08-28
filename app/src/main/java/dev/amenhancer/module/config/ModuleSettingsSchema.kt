@@ -6,8 +6,8 @@ import dev.amenhancer.module.model.LyricsFontManifest
 import dev.amenhancer.module.model.ModuleSettings
 
 internal object ModuleSettingsSchema {
-    /** Kept for storage callers; all previously obsolete settings are now gone. */
-    internal val obsoleteKeys: Set<String> = emptySet()
+    /** Keys removed by the profile migration. */
+    internal val obsoleteKeys: Set<String> = setOf(KEY_TITLE_CORRECTION_TARGET_LANGUAGE)
 
     fun decode(values: Map<String, *>): ModuleSettings = ModuleSettings(
         dualPaneEnabled = values.boolean(KEY_DUAL_PANE, default = true),
@@ -37,9 +37,7 @@ internal object ModuleSettingsSchema {
             KEY_TITLE_CORRECTION_ENABLED,
             default = false,
         ),
-        titleCorrectionTargetLanguage = CatalogLanguagePolicy.normalize(
-            values.string(KEY_TITLE_CORRECTION_TARGET_LANGUAGE),
-        ),
+        titleCorrectionMode = values.titleCorrectionMode(),
         customLyricsEnabled = values.boolean(
             KEY_CUSTOM_LYRICS_ENABLED,
             default = values.boolean(KEY_LEGACY_ONLINE_LYRIC_REPLACEMENT, default = false),
@@ -75,9 +73,7 @@ internal object ModuleSettingsSchema {
                 ModuleSettings.MAX_LYRIC_BLUR_RADIUS_OFFSET_PX,
             ),
             KEY_TITLE_CORRECTION_ENABLED to settings.titleCorrectionEnabled,
-            KEY_TITLE_CORRECTION_TARGET_LANGUAGE to CatalogLanguagePolicy.normalize(
-                settings.titleCorrectionTargetLanguage,
-            ),
+            KEY_TITLE_CORRECTION_MODE to settings.titleCorrectionMode.storageValue,
             KEY_CUSTOM_LYRICS_ENABLED to settings.customLyricsEnabled,
             KEY_AUTOMATIC_LYRICS_ENABLED to settings.automaticLyricsEnabled,
         )
@@ -160,6 +156,35 @@ internal object ModuleSettingsSchema {
     private fun Map<String, *>.customLyricsManifest(): CustomLyricsManifest =
         decodeLegacyCustomLyricsManifest(this)
 
+    private fun Map<String, *>.titleCorrectionMode(): TitleCorrectionMode {
+        val storedMode = string(KEY_TITLE_CORRECTION_MODE)
+        if (storedMode.isNotBlank()) return TitleCorrectionMode.decode(storedMode)
+        if (!boolean(KEY_TITLE_CORRECTION_ENABLED, default = false)) {
+            return TitleCorrectionMode.ORIGINAL_HYPER
+        }
+        return TitleCorrectionMode.fromLegacyTargetLanguage(
+            string(KEY_TITLE_CORRECTION_TARGET_LANGUAGE),
+        )
+    }
+
+    /**
+     * Returns the host-local values required before removing the v11 target
+     * language key.  This is intentionally independent of the schema version:
+     * an already-initialized embedded store skips remote migration, so it must
+     * still be able to upgrade its own legacy value in place.
+     */
+    internal fun legacyTitleCorrectionMigrationValues(values: Map<String, *>): Map<String, Any> {
+        if (!values.containsKey(KEY_TITLE_CORRECTION_TARGET_LANGUAGE) ||
+            values.string(KEY_TITLE_CORRECTION_MODE).isNotBlank()
+        ) {
+            return emptyMap()
+        }
+        return linkedMapOf(
+            KEY_TITLE_CORRECTION_MODE to values.titleCorrectionMode().storageValue,
+            KEY_SCHEMA_VERSION to ModuleConstants.CONFIG_SCHEMA_VERSION,
+        )
+    }
+
     private fun Map<String, *>.string(key: String): String = this[key] as? String ?: ""
 
     private fun Map<String, *>.long(key: String): Long? = when (val value = this[key]) {
@@ -198,6 +223,7 @@ internal object ModuleSettingsSchema {
         KEY_NAVIGATION_COMPENSATION,
         KEY_LYRIC_BLUR_RADIUS_OFFSET,
         KEY_TITLE_CORRECTION_ENABLED,
+        KEY_TITLE_CORRECTION_MODE,
         KEY_TITLE_CORRECTION_TARGET_LANGUAGE,
         KEY_CUSTOM_LYRICS_ENABLED,
         KEY_AUTOMATIC_LYRICS_ENABLED,
@@ -226,6 +252,7 @@ internal object ModuleSettingsSchema {
     private const val KEY_NAVIGATION_COMPENSATION = "navigation_compensation_enabled"
     private const val KEY_LYRIC_BLUR_RADIUS_OFFSET = "lyric_blur_radius_offset_px"
     private const val KEY_TITLE_CORRECTION_ENABLED = "title_correction_enabled"
+    private const val KEY_TITLE_CORRECTION_MODE = "title_correction_mode"
     private const val KEY_TITLE_CORRECTION_TARGET_LANGUAGE = "title_correction_target_language"
     private const val KEY_CUSTOM_LYRICS_ENABLED = "custom_lyrics_enabled"
     private const val KEY_AUTOMATIC_LYRICS_ENABLED = "automatic_lyrics_enabled"

@@ -18,11 +18,19 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
+private fun sanitizeCacheNamespace(raw: String): String = raw
+    .trim()
+    .lowercase()
+    .replace(Regex("[^a-z0-9_-]"), "_")
+    .trim('_')
+    .ifBlank { "default_v1" }
+
 internal class AppleInternalCatalogResolver(
     context: Context,
     private val classLoader: ClassLoader,
     private val hookResolver: AppleMusicHookResolver,
-    private val mainHandler: Handler
+    private val mainHandler: Handler,
+    cacheNamespace: String = "original_hyper_v1",
 ) {
     /**
      * Catalog response parsing is pure CPU work once the host response has been snapshotted.
@@ -41,8 +49,19 @@ internal class AppleInternalCatalogResolver(
         backgroundExecutor = catalogBackgroundExecutor,
         isMainThread = { Looper.myLooper() == Looper.getMainLooper() },
     )
-    private val persistentLocalizedCache = AppleLocalizedMetadataCache(context, mainHandler)
-    private val persistentOriginalCache = AppleOriginalMetadataCache(context, mainHandler)
+    private val cacheNamespace = sanitizeCacheNamespace(cacheNamespace)
+    private val persistentLocalizedCache = AppleLocalizedMetadataCache(
+        context = context,
+        mainHandler = mainHandler,
+        databaseName = "hyperlyricsenhanced_apple_metadata_${this.cacheNamespace}.db",
+    )
+    private val persistentOriginalCache = AppleOriginalMetadataCache(
+        context = context,
+        mainHandler = mainHandler,
+        databaseName = "hyperlyricsenhanced_apple_original_metadata_${this.cacheNamespace}.db",
+        artistRegionPreferencesName =
+            "hyperlyricsenhanced_apple_original_artist_regions_${this.cacheNamespace}",
+    )
     private val resolvedCatalogHolder by lazy {
         hookResolver.resolveClass(AppleMusicHookPoint.MEDIA_API_REPOSITORY_HOLDER_CLASS)
     }
@@ -81,6 +100,12 @@ internal class AppleInternalCatalogResolver(
     private var localizedBatchScheduled = false
     private var localizedBatchesRunning = 0
     private var localizedBackgroundBatchesRunning = 0
+    /**
+     * Fixed-region ID misses use a two-step identity/ISRC chain.  Keep that chain behind its own
+     * small queue so a 50-item localized batch cannot turn into 50 simultaneous host requests.
+     */
+    private val lockedIsrcFallbackPending = mutableListOf<LockedIsrcFallbackTask>()
+    private var lockedIsrcFallbackRunning = 0
     private val requestPriorityByMediaId =
         object : LinkedHashMap<String, RequestPriority>(256, 0.75f, true) {
             override fun removeEldestEntry(
@@ -95,12 +120,6 @@ internal class AppleInternalCatalogResolver(
     @Volatile
     private var persistentLocalizedCacheEnabled = true
     private var catalogAccess: CatalogAccess? = null
-    @Volatile
-    private var accountStorefront: String? = null
-    @Volatile
-    private var accountStorefrontCaptured = false
-    @Volatile
-    private var lastAppliedConfiguredStorefront: String? = null
     private val activeCatalogRequest = ThreadLocal<CatalogRequestLocalization?>()
     private val pendingCatalogRequests = ConcurrentHashMap<String, CatalogRequestLocalization>()
     private val catalogRequestSequence = AtomicLong()
@@ -110,20 +129,16 @@ internal class AppleInternalCatalogResolver(
         RootConstants.DEFAULT_HOOK_APPLE_MUSIC_CONTENT_UI_LANGUAGE
 
     /**
-     * Applies the content storefront without changing the account's original value.
-     * The MediaApi storefront is also used by Apple Music for localized content, so
-     * keeping this value in one place covers both startup and post-query recovery.
+     * Prepares the selected metadata profile without changing Apple Music's account storefront.
+     *
+     * Fixed-region requests are scoped by [CatalogRequestLocalization] inside [queryResponse]
+     * and are tagged with [CATALOG_REQUEST_TOKEN_PARAM].  Mutating MediaApi here would affect
+     * ordinary Apple Music catalog traffic, so this method intentionally only records the
+     * selection and warms the profile's display cache.
      */
     fun applyContentUiLanguage(selection: Int) {
         contentUiLanguageSelection = selection
         warmPersistentLocalizedCache(selection)
-        if (activeCatalogRequest.get() != null) return
-        runCatching {
-            val access = catalogAccess ?: createCatalogAccess().also { catalogAccess = it }
-            restoreConfiguredStorefront(access)
-        }.onFailure {
-            ProviderLogger.error("Apple 内容 UI storefront 应用失败: selection=$selection", it)
-        }
     }
 
     fun setPersistentLocalizedCacheEnabled(enabled: Boolean) {
@@ -250,46 +265,22 @@ internal class AppleInternalCatalogResolver(
     fun catalogRequestLocalization(token: String?): CatalogRequestLocalization? =
         token?.let(pendingCatalogRequests::get)
 
+    /**
+     * Returns the localization attached to the resolver's current direct-query scope.
+     *
+     * MediaApi callbacks are shared by Apple Music's ordinary traffic and by the resolver.  The
+     * request token is the durable discriminator, but a few app versions invoke the localization
+     * callback before copying the token into the parameter map.  This scope is only set around a
+     * resolver-owned direct query, so it is a safe, short-lived fallback and cannot localize an
+     * ordinary account request.
+     */
+    fun activeCatalogRequestLocalization(): CatalogRequestLocalization? =
+        activeCatalogRequest.get()
+
     fun pendingCatalogRequestCount(): Int = pendingCatalogRequests.size
 
     fun cachedCatalogGenres(mediaId: String): List<String> =
         catalogIdentityCache[mediaId]?.genres.orEmpty()
-
-    fun accountStorefrontForPlaybackRequest(): String? {
-        accountStorefront?.let { return it }
-        return runCatching {
-            val access = catalogAccess ?: createCatalogAccess().also { catalogAccess = it }
-            captureAccountStorefront(access)
-            accountStorefront
-        }.getOrNull()
-    }
-
-    private fun restoreConfiguredStorefront(access: CatalogAccess) {
-        captureAccountStorefront(access)
-        val selection = contentUiLanguageSelection
-        val configuredStorefront = storefrontForContentUiLanguage(selection)
-        if (configuredStorefront == null && !accountStorefrontCaptured) return
-        val target = configuredStorefront ?: accountStorefront
-        val previous = access.storefrontField.get(access.mediaApi) as? String
-        access.storefrontField.set(access.mediaApi, target)
-        lastAppliedConfiguredStorefront = configuredStorefront
-        if (previous != target) {
-            ProviderLogger.info(
-                "Apple 内容 UI storefront 已应用: selection=$selection, " +
-                    "previous=${previous ?: "unset"}, " +
-                    "storefront=${target ?: "account-default"}, " +
-                    "accountStorefront=${accountStorefront ?: "account-default"}"
-            )
-        }
-    }
-
-    private fun captureAccountStorefront(access: CatalogAccess) {
-        val current = access.storefrontField.get(access.mediaApi) as? String ?: return
-        if (!accountStorefrontCaptured || current != lastAppliedConfiguredStorefront) {
-            accountStorefront = current
-            accountStorefrontCaptured = true
-        }
-    }
 
     fun resolve(metadata: MediaMetadataCache.Metadata, onResolved: (Alias?) -> Unit) {
         resolveOriginalMetadata(metadata, RequestPriority.ACTIVE_PAGE) { resolution ->
@@ -333,7 +324,6 @@ internal class AppleInternalCatalogResolver(
                         alias = cachedAlias,
                         localizedTitle = metadata.title.orEmpty(),
                         localizedArtist = metadata.artist.orEmpty(),
-                        allowArtistOnly = true,
                     )
                 }?.let { cachedAlias ->
                     if (cachedAlias != alias) cache[metadata.id] = cachedAlias
@@ -344,9 +334,6 @@ internal class AppleInternalCatalogResolver(
                             originKnown = true,
                             artistIds = emptyList(),
                             album = cachedAlias.album,
-                            trustedArtistOnlyLanguages = setOf(
-                                canonicalOriginalLanguage(cachedAlias.language),
-                            ),
                         )
                     )
                     return
@@ -372,7 +359,6 @@ internal class AppleInternalCatalogResolver(
                     alias = alias,
                     localizedTitle = metadata.title.orEmpty(),
                     localizedArtist = metadata.artist.orEmpty(),
-                    allowArtistOnly = true,
                 )
             }
             if (reusableAlias != null) {
@@ -426,34 +412,18 @@ internal class AppleInternalCatalogResolver(
             }
             val results = identity.fallbackAliases.toMutableList()
             val isrc = identity.isrc
-            val singleArtistId = identity.artistIds.singleOrNull()
-                ?.trim()
-                ?.takeIf { artistId ->
-                    artistId.isNotEmpty() &&
-                        artistId.all(Char::isDigit) &&
-                        !isCollaborationArtistName(metadata.artist.orEmpty())
-                }
-            val cachedArtistLanguage = singleArtistId?.let { artistId ->
-                cachedOriginalArtistRegion(listOf("id:$artistId"))
-            }
-            val originKnownFromArtist = cachedArtistLanguage != null
-            val trustedArtistOnlyLanguages = (
-                languageTagsForIsrc(isrc) + listOfNotNull(cachedArtistLanguage)
-            ).map(::canonicalOriginalLanguage).toSet()
             val languages = languageTagsForOriginalMetadata(
                 genre = metadata.genre,
                 catalogGenres = identity.genres,
                 isrc = isrc,
-                artistLanguages = listOfNotNull(cachedArtistLanguage),
             )
             if (languages.isEmpty()) {
                 finishResolve(
                     metadata = metadata,
                     languages = languages,
                     results = results,
-                    originKnown = isrc != null || originKnownFromArtist,
+                    originKnown = isrc != null,
                     artistIds = identity.artistIds,
-                    trustedArtistOnlyLanguages = trustedArtistOnlyLanguages,
                 )
                 return@resolveCatalogIdentity
             }
@@ -463,9 +433,8 @@ internal class AppleInternalCatalogResolver(
                         metadata = metadata,
                         languages = languages,
                         results = results,
-                        originKnown = isrc != null || originKnownFromArtist,
+                        originKnown = isrc != null,
                         artistIds = identity.artistIds,
-                        trustedArtistOnlyLanguages = trustedArtistOnlyLanguages,
                     )
                     return
                 }
@@ -477,7 +446,6 @@ internal class AppleInternalCatalogResolver(
                         results = listOf(exactAlias),
                         originKnown = true,
                         artistIds = identity.artistIds,
-                        trustedArtistOnlyLanguages = trustedArtistOnlyLanguages,
                     )
                     return
                 }
@@ -494,9 +462,6 @@ internal class AppleInternalCatalogResolver(
                                 alias = alias,
                                 localizedTitle = metadata.title.orEmpty(),
                                 localizedArtist = metadata.artist.orEmpty(),
-                                allowArtistOnly =
-                                    canonicalOriginalLanguage(language) in
-                                        trustedArtistOnlyLanguages,
                             )
                     }
                     if (exactAlias != null) {
@@ -510,7 +475,6 @@ internal class AppleInternalCatalogResolver(
                             artistIds = (
                                 identity.artistIds + regionalArtistIds
                             ).distinct(),
-                            trustedArtistOnlyLanguages = trustedArtistOnlyLanguages,
                         )
                     } else {
                         if (resolvedAlias != null) {
@@ -1122,20 +1086,144 @@ internal class AppleInternalCatalogResolver(
                     batch.map { request -> Triple(request, null, null) }
                 }
                 mainHandler.post {
-                    matches.forEach { (request, resolvedLookupId, alias) ->
-                        finishLocalizedRequest(request, resolvedLookupId, alias)
+                    var remaining = matches.size
+                    fun finishBatch() {
+                        remaining -= 1
+                        if (remaining > 0) return
+                        synchronized(localizedPending) {
+                            localizedBatchesRunning -= 1
+                            if (batch.first().priority == RequestPriority.BACKGROUND) {
+                                localizedBackgroundBatchesRunning -= 1
+                            }
+                        }
+                        scheduleLocalizedBatchIfCapacity()
                     }
-                    synchronized(localizedPending) {
-                        localizedBatchesRunning -= 1
-                        if (batch.first().priority == RequestPriority.BACKGROUND) {
-                            localizedBackgroundBatchesRunning -= 1
+                    matches.forEach { (request, resolvedLookupId, alias) ->
+                        if (alias != null) {
+                            finishLocalizedRequest(request, resolvedLookupId, alias)
+                            finishBatch()
+                        } else if (request.entityType == LocalizedEntityType.SONG) {
+                            // A storefront can assign a different catalog ID to the same song.
+                            // Reuse the original HLE identity/ISRC lookup as a fallback, but keep
+                            // this second query on the fixed profile's storefront and language.
+                            enqueueLockedIsrcFallback(request) { fallbackLookupId, fallbackAlias ->
+                                finishLocalizedRequest(request, fallbackLookupId, fallbackAlias)
+                                finishBatch()
+                            }
+                        } else {
+                            finishLocalizedRequest(request, null, null)
+                            finishBatch()
                         }
                     }
-                    scheduleLocalizedBatchIfCapacity()
                 }
             }
         }
         scheduleLocalizedBatchIfCapacity()
+    }
+
+    /** Enqueues one fixed-region miss for the bounded identity/ISRC fallback scheduler. */
+    private fun enqueueLockedIsrcFallback(
+        request: LocalizedRequest,
+        onResolved: (resolvedLookupId: String?, alias: Alias?) -> Unit,
+    ) {
+        lockedIsrcFallbackPending += LockedIsrcFallbackTask(
+            request = request,
+            onResolved = onResolved,
+        )
+        scheduleLockedIsrcFallbacks()
+    }
+
+    private fun scheduleLockedIsrcFallbacks() {
+        while (
+            lockedIsrcFallbackRunning < MAX_LOCKED_ISRC_FALLBACK_RUNNING &&
+                lockedIsrcFallbackPending.isNotEmpty()
+        ) {
+            val task = nextLockedIsrcFallbackTask() ?: break
+            lockedIsrcFallbackRunning += 1
+            resolveLocalizedRequestByLockedIsrc(task.request) { resolvedLookupId, alias ->
+                lockedIsrcFallbackRunning = (lockedIsrcFallbackRunning - 1).coerceAtLeast(0)
+                task.onResolved(resolvedLookupId, alias)
+                scheduleLockedIsrcFallbacks()
+            }
+        }
+    }
+
+    /**
+     * Selects the highest effective priority at dispatch time.  The effective value is read from
+     * [requestPriorityByMediaId], so a visible-page promotion or a request-scope update also
+     * reorders tasks that are already waiting in this fallback queue.  Equal priorities retain
+     * insertion order to avoid unnecessary churn.
+     */
+    private fun nextLockedIsrcFallbackTask(): LockedIsrcFallbackTask? {
+        val priorities = lockedIsrcFallbackPending.map { task ->
+            currentRequestPriority(task.request.mediaId, task.request.priority)
+        }
+        val index = selectNextRequestIndex(priorities) ?: return null
+        return lockedIsrcFallbackPending.removeAt(index)
+    }
+
+    /**
+     * Resolves a fixed-region song missed by the ID batch through the same identity/ISRC fallback
+     * used by the original-region HLE path.  The identity probe is only a module-owned metadata
+     * lookup; the follow-up song query still uses [request.language]'s locked storefront.
+     */
+    private fun resolveLocalizedRequestByLockedIsrc(
+        request: LocalizedRequest,
+        onResolved: (resolvedLookupId: String?, alias: Alias?) -> Unit,
+    ) {
+        val candidateIds = (listOf(request.mediaId) + request.lookupIds)
+            .map(String::trim)
+            .filter { it.isNotEmpty() && it.all(Char::isDigit) }
+            .distinct()
+        if (candidateIds.isEmpty()) {
+            onResolved(null, null)
+            return
+        }
+
+        val attemptedIsrcs = mutableSetOf<String>()
+        fun queryNext(index: Int) {
+            if (index >= candidateIds.size) {
+                onResolved(null, null)
+                return
+            }
+            val identityId = candidateIds[index]
+            fun queryIdentity(identity: CatalogIdentity?) {
+                val isrc = identity?.isrc?.trim()?.takeIf(String::isNotEmpty)
+                if (isrc == null || !attemptedIsrcs.add(isrc)) {
+                    queryNext(index + 1)
+                    return
+                }
+                ProviderLogger.info(
+                    "Apple 固定地区歌曲启用 ISRC 备用查询: id=${request.mediaId}, " +
+                        "identityId=$identityId, isrc=$isrc, storefront=${request.storefront}, " +
+                        "language=${request.language}",
+                )
+                queryByIsrc(
+                    isrc = isrc,
+                    language = request.language,
+                    storefrontOverride = request.storefront,
+                ) { song ->
+                    val alias = song?.alias?.takeIf {
+                        it.title.isNotBlank() || it.artist.isNotBlank()
+                    }
+                    if (alias != null) {
+                        onResolved(song?.id, alias)
+                    } else {
+                        queryNext(index + 1)
+                    }
+                }
+            }
+            catalogIdentityCache[identityId]?.let { cached ->
+                queryIdentity(cached)
+                return
+            }
+            // Keep the identity probe region-neutral.  It obtains only ISRC/relationship facts;
+            // no alias from this account-region response is ever published for fixed mode.
+            resolveCatalogIdentity(identityId, emptyList()) { identity ->
+                queryIdentity(identity)
+            }
+        }
+        queryNext(0)
     }
 
     private fun scheduleLocalizedBatchIfCapacity() {
@@ -1281,6 +1369,10 @@ internal class AppleInternalCatalogResolver(
                 }
             }
         }
+        // Fallback tasks read their effective priority when a slot is selected.  Rescheduling
+        // here also wakes the queue when a completed task left capacity available during a scope
+        // update or explicit promotion.
+        scheduleLockedIsrcFallbacks()
         return changed
     }
 
@@ -1347,7 +1439,6 @@ internal class AppleInternalCatalogResolver(
         results: List<Alias>,
         originKnown: Boolean,
         artistIds: List<String>,
-        trustedArtistOnlyLanguages: Set<String>,
     ) {
         // Canonical language filtering and alias confidence checks are pure operations over
         // immutable DTOs.  Keep cache mutation and completion publication on the host main thread,
@@ -1360,7 +1451,6 @@ internal class AppleInternalCatalogResolver(
                     results = results,
                     originKnown = originKnown,
                     artistIds = artistIds,
-                    trustedArtistOnlyLanguages = trustedArtistOnlyLanguages,
                 )
             }.onFailure { error ->
                 ProviderLogger.error(
@@ -1370,7 +1460,6 @@ internal class AppleInternalCatalogResolver(
             }.getOrElse {
                 PreparedOriginalResolution(
                     canonicalLanguages = languages.map(String::trim).filter(String::isNotEmpty),
-                    canonicalTrustedArtistOnlyLanguages = trustedArtistOnlyLanguages,
                     sourceLanguage = languages.singleOrNull(),
                     originalAlias = null,
                     resolvedAlbum = null,
@@ -1390,26 +1479,15 @@ internal class AppleInternalCatalogResolver(
         results: List<Alias>,
         originKnown: Boolean,
         artistIds: List<String>,
-        trustedArtistOnlyLanguages: Set<String>,
     ): PreparedOriginalResolution {
         val canonicalLanguages = languages.map(::canonicalOriginalLanguage).distinct()
-        val canonicalTrustedArtistOnlyLanguages = trustedArtistOnlyLanguages
-            .map(::canonicalOriginalLanguage)
-            .toSet()
         val sourceLanguage = canonicalLanguages.singleOrNull()
         val acceptableResults = regionalOriginalAliases(results, canonicalLanguages)
-        fun isTrustedArtistOnlyAlias(alias: Alias): Boolean =
-            canonicalOriginalLanguage(alias.language) in canonicalTrustedArtistOnlyLanguages &&
-                isConfidentOriginalArtistOnlyAlias(
-                    alias = alias,
-                    localizedTitle = metadata.title.orEmpty(),
-                    localizedArtist = metadata.artist.orEmpty(),
-                )
         val selected = selectOriginalAlias(
             variants = acceptableResults,
             localizedTitle = metadata.title.orEmpty(),
             localizedArtist = metadata.artist.orEmpty()
-        ) ?: acceptableResults.lastOrNull(::isTrustedArtistOnlyAlias)
+        )
         val confirmedRegionalAlias = if (originKnown) {
             acceptableResults.lastOrNull { alias ->
                 canonicalOriginalLanguage(alias.language) in canonicalLanguages &&
@@ -1417,7 +1495,6 @@ internal class AppleInternalCatalogResolver(
                         alias = alias,
                         localizedTitle = metadata.title.orEmpty(),
                         localizedArtist = metadata.artist.orEmpty(),
-                        allowArtistOnly = isTrustedArtistOnlyAlias(alias),
                     )
             }
         } else {
@@ -1430,7 +1507,6 @@ internal class AppleInternalCatalogResolver(
         )
         return PreparedOriginalResolution(
             canonicalLanguages = canonicalLanguages,
-            canonicalTrustedArtistOnlyLanguages = canonicalTrustedArtistOnlyLanguages,
             sourceLanguage = sourceLanguage,
             originalAlias = originalAlias,
             resolvedAlbum = resolvedAlbum,
@@ -1462,7 +1538,6 @@ internal class AppleInternalCatalogResolver(
             originKnown = prepared.originKnown,
             artistIds = prepared.artistIds,
             album = prepared.resolvedAlbum,
-            trustedArtistOnlyLanguages = prepared.canonicalTrustedArtistOnlyLanguages,
         )
         callbacks.forEach { callback -> callback(resolution) }
     }
@@ -1479,7 +1554,6 @@ internal class AppleInternalCatalogResolver(
             originKnown = true,
             artistIds = emptyList(),
             album = alias.album,
-            trustedArtistOnlyLanguages = setOf(canonicalOriginalLanguage(alias.language)),
         )
         callbacks.forEach { callback -> callback(resolution) }
     }
@@ -1626,7 +1700,14 @@ internal class AppleInternalCatalogResolver(
             next
         }
         val cacheable = isUsefulCatalogIdentity(merged)
-        MediaMetadataCache.updateCatalogGenres(mediaId, merged.genres)
+        // The resolver may finish after a different metadata profile has become active. Keep
+        // catalog identity facts in this resolver's namespace instead of letting a late callback
+        // mutate whichever profile happens to be globally selected at that moment.
+        MediaMetadataCache.updateCatalogGenres(
+            mediaId = mediaId,
+            genres = merged.genres,
+            profile = cacheNamespace,
+        )
         // Remove and drain the in-flight callbacks on main together with their publication. This
         // prevents a new request from observing a removed key while the background preprocessing
         // result is still waiting in the main queue.
@@ -1737,6 +1818,7 @@ internal class AppleInternalCatalogResolver(
     private fun queryByIsrc(
         isrc: String,
         language: String,
+        storefrontOverride: String? = null,
         onResult: (CatalogSong?) -> Unit
     ) {
         val queryParams = linkedMapOf(
@@ -1747,7 +1829,7 @@ internal class AppleInternalCatalogResolver(
             "limit" to "1"
         )
         query(
-            storefront = storefrontForLanguage(language),
+            storefront = storefrontOverride ?: storefrontForLanguage(language),
             language = language,
             description = "isrc=$isrc",
             path = "songs",
@@ -1942,7 +2024,6 @@ internal class AppleInternalCatalogResolver(
                     null
                 }
                 if (localization != null) {
-                    captureAccountStorefront(access)
                     requestToken = catalogRequestSequence.incrementAndGet().toString(36)
                     pendingCatalogRequests[requestToken] = localization
                 }
@@ -2106,7 +2187,7 @@ internal class AppleInternalCatalogResolver(
             directQueryMethod = directQueryMethod,
             continuationType = continuationType,
             emptyCoroutineContext = emptyCoroutineContext,
-        ).also(::captureAccountStorefront)
+        )
     }
 
     private fun findDirectCatalogQueryMethod(clazz: Class<*>, methodName: String): Method {
@@ -2467,7 +2548,6 @@ internal class AppleInternalCatalogResolver(
 
     private data class PreparedOriginalResolution(
         val canonicalLanguages: List<String>,
-        val canonicalTrustedArtistOnlyLanguages: Set<String>,
         val sourceLanguage: String?,
         val originalAlias: Alias?,
         val resolvedAlbum: String?,
@@ -2493,6 +2573,11 @@ internal class AppleInternalCatalogResolver(
         val storefront: String,
         val language: String,
         val priority: RequestPriority,
+    )
+
+    private data class LockedIsrcFallbackTask(
+        val request: LocalizedRequest,
+        val onResolved: (resolvedLookupId: String?, alias: Alias?) -> Unit,
     )
 
     private data class OriginalEntityRequest(
@@ -2525,11 +2610,6 @@ internal class AppleInternalCatalogResolver(
         val originKnown: Boolean,
         val artistIds: List<String>,
         val album: String? = null,
-        /**
-         * Original-region evidence that is strong enough to permit an alias
-         * whose title stays English while only its artist becomes CJK.
-         */
-        val trustedArtistOnlyLanguages: Set<String> = emptySet(),
     )
 
     data class LocalizedLookup(
@@ -2639,6 +2719,7 @@ internal class AppleInternalCatalogResolver(
         private const val LOCALIZED_BATCH_SIZE = 50
         private const val MAX_LOCALIZED_BATCHES_RUNNING = 4
         private const val MAX_BACKGROUND_LOCALIZED_BATCHES_RUNNING = 2
+        private const val MAX_LOCKED_ISRC_FALLBACK_RUNNING = 2
         private const val LOCALIZED_BATCH_DELAY_MS = 32L
         private const val ORIGINAL_ENTITY_BATCH_SIZE = 50
         private const val MAX_ORIGINAL_ENTITY_BATCHES_RUNNING = 3
@@ -3048,41 +3129,13 @@ internal class AppleInternalCatalogResolver(
             alias: Alias,
             localizedTitle: String,
             localizedArtist: String,
-            allowArtistOnly: Boolean = false,
         ): Boolean = isOriginalTitle(alias, localizedTitle) ||
-            nonLatinLetterCount(localizedTitle) > 0 ||
-            (
-                allowArtistOnly &&
-                    isConfidentOriginalArtistOnlyAlias(
-                        alias = alias,
-                        localizedTitle = localizedTitle,
-                        localizedArtist = localizedArtist,
-                    )
-                )
-
-        /**
-         * An English title is not by itself regional evidence. This narrow
-         * shape is only enabled by a trusted source language (ISRC or a
-         * script-confirmed single artist) at the caller.
-         */
-        internal fun isConfidentOriginalArtistOnlyAlias(
-            alias: Alias,
-            localizedTitle: String,
-            localizedArtist: String,
-        ): Boolean = normalize(alias.title) == normalize(localizedTitle) &&
-            nonLatinLetterCount(localizedTitle) == 0 &&
-            alias.artist.isNotBlank() &&
-            localizedArtist.isNotBlank() &&
-            normalize(alias.artist) != normalize(localizedArtist) &&
-            !isCollaborationArtistName(localizedArtist) &&
-            !isCollaborationArtistName(alias.artist) &&
-            hasCjkArtistScript(alias.artist, alias.language)
+            nonLatinLetterCount(localizedTitle) > 0
 
         internal fun isReusableOriginalSongAlias(
             alias: Alias,
             localizedTitle: String,
             localizedArtist: String,
-            allowArtistOnly: Boolean = false,
         ): Boolean = isAcceptableOriginalAlias(
             alias = alias,
             sourceLanguage = canonicalOriginalLanguage(alias.language),
@@ -3090,7 +3143,6 @@ internal class AppleInternalCatalogResolver(
             alias = alias,
             localizedTitle = localizedTitle,
             localizedArtist = localizedArtist,
-            allowArtistOnly = allowArtistOnly,
         )
 
         internal fun isCollaborationArtistName(artist: String): Boolean {

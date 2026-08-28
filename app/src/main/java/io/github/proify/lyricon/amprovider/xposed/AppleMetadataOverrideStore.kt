@@ -6,6 +6,7 @@
 
 package io.github.proify.lyricon.amprovider.xposed
 
+import android.os.SystemClock
 import java.util.concurrent.ConcurrentHashMap
 
 /** Owns Apple Music metadata overrides, identity facts, and request lifecycle state. */
@@ -36,7 +37,7 @@ internal class AppleMetadataOverrideStore {
     private val nonCatalogContentItemIds = ConcurrentHashMap.newKeySet<String>()
 
     private val configuredResolveRequests = ConcurrentHashMap.newKeySet<String>()
-    private val configuredResolveMisses = ConcurrentHashMap.newKeySet<String>()
+    private val configuredResolveMisses = ConcurrentHashMap<String, Long>()
     private val originalResolveRequests = ConcurrentHashMap.newKeySet<String>()
     private val associatedArtistResolveRequests = ConcurrentHashMap.newKeySet<String>()
     private val originalResolvedIds = ConcurrentHashMap.newKeySet<String>()
@@ -83,8 +84,10 @@ internal class AppleMetadataOverrideStore {
     fun rememberConfiguredMetadataIfAbsent(
         mediaId: String,
         alias: AppleInternalCatalogResolver.Alias,
-    ): AppleInternalCatalogResolver.Alias =
-        configuredMetadataOverrides.putIfAbsent(mediaId, alias) ?: alias
+    ): AppleInternalCatalogResolver.Alias {
+        val existing = configuredMetadataOverrides.putIfAbsent(mediaId, alias)
+        return existing ?: alias
+    }
 
     fun originalMetadata(mediaId: String): AppleInternalCatalogResolver.Alias? =
         originalMetadataOverrides[mediaId]
@@ -263,10 +266,23 @@ internal class AppleMetadataOverrideStore {
         configuredResolveRequests.remove(requestKey)
     }
 
-    fun isConfiguredMiss(requestKey: String): Boolean = requestKey in configuredResolveMisses
+    fun isConfiguredMiss(
+        requestKey: String,
+        nowUptimeMillis: Long = SystemClock.uptimeMillis(),
+    ): Boolean {
+        val lastMiss = configuredResolveMisses[requestKey] ?: return false
+        if (ConfiguredMetadataRetryPolicy.shouldSkip(lastMiss, nowUptimeMillis)) {
+            return true
+        }
+        configuredResolveMisses.remove(requestKey, lastMiss)
+        return false
+    }
 
-    fun markConfiguredMiss(requestKey: String) {
-        configuredResolveMisses.add(requestKey)
+    fun markConfiguredMiss(
+        requestKey: String,
+        nowUptimeMillis: Long = SystemClock.uptimeMillis(),
+    ) {
+        configuredResolveMisses[requestKey] = nowUptimeMillis
     }
 
     fun beginOriginalRequest(requestKey: String): Boolean = originalResolveRequests.add(requestKey)

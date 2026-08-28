@@ -46,8 +46,8 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import dev.amenhancer.module.ModuleConstants
-import dev.amenhancer.module.config.CatalogLanguagePolicy
 import dev.amenhancer.module.config.EmbeddedConfigurationSession
+import dev.amenhancer.module.config.TitleCorrectionMode
 import dev.amenhancer.module.CurrentSongDetails
 import dev.amenhancer.module.hook.AmLyricsClient
 import dev.amenhancer.module.hook.AmllTtmlClient
@@ -2230,7 +2230,11 @@ internal class EmbeddedSettingsHost private constructor(
             addView(embeddedSettingRow(
                 activity,
                 "歌曲名显示修正",
-                "按 HLE 原地区策略修正歌曲信息，并创建持久化检索库；目标语言仅改写底层 Catalog 请求",
+                if (settings.titleCorrectionEnabled) {
+                    "${settings.titleCorrectionMode.displayName} · 重开 Apple Music 后生效"
+                } else {
+                    "关闭时跟随 Apple Music 账号 · 开启后选择修正地区"
+                },
                 settings.titleCorrectionEnabled,
                 iconTint = EmbeddedSettingsPalette.accent,
                 iconDrawable = EmbeddedGlyphDrawable(
@@ -2241,19 +2245,18 @@ internal class EmbeddedSettingsHost private constructor(
             addView(embeddedDivider(activity))
             addView(embeddedNavigationRow(
                 activity,
-                "目标语言",
-                CatalogLanguagePolicy.displayName(settings.titleCorrectionTargetLanguage),
+                "歌曲名修正模式",
+                settings.titleCorrectionMode.displayName,
                 iconDrawable = EmbeddedGlyphDrawable(
                     EmbeddedGlyphKind.Translate,
                     EmbeddedSettingsPalette.accent,
                 ),
                 inlineSummary = true,
             ) {
-                showEmbeddedTargetLanguagePicker(
+                showEmbeddedTitleCorrectionModePicker(
                     activity = activity,
-                    current = settings.titleCorrectionTargetLanguage,
-                ) { target ->
-                    onSettingsChanged(settings.copy(titleCorrectionTargetLanguage = target))
+                ) { mode ->
+                    onSettingsChanged(settings.copy(titleCorrectionMode = mode))
                     pageRefresh?.invoke()
                 }
             })
@@ -3095,52 +3098,20 @@ internal class EmbeddedSettingsHost private constructor(
         }, matchWidthWrapContent())
     }
 
-    private fun showEmbeddedTargetLanguagePicker(
+    private fun showEmbeddedTitleCorrectionModePicker(
         activity: Activity,
-        current: String,
-        onSelected: (String) -> Unit,
+        onSelected: (TitleCorrectionMode) -> Unit,
     ) {
-        val normalizedCurrent = CatalogLanguagePolicy.normalize(current)
-        val tags = listOf("", "zh-CN", "zh-TW", "ja-JP", "ko-KR", "en-US", "tr-TR")
-        val labels = tags.map { CatalogLanguagePolicy.displayName(it) }.toTypedArray()
+        val modes = TitleCorrectionMode.values()
+        val current = controller.currentSettings().titleCorrectionMode
+        val labels = modes.map(TitleCorrectionMode::displayName).toTypedArray()
         AlertDialog.Builder(activity)
-            .setTitle("目标语言")
-            .setSingleChoiceItems(labels, tags.indexOf(normalizedCurrent)) { dialog, which ->
-                tags.getOrNull(which)?.let(onSelected)
+            .setTitle("歌曲名修正模式")
+            .setSingleChoiceItems(labels, modes.indexOf(current)) { dialog, which ->
+                modes.getOrNull(which)?.let(onSelected)
                 dialog.dismiss()
             }
-            .setNeutralButton("自定义") { _, _ ->
-                showEmbeddedTargetLanguageEditor(activity, normalizedCurrent, onSelected)
-            }
             .setNegativeButton("取消", null)
-            .show()
-    }
-
-    private fun showEmbeddedTargetLanguageEditor(
-        activity: Activity,
-        current: String,
-        onSelected: (String) -> Unit,
-    ) {
-        val input = EditText(activity).apply {
-            hint = "例如 ja-JP"
-            inputType = InputType.TYPE_CLASS_TEXT
-            setText(current)
-            setSelectAllOnFocus(true)
-            setPadding(dp(activity, 24), dp(activity, 8), dp(activity, 24), 0)
-        }
-        AlertDialog.Builder(activity)
-            .setTitle("自定义目标语言")
-            .setMessage("请输入 BCP-47 语言标签（例如 zh-CN）；留空请在上一级选择“跟随 Apple Music”")
-            .setView(input)
-            .setNegativeButton("取消", null)
-            .setPositiveButton("保存") { _, _ ->
-                val raw = input.text?.toString().orEmpty()
-                if (!CatalogLanguagePolicy.isValid(raw)) {
-                    Toast.makeText(activity, "目标语言格式无效，例如 ja-JP", Toast.LENGTH_SHORT).show()
-                } else {
-                    onSelected(CatalogLanguagePolicy.normalize(raw))
-                }
-            }
             .show()
     }
 

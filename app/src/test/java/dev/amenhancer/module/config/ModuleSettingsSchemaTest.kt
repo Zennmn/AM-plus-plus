@@ -50,7 +50,7 @@ class ModuleSettingsSchemaTest {
                 "navigation_compensation_enabled" to false,
                 "lyric_blur_radius_offset_px" to 6,
                 "title_correction_enabled" to false,
-                "title_correction_target_language" to "",
+                "title_correction_mode" to "original_hyper",
                 "custom_lyrics_enabled" to false,
                 "automatic_lyrics_enabled" to true,
                 "lyrics_font_enabled" to false,
@@ -85,7 +85,7 @@ class ModuleSettingsSchemaTest {
                 "navigation_compensation_enabled" to false,
                 "lyric_blur_radius_offset_px" to 0,
                 "title_correction_enabled" to false,
-                "title_correction_target_language" to "",
+                "title_correction_mode" to "original_hyper",
                 "custom_lyrics_enabled" to false,
                 "automatic_lyrics_enabled" to true,
                 "lyrics_font_enabled" to false,
@@ -235,31 +235,51 @@ class ModuleSettingsSchemaTest {
     }
 
     @Test
-    fun `target language is optional and round trips independently from HLE`() {
+    fun `title correction mode defaults to original and round trips`() {
         assertEquals(
-            CatalogLanguagePolicy.DISABLED_TARGET_LANGUAGE,
-            ModuleSettingsSchema.decode(emptyMap<String, Any?>()).titleCorrectionTargetLanguage,
+            TitleCorrectionMode.ORIGINAL_HYPER,
+            ModuleSettingsSchema.decode(emptyMap<String, Any?>()).titleCorrectionMode,
         )
 
         val encoded = ModuleSettingsSchema.encodeOrdinarySettings(
-            ModuleSettings(titleCorrectionTargetLanguage = "ja_jp"),
+            ModuleSettings(titleCorrectionMode = TitleCorrectionMode.JAPAN),
         )
-        assertEquals("ja-JP", encoded["title_correction_target_language"])
-        assertEquals("ja-JP", ModuleSettingsSchema.decode(encoded).titleCorrectionTargetLanguage)
+        assertEquals("japan", encoded["title_correction_mode"])
+        assertEquals(TitleCorrectionMode.JAPAN, ModuleSettingsSchema.decode(encoded).titleCorrectionMode)
     }
 
     @Test
-    fun `schema v10 target language survives the v11 reintroduction`() {
+    fun `schema v11 target language migrates to the selected profile`() {
         val upgraded = ModuleSettingsSchema.upgrade(
             storedValues = mapOf(
-                "schema_version" to 10,
-                "title_correction_target_language" to "ko_kr",
+                "schema_version" to 11,
+                "title_correction_enabled" to true,
+                "title_correction_target_language" to "ja_jp",
             ),
             legacyValues = emptyMap<String, Any?>(),
         )
 
-        assertEquals("ko-KR", upgraded?.get("title_correction_target_language"))
+        assertEquals("japan", upgraded?.get("title_correction_mode"))
+        assertFalse(upgraded?.containsKey("title_correction_target_language") == true)
         assertEquals(ModuleConstants.CONFIG_SCHEMA_VERSION, upgraded?.get("schema_version"))
+    }
+
+    @Test
+    fun `legacy mainland target maps to mainland profile and unsupported target maps to original`() {
+        val mainland = ModuleSettingsSchema.decode(
+            mapOf(
+                "title_correction_enabled" to true,
+                "title_correction_target_language" to "zh-CN",
+            ),
+        )
+        val unsupported = ModuleSettingsSchema.decode(
+            mapOf(
+                "title_correction_enabled" to true,
+                "title_correction_target_language" to "ko-KR",
+            ),
+        )
+        assertEquals(TitleCorrectionMode.MAINLAND_CHINA, mainland.titleCorrectionMode)
+        assertEquals(TitleCorrectionMode.ORIGINAL_HYPER, unsupported.titleCorrectionMode)
     }
 
     @Test
@@ -395,7 +415,7 @@ class ModuleSettingsSchemaTest {
         val encoded = ModuleSettingsSchema.encodeOrdinarySettings(decoded)
         assertFalse(encoded.containsKey("modify_locale"))
         assertFalse(encoded.containsKey("modify_locale_target_tag"))
-        assertEquals("", encoded["title_correction_target_language"])
+        assertEquals("original_hyper", encoded["title_correction_mode"])
 
         val upgraded = ModuleSettingsSchema.upgrade(
             storedValues = mapOf(
@@ -406,6 +426,6 @@ class ModuleSettingsSchemaTest {
         )
         assertFalse(upgraded!!.containsKey("modify_locale"))
         assertFalse(upgraded.containsKey("modify_locale_target_tag"))
-        assertEquals("", upgraded["title_correction_target_language"])
+        assertEquals("original_hyper", upgraded["title_correction_mode"])
     }
 }

@@ -28,8 +28,9 @@ internal data class TargetAdaptation(
     val currentSongIdentity: CurrentSongIdentityTarget = CurrentSongIdentityTarget {
         TargetCapabilityInstall.Degraded("Current song identity target was not configured")
     },
+    /** Retained only for compatibility; the former global target is never installed. */
     val catalogLanguage: CatalogLanguageTarget = CatalogLanguageTarget {
-        TargetCapabilityInstall.Degraded("Catalog language target was not configured")
+        TargetCapabilityInstall.Degraded("Catalog language target is intentionally disabled")
     },
     val hleMetadata: HleMetadataTarget = HleMetadataTarget {
         TargetCapabilityInstall.Degraded("HLE metadata target was not configured")
@@ -85,7 +86,7 @@ internal data class TargetAdaptation(
                 ),
                 catalogLanguage = AppleMusicCatalogLanguageTarget(
                     symbols = resolver,
-                    rawTargetLanguage = settings.titleCorrectionTargetLanguage,
+                    rawTargetLanguage = settings.titleCorrectionMode.catalogLanguage.orEmpty(),
                 ),
                 hleMetadata = HleMetadataTarget {
                     val activeModule = ModernXposedRuntime.activeModule()
@@ -97,6 +98,7 @@ internal data class TargetAdaptation(
                             module = activeModule,
                             application = application,
                             classLoader = classLoader,
+                            mode = settings.titleCorrectionMode,
                         ).install()
                     }.getOrElse { error ->
                         ModernXposedRuntime.log("HLE metadata runtime install failed", error)

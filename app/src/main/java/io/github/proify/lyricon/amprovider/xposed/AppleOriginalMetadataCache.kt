@@ -13,10 +13,12 @@ import java.util.concurrent.Executors
 internal class AppleOriginalMetadataCache(
     context: Context,
     private val mainHandler: Handler,
+    private val databaseName: String = DEFAULT_DATABASE_NAME,
+    private val artistRegionPreferencesName: String = DEFAULT_ARTIST_REGION_PREFERENCES,
 ) {
-    private val helper = DatabaseHelper(context.applicationContext)
+    private val helper = DatabaseHelper(context.applicationContext, databaseName)
     private val artistRegionPreferences = context.applicationContext.getSharedPreferences(
-        ARTIST_REGION_PREFERENCES,
+        artistRegionPreferencesName,
         Context.MODE_PRIVATE,
     )
     private val artistRegionLock = Any()
@@ -393,8 +395,10 @@ internal class AppleOriginalMetadataCache(
     private fun Cursor.stringColumn(name: String): String =
         getString(getColumnIndexOrThrow(name)).orEmpty()
 
-    private class DatabaseHelper(context: Context) :
-        SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
+    private class DatabaseHelper(
+        context: Context,
+        databaseName: String,
+    ) : SQLiteOpenHelper(context, databaseName, null, DATABASE_VERSION) {
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL(
                 """
@@ -423,10 +427,10 @@ internal class AppleOriginalMetadataCache(
     internal companion object {
         const val MAX_ENTRIES = 20_000
         private const val MAX_ARTIST_REGION_ENTRIES = 5_000
-        private const val DATABASE_NAME =
-            "hyperlyricsenhanced_apple_original_metadata_v5.db"
-        /** Isolates v4 aliases created from storefront-localized artist display names. */
-        private const val DATABASE_VERSION = 5
+        private const val DEFAULT_DATABASE_NAME =
+            "hyperlyricsenhanced_apple_original_metadata_original_hyper_v1.db"
+        /** A new physical namespace deliberately does not read the legacy v5 database. */
+        private const val DATABASE_VERSION = 1
         private const val TABLE_NAME = "original_metadata"
         private const val COLUMN_KEY = "cache_key"
         private const val COLUMN_TITLE = "title"
@@ -434,16 +438,16 @@ internal class AppleOriginalMetadataCache(
         private const val COLUMN_ALBUM = "album"
         private const val COLUMN_LANGUAGE = "language"
         private const val COLUMN_UPDATED_AT = "updated_at"
-        private const val ARTIST_REGION_PREFERENCES =
-            "hyperlyricsenhanced_apple_original_artist_regions_v5"
+        private const val DEFAULT_ARTIST_REGION_PREFERENCES =
+            "hyperlyricsenhanced_apple_original_artist_regions_original_hyper_v1"
         private const val ARTIST_REGION_VALUE_SEPARATOR = "|"
 
         internal fun currentDatabaseVersionForTest(): Int = DATABASE_VERSION
 
-        internal fun currentDatabaseNameForTest(): String = DATABASE_NAME
+        internal fun currentDatabaseNameForTest(): String = DEFAULT_DATABASE_NAME
 
         internal fun currentArtistRegionPreferencesNameForTest(): String =
-            ARTIST_REGION_PREFERENCES
+            DEFAULT_ARTIST_REGION_PREFERENCES
 
         private val COLUMNS = arrayOf(
             COLUMN_TITLE,

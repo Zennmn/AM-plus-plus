@@ -6,11 +6,10 @@
 
 package io.github.proify.lyricon.amprovider.xposed.hooks
 
-import android.content.SharedPreferences
 import android.net.Uri
 import android.os.SystemClock
 import com.juren233.hyperlyricsenhanced.BuildConfig
-import com.juren233.hyperlyricsenhanced.common.RootConstants
+import dev.amenhancer.module.config.CatalogLanguagePolicy
 import io.github.proify.lyricon.amprovider.xposed.AppleContentHttpTimingTracker
 import io.github.proify.lyricon.amprovider.xposed.AppleInternalCatalogResolver
 import io.github.proify.lyricon.amprovider.xposed.AppleMusicHookPoint
@@ -24,7 +23,6 @@ import java.util.concurrent.ConcurrentHashMap
 
 internal class AppleContentLocalizationHooks(
     private val runtime: AppleMusicProviderRuntime,
-    private val preferences: () -> SharedPreferences?,
     private val catalogResolver: () -> AppleInternalCatalogResolver,
 ) {
     @Volatile
@@ -47,27 +45,22 @@ internal class AppleContentLocalizationHooks(
             runtime.hookRegistrar.installHook(method, after = { _, result ->
                 @Suppress("UNCHECKED_CAST")
                 val params = result as? MutableMap<Any?, Any?> ?: return@installHook
-                val prefs = preferences() ?: return@installHook
-                val selection = prefs.getInt(
-                    RootConstants.KEY_HOOK_APPLE_MUSIC_CONTENT_UI_LANGUAGE,
-                    RootConstants.DEFAULT_HOOK_APPLE_MUSIC_CONTENT_UI_LANGUAGE
-                )
                 val resolver = catalogResolver()
-                resolver.applyContentUiLanguage(selection)
                 val requestToken = params[
                     AppleInternalCatalogResolver.CATALOG_REQUEST_TOKEN_PARAM
                 ]?.toString()
                 val requestLocalization = resolver.catalogRequestLocalization(requestToken)
-                val language = requestLocalization?.language
-                    ?: resolver.languageTagForCurrentRequest(selection)
-                language?.let {
-                    params["l"] = language
-                    if (lastLoggedContentLanguage != language) {
-                        lastLoggedContentLanguage = language
-                        ProviderLogger.info(
-                            "Apple Music 内容本地化参数已覆盖: language=$language"
-                        )
-                    }
+                    ?: resolver.activeCatalogRequestLocalization()
+                // This hook is shared with every native MediaApi request.  Only a resolver-owned
+                // token proves that the request belongs to the module's metadata lookup; without
+                // it, leave the account's language and storefront untouched.
+                val language = requestLocalization?.language ?: return@installHook
+                params["l"] = language
+                if (lastLoggedContentLanguage != language) {
+                    lastLoggedContentLanguage = language
+                    ProviderLogger.info(
+                        "Apple Music HLE 元数据本地化参数已覆盖: language=$language"
+                    )
                 }
                 if (
                     BuildConfig.DEBUG &&
@@ -76,9 +69,9 @@ internal class AppleContentLocalizationHooks(
                 ) {
                     ProviderLogger.diagnostic(
                         "AppleCatalogLocalizationParams: token=$requestToken, " +
-                            "resolved=${requestLocalization != null}, " +
+                            "resolved=true, " +
                             "storefront=${requestLocalization?.storefront ?: "fallback"}, " +
-                            "language=${requestLocalization?.language ?: language ?: "unset"}"
+                            "language=${requestLocalization?.language ?: language}"
                     )
                 }
             })
@@ -101,11 +94,6 @@ internal class AppleContentLocalizationHooks(
             runtime.hookRegistrar.installHook(
                 resolved.method,
                 before = { chain ->
-                    val prefs = preferences() ?: return@installHook
-                    val selection = prefs.getInt(
-                        RootConstants.KEY_HOOK_APPLE_MUSIC_CONTENT_UI_LANGUAGE,
-                        RootConstants.DEFAULT_HOOK_APPLE_MUSIC_CONTENT_UI_LANGUAGE
-                    )
                     val httpChain = chain.args.firstOrNull() ?: return@installHook
                     val request = AppleReflection.field(
                         httpChain,
@@ -117,50 +105,17 @@ internal class AppleContentLocalizationHooks(
                     )?.toString().orEmpty()
                     val requestUri = Uri.parse(requestUrl)
                     startContentHttpTiming(httpChain, requestUri)
-                    val pathSegments = requestUri.pathSegments
-                    val isLyricsRequest = isAppleLyricsRequestPath(pathSegments)
                     val resolver = catalogResolver()
-                    if (
-                        AppleInternalCatalogResolver.isAccountScopedPlaybackPath(pathSegments) ||
-                        isLyricsRequest
-                    ) {
-                        val accountStorefront = resolver.accountStorefrontForPlaybackRequest()
-                            ?: return@installHook
-                        val rewritten = rewriteContentRequestStorefrontOnly(
-                            request = request,
-                            storefront = accountStorefront,
-                        )
-                        rewritten?.let {
-                            AppleReflection.setField(
-                                httpChain,
-                                member(
-                                    AppleMusicRuntimeMember.CONTENT_HTTP_CHAIN_REQUEST_FIELD
-                                ),
-                                it,
-                            )
-                        }
-                        if (BuildConfig.DEBUG && isLyricsRequest) {
-                            val sourceStorefront =
-                                AppleInternalCatalogResolver.storefrontFromContentPath(pathSegments)
-                            ProviderLogger.info(
-                                "Apple 歌词请求使用账号 storefront: " +
-                                    "${sourceStorefront ?: "none"}->$accountStorefront"
-                            )
-                        }
-                        return@installHook
-                    }
                     val requestToken = requestUri.getQueryParameter(
                         AppleInternalCatalogResolver.CATALOG_REQUEST_TOKEN_PARAM
                     )
                     val requestLocalization = resolver.catalogRequestLocalization(requestToken)
-                    val configuredStorefront =
-                        AppleInternalCatalogResolver.storefrontForContentUiLanguage(selection)
-                    val storefront = requestLocalization?.storefront
-                        ?: configuredStorefront
-                        ?: return@installHook
-                    val language = requestLocalization?.language
-                        ?: resolver.languageTagForCurrentRequest(selection)
-                        ?: return@installHook
+                        ?: resolver.activeCatalogRequestLocalization()
+                    // Native catalog, playback, lyrics, search and playlist requests do not carry
+                    // this token and must follow the Apple Music account region unchanged.
+                    if (requestLocalization == null) return@installHook
+                    val storefront = requestLocalization.storefront
+                    val language = requestLocalization.language
                     logContentRequestLocalizationDecision(
                         uri = requestUri,
                         requestToken = requestToken,
@@ -320,6 +275,7 @@ internal class AppleContentLocalizationHooks(
         }
         builder.appendQueryParameter("l", language)
         val rewrittenUrl = builder.build().toString()
+        val headerLanguage = CatalogLanguagePolicy.headerLanguage(language)
         val sourceAcceptLanguage = requestHeader(request, "Accept-Language")
         val sourceStorefrontHeader = requestHeader(request, "X-Apple-Store-Front")
         val sourceRequestStorefrontHeader =
@@ -335,7 +291,7 @@ internal class AppleContentLocalizationHooks(
                 currentValue = sourceRequestStorefrontHeader,
             )
         val hasHeaderChanges =
-            sourceAcceptLanguage != language ||
+            sourceAcceptLanguage != headerLanguage ||
                 targetStorefrontHeader != sourceStorefrontHeader ||
                 targetRequestStorefrontHeader != sourceRequestStorefrontHeader
         if (rewrittenUrl == url && !hasHeaderChanges) return null
@@ -363,7 +319,7 @@ internal class AppleContentLocalizationHooks(
         }
         val headerMethod =
             member(AppleMusicRuntimeMember.CONTENT_HTTP_REQUEST_BUILDER_HEADER_METHOD)
-        AppleReflection.call(requestBuilder, headerMethod, "Accept-Language", language)
+        AppleReflection.call(requestBuilder, headerMethod, "Accept-Language", headerLanguage)
         targetStorefrontHeader?.let { value ->
             AppleReflection.call(requestBuilder, headerMethod, "X-Apple-Store-Front", value)
         }
@@ -378,7 +334,7 @@ internal class AppleContentLocalizationHooks(
         logContentRequestHeaders(
             requestToken = requestToken,
             sourceAcceptLanguage = sourceAcceptLanguage,
-            targetAcceptLanguage = language,
+            targetAcceptLanguage = headerLanguage,
             sourceStorefrontHeader = sourceStorefrontHeader,
             targetStorefrontHeader = targetStorefrontHeader,
             sourceRequestStorefrontHeader = sourceRequestStorefrontHeader,

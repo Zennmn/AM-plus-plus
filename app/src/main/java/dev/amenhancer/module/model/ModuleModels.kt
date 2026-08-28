@@ -1,7 +1,7 @@
 package dev.amenhancer.module.model
 
 import dev.amenhancer.module.ModuleConstants
-import dev.amenhancer.module.config.CatalogLanguagePolicy
+import dev.amenhancer.module.config.TitleCorrectionMode
 
 data class ModuleSettings(
     val dualPaneEnabled: Boolean = true,
@@ -14,8 +14,8 @@ data class ModuleSettings(
     val navigationCompensationEnabled: Boolean = false,
     val lyricBlurRadiusOffsetPx: Int = 0,
     val titleCorrectionEnabled: Boolean = false,
-    /** Optional BCP-47 language for ordinary Apple Music Catalog requests. */
-    val titleCorrectionTargetLanguage: String = CatalogLanguagePolicy.DISABLED_TARGET_LANGUAGE,
+    /** Selected metadata profile; ignored while [titleCorrectionEnabled] is false. */
+    val titleCorrectionMode: TitleCorrectionMode = TitleCorrectionMode.ORIGINAL_HYPER,
     val customLyricsEnabled: Boolean = false,
     /** Enables background AMLL/Lunabeat/user-repository lyric completion. */
     val automaticLyricsEnabled: Boolean = true,

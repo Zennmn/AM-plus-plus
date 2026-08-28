@@ -37,7 +37,6 @@ internal interface ApplePlaybackMetadataCoordinatorHost {
         alias: AppleInternalCatalogResolver.Alias?,
         localizedTitle: String?,
         localizedArtist: String?,
-        allowArtistOnly: Boolean = false,
     ): AppleInternalCatalogResolver.Alias?
 
     fun shouldShareOriginalSongLanguage(
@@ -207,6 +206,12 @@ internal class ApplePlaybackMetadataCoordinator(
     }
 
     fun resolveOriginalMetadataOnDemand(mediaId: String) {
+        if (!host.isRestoreOriginalMetadataEnabled()) {
+            ProviderLogger.debug(
+                "Apple 原名按需查询忽略: id=$mediaId, reason=original_mode_disabled",
+            )
+            return
+        }
         val metadata = MediaMetadataCache.getMetadataById(mediaId)
         if (metadata == null) {
             ProviderLogger.info("Apple 原名按需查询忽略: id=$mediaId, reason=metadata_missing")
@@ -372,10 +377,6 @@ internal class ApplePlaybackMetadataCoordinator(
                     alias = resolution.alias,
                     localizedTitle = metadata.title,
                     localizedArtist = metadata.artist,
-                    allowArtistOnly = hasTrustedOriginalArtistOnlyLanguage(
-                        resolution = resolution,
-                        alias = resolution.alias,
-                    ),
                 )
                 metadataStore.markOriginalResolved(metadata.id)
                 resolution.language?.takeIf {

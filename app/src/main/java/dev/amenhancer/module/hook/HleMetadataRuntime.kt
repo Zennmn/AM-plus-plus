@@ -1,8 +1,7 @@
 package dev.amenhancer.module.hook
 
 import android.app.Application
-import android.content.SharedPreferences
-import dev.amenhancer.module.ModuleConstants
+import dev.amenhancer.module.config.TitleCorrectionMode
 import io.github.libxposed.api.XposedModule
 import io.github.proify.lyricon.amprovider.xposed.AppleInternalCatalogResolver
 import io.github.proify.lyricon.amprovider.xposed.AppleMetadataOverrideStore
@@ -26,7 +25,6 @@ import io.github.proify.lyricon.amprovider.xposed.AppleActionSheetMetadataHooks
 import io.github.proify.lyricon.amprovider.xposed.AppleActionSheetMetadataHost
 import io.github.proify.lyricon.amprovider.xposed.InAppContainerKind
 import io.github.proify.lyricon.amprovider.xposed.validatedOriginalSongAlias
-import com.juren233.hyperlyricsenhanced.common.RootConstants
 import com.juren233.hyperlyricsenhanced.common.lyric.AppleOriginalMetadataPolicy
 
 /**
@@ -41,6 +39,7 @@ internal class HleMetadataRuntime(
     private val module: XposedModule,
     private val application: Application,
     private val classLoader: ClassLoader,
+    private val mode: TitleCorrectionMode = TitleCorrectionMode.ORIGINAL_HYPER,
 ) {
     private val version = runCatching {
         val info = application.packageManager.getPackageInfo(
@@ -71,12 +70,8 @@ internal class HleMetadataRuntime(
         classLoader = classLoader,
         hookResolver = hookResolver,
         mainHandler = runtime.mainHandler,
+        cacheNamespace = mode.cacheNamespace,
     )
-    private val remotePreferences: SharedPreferences? by lazy {
-        runCatching {
-            module.getRemotePreferences(ModuleConstants.REMOTE_PREFERENCES_GROUP)
-        }.getOrNull()
-    }
     private lateinit var contentLocalizationHooks: AppleContentLocalizationHooks
     private lateinit var frameworkHooks: AppleFrameworkMetadataHooks
     private lateinit var playbackCoordinator: ApplePlaybackMetadataCoordinator
@@ -130,12 +125,12 @@ internal class HleMetadataRuntime(
 
     fun install(): TargetCapabilityInstall {
         runtime.attach(application, hookResolver)
-        catalogResolver.applyContentUiLanguage(RootConstants.APPLE_MUSIC_CONTENT_UI_LANGUAGE_NONE)
+        MediaMetadataCache.setProfile(mode.cacheNamespace)
+        catalogResolver.applyContentUiLanguage(mode.contentUiLanguageSelection)
         catalogResolver.setPersistentLocalizedCacheEnabled(true)
 
         contentLocalizationHooks = AppleContentLocalizationHooks(
             runtime = runtime,
-            preferences = { remotePreferences },
             catalogResolver = { catalogResolver },
         )
         runCatching { contentLocalizationHooks.installMediaApiLocalization() }
@@ -382,6 +377,9 @@ internal class HleMetadataRuntime(
             contentItemHooks = contentItemHooks,
             queueMetadataHooks = queueMetadataHooks,
             actionSheetMetadataHooks = actionSheetMetadataHooks,
+            configuredContentUiLanguage = mode.contentUiLanguageSelection,
+            restoreOriginalMetadata = mode == TitleCorrectionMode.ORIGINAL_HYPER,
+            profileId = mode.cacheNamespace,
         )
         surfaceBridge.install()
         bridgeEnsureOverride = surfaceBridge::ensureOverride
@@ -425,11 +423,12 @@ internal class HleMetadataRuntime(
 
     private fun playbackHost() = object : ApplePlaybackMetadataCoordinatorHost {
         override fun activePlayer(): Any? = playbackHooks.activePlayer()
-        override fun configuredContentUiLanguage(): Int =
-            RootConstants.APPLE_MUSIC_CONTENT_UI_LANGUAGE_NONE
-        override fun shouldOverrideAccountLanguage(selection: Int): Boolean = false
+        override fun configuredContentUiLanguage(): Int = mode.contentUiLanguageSelection
+        override fun shouldOverrideAccountLanguage(selection: Int): Boolean =
+            mode.catalogLanguage != null
         override fun shouldRestoreCjkOriginalMetadata(metadata: MediaMetadataCache.Metadata): Boolean =
-            AppleOriginalMetadataPolicy.shouldProbeCjkOriginalMetadata(
+            mode == TitleCorrectionMode.ORIGINAL_HYPER &&
+                AppleOriginalMetadataPolicy.shouldProbeCjkOriginalMetadata(
                 mediaId = metadata.id,
                 title = metadata.title,
                 artist = metadata.artist,
@@ -460,6 +459,8 @@ internal class HleMetadataRuntime(
                     originalMetadata = originalMetadata,
                     originalMetadataConfirmed = originalMetadataConfirmed,
                 )
+            } else if (originalMetadata && mode != TitleCorrectionMode.ORIGINAL_HYPER) {
+                return
             } else if (originalMetadata) {
                 metadataStore.rememberOriginalMetadata(mediaId, alias, originalMetadataConfirmed)
             } else {
@@ -475,13 +476,11 @@ internal class HleMetadataRuntime(
             alias: AppleInternalCatalogResolver.Alias?,
             localizedTitle: String?,
             localizedArtist: String?,
-            allowArtistOnly: Boolean,
         ): AppleInternalCatalogResolver.Alias? =
             io.github.proify.lyricon.amprovider.xposed.validatedOriginalSongAlias(
                 alias = alias,
                 localizedTitle = localizedTitle,
                 localizedArtist = localizedArtist,
-                allowArtistOnly = allowArtistOnly,
             )
         override fun shouldShareOriginalSongLanguage(
             localizedTitle: String?,
@@ -501,7 +500,8 @@ internal class HleMetadataRuntime(
                 surfaceBridge.rememberOriginalLanguageForArtist(mediaId, language)
             }
         }
-        override fun isRestoreOriginalMetadataEnabled(): Boolean = true
+        override fun isRestoreOriginalMetadataEnabled(): Boolean =
+            mode == TitleCorrectionMode.ORIGINAL_HYPER
     }
 
     private fun effectiveAlias(mediaId: String): AppleInternalCatalogResolver.Alias? =

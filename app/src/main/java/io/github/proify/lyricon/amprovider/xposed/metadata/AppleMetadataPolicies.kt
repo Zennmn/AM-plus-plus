@@ -320,24 +320,15 @@ internal fun confirmedOriginalSongAlias(
     resolution: AppleInternalCatalogResolver.OriginalResolution,
 ): AppleInternalCatalogResolver.Alias? = resolution.alias
 
-internal fun hasTrustedOriginalArtistOnlyLanguage(
-    resolution: AppleInternalCatalogResolver.OriginalResolution,
-    alias: AppleInternalCatalogResolver.Alias?,
-): Boolean = alias != null &&
-    AppleInternalCatalogResolver.canonicalOriginalLanguage(alias.language) in
-        resolution.trustedArtistOnlyLanguages
-
 internal fun validatedOriginalSongAlias(
     alias: AppleInternalCatalogResolver.Alias?,
     localizedTitle: String?,
     localizedArtist: String?,
-    allowArtistOnly: Boolean = false,
 ): AppleInternalCatalogResolver.Alias? = alias?.takeIf {
     AppleInternalCatalogResolver.isConfidentOriginalSongAlias(
         alias = it,
         localizedTitle = localizedTitle.orEmpty(),
         localizedArtist = localizedArtist.orEmpty(),
-        allowArtistOnly = allowArtistOnly,
     )
 }
 
@@ -345,23 +336,6 @@ internal fun originalSongRetryLanguage(
     resolution: AppleInternalCatalogResolver.OriginalResolution,
 ): String? = resolution.language?.takeIf {
     resolution.alias == null && resolution.originKnown
-}
-
-internal fun originalArtistLanguageFromSongResolution(
-    resolution: AppleInternalCatalogResolver.OriginalResolution,
-    localizedArtist: String?,
-): String? {
-    if (!resolution.originKnown ||
-        !shouldUseAssociatedArtistEntities(
-            artistIds = resolution.artistIds,
-            artistCredit = localizedArtist,
-        )
-    ) {
-        return null
-    }
-    return resolution.language?.let(
-        AppleInternalCatalogResolver::supportedOriginalLanguageOrNull
-    )
 }
 
 internal fun stableArtistCacheKeys(keys: Collection<String>): Set<String> =

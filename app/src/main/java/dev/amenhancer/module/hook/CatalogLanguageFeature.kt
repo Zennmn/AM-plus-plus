@@ -1,26 +1,20 @@
 package dev.amenhancer.module.hook
 
 import dev.amenhancer.module.ModuleConstants
-import dev.amenhancer.module.config.CatalogLanguagePolicy
 
 /**
- * Optional request-language half of title correction.
+ * Legacy compatibility slot for the old global Catalog-language feature.
  *
- * It is deliberately installed before HLE metadata hooks. HLE's tokenized
- * resolver requests have their own locale and later take precedence, while
- * normal Apple Music Catalog requests retain the configured target language.
+ * Fixed-region title correction now scopes the locale to HLE's tokenized
+ * metadata requests. Installing the old process-wide hooks would change
+ * ordinary Apple Music traffic (and can make account-available songs appear
+ * unavailable), so this feature is intentionally inert for every mode.
  */
 internal class CatalogLanguageFeature : FeatureHook {
     override val key: String = ModuleConstants.FEATURE_CATALOG_LANGUAGE
 
-    override fun install(context: HookContext): FeatureInstallResult {
-        val settings = context.config.settings()
-        if (!settings.titleCorrectionEnabled) return FeatureInstallResult.disabled()
-        if (!CatalogLanguagePolicy.isConfigured(settings.titleCorrectionTargetLanguage)) {
-            return FeatureInstallResult.disabled(
-                "No target language configured; ordinary Catalog requests follow Apple Music",
-            )
-        }
-        return context.target.catalogLanguage.install().toFeatureInstallResult()
-    }
+    override fun install(context: HookContext): FeatureInstallResult =
+        FeatureInstallResult.disabled(
+            "Scoped to HLE metadata requests; ordinary Apple Music requests follow the account",
+        )
 }

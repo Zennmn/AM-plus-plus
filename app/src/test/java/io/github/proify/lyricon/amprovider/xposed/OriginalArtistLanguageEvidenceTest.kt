@@ -52,21 +52,13 @@ class OriginalArtistLanguageEvidenceTest {
     }
 
     @Test
-    fun sameEnglishTitleCanApplyConfirmedJapaneseArtistAlias() {
+    fun sameEnglishTitleDoesNotApplyJapaneseArtistOnlyAlias() {
         val alias = AppleInternalCatalogResolver.Alias(
             title = "Let Me Know",
             artist = "當山 みれい",
             language = "ja-JP",
         )
 
-        assertTrue(
-            AppleInternalCatalogResolver.isConfidentOriginalSongAlias(
-                alias = alias,
-                localizedTitle = "Let Me Know",
-                localizedArtist = "MIREI",
-                allowArtistOnly = true,
-            ),
-        )
         assertFalse(
             AppleInternalCatalogResolver.isConfidentOriginalSongAlias(
                 alias = alias,
@@ -89,7 +81,23 @@ class OriginalArtistLanguageEvidenceTest {
                 alias = alias,
                 localizedTitle = "Let Me Know",
                 localizedArtist = "MIREI",
-                allowArtistOnly = true,
+            ),
+        )
+    }
+
+    @Test
+    fun oneRepublicJapaneseStorefrontArtistAliasIsNotAnOriginalSongAlias() {
+        val alias = AppleInternalCatalogResolver.Alias(
+            title = "I Ain't Worried",
+            artist = "ワンリパブリック",
+            language = "ja-JP",
+        )
+
+        assertFalse(
+            AppleInternalCatalogResolver.isConfidentOriginalSongAlias(
+                alias = alias,
+                localizedTitle = "I Ain't Worried",
+                localizedArtist = "OneRepublic",
             ),
         )
     }
@@ -102,26 +110,4 @@ class OriginalArtistLanguageEvidenceTest {
         )
     }
 
-    @Test
-    fun trustedArtistOnlyLanguageMustMatchTheAliasLanguage() {
-        val japaneseAlias = AppleInternalCatalogResolver.Alias(
-            title = "Let Me Know",
-            artist = "當山 みれい",
-            language = "ja-JP",
-        )
-        val koreanAlias = japaneseAlias.copy(
-            artist = "방탄소년단",
-            language = "ko-KR",
-        )
-        val resolution = AppleInternalCatalogResolver.OriginalResolution(
-            alias = japaneseAlias,
-            language = "ja-JP",
-            originKnown = true,
-            artistIds = listOf("882739606"),
-            trustedArtistOnlyLanguages = setOf("ja-JP"),
-        )
-
-        assertTrue(hasTrustedOriginalArtistOnlyLanguage(resolution, japaneseAlias))
-        assertFalse(hasTrustedOriginalArtistOnlyLanguage(resolution, koreanAlias))
-    }
 }

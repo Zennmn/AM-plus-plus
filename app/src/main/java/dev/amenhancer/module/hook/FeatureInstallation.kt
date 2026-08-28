@@ -281,7 +281,6 @@ private fun productionFeatureInstallationModule(
                 registerResources = lyricsTypefaceSession::registerResources,
             ),
             FeatureInstallationPlan(feature = CurrentSongIdentityFeature()),
-            FeatureInstallationPlan(feature = CatalogLanguageFeature()),
             FeatureInstallationPlan(feature = TitleCorrectionFeature()),
             FeatureInstallationPlan(feature = CustomLyricsFeature()),
         ),

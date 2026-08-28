@@ -18,9 +18,11 @@ class HleArtistLanguageStructuralTest {
             "app/src/main/java/io/github/proify/lyricon/amprovider/xposed/AppleInternalCatalogResolver.kt",
         )
         assertFalse(resolver.contains("probeOriginalArtistLanguage"))
-        assertTrue(resolver.contains("artistLanguages = listOfNotNull(cachedArtistLanguage)"))
-        assertTrue(resolver.contains("originKnownFromArtist"))
-        assertTrue(resolver.contains("hasCjkArtistScript"))
+        assertFalse(resolver.contains("artistLanguages = listOfNotNull(cachedArtistLanguage)"))
+        assertFalse(resolver.contains("originKnownFromArtist"))
+        assertFalse(resolver.contains("trustedArtistOnlyLanguages"))
+        assertTrue(resolver.contains("originKnown = isrc != null"))
+        assertTrue(resolver.contains("isConfidentOriginalSongAlias"))
     }
 
     @Test
