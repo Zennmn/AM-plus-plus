@@ -13,12 +13,33 @@ object MediaMetadataCache {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Metadata>?): Boolean =
             size > 100
     }
+    @Volatile
+    private var activeProfile = DEFAULT_PROFILE
+
+    /** Selects the in-memory namespace used by the currently installed runtime. */
+    @Synchronized
+    fun setProfile(profile: String) {
+        val normalized = normalizeProfile(profile)
+        if (activeProfile == normalized) return
+        activeProfile = normalized
+        metadataCache.clear()
+    }
+
+    @Synchronized
+    fun profile(): String = activeProfile
+
+    @Synchronized
+    fun clearProfile(profile: String = activeProfile) {
+        val prefix = normalizeProfile(profile) + ":"
+        metadataCache.keys.removeIf { it.startsWith(prefix) }
+    }
 
     /** 缓存从 Apple Music 内部播放队列中提取的歌曲元数据。 */
     @Synchronized
-    fun put(metadata: Metadata) {
-        val current = metadataCache[metadata.id]
-        metadataCache[metadata.id] = metadata.copy(
+    fun put(metadata: Metadata, profile: String = activeProfile) {
+        val key = cacheKey(profile, metadata.id)
+        val current = metadataCache[key]
+        metadataCache[key] = metadata.copy(
             genre = mergeGenres(current?.genre, listOfNotNull(metadata.genre)),
             originalTitle = metadata.originalTitle ?: current?.originalTitle,
             originalArtist = metadata.originalArtist ?: current?.originalArtist,
@@ -29,7 +50,8 @@ object MediaMetadataCache {
     }
 
     @Synchronized
-    fun getMetadataById(mediaId: String): Metadata? = metadataCache[mediaId]
+    fun getMetadataById(mediaId: String, profile: String = activeProfile): Metadata? =
+        metadataCache[cacheKey(profile, mediaId)]
 
     @Synchronized
     fun updateOriginalMetadata(
@@ -38,36 +60,49 @@ object MediaMetadataCache {
         artist: String?,
         album: String? = null,
         resolved: Boolean = true,
+        profile: String = activeProfile,
     ): Metadata? {
-        val current = metadataCache[mediaId] ?: return null
+        val key = cacheKey(profile, mediaId)
+        val current = metadataCache[key] ?: return null
         val updated = current.copy(
             originalTitle = title,
             originalArtist = artist,
             originalAlbum = album,
             originalMetadataResolved = resolved,
         )
-        metadataCache[mediaId] = updated
+        metadataCache[key] = updated
         return updated
     }
 
     @Synchronized
-    fun updateDisplayMetadata(mediaId: String, title: String?, artist: String?): Metadata? {
-        val current = metadataCache[mediaId] ?: return null
+    fun updateDisplayMetadata(
+        mediaId: String,
+        title: String?,
+        artist: String?,
+        profile: String = activeProfile,
+    ): Metadata? {
+        val key = cacheKey(profile, mediaId)
+        val current = metadataCache[key] ?: return null
         val updated = current.copy(
             title = title?.takeIf(String::isNotBlank) ?: current.title,
             artist = artist?.takeIf(String::isNotBlank) ?: current.artist,
         )
-        metadataCache[mediaId] = updated
+        metadataCache[key] = updated
         return updated
     }
 
     @Synchronized
-    fun updateCatalogGenres(mediaId: String, genres: Collection<String>): Metadata? {
-        val current = metadataCache[mediaId] ?: return null
+    fun updateCatalogGenres(
+        mediaId: String,
+        genres: Collection<String>,
+        profile: String = activeProfile,
+    ): Metadata? {
+        val key = cacheKey(profile, mediaId)
+        val current = metadataCache[key] ?: return null
         val mergedGenre = mergeGenres(current.genre, genres) ?: return current
         if (mergedGenre == current.genre) return current
         val updated = current.copy(genre = mergedGenre)
-        metadataCache[mediaId] = updated
+        metadataCache[key] = updated
         return updated
     }
 
@@ -80,6 +115,18 @@ object MediaMetadataCache {
             .distinct()
             .joinToString(", ")
             .takeIf(String::isNotEmpty)
+
+    private fun cacheKey(profile: String, mediaId: String): String =
+        normalizeProfile(profile) + ":" + mediaId.trim()
+
+    private fun normalizeProfile(profile: String): String = profile
+        .trim()
+        .lowercase()
+        .replace(Regex("[^a-z0-9_-]"), "_")
+        .trim('_')
+        .ifBlank { DEFAULT_PROFILE }
+
+    private const val DEFAULT_PROFILE = "account"
 
     @Serializable
     data class Metadata(

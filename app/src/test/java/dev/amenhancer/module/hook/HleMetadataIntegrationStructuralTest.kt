@@ -13,16 +13,13 @@ class HleMetadataIntegrationStructuralTest {
         ?: error("Missing $relative")
 
     @Test
-    fun `title switch installs HLE metadata runtime and optional catalog language target`() {
+    fun `title switch installs HLE metadata runtime without global catalog language target`() {
         val feature = source("app/src/main/java/dev/amenhancer/module/hook/TitleCorrectionFeature.kt")
         val installation = source("app/src/main/java/dev/amenhancer/module/hook/FeatureInstallation.kt")
         assertTrue(feature.contains("hleMetadata.install()"))
         assertFalse(installation.contains("LibraryRefreshFeature()"))
-        assertTrue(installation.contains("CatalogLanguageFeature()"))
-        assertTrue(
-            installation.indexOf("CatalogLanguageFeature()") <
-                installation.indexOf("TitleCorrectionFeature()"),
-        )
+        assertFalse(installation.contains("CatalogLanguageFeature()"))
+        assertTrue(installation.contains("TitleCorrectionFeature()"))
     }
 
     @Test
@@ -60,15 +57,43 @@ class HleMetadataIntegrationStructuralTest {
     }
 
     @Test
-    fun `new metadata lookups install HLE storefront and language request rewriting`() {
+    fun `new metadata lookups scope storefront and language rewriting to HLE tokens`() {
         val runtime = source("app/src/main/java/dev/amenhancer/module/hook/HleMetadataRuntime.kt")
+        val localization = source(
+            "app/src/main/java/io/github/proify/lyricon/amprovider/xposed/hooks/AppleContentLocalizationHooks.kt",
+        )
+        val resolver = source(
+            "app/src/main/java/io/github/proify/lyricon/amprovider/xposed/AppleInternalCatalogResolver.kt",
+        )
+        assertTrue(runtime.contains("mode.contentUiLanguageSelection"))
+        assertTrue(runtime.contains("cacheNamespace = mode.cacheNamespace"))
         assertTrue(runtime.contains("contentLocalizationHooks.installMediaApiLocalization()"))
         assertTrue(runtime.contains("contentLocalizationHooks.installContentHttpLocalization()"))
-        assertTrue(
-            source(
-                "app/src/main/java/io/github/proify/lyricon/amprovider/xposed/hooks/AppleContentLocalizationHooks.kt",
-            ).contains("Accept-Language"),
+        assertTrue(localization.contains("resolver.catalogRequestLocalization(requestToken)"))
+        assertTrue(localization.contains("resolver.activeCatalogRequestLocalization()"))
+        assertTrue(localization.contains("if (requestLocalization == null) return@installHook"))
+        assertFalse(localization.contains("resolver.applyContentUiLanguage(selection)"))
+        assertTrue(localization.contains("Accept-Language"))
+        assertFalse(resolver.contains("restoreConfiguredStorefront(access)"))
+    }
+
+    @Test
+    fun `fixed region lookups retain HLE identity and ISRC fallback`() {
+        val resolver = source(
+            "app/src/main/java/io/github/proify/lyricon/amprovider/xposed/AppleInternalCatalogResolver.kt",
         )
+        assertTrue(resolver.contains("resolveLocalizedRequestByLockedIsrc"))
+        assertTrue(resolver.contains("enqueueLockedIsrcFallback"))
+        assertTrue(resolver.contains("lockedIsrcFallbackPending"))
+        assertTrue(resolver.contains("MAX_LOCKED_ISRC_FALLBACK_RUNNING"))
+        assertTrue(resolver.contains("resolveCatalogIdentity(identityId, emptyList())"))
+        assertTrue(resolver.contains("queryByIsrc("))
+        assertTrue(resolver.contains("storefrontOverride = request.storefront"))
+        val batchCompletion = resolver
+            .substringAfter("matches.forEach")
+            .substringBefore("private fun enqueueLockedIsrcFallback")
+        assertTrue(batchCompletion.contains("enqueueLockedIsrcFallback(request)"))
+        assertFalse(batchCompletion.contains("resolveLocalizedRequestByLockedIsrc(request)"))
     }
 
     @Test
@@ -268,25 +293,34 @@ class HleMetadataIntegrationStructuralTest {
     }
 
     @Test
-    fun `settings expose target language without restoring refresh action`() {
+    fun `settings expose profile selector without restoring refresh action`() {
         val standalone = source("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
         val embedded = source("app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsHost.kt")
         assertTrue(standalone.contains("歌曲名显示修正"))
         assertTrue(embedded.contains("歌曲名显示修正"))
-        assertTrue(standalone.contains("目标语言"))
-        assertTrue(embedded.contains("目标语言"))
+        assertTrue(standalone.contains("歌曲名修正模式"))
+        assertTrue(embedded.contains("歌曲名修正模式"))
+        assertTrue(standalone.contains("titleCorrectionMode"))
+        assertTrue(embedded.contains("titleCorrectionMode"))
         assertFalse(standalone.contains("刷新资料库"))
         assertFalse(embedded.contains("刷新资料库"))
     }
 
     @Test
-    fun `schema owns optional target language and HLE token requests bypass it`() {
+    fun `schema owns the profile selector and HLE token requests remain isolated`() {
         val schema = source("app/src/main/java/dev/amenhancer/module/config/ModuleSettingsSchema.kt")
         val target = source(
             "app/src/main/java/dev/amenhancer/module/hook/AppleMusicCatalogLanguageTarget.kt",
         )
+        val bridge = source("app/src/main/java/dev/amenhancer/module/hook/HleMetadataSurfaceBridge.kt")
+        assertTrue(schema.contains("KEY_TITLE_CORRECTION_MODE"))
         assertTrue(schema.contains("KEY_TITLE_CORRECTION_TARGET_LANGUAGE"))
         assertTrue(target.contains("isHleResolverRequest"))
         assertTrue(target.contains("CATALOG_REQUEST_TOKEN_PARAM"))
+        assertTrue(target.contains("Global Catalog locale hooks disabled"))
+        assertFalse(target.contains("ModernXposedRuntime.hookMethod"))
+        assertTrue(bridge.contains("MediaMetadataCache.setProfile(profileId)"))
+        assertTrue(bridge.contains("if (MediaMetadataCache.profile() != profileId)"))
+        assertTrue(bridge.contains("restoreOriginalMetadata"))
     }
 }

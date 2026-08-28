@@ -7,15 +7,15 @@ class OriginalMetadataCacheGenerationTest {
     @Test
     fun storefrontArtistLocalizationCachesUseASeparateGeneration() {
         assertEquals(
-            5,
+            1,
             AppleOriginalMetadataCache.currentDatabaseVersionForTest(),
         )
         assertEquals(
-            "hyperlyricsenhanced_apple_original_metadata_v5.db",
+            "hyperlyricsenhanced_apple_original_metadata_original_hyper_v1.db",
             AppleOriginalMetadataCache.currentDatabaseNameForTest(),
         )
         assertEquals(
-            "hyperlyricsenhanced_apple_original_artist_regions_v5",
+            "hyperlyricsenhanced_apple_original_artist_regions_original_hyper_v1",
             AppleOriginalMetadataCache.currentArtistRegionPreferencesNameForTest(),
         )
     }

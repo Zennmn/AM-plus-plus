@@ -35,8 +35,8 @@ import android.widget.Toast
 import dev.amenhancer.module.ModuleApplication
 import dev.amenhancer.module.R
 import dev.amenhancer.module.XposedServiceSnapshot
-import dev.amenhancer.module.config.CatalogLanguagePolicy
 import dev.amenhancer.module.config.ConfigStore
+import dev.amenhancer.module.config.TitleCorrectionMode
 import dev.amenhancer.module.font.FontImportResult
 import dev.amenhancer.module.font.SafFontImporter
 import dev.amenhancer.module.hook.AmLyricsClient
@@ -419,7 +419,11 @@ class SettingsActivity : Activity() {
             addView(insetDivider())
             addView(settingRow(
                 title = "歌曲名显示修正",
-                summary = "按 HyperLyrics-Enhanced 策略恢复原地区原名，并创建持久化检索库；目标语言仅改写底层 Catalog 请求 · 修改后重开 Apple Music",
+                summary = if (settings.titleCorrectionEnabled) {
+                    "${settings.titleCorrectionMode.displayName} · 修改后重开 Apple Music"
+                } else {
+                    "关闭时跟随 Apple Music 账号 · 开启后选择修正地区"
+                },
                 checked = settings.titleCorrectionEnabled,
                 enabled = writable,
             ) { enabled ->
@@ -427,10 +431,10 @@ class SettingsActivity : Activity() {
             })
             addView(insetDivider())
             addView(actionRow(
-                title = "目标语言",
-                summary = CatalogLanguagePolicy.displayName(settings.titleCorrectionTargetLanguage),
+                title = "歌曲名修正模式",
+                summary = settings.titleCorrectionMode.displayName,
                 enabled = writable,
-            ) { showTargetLanguagePicker() })
+            ) { showTitleCorrectionModePicker() })
             addView(insetDivider())
             addView(customLyricsNavigationRow(settings.customLyricsManifest))
         }
@@ -473,57 +477,25 @@ class SettingsActivity : Activity() {
         setOnClickListener { if (enabled) onClick() }
     }
 
-    private fun showTargetLanguagePicker() {
-        val current = CatalogLanguagePolicy.normalize(store.settings().titleCorrectionTargetLanguage)
-        val tags = listOf("", "zh-CN", "zh-TW", "ja-JP", "ko-KR", "en-US", "tr-TR")
-        val labels = tags.map { CatalogLanguagePolicy.displayName(it) }.toTypedArray()
+    private fun showTitleCorrectionModePicker() {
+        val modes = TitleCorrectionMode.values()
+        val current = store.settings().titleCorrectionMode
+        val labels = modes.map(TitleCorrectionMode::displayName).toTypedArray()
         AlertDialog.Builder(this)
-            .setTitle("目标语言")
-            .setSingleChoiceItems(labels, tags.indexOf(current)) { dialog, which ->
-                tags.getOrNull(which)?.let(::saveTargetLanguage)
+            .setTitle("歌曲名修正模式")
+            .setSingleChoiceItems(labels, modes.indexOf(current)) { dialog, which ->
+                modes.getOrNull(which)?.let(::saveTitleCorrectionMode)
                 dialog.dismiss()
             }
-            .setNeutralButton("自定义") { _, _ -> showTargetLanguageEditor(current) }
             .setNegativeButton("取消", null)
             .show()
     }
 
-    private fun showTargetLanguageEditor(current: String) {
-        val input = EditText(this).apply {
-            hint = "例如 ja-JP"
-            inputType = InputType.TYPE_CLASS_TEXT
-            setText(current)
-            setSelectAllOnFocus(true)
-            setPadding(dp(24), dp(8), dp(24), 0)
-        }
-        AlertDialog.Builder(this)
-            .setTitle("自定义目标语言")
-            .setMessage("请输入 BCP-47 语言标签（例如 zh-CN）；留空请在上一级选择“跟随 Apple Music”")
-            .setView(input)
-            .setNegativeButton("取消", null)
-            .setPositiveButton("保存") { _, _ ->
-                val raw = input.text?.toString().orEmpty()
-                if (!CatalogLanguagePolicy.isValid(raw)) {
-                    toast("目标语言格式无效，例如 ja-JP")
-                } else {
-                    saveTargetLanguage(raw)
-                }
-            }
-            .show()
-    }
-
-    private fun saveTargetLanguage(raw: String) {
-        val normalized = CatalogLanguagePolicy.normalize(raw)
+    private fun saveTitleCorrectionMode(mode: TitleCorrectionMode) {
         store.saveSettings(
-            store.settings().copy(titleCorrectionTargetLanguage = normalized),
+            store.settings().copy(titleCorrectionMode = mode),
         )
-        val message = if (normalized.isBlank()) {
-            "目标语言已恢复为跟随 Apple Music；重开 Apple Music 后生效"
-        } else {
-            "目标语言已设为 " + CatalogLanguagePolicy.displayName(normalized) +
-                "；重开 Apple Music 后生效"
-        }
-        toast(message)
+        toast("歌曲名修正模式已设为${mode.displayName}；重开 Apple Music 后生效")
         render()
     }
 

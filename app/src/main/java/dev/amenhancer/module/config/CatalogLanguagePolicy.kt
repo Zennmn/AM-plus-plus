@@ -33,6 +33,7 @@ internal object CatalogLanguagePolicy {
     fun headerLanguage(tag: String): String = when (val normalized = normalize(tag)) {
         "zh-CN", "zh-SG" -> DEFAULT_SCRIPT_SIMPLIFIED
         "zh-TW", "zh-HK", "zh-MO" -> DEFAULT_SCRIPT_TRADITIONAL
+        "ja-JP" -> "ja"
         else -> normalized
     }
 

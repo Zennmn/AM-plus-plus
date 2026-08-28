@@ -22,6 +22,9 @@ internal class HleMetadataSurfaceBridge(
     private val contentItemHooks: AppleContentItemMetadataHooks,
     private val queueMetadataHooks: AppleQueueMetadataHooks,
     private val actionSheetMetadataHooks: AppleActionSheetMetadataHooks,
+    private val configuredContentUiLanguage: Int,
+    private val restoreOriginalMetadata: Boolean,
+    private val profileId: String,
 ) {
     private val traceSequence = AtomicLong(0L)
     private val registry = AppleInAppMetadataRegistry()
@@ -45,6 +48,7 @@ internal class HleMetadataSurfaceBridge(
     private lateinit var visibleMetadataDiagnostics: AppleVisibleMetadataDiagnostics
 
     fun install() {
+        MediaMetadataCache.setProfile(profileId)
         refreshQueue = AppleInAppMetadataRefreshQueue(
             postToMain = { callback -> runtime.mainHandler.post { callback() } },
             diagnostics = if (BuildConfig.DEBUG) {
@@ -149,7 +153,7 @@ internal class HleMetadataSurfaceBridge(
             metadataApplier = metadataApplier,
             surfaceRuntime = surfaceRuntime,
             dataBindingHooks = dataBindingHooks,
-            configuredContentUiLanguage = { 0 },
+            configuredContentUiLanguage = { this@HleMetadataSurfaceBridge.configuredContentUiLanguage },
         )
         visibleMetadataDiagnostics = AppleVisibleMetadataDiagnostics(
             runtime = runtime,
@@ -171,7 +175,7 @@ internal class HleMetadataSurfaceBridge(
             frameworkMetadataHooks = frameworkHooks,
             visibleMetadataDiagnostics = visibleMetadataDiagnostics,
             media3MetadataCoordinator = media3MetadataCoordinator,
-            configuredContentUiLanguage = { 0 },
+            configuredContentUiLanguage = { this@HleMetadataSurfaceBridge.configuredContentUiLanguage },
             traceSequence = traceSequence,
         )
         playbackItemConversionHooks = ApplePlaybackItemConversionHooks(
@@ -287,16 +291,24 @@ internal class HleMetadataSurfaceBridge(
         originalMetadataConfirmed: Boolean = false,
         artistOnly: Boolean = false,
         propagateArtistEntity: Boolean = true,
-    ) = metadataOverrideApplicationCoordinator.apply(
-        mediaId = mediaId,
-        alias = alias,
-        forceInAppRebind = forceInAppRebind,
-        rememberLocalizedArtist = rememberLocalizedArtist,
-        originalMetadata = originalMetadata,
-        originalMetadataConfirmed = originalMetadataConfirmed,
-        artistOnly = artistOnly,
-        propagateArtistEntity = propagateArtistEntity,
-    )
+    ) {
+        if (MediaMetadataCache.profile() != profileId) {
+            ProviderLogger.debug(
+                "忽略过期元数据 profile 回调: expected=$profileId, active=${MediaMetadataCache.profile()}"
+            )
+            return
+        }
+        metadataOverrideApplicationCoordinator.apply(
+            mediaId = mediaId,
+            alias = alias,
+            forceInAppRebind = forceInAppRebind,
+            rememberLocalizedArtist = rememberLocalizedArtist,
+            originalMetadata = originalMetadata,
+            originalMetadataConfirmed = originalMetadataConfirmed,
+            artistOnly = artistOnly,
+            propagateArtistEntity = propagateArtistEntity,
+        )
+    }
 
     private fun applyPlaybackMetadataOverrideFromHost(
         mediaId: String,
@@ -308,6 +320,7 @@ internal class HleMetadataSurfaceBridge(
         artistOnly: Boolean,
         propagateArtistEntity: Boolean,
     ) {
+        if (originalMetadata && !restoreOriginalMetadata) return
         if (::metadataOverrideApplicationCoordinator.isInitialized) {
             applyPlaybackMetadataOverride(
                 mediaId = mediaId,
@@ -362,14 +375,17 @@ internal class HleMetadataSurfaceBridge(
         localizedTitle: String?,
         localizedArtist: String?,
         alias: AppleInternalCatalogResolver.Alias?,
-    ): Boolean = resolutionCoordinator.shouldShareOriginalSongLanguage(
+    ): Boolean = restoreOriginalMetadata && resolutionCoordinator.shouldShareOriginalSongLanguage(
         localizedTitle = localizedTitle,
         localizedArtist = localizedArtist,
         alias = alias,
     )
 
-    fun rememberOriginalLanguageForArtist(mediaId: String, language: String) =
-        resolutionCoordinator.rememberOriginalLanguageForArtist(mediaId, language)
+    fun rememberOriginalLanguageForArtist(mediaId: String, language: String) {
+        if (restoreOriginalMetadata) {
+            resolutionCoordinator.rememberOriginalLanguageForArtist(mediaId, language)
+        }
+    }
 
     fun containerNavigationBinding(containerItem: Any): InAppContainerNavigationRef? =
         metadataRegistrationCoordinator.containerNavigationBinding(containerItem)
@@ -1089,7 +1105,7 @@ internal class HleMetadataSurfaceBridge(
                     localizedArtist: String?,
                     alias: AppleInternalCatalogResolver.Alias?,
                 ): Boolean = bridge.hostCall("mediaApi.shouldShareOriginalSongLanguage", false) {
-                    bridge.resolutionCoordinator.shouldShareOriginalSongLanguage(
+                    bridge.shouldShareOriginalSongLanguage(
                         localizedTitle = localizedTitle,
                         localizedArtist = localizedArtist,
                         alias = alias,
@@ -1098,7 +1114,7 @@ internal class HleMetadataSurfaceBridge(
 
                 override fun rememberOriginalLanguageForArtist(mediaId: String, language: String) =
                     bridge.hostCall("mediaApi.rememberOriginalLanguageForArtist", Unit) {
-                        bridge.resolutionCoordinator.rememberOriginalLanguageForArtist(mediaId, language)
+                        bridge.rememberOriginalLanguageForArtist(mediaId, language)
                     }
 
                 override fun hydrateSharedArtistOverrides(mediaId: String) =
@@ -1138,7 +1154,8 @@ internal class HleMetadataSurfaceBridge(
                     bridge.resolutionCoordinator.schedule(mediaIds, priority, originalResolutionMode)
                 }
 
-                override fun configuredContentUiLanguage(): Int = 0
+                override fun configuredContentUiLanguage(): Int =
+                    this@HleMetadataSurfaceBridge.configuredContentUiLanguage
 
                 override fun nextTraceSequence(): Long =
                     bridge.hostCall("mediaApi.nextTraceSequence", 0L) {
@@ -1151,11 +1168,13 @@ internal class HleMetadataSurfaceBridge(
                         bridge.playbackCoordinator.currentMetadataId()
                     }
 
-                override fun configuredContentUiLanguage(): Int = 0
+                override fun configuredContentUiLanguage(): Int =
+                    this@HleMetadataSurfaceBridge.configuredContentUiLanguage
 
-                override fun shouldOverrideAccountLanguage(selection: Int): Boolean = false
+                override fun shouldOverrideAccountLanguage(selection: Int): Boolean =
+                    this@HleMetadataSurfaceBridge.configuredContentUiLanguage != 0
 
-                override fun isRestoreOriginalEnabled(): Boolean = true
+                override fun isRestoreOriginalEnabled(): Boolean = restoreOriginalMetadata
 
                 override fun refreshRequestScope() =
                     bridge.hostCall("resolution.refreshRequestScope", Unit) {
@@ -1253,7 +1272,7 @@ internal class HleMetadataSurfaceBridge(
                     bridge.librarySurfaceHooks.enrichEntity(mediaId, entity, kind, attributes)
                 }
 
-                override fun isRestoreOriginalMetadataEnabled(): Boolean = true
+                override fun isRestoreOriginalMetadataEnabled(): Boolean = restoreOriginalMetadata
 
                 override fun shouldRetryOriginalMetadataCacheProbe(mediaId: String): Boolean =
                     bridge.hostCall("listenNow.shouldRetryOriginalMetadataCacheProbe", false) {
@@ -1265,12 +1284,14 @@ internal class HleMetadataSurfaceBridge(
                     alias: AppleInternalCatalogResolver.Alias,
                     confirmed: Boolean,
                 ) = bridge.hostCall("listenNow.rememberOriginalMetadataOverride", Unit) {
-                    bridge.metadataStore.rememberOriginalMetadata(mediaId, alias, confirmed)
+                    if (bridge.restoreOriginalMetadata) {
+                        bridge.metadataStore.rememberOriginalMetadata(mediaId, alias, confirmed)
+                    }
                 }
 
                 override fun rememberOriginalLanguageForArtist(mediaId: String, language: String) =
                     bridge.hostCall("listenNow.rememberOriginalLanguageForArtist", Unit) {
-                        bridge.resolutionCoordinator.rememberOriginalLanguageForArtist(mediaId, language)
+                        bridge.rememberOriginalLanguageForArtist(mediaId, language)
                     }
 
                 override fun resolveCachedOriginalEntityForInApp(

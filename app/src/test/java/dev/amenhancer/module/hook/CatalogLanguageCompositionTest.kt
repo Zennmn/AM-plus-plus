@@ -17,7 +17,7 @@ class CatalogLanguageCompositionTest {
         val headers = CatalogLanguageRewritePolicy.withHeaderLanguageValue(source, "ja-JP")
 
         assertEquals("ja-JP", raw["l"])
-        assertEquals("ja-JP", headers["Accept-Language"])
+        assertEquals("ja", headers["Accept-Language"])
     }
 
     @Test

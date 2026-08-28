@@ -13,8 +13,9 @@ import java.util.concurrent.Executors
 internal class AppleLocalizedMetadataCache(
     context: Context,
     private val mainHandler: Handler,
+    private val databaseName: String = "hyperlyricsenhanced_apple_metadata.db",
 ) {
-    private val helper = DatabaseHelper(context.applicationContext)
+    private val helper = DatabaseHelper(context.applicationContext, databaseName)
     private val executor: ExecutorService = Executors.newSingleThreadExecutor { task ->
         Thread(task, "HLE-AppleMetadataCache").apply { isDaemon = true }
     }
@@ -173,8 +174,10 @@ internal class AppleLocalizedMetadataCache(
     private fun Cursor.stringColumn(name: String): String =
         getString(getColumnIndexOrThrow(name)).orEmpty()
 
-    private class DatabaseHelper(context: Context) :
-        SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
+    private class DatabaseHelper(
+        context: Context,
+        databaseName: String,
+    ) : SQLiteOpenHelper(context, databaseName, null, DATABASE_VERSION) {
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL(
                 """
@@ -201,7 +204,6 @@ internal class AppleLocalizedMetadataCache(
     }
 
     private companion object {
-        const val DATABASE_NAME = "hyperlyricsenhanced_apple_metadata.db"
         const val DATABASE_VERSION = 1
         const val TABLE_NAME = "localized_metadata"
         const val COLUMN_KEY = "cache_key"

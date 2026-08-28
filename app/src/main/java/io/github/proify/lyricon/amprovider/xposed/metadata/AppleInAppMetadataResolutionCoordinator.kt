@@ -790,6 +790,12 @@ internal class AppleInAppMetadataResolutionCoordinator(
         preBind: Boolean,
         priority: AppleInternalCatalogResolver.RequestPriority,
     ) {
+        if (!host.isRestoreOriginalEnabled()) {
+            ProviderLogger.debug(
+                "Apple App 原地区缓存查询忽略: id=$mediaId, reason=original_mode_disabled",
+            )
+            return
+        }
         val requestKey = "original-cache:$entityType:$mediaId"
         if (!metadataStore.beginOriginalRequest(requestKey)) return
         var bindingPhase = true
@@ -891,15 +897,8 @@ internal class AppleInAppMetadataResolutionCoordinator(
                     return@resolveOriginalMetadata
                 }
                 mergePlaybackAssociatedArtistIds(mediaId, resolution.artistIds)
-                originalArtistLanguageFromSongResolution(
-                    resolution = resolution,
-                    localizedArtist = account.artist,
-                )?.let { language ->
-                    rememberOriginalLanguageForArtist(mediaId, language)
-                }
                 fun finishResolution(
                     alias: AppleInternalCatalogResolver.Alias?,
-                    allowArtistOnly: Boolean = false,
                 ) {
                     metadataStore.finishOriginalRequest(requestKey)
                     if (!host.isRestoreOriginalEnabled()) return
@@ -909,7 +908,6 @@ internal class AppleInAppMetadataResolutionCoordinator(
                         alias = alias,
                         localizedTitle = account.title,
                         localizedArtist = account.artist,
-                        allowArtistOnly = allowArtistOnly,
                     )
                     if (alias != null && safeAlias == null) {
                         catalogResolver.invalidateOriginalEntity(
@@ -962,10 +960,6 @@ internal class AppleInAppMetadataResolutionCoordinator(
                 if (retryLanguage == null) {
                     finishResolution(
                         alias = alias,
-                        allowArtistOnly = hasTrustedOriginalArtistOnlyLanguage(
-                            resolution = resolution,
-                            alias = alias,
-                        ),
                     )
                 } else {
                     ProviderLogger.info(
@@ -981,10 +975,6 @@ internal class AppleInAppMetadataResolutionCoordinator(
                         onResolved = { retryAlias ->
                             finishResolution(
                                 alias = retryAlias,
-                                allowArtistOnly = hasTrustedOriginalArtistOnlyLanguage(
-                                    resolution = resolution,
-                                    alias = retryAlias,
-                                ),
                             )
                         },
                     )
