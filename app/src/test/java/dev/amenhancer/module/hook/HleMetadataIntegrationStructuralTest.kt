@@ -94,6 +94,15 @@ class HleMetadataIntegrationStructuralTest {
             .substringBefore("private fun enqueueLockedIsrcFallback")
         assertTrue(batchCompletion.contains("enqueueLockedIsrcFallback(request)"))
         assertFalse(batchCompletion.contains("resolveLocalizedRequestByLockedIsrc(request)"))
+        val fallbackScheduler = resolver
+            .substringAfter("private fun scheduleLockedIsrcFallbacks")
+            .substringBefore("private fun resolveLocalizedRequestByLockedIsrc")
+        assertTrue(fallbackScheduler.contains("currentRequestPriority(task.request.mediaId"))
+        assertTrue(fallbackScheduler.contains("selectNextRequestIndex(priorities)"))
+        val priorityUpdate = resolver
+            .substringAfter("private fun updatePendingRequestPriorities")
+            .substringBefore("private fun currentScopedPriority")
+        assertTrue(priorityUpdate.contains("scheduleLockedIsrcFallbacks()"))
     }
 
     @Test

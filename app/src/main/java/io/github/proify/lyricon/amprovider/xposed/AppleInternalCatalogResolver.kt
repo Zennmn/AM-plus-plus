@@ -11,7 +11,6 @@ import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 import java.lang.reflect.Proxy
-import java.util.ArrayDeque
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
@@ -105,7 +104,7 @@ internal class AppleInternalCatalogResolver(
      * Fixed-region ID misses use a two-step identity/ISRC chain.  Keep that chain behind its own
      * small queue so a 50-item localized batch cannot turn into 50 simultaneous host requests.
      */
-    private val lockedIsrcFallbackPending = ArrayDeque<LockedIsrcFallbackTask>()
+    private val lockedIsrcFallbackPending = mutableListOf<LockedIsrcFallbackTask>()
     private var lockedIsrcFallbackRunning = 0
     private val requestPriorityByMediaId =
         object : LinkedHashMap<String, RequestPriority>(256, 0.75f, true) {
@@ -1127,8 +1126,9 @@ internal class AppleInternalCatalogResolver(
         request: LocalizedRequest,
         onResolved: (resolvedLookupId: String?, alias: Alias?) -> Unit,
     ) {
-        lockedIsrcFallbackPending.addLast(
-            LockedIsrcFallbackTask(request = request, onResolved = onResolved),
+        lockedIsrcFallbackPending += LockedIsrcFallbackTask(
+            request = request,
+            onResolved = onResolved,
         )
         scheduleLockedIsrcFallbacks()
     }
@@ -1138,7 +1138,7 @@ internal class AppleInternalCatalogResolver(
             lockedIsrcFallbackRunning < MAX_LOCKED_ISRC_FALLBACK_RUNNING &&
                 lockedIsrcFallbackPending.isNotEmpty()
         ) {
-            val task = lockedIsrcFallbackPending.removeFirst()
+            val task = nextLockedIsrcFallbackTask() ?: break
             lockedIsrcFallbackRunning += 1
             resolveLocalizedRequestByLockedIsrc(task.request) { resolvedLookupId, alias ->
                 lockedIsrcFallbackRunning = (lockedIsrcFallbackRunning - 1).coerceAtLeast(0)
@@ -1146,6 +1146,20 @@ internal class AppleInternalCatalogResolver(
                 scheduleLockedIsrcFallbacks()
             }
         }
+    }
+
+    /**
+     * Selects the highest effective priority at dispatch time.  The effective value is read from
+     * [requestPriorityByMediaId], so a visible-page promotion or a request-scope update also
+     * reorders tasks that are already waiting in this fallback queue.  Equal priorities retain
+     * insertion order to avoid unnecessary churn.
+     */
+    private fun nextLockedIsrcFallbackTask(): LockedIsrcFallbackTask? {
+        val priorities = lockedIsrcFallbackPending.map { task ->
+            currentRequestPriority(task.request.mediaId, task.request.priority)
+        }
+        val index = selectNextRequestIndex(priorities) ?: return null
+        return lockedIsrcFallbackPending.removeAt(index)
     }
 
     /**
@@ -1355,6 +1369,10 @@ internal class AppleInternalCatalogResolver(
                 }
             }
         }
+        // Fallback tasks read their effective priority when a slot is selected.  Rescheduling
+        // here also wakes the queue when a completed task left capacity available during a scope
+        // update or explicit promotion.
+        scheduleLockedIsrcFallbacks()
         return changed
     }
 
