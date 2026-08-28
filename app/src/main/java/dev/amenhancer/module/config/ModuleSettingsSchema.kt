@@ -167,6 +167,24 @@ internal object ModuleSettingsSchema {
         )
     }
 
+    /**
+     * Returns the host-local values required before removing the v11 target
+     * language key.  This is intentionally independent of the schema version:
+     * an already-initialized embedded store skips remote migration, so it must
+     * still be able to upgrade its own legacy value in place.
+     */
+    internal fun legacyTitleCorrectionMigrationValues(values: Map<String, *>): Map<String, Any> {
+        if (!values.containsKey(KEY_TITLE_CORRECTION_TARGET_LANGUAGE) ||
+            values.string(KEY_TITLE_CORRECTION_MODE).isNotBlank()
+        ) {
+            return emptyMap()
+        }
+        return linkedMapOf(
+            KEY_TITLE_CORRECTION_MODE to values.titleCorrectionMode().storageValue,
+            KEY_SCHEMA_VERSION to ModuleConstants.CONFIG_SCHEMA_VERSION,
+        )
+    }
+
     private fun Map<String, *>.string(key: String): String = this[key] as? String ?: ""
 
     private fun Map<String, *>.long(key: String): Long? = when (val value = this[key]) {

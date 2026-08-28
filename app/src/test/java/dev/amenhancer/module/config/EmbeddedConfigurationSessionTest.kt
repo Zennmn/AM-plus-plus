@@ -1,5 +1,6 @@
 package dev.amenhancer.module.config
 
+import dev.amenhancer.module.ModuleConstants
 import dev.amenhancer.module.font.FontImportResult
 import dev.amenhancer.module.font.FontImportTransaction
 import dev.amenhancer.module.model.LyricsFontManifest
@@ -16,6 +17,50 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class EmbeddedConfigurationSessionTest {
+    @Test
+    fun `legacy title correction mode is published before obsolete key cleanup`() {
+        listOf(
+            "zh-CN" to TitleCorrectionMode.MAINLAND_CHINA,
+            "ja-JP" to TitleCorrectionMode.JAPAN,
+        ).forEach { (legacyLanguage, expectedMode) ->
+            val storage = InMemoryEmbeddedStorage(
+                initialValues = mapOf(
+                    "schema_version" to 11,
+                    "title_correction_enabled" to true,
+                    "title_correction_target_language" to legacyLanguage,
+                ),
+            )
+
+            val session = EmbeddedConfigurationSession(storage)
+
+            assertEquals(expectedMode, session.settings().titleCorrectionMode)
+            assertEquals(expectedMode.storageValue, storage.values()["title_correction_mode"])
+            assertEquals(
+                ModuleConstants.CONFIG_SCHEMA_VERSION,
+                storage.values()["schema_version"],
+            )
+            assertFalse(storage.values().containsKey("title_correction_target_language"))
+        }
+    }
+
+    @Test
+    fun `legacy title correction key remains when new mode cannot be published`() {
+        val storage = InMemoryEmbeddedStorage(
+            initialValues = mapOf(
+                "schema_version" to 11,
+                "title_correction_enabled" to true,
+                "title_correction_target_language" to "ja-JP",
+            ),
+            failWrites = true,
+        )
+
+        val session = EmbeddedConfigurationSession(storage)
+
+        assertEquals(TitleCorrectionMode.JAPAN, session.settings().titleCorrectionMode)
+        assertTrue(storage.values().containsKey("title_correction_target_language"))
+        assertFalse(storage.values().containsKey("title_correction_mode"))
+    }
+
     @Test
     fun `ordinary settings round trip preserves file-backed metadata`() {
         val font = LyricsFontManifest(
@@ -120,6 +165,7 @@ class EmbeddedConfigurationSessionTest {
 
     private class InMemoryEmbeddedStorage(
         initialValues: Map<String, Any> = emptyMap(),
+        private val failWrites: Boolean = false,
     ) : EmbeddedConfigurationStorage {
         private val storedValues = initialValues.toMutableMap()
         private val files = mutableMapOf<String, ByteArray>()
@@ -127,7 +173,13 @@ class EmbeddedConfigurationSessionTest {
         override fun values(): Map<String, *> = storedValues.toMap()
 
         override fun writeValues(values: Map<String, Any>, synchronous: Boolean): Boolean {
+            if (failWrites) return false
             storedValues.putAll(values)
+            return true
+        }
+
+        override fun removeValues(keys: Set<String>, synchronous: Boolean): Boolean {
+            keys.forEach(storedValues::remove)
             return true
         }
 

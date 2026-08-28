@@ -74,7 +74,7 @@ internal class EmbeddedConfigurationSession(
     private val writable: Boolean = true,
 ) : ConfigurationReader {
     init {
-        if (writable) storage.removeValues(ModuleSettingsSchema.obsoleteKeys, synchronous = true)
+        if (writable) migrateLegacyValuesBeforeCleanup()
     }
     private val indexRepository = CustomLyricsIndexRepository(
         newIndexFileId = newIndexFileId,
@@ -164,6 +164,24 @@ internal class EmbeddedConfigurationSession(
 
     override fun openFileDescriptor(name: String): ParcelFileDescriptor? =
         storage.openFileDescriptor(name)
+
+    /**
+     * Existing host-private stores may already be marked initialized, which
+     * intentionally bypasses remote migration.  Convert the legacy title
+     * correction value locally before deleting its old key; if publication
+     * fails, leave the legacy key intact so the next process can retry.
+     */
+    private fun migrateLegacyValuesBeforeCleanup() {
+        val values = runCatching { storage.values() }.getOrNull() ?: return
+        val migration = ModuleSettingsSchema.legacyTitleCorrectionMigrationValues(values)
+        if (migration.isNotEmpty() && !runCatching {
+                storage.writeValues(migration, synchronous = true)
+            }.getOrDefault(false)
+        ) {
+            return
+        }
+        storage.removeValues(ModuleSettingsSchema.obsoleteKeys, synchronous = true)
+    }
 
     private companion object {
         val INDEX_MUTATION_LOCK = Any()
