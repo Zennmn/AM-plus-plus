@@ -9,6 +9,8 @@ internal object CurrentSongIdentityProtocol {
     const val EXTRA_APPLE_MUSIC_ID = "dev.amenhancer.module.extra.CURRENT_SONG_ID"
     const val EXTRA_SONG_TITLE = "dev.amenhancer.module.extra.CURRENT_SONG_TITLE"
     const val EXTRA_SONG_ARTIST = "dev.amenhancer.module.extra.CURRENT_SONG_ARTIST"
+    const val EXTRA_SONG_ALBUM = "dev.amenhancer.module.extra.CURRENT_SONG_ALBUM"
+    const val EXTRA_SONG_DURATION_MS = "dev.amenhancer.module.extra.CURRENT_SONG_DURATION_MS"
 
     const val RESULT_UNAVAILABLE = 0
     const val RESULT_AVAILABLE = 1
@@ -18,4 +20,6 @@ internal data class CurrentSongDetails(
     val appleMusicId: Long,
     val title: String? = null,
     val artist: String? = null,
+    val album: String? = null,
+    val durationMs: Long? = null,
 )

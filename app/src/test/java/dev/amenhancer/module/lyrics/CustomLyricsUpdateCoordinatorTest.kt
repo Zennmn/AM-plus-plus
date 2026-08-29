@@ -127,6 +127,190 @@ class CustomLyricsUpdateCoordinatorTest {
         assertTrue(result.issues.any { it.appleMusicId == 3L })
     }
 
+    @Test
+    fun `metadata imports stay skipped when all official sources miss`() {
+        val qq = entry(11L, CustomLyricsSources.QQ_MUSIC, ttml("qq"), "lyrics_qq")
+        val netease = entry(12L, CustomLyricsSources.NETEASE_CLOUD_MUSIC, ttml("ne"), "lyrics_ne")
+        val result = coordinator(
+            loadLunabeatCatalog = {
+                LunabeatCatalog(
+                    manifest = LunabeatManifest(1, "r1", "songs.json"),
+                    songs = emptyList(),
+                )
+            },
+            loadAmLyricsIndex = { AmLyricsIndex(emptyList()) },
+        ).update(
+            oldManifest = CustomLyricsManifest(listOf(qq, netease)),
+            fileIdFactory = { error("must not allocate files") },
+            writeRemoteFile = { _, _ -> error("must not write") },
+            publishManifest = { error("must not publish") },
+            deleteRemoteFile = {},
+        ) as CustomLyricsUpdateResult.Updated
+
+        assertEquals(2, result.skipped)
+        assertEquals(0, result.updated)
+        assertEquals(0, result.failed)
+        assertEquals(CustomLyricsManifest(listOf(qq, netease)), result.manifest)
+    }
+
+    @Test
+    fun `metadata entry promotes to AMLL before lower priority sources`() {
+        val local = entry(42L, CustomLyricsSources.QQ_MUSIC, ttml("local"), "lyrics_old")
+        val amllFetches = AtomicInteger()
+        val lunabeatFetches = AtomicInteger()
+        val amLyricsFetches = AtomicInteger()
+        val result = coordinator(
+            fetchAmll = {
+                amllFetches.incrementAndGet()
+                ttml("amll")
+            },
+            loadLunabeatCatalog = {
+                LunabeatCatalog(
+                    manifest = LunabeatManifest(1, "r1", "songs.json"),
+                    songs = listOf(
+                        LunabeatSong(
+                            title = "Song",
+                            artists = listOf("Artist"),
+                            album = "Album",
+                            appleMusicIds = listOf(42L),
+                            path = "lyrics/luna.ttml",
+                            sha256 = "0".repeat(64),
+                        ),
+                    ),
+                )
+            },
+            fetchLunabeat = {
+                lunabeatFetches.incrementAndGet()
+                ttml("lunabeat")
+            },
+            loadAmLyricsIndex = {
+                AmLyricsIndex(
+                    listOf(
+                        AmLyricsIndexEntry(
+                            appleMusicId = 42L,
+                            alternateIds = emptyList(),
+                            displayName = "AM",
+                            path = "am-lyrics/a.ttml",
+                            enabled = true,
+                            sizeBytes = 1L,
+                            sha256 = "0".repeat(64),
+                        ),
+                    ),
+                )
+            },
+            fetchAmLyrics = {
+                amLyricsFetches.incrementAndGet()
+                ttml("am-lyrics")
+            },
+        ).update(
+            oldManifest = CustomLyricsManifest(listOf(local)),
+            fileIdFactory = { "lyrics_new" },
+            writeRemoteFile = { _, _ -> true },
+            publishManifest = { true },
+            deleteRemoteFile = {},
+        ) as CustomLyricsUpdateResult.Updated
+
+        assertEquals(1, result.updated)
+        assertEquals(CustomLyricsSources.AMLL, result.manifest.entries.single().source)
+        assertEquals(1, amllFetches.get())
+        assertEquals(0, lunabeatFetches.get())
+        assertEquals(0, amLyricsFetches.get())
+    }
+
+    @Test
+    fun `metadata entry falls back to Lunabeat before AM-Lyrics and promotes even with identical bytes`() {
+        val localBody = ttml("same")
+        val local = entry(43L, CustomLyricsSources.NETEASE_CLOUD_MUSIC, localBody, "lyrics_old")
+        val amLyricsFetches = AtomicInteger()
+        val result = coordinator(
+            fetchAmll = { null },
+            loadLunabeatCatalog = {
+                LunabeatCatalog(
+                    manifest = LunabeatManifest(1, "r1", "songs.json"),
+                    songs = listOf(
+                        LunabeatSong(
+                            title = "Song",
+                            artists = listOf("Artist"),
+                            album = "Album",
+                            appleMusicIds = listOf(43L),
+                            path = "lyrics/luna.ttml",
+                            sha256 = "0".repeat(64),
+                        ),
+                    ),
+                )
+            },
+            fetchLunabeat = { localBody },
+            loadAmLyricsIndex = {
+                AmLyricsIndex(
+                    listOf(
+                        AmLyricsIndexEntry(
+                            appleMusicId = 43L,
+                            alternateIds = emptyList(),
+                            displayName = "AM",
+                            path = "am-lyrics/a.ttml",
+                            enabled = true,
+                            sizeBytes = 1L,
+                            sha256 = "0".repeat(64),
+                        ),
+                    ),
+                )
+            },
+            fetchAmLyrics = {
+                amLyricsFetches.incrementAndGet()
+                ttml("am-lyrics")
+            },
+        ).update(
+            oldManifest = CustomLyricsManifest(listOf(local)),
+            fileIdFactory = { "lyrics_new" },
+            writeRemoteFile = { _, _ -> true },
+            publishManifest = { true },
+            deleteRemoteFile = {},
+        ) as CustomLyricsUpdateResult.Updated
+
+        assertEquals(1, result.updated)
+        assertEquals(CustomLyricsSources.LUNABEAT, result.manifest.entries.single().source)
+        assertEquals(0, amLyricsFetches.get())
+    }
+
+    @Test
+    fun `metadata entry promotes to AM-Lyrics when higher priority sources miss`() {
+        val local = entry(44L, CustomLyricsSources.QQ_MUSIC, ttml("local"), "lyrics_old")
+        val result = coordinator(
+            fetchAmll = { null },
+            loadLunabeatCatalog = {
+                LunabeatCatalog(
+                    manifest = LunabeatManifest(1, "r1", "songs.json"),
+                    songs = emptyList(),
+                )
+            },
+            loadAmLyricsIndex = {
+                AmLyricsIndex(
+                    listOf(
+                        AmLyricsIndexEntry(
+                            appleMusicId = 44L,
+                            alternateIds = emptyList(),
+                            displayName = "AM",
+                            path = "am-lyrics/a.ttml",
+                            enabled = true,
+                            sizeBytes = 1L,
+                            sha256 = "0".repeat(64),
+                        ),
+                    ),
+                )
+            },
+            fetchAmLyrics = { ttml("am-lyrics") },
+        ).update(
+            oldManifest = CustomLyricsManifest(listOf(local)),
+            fileIdFactory = { "lyrics_new" },
+            writeRemoteFile = { _, _ -> true },
+            publishManifest = { true },
+            deleteRemoteFile = {},
+        ) as CustomLyricsUpdateResult.Updated
+
+        assertEquals(1, result.updated)
+        assertEquals(CustomLyricsSources.AM_LYRICS, result.manifest.entries.single().source)
+    }
+
     private fun coordinator(
         fetchAmll: (Long) -> String? = { null },
         loadAmLyricsIndex: () -> AmLyricsIndex? = { null },

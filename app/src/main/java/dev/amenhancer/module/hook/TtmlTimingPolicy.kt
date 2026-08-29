@@ -119,14 +119,15 @@ internal object TtmlTimingPolicy {
 
 /**
  * Bounded identity observations from the parser seam. Weak references avoid
- * retaining JavaCPP pointer wrappers (and their native addresses) after Apple
- * releases a lyric document.
+ * retaining JavaCPP pointer wrappers; address-backed metadata remains until
+ * the same address is replaced or the bounded queue evicts it.
  */
 internal class TtmlTimingObservationRegistry(
     private val maxEntries: Int = DEFAULT_MAX_ENTRIES,
 ) {
     private data class Observation(
         val pointer: java.lang.ref.WeakReference<Any>,
+        val nativeAddress: Long?,
         val metadata: TtmlDocumentMetadata,
     )
 
@@ -149,12 +150,20 @@ internal class TtmlTimingObservationRegistry(
         if (pointer == null) return
         synchronized(observations) {
             sweepCleared()
+            val nativeAddress = nativeAddressOf(pointer)
             val iterator = observations.iterator()
             while (iterator.hasNext()) {
-                if (iterator.next().pointer.get() === pointer) iterator.remove()
+                val observation = iterator.next()
+                if (observation.pointer.get() === pointer ||
+                    (nativeAddress != null && observation.nativeAddress == nativeAddress)
+                ) {
+                    iterator.remove()
+                }
             }
             while (observations.size >= maxEntries.coerceAtLeast(1)) observations.removeFirst()
-            observations.addLast(Observation(java.lang.ref.WeakReference(pointer), metadata))
+            observations.addLast(
+                Observation(java.lang.ref.WeakReference(pointer), nativeAddress, metadata),
+            )
             appleMusicId?.takeIf { it > 0L }?.let { idObservations[it] = metadata }
         }
     }
@@ -172,7 +181,11 @@ internal class TtmlTimingObservationRegistry(
         if (pointer == null) return null
         synchronized(observations) {
             sweepCleared()
-            return observations.firstOrNull { it.pointer.get() === pointer }?.metadata
+            val nativeAddress = nativeAddressOf(pointer)
+            return observations.firstOrNull { observation ->
+                observation.pointer.get() === pointer ||
+                    (nativeAddress != null && observation.nativeAddress == nativeAddress)
+            }?.metadata
         }
     }
 
@@ -189,9 +202,21 @@ internal class TtmlTimingObservationRegistry(
     private fun sweepCleared() {
         val iterator = observations.iterator()
         while (iterator.hasNext()) {
-            if (iterator.next().pointer.get() == null) iterator.remove()
+            val observation = iterator.next()
+            if (observation.pointer.get() == null && observation.nativeAddress == null) {
+                iterator.remove()
+            }
         }
     }
+
+    /** JavaCPP can create distinct wrappers for one native SongInfo pointer. */
+    private fun nativeAddressOf(pointer: Any): Long? = generateSequence(pointer.javaClass) {
+        it.superclass
+    }.mapNotNull { type ->
+        runCatching { type.getDeclaredField("address").apply { isAccessible = true } }.getOrNull()
+    }.firstOrNull()?.let { field ->
+        runCatching { (field.get(pointer) as? Number)?.toLong() }.getOrNull()
+    }?.takeIf { it > 0L }
 
     private companion object {
         const val DEFAULT_MAX_ENTRIES = 256

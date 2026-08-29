@@ -4,6 +4,11 @@ import dev.amenhancer.module.lyrics.TtmlInputPolicy
 import dev.amenhancer.module.lyrics.AmllTtmlFormatConverter
 import dev.amenhancer.module.model.CustomLyricsSources
 import java.net.URLEncoder
+import java.util.concurrent.Future
+import java.util.concurrent.SynchronousQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -33,17 +38,80 @@ internal data class AutoLyricsSource(
  */
 internal class AutoLyricsSourceResolver(
     private val sources: List<AutoLyricsSource>,
+    private val parallelBudgetMs: Long? = null,
 ) {
+    private val sourceExecutor = parallelBudgetMs
+        ?.takeIf { it > 0L && sources.isNotEmpty() }
+        ?.let {
+            ThreadPoolExecutor(
+                0,
+                sources.size.coerceAtLeast(1),
+                SOURCE_WORKER_KEEP_ALIVE_SECONDS,
+                TimeUnit.SECONDS,
+                SynchronousQueue(),
+                { runnable -> Thread(runnable, "ampp-auto-lyrics-source").apply { isDaemon = true } },
+                ThreadPoolExecutor.AbortPolicy(),
+            )
+        }
+
     fun fetch(appleMusicId: Long): AutoLyricsCandidate? {
         if (appleMusicId <= 0L) return null
+        val executor = sourceExecutor
+        val budgetMs = parallelBudgetMs
+        if (executor != null && budgetMs != null) {
+            return fetchInParallel(appleMusicId, executor, budgetMs)
+        }
         sources.forEach { source ->
-            val ttml = runCatching { source.fetch(appleMusicId) }.getOrNull() ?: return@forEach
-            if (!TtmlInputPolicy.isAcceptable(ttml) || !TtmlTimingPolicy.isWord(ttml)) {
-                return@forEach
-            }
-            return AutoLyricsCandidate(source.name, ttml)
+            fetchValidated(source, appleMusicId)?.let { return it }
         }
         return null
+    }
+
+    private fun fetchInParallel(
+        appleMusicId: Long,
+        executor: ThreadPoolExecutor,
+        budgetMs: Long,
+    ): AutoLyricsCandidate? {
+        val futures = sources.mapNotNull { source ->
+            runCatching {
+                executor.submit<AutoLyricsCandidate?> { fetchValidated(source, appleMusicId) }
+            }.getOrNull()
+        }
+        if (futures.isEmpty()) return null
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMs)
+        try {
+            futures.forEach { future ->
+                val remainingNanos = deadline - System.nanoTime()
+                if (remainingNanos <= 0L) return@forEach
+                val candidate = await(future, remainingNanos)
+                if (candidate != null) return candidate
+                if (!future.isDone) return@forEach
+            }
+            // A higher-priority source may consume the whole budget. At the
+            // deadline, select the highest-priority result already completed.
+            return futures.firstNotNullOfOrNull { future ->
+                if (!future.isDone || future.isCancelled) null else await(future, 0L)
+            }
+        } finally {
+            futures.forEach { future ->
+                if (!future.isDone) future.cancel(true)
+            }
+        }
+    }
+
+    private fun await(future: Future<AutoLyricsCandidate?>, timeoutNanos: Long): AutoLyricsCandidate? =
+        try {
+            if (timeoutNanos <= 0L) future.get() else future.get(timeoutNanos, TimeUnit.NANOSECONDS)
+        } catch (_: TimeoutException) {
+            null
+        } catch (_: Exception) {
+            null
+        }
+
+    private fun fetchValidated(source: AutoLyricsSource, appleMusicId: Long): AutoLyricsCandidate? {
+        val ttml = runCatching { source.fetch(appleMusicId) }.getOrNull() ?: return null
+        if (!TtmlInputPolicy.isAcceptable(ttml) || !TtmlTimingPolicy.isWord(ttml)) return null
+        return AutoLyricsCandidate(source.name, ttml)
     }
 
     companion object {
@@ -53,14 +121,18 @@ internal class AutoLyricsSourceResolver(
             amLyrics: AmLyricsClient,
             lunabeat: LunabeatClient,
         ): AutoLyricsSourceResolver = AutoLyricsSourceResolver(
-            listOf(
+            sources = listOf(
                 AutoLyricsSource(CustomLyricsSources.AMLL) { raw ->
                     amll.fetch(raw)?.let { AmllTtmlFormatConverter.toAppleFormat(it).ttml }
                 },
                 AutoLyricsSource(CustomLyricsSources.LUNABEAT, lunabeat::fetch),
                 AutoLyricsSource(CustomLyricsSources.AM_LYRICS, amLyrics::fetch),
             ),
+            parallelBudgetMs = APPLE_ID_SOURCE_BUDGET_MS,
         )
+
+        private const val APPLE_ID_SOURCE_BUDGET_MS = 4_000L
+        private const val SOURCE_WORKER_KEEP_ALIVE_SECONDS = 15L
     }
 }
 

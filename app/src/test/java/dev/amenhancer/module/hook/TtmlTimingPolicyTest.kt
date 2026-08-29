@@ -1,5 +1,6 @@
 package dev.amenhancer.module.hook
 
+import java.lang.ref.WeakReference
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -118,6 +119,30 @@ class TtmlTimingPolicyTest {
     }
 
     @Test
+    fun `registry associates distinct wrappers of the same native pointer`() {
+        val parsedWrapper = NativePointerWrapper(0x1234L)
+        val installWrapper = NativePointerWrapper(0x1234L)
+        val registry = TtmlTimingObservationRegistry()
+
+        registry.record(parsedWrapper, TtmlTimingMode.NON_WORD)
+
+        assertEquals(TtmlTimingMode.NON_WORD, registry.modeOf(installWrapper))
+    }
+
+    @Test
+    fun `registry retains native address metadata after parsed wrapper is collected`() {
+        val registry = TtmlTimingObservationRegistry()
+        val parsedWrapper = recordCollectibleNativePointer(registry)
+
+        assertTrue("parsed wrapper was not collected", awaitCollected(parsedWrapper))
+
+        assertEquals(
+            TtmlTimingMode.NON_WORD,
+            registry.modeOf(NativePointerWrapper(0x5678L)),
+        )
+    }
+
+    @Test
     fun `registry evicts oldest observation`() {
         val registry = TtmlTimingObservationRegistry(maxEntries = 1)
         val first = Any()
@@ -130,3 +155,25 @@ class TtmlTimingPolicyTest {
         assertEquals(TtmlTimingMode.NON_WORD, registry.modeOf(second))
     }
 }
+
+private fun recordCollectibleNativePointer(
+    registry: TtmlTimingObservationRegistry,
+): WeakReference<NativePointerWrapper> {
+    val pointer = NativePointerWrapper(0x5678L)
+    registry.record(pointer, TtmlTimingMode.NON_WORD)
+    return WeakReference(pointer)
+}
+
+private fun awaitCollected(reference: WeakReference<*>): Boolean {
+    repeat(40) {
+        System.gc()
+        System.runFinalization()
+        if (reference.get() == null) return true
+        Thread.sleep(10L)
+    }
+    return false
+}
+
+private class NativePointerWrapper(
+    @JvmField val address: Long,
+)

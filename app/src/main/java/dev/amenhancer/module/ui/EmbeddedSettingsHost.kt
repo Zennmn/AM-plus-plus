@@ -59,6 +59,9 @@ import dev.amenhancer.module.lyrics.CustomLyricsDraft
 import dev.amenhancer.module.lyrics.CustomLyricsMultiIdDraft
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImportResult
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImporter
+import dev.amenhancer.module.lyrics.MetadataLyricsCandidate
+import dev.amenhancer.module.lyrics.MetadataLyricsQuery
+import dev.amenhancer.module.lyrics.MetadataLyricsSource
 import dev.amenhancer.module.lyrics.CustomLyricsRestorePolicy
 import dev.amenhancer.module.lyrics.CustomLyricsUpdateProgress
 import dev.amenhancer.module.lyrics.CustomLyricsUpdateResult
@@ -1048,6 +1051,16 @@ internal interface EmbeddedSettingsController {
         displayName: String,
     ): EmbeddedActionResult = EmbeddedActionResult.Failed("在线导入不可用")
 
+    /** Searches an external platform without changing the current TTML draft. */
+    fun searchMetadataLyrics(
+        source: MetadataLyricsSource,
+        query: MetadataLyricsQuery,
+    ): List<MetadataLyricsCandidate> = emptyList()
+
+    /** Downloads a user-confirmed candidate without persisting it. */
+    fun importMetadataLyrics(candidate: MetadataLyricsCandidate): CustomLyricsOnlineImportResult =
+        CustomLyricsOnlineImportResult.Failed("元数据歌词导入不可用")
+
     fun updateLyrics(
         isCancelled: () -> Boolean = { false },
         onProgress: (CustomLyricsUpdateProgress) -> Unit = {},
@@ -1100,6 +1113,8 @@ internal class EmbeddedSettingsHost private constructor(
     private val worker = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "ampp-embedded-settings").apply { isDaemon = true }
     }
+    @Volatile
+    private var metadataRequestGeneration = 0L
 
     @Volatile
     private var registered = true
@@ -1342,6 +1357,7 @@ internal class EmbeddedSettingsHost private constructor(
     fun uninstall() {
         if (!registered) return
         registered = false
+        metadataRequestGeneration += 1
         application.unregisterActivityLifecycleCallbacks(this)
         removeMainContentLayoutObserver()
         removeInjectedViews(activityReference?.get())
@@ -2340,6 +2356,19 @@ internal class EmbeddedSettingsHost private constructor(
             compactWidePadding = true,
         ) { onSettingsChanged(settings.copy(automaticLyricsEnabled = it)) })
         parent.addView(embeddedSpacer(activity, if (isEmbeddedPhone(activity)) 10 else 14))
+        parent.addView(embeddedSettingRow(
+            activity,
+            "QQ/网易云自动兜底（实验性）",
+            "三个 Apple ID 歌词源未命中时，再按歌名、歌手、专辑和时长查找逐字歌词；默认关闭",
+            settings.metadataLyricsFallbackEnabled,
+            enabled = settings.customLyricsEnabled && settings.automaticLyricsEnabled,
+            iconDrawable = EmbeddedGlyphDrawable(
+                EmbeddedGlyphKind.Exchange,
+                EmbeddedSettingsPalette.accent,
+            ),
+            compactWidePadding = true,
+        ) { onSettingsChanged(settings.copy(metadataLyricsFallbackEnabled = it)) })
+        parent.addView(embeddedSpacer(activity, if (isEmbeddedPhone(activity)) 10 else 14))
 
         val lyricsContent = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
@@ -2652,6 +2681,8 @@ internal class EmbeddedSettingsHost private constructor(
         CustomLyricsSources.AMLL -> "AMLL"
         CustomLyricsSources.AM_LYRICS -> "AM-Lyrics 仓库"
         CustomLyricsSources.LUNABEAT -> "Lunabeat"
+        CustomLyricsSources.QQ_MUSIC -> "QQ 音乐"
+        CustomLyricsSources.NETEASE_CLOUD_MUSIC -> "网易云音乐"
         else -> "手动 TTML"
     }
 
@@ -3757,7 +3788,8 @@ internal class EmbeddedSettingsHost private constructor(
                 setPadding(0, dp(activity, 6), 0, dp(activity, 6))
             }
             row.addView(TextView(activity).apply {
-                text = "${entry.displayName.ifBlank { entry.appleMusicId.toString() }}  ·  ${entry.appleMusicId}"
+                text = "${entry.displayName.ifBlank { entry.appleMusicId.toString() }}  ·  ${entry.appleMusicId}  ·  " +
+                    embeddedCustomLyricsSourceName(entry.source)
                 setTextColor(EmbeddedSettingsPalette.onSurface)
                 setSingleLine(false)
             }, matchWidthWrapContent())
@@ -3816,6 +3848,21 @@ internal class EmbeddedSettingsHost private constructor(
             hint = "显示名称",
             initial = entry?.displayName ?: song?.title.orEmpty(),
         )
+        val titleInput = embeddedLyricsEditorInput(
+            activity = activity,
+            hint = "歌曲名（QQ/网易云搜索）",
+            initial = song?.title.orEmpty(),
+        )
+        val artistInput = embeddedLyricsEditorInput(
+            activity = activity,
+            hint = "歌手（QQ/网易云搜索）",
+            initial = song?.artist.orEmpty(),
+        )
+        val albumInput = embeddedLyricsEditorInput(
+            activity = activity,
+            hint = "专辑（可选，用于区分版本）",
+            initial = song?.album.orEmpty(),
+        )
         val ttmlInput = embeddedLyricsEditorInput(
             activity = activity,
             hint = "TTML 内容",
@@ -3842,12 +3889,38 @@ internal class EmbeddedSettingsHost private constructor(
                 updateSourceLabel()
             }
         }
+        fun importMetadata(sourceToImport: MetadataLyricsSource) {
+            importEmbeddedMetadataLyrics(
+                activity = activity,
+                source = sourceToImport,
+                displayNameInput = nameInput,
+                titleInput = titleInput,
+                artistInput = artistInput,
+                albumInput = albumInput,
+                ttmlInput = ttmlInput,
+            ) { importedSource ->
+                source = importedSource
+                updateSourceLabel()
+            }
+        }
         updateSourceLabel()
         fields.addView(idInput, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             dp(activity, 56),
         ).apply { bottomMargin = dp(activity, 2) })
         fields.addView(nameInput, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            dp(activity, 56),
+        ).apply { bottomMargin = dp(activity, 2) })
+        fields.addView(titleInput, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            dp(activity, 56),
+        ).apply { bottomMargin = dp(activity, 2) })
+        fields.addView(artistInput, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            dp(activity, 56),
+        ).apply { bottomMargin = dp(activity, 2) })
+        fields.addView(albumInput, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             dp(activity, 56),
         ).apply { bottomMargin = dp(activity, 2) })
@@ -3873,7 +3946,7 @@ internal class EmbeddedSettingsHost private constructor(
                         )
                     },
                     EmbeddedLyricsEditorAction("获取 ID") {
-                        requestCurrentSongId(activity, idInput, nameInput)
+                        requestCurrentSongId(activity, idInput, nameInput, titleInput, artistInput, albumInput)
                     },
                     EmbeddedLyricsEditorAction(
                         label = "从 AMLL 导入",
@@ -3892,6 +3965,18 @@ internal class EmbeddedSettingsHost private constructor(
                         compactLabel = "GitHub 导入",
                     ) {
                         importOnline(EmbeddedOnlineSource.AM_LYRICS)
+                    },
+                    EmbeddedLyricsEditorAction(
+                        label = "从 QQ 音乐导入",
+                        compactLabel = "QQ 导入",
+                    ) {
+                        importMetadata(MetadataLyricsSource.QQ_MUSIC)
+                    },
+                    EmbeddedLyricsEditorAction(
+                        label = "从网易云导入",
+                        compactLabel = "网易云导入",
+                    ) {
+                        importMetadata(MetadataLyricsSource.NETEASE_CLOUD_MUSIC)
                     },
                 ),
             ),
@@ -3998,6 +4083,7 @@ internal class EmbeddedSettingsHost private constructor(
             .create()
         dialog.setOnDismissListener {
             if (pendingTtmlImport != null) pendingTtmlImport = null
+            metadataRequestGeneration += 1
         }
         dialog.setOnShowListener {
             dialog.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
@@ -4024,6 +4110,9 @@ internal class EmbeddedSettingsHost private constructor(
         activity: Activity,
         appleMusicId: EditText,
         displayName: EditText,
+        titleInput: EditText? = null,
+        artistInput: EditText? = null,
+        albumInput: EditText? = null,
     ) {
         val currentSong = controller.currentSongDetails()
         if (currentSong == null) {
@@ -4036,6 +4125,12 @@ internal class EmbeddedSettingsHost private constructor(
         }
         appleMusicId.setText(currentSong.appleMusicId.toString())
         appleMusicId.setSelection(appleMusicId.length())
+        titleInput?.setText(currentSong.title.orEmpty())
+        titleInput?.setSelection(titleInput.length())
+        artistInput?.setText(currentSong.artist.orEmpty())
+        artistInput?.setSelection(artistInput.length())
+        albumInput?.setText(currentSong.album.orEmpty())
+        albumInput?.setSelection(albumInput.length())
         listOfNotNull(
             currentSong.title?.takeIf(String::isNotBlank),
             currentSong.artist?.takeIf(String::isNotBlank),
@@ -4105,6 +4200,87 @@ internal class EmbeddedSettingsHost private constructor(
         }
     }
 
+    private fun importEmbeddedMetadataLyrics(
+        activity: Activity,
+        source: MetadataLyricsSource,
+        displayNameInput: EditText,
+        titleInput: EditText,
+        artistInput: EditText,
+        albumInput: EditText,
+        ttmlInput: EditText,
+        onImported: (String) -> Unit,
+    ) {
+        val requestGeneration = metadataRequestGeneration + 1
+        metadataRequestGeneration = requestGeneration
+        val title = titleInput.text.toString().trim()
+        val artist = artistInput.text.toString().trim()
+        if (title.isBlank()) {
+            titleInput.error = "请输入歌曲名"
+            return
+        }
+        if (artist.isBlank()) {
+            artistInput.error = "请输入歌手"
+            return
+        }
+        val query = MetadataLyricsQuery(
+            title = title,
+            artist = artist,
+            album = albumInput.text.toString().trim().takeIf(String::isNotBlank),
+        )
+        Toast.makeText(activity, "正在搜索 ${source.displayName}…", Toast.LENGTH_SHORT).show()
+        worker.execute {
+            val candidates = runCatching { controller.searchMetadataLyrics(source, query) }
+                .getOrDefault(emptyList())
+            mainHandler.post {
+                if (!registered || requestGeneration != metadataRequestGeneration || currentActivity() !== activity ||
+                    !titleInput.isAttachedToWindow
+                ) return@post
+                if (candidates.isEmpty()) {
+                    Toast.makeText(activity, "${source.displayName} 没有匹配候选", Toast.LENGTH_LONG).show()
+                    return@post
+                }
+                AlertDialog.Builder(activity)
+                    .setTitle("选择 ${source.displayName} 歌曲")
+                    .setItems(candidates.map { it.displayName }.toTypedArray()) { _, which ->
+                        val candidate = candidates.getOrNull(which) ?: return@setItems
+                        if (displayNameInput.text.isNullOrBlank()) {
+                            displayNameInput.setText("${candidate.title} - ${candidate.artist}".trim(' ', '-'))
+                        }
+                        Toast.makeText(activity, "正在获取 ${candidate.displayName}…", Toast.LENGTH_SHORT).show()
+                        worker.execute {
+                            val result = runCatching { controller.importMetadataLyrics(candidate) }
+                                .getOrElse {
+                                    CustomLyricsOnlineImportResult.Failed(
+                                        it.message.orEmpty().ifBlank { "在线导入失败" },
+                                    )
+                                }
+                            mainHandler.post {
+                                if (!registered || requestGeneration != metadataRequestGeneration ||
+                                    currentActivity() !== activity || !ttmlInput.isAttachedToWindow
+                                ) return@post
+                                when (result) {
+                                    is CustomLyricsOnlineImportResult.Imported -> {
+                                        ttmlInput.setText(result.ttml)
+                                        onImported(result.source)
+                                        Toast.makeText(
+                                            activity,
+                                            "已导入 ${source.displayName} 歌词，请确认后保存",
+                                            Toast.LENGTH_LONG,
+                                        ).show()
+                                    }
+                                    is CustomLyricsOnlineImportResult.Failed -> {
+                                        Toast.makeText(activity, result.message, Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .setNegativeButton("取消", null)
+                    .show()
+            }
+        }
+    }
+
     private fun embeddedOnlineLyricsImporter(): CustomLyricsOnlineImporter = CustomLyricsOnlineImporter(
         fetchAmll = AmllTtmlClient(HttpLyricTransport())::fetch,
         fetchAmLyrics = AmLyricsClient(HttpLyricTransport())::fetch,
@@ -4120,6 +4296,8 @@ internal class EmbeddedSettingsHost private constructor(
         CustomLyricsSources.AMLL -> "AMLL"
         CustomLyricsSources.AM_LYRICS -> "AM-Lyrics 仓库"
         CustomLyricsSources.LUNABEAT -> "Lunabeat"
+        CustomLyricsSources.QQ_MUSIC -> "QQ 音乐"
+        CustomLyricsSources.NETEASE_CLOUD_MUSIC -> "网易云音乐"
         else -> "手动 TTML"
     }
 
@@ -4281,6 +4459,7 @@ internal class EmbeddedSettingsHost private constructor(
     }
 
     private fun dismissDialog() {
+        metadataRequestGeneration += 1
         pendingTtmlImport = null
         dialogReference?.get()?.dismiss()
         dialogReference = null

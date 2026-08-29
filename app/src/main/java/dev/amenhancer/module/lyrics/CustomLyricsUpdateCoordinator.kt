@@ -80,7 +80,9 @@ internal class CustomLyricsUpdateCoordinator(
         }
         fun cancelled(): Boolean = runCatching { isCancelled() }.getOrDefault(false)
 
-        // Manual TTML and AUTO_CACHE have no authoritative remote source.
+        // Manual TTML and standalone automatic-cache entries have no
+        // authoritative remote source. They must be re-imported by the user
+        // instead of being silently replaced by a different platform version.
         oldManifest.entries.forEach { entry ->
             if (entry.source == CustomLyricsSources.MANUAL ||
                 entry.source == CustomLyricsSources.AUTO_CACHE
@@ -95,6 +97,10 @@ internal class CustomLyricsUpdateCoordinator(
                 )
             }
         }
+        if (cancelled()) return CustomLyricsUpdateResult.Cancelled
+
+        updateMetadataEntries(oldManifest, ::record, ::cancelled)
+            ?.let { return it }
         if (cancelled()) return CustomLyricsUpdateResult.Cancelled
 
         updateAmll(oldManifest, decisions, ::record, ::cancelled)
@@ -140,6 +146,200 @@ internal class CustomLyricsUpdateCoordinator(
             isCancelled = isCancelled,
             onProgress = onProgress,
         )
+    }
+
+    /**
+     * Promotes one-shot QQ/NetEase mappings into the normal Apple-ID source
+     * chain. The order deliberately mirrors [AutoLyricsSourceResolver]: AMLL,
+     * Lunabeat, then AM-Lyrics. A source is considered a match only after its
+     * body has been fetched and accepted as TTML, so an index hit cannot
+     * accidentally discard the existing metadata-imported lyric.
+     */
+    private fun updateMetadataEntries(
+        manifest: CustomLyricsManifest,
+        record: (CustomLyricsEntry, CustomLyricsUpdateItem) -> Unit,
+        cancelled: () -> Boolean,
+    ): CustomLyricsUpdateResult? {
+        val pending = linkedMapOf<Long, CustomLyricsEntry>()
+        manifest.entries.forEach { entry ->
+            if (entry.source == CustomLyricsSources.QQ_MUSIC ||
+                entry.source == CustomLyricsSources.NETEASE_CLOUD_MUSIC
+            ) {
+                pending[entry.appleMusicId] = entry
+            }
+        }
+        if (pending.isEmpty()) return null
+
+        data class PromotionFailure(
+            val kind: CustomLyricsUpdateFailureKind,
+            val message: String,
+        )
+
+        val failures = mutableMapOf<Long, PromotionFailure>()
+        fun rememberFailure(
+            appleMusicId: Long,
+            kind: CustomLyricsUpdateFailureKind,
+            message: String,
+        ) {
+            // Keep the highest-priority failure for the final report. A lower
+            // source may still succeed and remove it from the pending set.
+            failures.putIfAbsent(appleMusicId, PromotionFailure(kind, message))
+        }
+
+        fun accept(
+            entry: CustomLyricsEntry,
+            rawTtml: String,
+            replacementSource: String,
+        ) {
+            val inspected = CustomLyricsFilePolicy.inspect(rawTtml)
+            if (inspected is CustomLyricsInspection.Rejected) {
+                rememberFailure(
+                    entry.appleMusicId,
+                    CustomLyricsUpdateFailureKind.INVALID_TTML,
+                    "${replacementSourceName(replacementSource)} 歌词不是有效 TTML",
+                )
+                return
+            }
+            record(entry, compareTtml(entry, rawTtml, replacementSource))
+            pending.remove(entry.appleMusicId)
+            failures.remove(entry.appleMusicId)
+        }
+
+        val amllCompleted = parallelForEach(
+            keys = pending.keys.toList(),
+            fetch = sources.fetchAmll,
+            cancelled = cancelled,
+        ) { appleMusicId, raw ->
+            val entry = pending[appleMusicId] ?: return@parallelForEach
+            if (raw == null) return@parallelForEach
+            val converted = runCatching { AmllTtmlFormatConverter.toAppleFormat(raw).ttml }
+                .getOrNull()
+            if (converted == null) {
+                rememberFailure(
+                    appleMusicId,
+                    CustomLyricsUpdateFailureKind.INVALID_TTML,
+                    "AMLL 歌词转换失败",
+                )
+            } else {
+                accept(entry, converted, CustomLyricsSources.AMLL)
+            }
+        }
+        if (!amllCompleted) return CustomLyricsUpdateResult.Cancelled
+        if (pending.isEmpty()) return null
+
+        val lunabeatCatalog = runCatching { sources.loadLunabeatCatalog() }.getOrNull()
+        if (lunabeatCatalog == null) {
+            pending.keys.forEach { appleMusicId ->
+                rememberFailure(
+                    appleMusicId,
+                    CustomLyricsUpdateFailureKind.NETWORK,
+                    "Lunabeat catalog 读取失败",
+                )
+            }
+        } else {
+            val matches = pending.values.mapNotNull { entry ->
+                lunabeatCatalog.entryFor(entry.appleMusicId)?.let { song -> entry to song }
+            }
+            val byPath = matches.groupBy { (_, song) -> song.path }
+            val lunabeatCompleted = parallelForEach(
+                keys = byPath.keys.toList(),
+                fetch = { path -> sources.fetchLunabeatTtml(byPath.getValue(path).first().second) },
+                cancelled = cancelled,
+            ) { path, raw ->
+                val localEntries = byPath.getValue(path).map { it.first }
+                if (raw == null) {
+                    localEntries.forEach { entry ->
+                        rememberFailure(
+                            entry.appleMusicId,
+                            CustomLyricsUpdateFailureKind.NETWORK,
+                            "Lunabeat 歌词下载失败或校验失败",
+                        )
+                    }
+                } else {
+                    localEntries.forEach { entry ->
+                        if (entry.appleMusicId in pending) {
+                            accept(entry, raw, CustomLyricsSources.LUNABEAT)
+                        }
+                    }
+                }
+            }
+            if (!lunabeatCompleted) return CustomLyricsUpdateResult.Cancelled
+        }
+        if (cancelled()) return CustomLyricsUpdateResult.Cancelled
+        if (pending.isEmpty()) return null
+
+        val amLyricsIndex = runCatching { sources.loadAmLyricsIndex() }.getOrNull()
+        if (amLyricsIndex == null) {
+            pending.keys.forEach { appleMusicId ->
+                rememberFailure(
+                    appleMusicId,
+                    CustomLyricsUpdateFailureKind.NETWORK,
+                    "AM-Lyrics 索引读取失败",
+                )
+            }
+        } else {
+            val matches = pending.values.mapNotNull { entry ->
+                amLyricsIndex.entryFor(entry.appleMusicId)
+                    ?.takeIf { it.enabled }
+                    ?.let { remote -> entry to remote }
+            }
+            val byPath = matches.groupBy { (_, remote) -> remote.path }
+            val amLyricsCompleted = parallelForEach(
+                keys = byPath.keys.toList(),
+                fetch = { path -> sources.fetchAmLyricsTtml(byPath.getValue(path).first().second) },
+                cancelled = cancelled,
+            ) { path, raw ->
+                val localEntries = byPath.getValue(path).map { it.first }
+                if (raw == null) {
+                    localEntries.forEach { entry ->
+                        rememberFailure(
+                            entry.appleMusicId,
+                            CustomLyricsUpdateFailureKind.NETWORK,
+                            "AM-Lyrics 歌词下载失败或校验失败",
+                        )
+                    }
+                } else {
+                    localEntries.forEach { entry ->
+                        if (entry.appleMusicId in pending) {
+                            accept(entry, raw, CustomLyricsSources.AM_LYRICS)
+                        }
+                    }
+                }
+            }
+            if (!amLyricsCompleted) return CustomLyricsUpdateResult.Cancelled
+        }
+
+        pending.values.toList().forEach { entry ->
+            val failure = failures[entry.appleMusicId]
+            if (failure == null) {
+                record(
+                    entry,
+                    CustomLyricsUpdateItem.Skipped(
+                        appleMusicId = entry.appleMusicId,
+                        source = entry.source,
+                        message = "AMLL、Lunabeat、AM-Lyrics 均未找到可用歌词",
+                    ),
+                )
+            } else {
+                record(
+                    entry,
+                    CustomLyricsUpdateItem.Failed(
+                        appleMusicId = entry.appleMusicId,
+                        source = entry.source,
+                        kind = failure.kind,
+                        message = failure.message,
+                    ),
+                )
+            }
+        }
+        return null
+    }
+
+    private fun replacementSourceName(source: String): String = when (source) {
+        CustomLyricsSources.AMLL -> "AMLL"
+        CustomLyricsSources.LUNABEAT -> "Lunabeat"
+        CustomLyricsSources.AM_LYRICS -> "AM-Lyrics"
+        else -> source
     }
 
     private fun updateAmll(
@@ -336,7 +536,11 @@ internal class CustomLyricsUpdateCoordinator(
         return null
     }
 
-    private fun compareTtml(entry: CustomLyricsEntry, ttml: String): CustomLyricsUpdateItem {
+    private fun compareTtml(
+        entry: CustomLyricsEntry,
+        ttml: String,
+        replacementSource: String? = null,
+    ): CustomLyricsUpdateItem {
         val inspected = CustomLyricsFilePolicy.inspect(ttml)
         if (inspected is CustomLyricsInspection.Rejected) {
             return CustomLyricsUpdateItem.Failed(
@@ -348,12 +552,18 @@ internal class CustomLyricsUpdateCoordinator(
         }
         inspected as CustomLyricsInspection.Accepted
         return if (
+            replacementSource.isNullOrBlank() &&
             inspected.bytes.size.toLong() == entry.sizeBytes &&
             inspected.sha256.equals(entry.sha256, ignoreCase = true)
         ) {
             CustomLyricsUpdateItem.Unchanged(entry.appleMusicId, entry.source)
         } else {
-            CustomLyricsUpdateItem.Changed(entry.appleMusicId, entry.source, inspected.bytes)
+            CustomLyricsUpdateItem.Changed(
+                appleMusicId = entry.appleMusicId,
+                source = entry.source,
+                bytes = inspected.bytes,
+                replacementSource = replacementSource,
+            )
         }
     }
 

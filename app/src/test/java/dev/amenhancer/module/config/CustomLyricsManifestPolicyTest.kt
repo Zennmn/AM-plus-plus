@@ -68,6 +68,21 @@ class CustomLyricsManifestPolicyTest {
     }
 
     @Test
+    fun `sanitize keeps one-shot metadata source markers`() {
+        val manifest = CustomLyricsManifest(
+            listOf(
+                entry(42L, "lyrics_qq", CustomLyricsSources.QQ_MUSIC),
+                entry(84L, "lyrics_ne", CustomLyricsSources.NETEASE_CLOUD_MUSIC),
+            ),
+        )
+
+        assertEquals(
+            listOf(CustomLyricsSources.QQ_MUSIC, CustomLyricsSources.NETEASE_CLOUD_MUSIC),
+            CustomLyricsManifestPolicy.sanitize(manifest).entries.map(CustomLyricsEntry::source),
+        )
+    }
+
+    @Test
     fun `removed provider entries remain usable as manual lyrics`() {
         val sanitized = CustomLyricsManifestPolicy.sanitize(
             CustomLyricsManifest(listOf(entry(42L, "lyrics_removed", "removed-provider"))),

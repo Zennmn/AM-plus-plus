@@ -5,6 +5,7 @@ import android.os.Looper
 import dev.amenhancer.module.config.TargetConfigClient
 import dev.amenhancer.module.lyrics.CustomLyricsFilePolicy
 import dev.amenhancer.module.lyrics.CustomLyricsFileReader
+import dev.amenhancer.module.lyrics.MetadataLyricsQuery
 import dev.amenhancer.module.model.CustomLyricsEntry
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
@@ -16,6 +17,7 @@ internal class AppleMusicCustomLyricsTarget(
     private val symbols: TargetSymbolResolver,
     private val currentSong: CurrentSongIdentityCache,
     private val autoLyricsRuntime: AutoLyricsRuntime? = null,
+    private val stableMetadata: StablePlaybackMetadataCoordinator? = null,
 ) : CustomLyricsTarget {
     override fun install(): TargetCapabilityInstall {
         val installMethodResolution = symbols.resolve(AppleMusicSymbols.LyricsInstallMethod)
@@ -114,6 +116,24 @@ internal class AppleMusicCustomLyricsTarget(
                             details?.artist?.takeIf(String::isNotBlank),
                         ).joinToString(" - ").ifBlank { null }
                         candidate.copy(displayName = displayName)
+                    }
+                },
+                fetchMetadataCandidate = runtime.metadataResolver?.let { metadataResolver ->
+                    { metadata ->
+                    metadataResolver.fetch(
+                        MetadataLyricsQuery(
+                            title = metadata.title,
+                            artist = metadata.artist,
+                            album = metadata.album.takeIf(String::isNotBlank),
+                            durationMs = metadata.durationMs,
+                        ),
+                    )?.let { result ->
+                        AutoLyricsCandidate(
+                            source = result.source,
+                            ttml = result.ttml,
+                            displayName = result.displayName,
+                        )
+                    }
                     }
                 },
                 cache = runtime.cache,
@@ -356,6 +376,9 @@ internal class AppleMusicCustomLyricsTarget(
                     ?.takeIf { session.readyReplacementFor(id) == null }
                     ?.let { autoSession?.ensureRequested(id) }
             }
+        }
+        if (autoSession != null) {
+            stableMetadata?.addListener(autoSession::onStableMetadata)
         }
         if (!availabilityHooked) {
             return TargetCapabilityInstall.Degraded(

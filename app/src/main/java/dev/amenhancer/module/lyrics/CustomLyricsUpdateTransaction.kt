@@ -75,6 +75,8 @@ internal sealed interface CustomLyricsUpdateItem {
         override val appleMusicId: Long,
         override val source: String,
         val bytes: ByteArray,
+        /** Optional source to promote this entry to after the body is staged. */
+        val replacementSource: String? = null,
     ) : CustomLyricsUpdateItem
 
     data class Unchanged(
@@ -182,9 +184,10 @@ internal class CustomLyricsUpdateTransaction(
                 fileId = fileId,
                 sizeBytes = accepted.bytes.size.toLong(),
                 sha256 = accepted.sha256,
+                source = item.replacementSource?.takeIf(String::isNotBlank) ?: previous.source,
                 // displayName, enabled, ID and source intentionally remain
                 // local state; remote catalogs are never allowed to overwrite
-                // those fields.
+                // those fields unless this is an explicit source promotion.
             )
         }
 

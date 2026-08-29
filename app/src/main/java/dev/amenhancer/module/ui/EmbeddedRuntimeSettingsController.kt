@@ -28,6 +28,11 @@ import dev.amenhancer.module.lyrics.CustomLyricsSaveResult
 import dev.amenhancer.module.lyrics.CustomLyricsUpdateProgress
 import dev.amenhancer.module.lyrics.CustomLyricsUpdateResult
 import dev.amenhancer.module.lyrics.CustomLyricsUpdateSources
+import dev.amenhancer.module.lyrics.MetadataLyricsCandidate
+import dev.amenhancer.module.lyrics.MetadataLyricsImporter
+import dev.amenhancer.module.lyrics.FileQqMusicSessionStore
+import dev.amenhancer.module.lyrics.MetadataLyricsQuery
+import dev.amenhancer.module.lyrics.MetadataLyricsSource
 import dev.amenhancer.module.model.CustomLyricsEntry
 import dev.amenhancer.module.model.CustomLyricsSources
 import dev.amenhancer.module.model.ModuleSettings
@@ -56,6 +61,12 @@ internal class EmbeddedRuntimeSettingsController(
         session = session,
         validateTypeface = ::canBuildTypeface,
     )
+    private val metadataImporter by lazy {
+        MetadataLyricsImporter.withTransport(
+            HttpLyricTransport(),
+            FileQqMusicSessionStore(File(appContext.filesDir, "ampp-qq-music-session.json")),
+        )
+    }
 
     override fun currentSettings(): ModuleSettings = session.settings()
 
@@ -201,6 +212,17 @@ internal class EmbeddedRuntimeSettingsController(
             ).toActionResult()
         }
     }
+
+    override fun searchMetadataLyrics(
+        source: MetadataLyricsSource,
+        query: MetadataLyricsQuery,
+    ): List<MetadataLyricsCandidate> = runCatching {
+        metadataImporter.searchCandidates(source, query)
+    }.getOrDefault(emptyList())
+
+    override fun importMetadataLyrics(candidate: MetadataLyricsCandidate): CustomLyricsOnlineImportResult =
+        runCatching { metadataImporter.importCandidate(candidate) }
+            .getOrElse { CustomLyricsOnlineImportResult.Failed(it.message.orEmpty().ifBlank { "在线导入失败" }) }
 
     /**
      * Checks all remote-backed custom lyrics and atomically updates changed

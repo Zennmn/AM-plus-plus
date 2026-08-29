@@ -34,6 +34,10 @@ internal class CurrentSongIdentityRequester(
                         appleMusicId = it,
                         title = resultData.stringOrNull(CurrentSongIdentityProtocol.EXTRA_SONG_TITLE),
                         artist = resultData.stringOrNull(CurrentSongIdentityProtocol.EXTRA_SONG_ARTIST),
+                        album = resultData.stringOrNull(CurrentSongIdentityProtocol.EXTRA_SONG_ALBUM),
+                        durationMs = resultData
+                            .getLong(CurrentSongIdentityProtocol.EXTRA_SONG_DURATION_MS, 0L)
+                            .takeIf { duration -> duration > 0L },
                     )
                 },
             )

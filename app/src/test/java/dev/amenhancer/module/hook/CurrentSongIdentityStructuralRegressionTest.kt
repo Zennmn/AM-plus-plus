@@ -112,6 +112,8 @@ class CurrentSongIdentityStructuralRegressionTest {
         assertTrue(entry.contains("EmbeddedRuntimeSettingsController"))
         assertTrue(protocol.contains("EXTRA_SONG_TITLE"))
         assertTrue(protocol.contains("EXTRA_SONG_ARTIST"))
+        assertTrue(protocol.contains("EXTRA_SONG_ALBUM"))
+        assertTrue(protocol.contains("EXTRA_SONG_DURATION_MS"))
         assertFalse(manifest.contains("android:protectionLevel=\"signature\""))
         assertFalse(manifest.contains("permission.REQUEST_CURRENT_SONG_ID"))
     }

@@ -234,6 +234,114 @@ class AutoLyricsReplacementSessionTest {
     }
 
     @Test
+    fun `metadata sources wait for stable identity and do not repeat Apple ID sources`() {
+        val queued = QueuedExecutor()
+        var appleIdFetches = 0
+        var metadataFetches = 0
+        val pointer = Pointer()
+        val session = session(
+            queued = queued,
+            fetch = { appleIdFetches += 1; null },
+            fetchMetadata = {
+                metadataFetches += 1
+                assertEquals("修正后歌名", it.title)
+                AutoLyricsCandidate("qq-music", WORD_TTML)
+            },
+            parse = { pointer },
+        )
+
+        session.onSongChanged(42L)
+        session.ensureRequested(42L)
+        queued.runAll()
+        assertEquals(1, appleIdFetches)
+        assertEquals(0, metadataFetches)
+
+        session.onStableMetadata(stableMetadata(42L, "修正后歌名"))
+        queued.runAll()
+
+        assertEquals(1, appleIdFetches)
+        assertEquals(1, metadataFetches)
+        assertSame(pointer, session.readyReplacementFor(42L))
+    }
+
+    @Test
+    fun `provisional raw song change does not cancel the serial metadata fallback`() {
+        val queued = QueuedExecutor()
+        var appleIdFetches = 0
+        var metadataFetches = 0
+        val pointer = Pointer()
+        lateinit var session: AutoLyricsReplacementSession
+        session = session(
+            queued = queued,
+            fetch = {
+                appleIdFetches += 1
+                session.onSongChanged(43L)
+                null
+            },
+            fetchMetadata = {
+                metadataFetches += 1
+                AutoLyricsCandidate("qq-music", WORD_TTML)
+            },
+            parse = { pointer },
+        )
+
+        session.onSongChanged(42L)
+        session.onStableMetadata(stableMetadata(42L, "Confirmed"))
+        session.ensureRequested(42L)
+        queued.runAll()
+
+        assertEquals(1, appleIdFetches)
+        assertEquals(1, metadataFetches)
+        assertSame(pointer, session.readyReplacementFor(42L))
+    }
+
+    @Test
+    fun `stable metadata confirmation alone does not start a new primary chain`() {
+        val queued = QueuedExecutor()
+        val fetchedIds = mutableListOf<Long>()
+        val session = session(
+            queued = queued,
+            fetch = { appleMusicId ->
+                fetchedIds += appleMusicId
+                AutoLyricsCandidate("amll", WORD_TTML)
+            },
+            fetchMetadata = { AutoLyricsCandidate("qq-music", WORD_TTML) },
+            parse = { Pointer() },
+        )
+
+        session.onSongChanged(42L)
+        session.onStableMetadata(stableMetadata(42L, "Old"))
+        session.onSongChanged(43L)
+        session.onStableMetadata(stableMetadata(43L, "New"))
+        queued.runAll()
+
+        assertEquals(emptyList<Long>(), fetchedIds)
+        assertNull(session.readyReplacementFor(42L))
+        assertNull(session.readyReplacementFor(43L))
+    }
+
+    @Test
+    fun `stable metadata from the active song can resume the serial fallback`() {
+        val queued = QueuedExecutor()
+        var metadataFetches = 0
+        val session = session(
+            queued = queued,
+            fetch = { null },
+            fetchMetadata = { metadataFetches += 1; AutoLyricsCandidate("qq-music", WORD_TTML) },
+            parse = { Pointer() },
+        )
+
+        session.onSongChanged(42L)
+        session.ensureRequested(42L)
+        queued.runAll()
+        session.onStableMetadata(stableMetadata(42L, "Old"))
+        queued.runAll()
+
+        assertEquals(1, metadataFetches)
+        assertTrue(session.readyReplacementFor(42L) != null)
+    }
+
+    @Test
     fun `file cache persists only Word TTML and reloads it by Adam ID`() {
         val directory = Files.createTempDirectory("ampp-auto-lyrics-test").toFile()
         try {
@@ -250,12 +358,14 @@ class AutoLyricsReplacementSessionTest {
         queued: QueuedExecutor,
         cache: AutoLyricsCache = MemoryCache(),
         fetch: (Long) -> AutoLyricsCandidate?,
+        fetchMetadata: ((StablePlaybackMetadata) -> AutoLyricsCandidate?)? = null,
         parse: (String) -> Any?,
         onPublished: (Long) -> Unit = {},
         isAllowed: (Long) -> Boolean = { true },
     ): AutoLyricsReplacementSession {
         return AutoLyricsReplacementSession(
             fetchCandidate = fetch,
+            fetchMetadataCandidate = fetchMetadata,
             cache = cache,
             parseTtml = parse,
             isAlive = { it is Pointer && it.live },
@@ -275,6 +385,16 @@ class AutoLyricsReplacementSessionTest {
     private class Pointer(
         var adamId: Long = 0L,
         var live: Boolean = true,
+    )
+
+    private fun stableMetadata(id: Long, title: String) = StablePlaybackMetadata(
+        appleMusicId = id,
+        title = title,
+        artist = "Artist",
+        album = "Album",
+        durationMs = 180_000L,
+        outcome = StableMetadataOutcome.CORRECTED,
+        generation = 1L,
     )
 
     private class MemoryCache(initial: Map<Long, String> = emptyMap()) : AutoLyricsCache {

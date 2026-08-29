@@ -2,6 +2,7 @@ package dev.amenhancer.module.hook
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AutoLyricsSourceResolverTest {
@@ -45,6 +46,28 @@ class AutoLyricsSourceResolverTest {
 
         assertNull(resolver.fetch(0L))
         assertEquals(false, called)
+    }
+
+    @Test
+    fun `bounded parallel resolver does not serialize source timeouts`() {
+        val resolver = AutoLyricsSourceResolver(
+            sources = listOf(
+                AutoLyricsSource("slow-high-priority") {
+                    Thread.sleep(2_000L)
+                    null
+                },
+                AutoLyricsSource("fast-fallback") { WORD_TTML },
+                AutoLyricsSource("later") { null },
+            ),
+            parallelBudgetMs = 100L,
+        )
+
+        val startedAt = System.nanoTime()
+        val candidate = resolver.fetch(42L)
+        val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L
+
+        assertEquals(AutoLyricsCandidate("fast-fallback", WORD_TTML), candidate)
+        assertTrue("elapsed=${elapsedMs}ms", elapsedMs < 750L)
     }
 
     private companion object {

@@ -223,6 +223,7 @@ internal class ApplePlaybackMetadataCoordinator(
             !metadata.originalArtist.isNullOrBlank()
         ) {
             PlaybackManager.onCatalogMetadataResolved(mediaId)
+            PlaybackManager.onCatalogMetadataResolutionFinished(mediaId)
             return
         }
         resolveOriginalMetadata(
@@ -299,6 +300,7 @@ internal class ApplePlaybackMetadataCoordinator(
                 } else {
                     PlaybackManager.onCatalogMetadataResolved(metadata.id)
                 }
+                PlaybackManager.onCatalogMetadataResolutionFinished(metadata.id)
                 return
             }
             resolveOriginalMetadata(
@@ -313,6 +315,7 @@ internal class ApplePlaybackMetadataCoordinator(
                 event = "current_catalog_resolve_skipped",
                 details = "requestedId=${metadata.id}, selection=$languageSelection, reason=disabled",
             )
+            PlaybackManager.onCatalogMetadataResolutionFinished(metadata.id)
         }
     }
 
@@ -342,6 +345,7 @@ internal class ApplePlaybackMetadataCoordinator(
             ) {
                 host.applyPlaybackMetadataOverride(metadata.id, alias)
             }
+            PlaybackManager.onCatalogMetadataResolutionFinished(metadata.id)
         }
     }
 
@@ -402,6 +406,7 @@ internal class ApplePlaybackMetadataCoordinator(
                     metadataStore.configuredMetadata(metadata.id)?.let { localizedAlias ->
                         host.applyPlaybackMetadataOverride(metadata.id, localizedAlias)
                     } ?: PlaybackManager.onCatalogMetadataResolved(metadata.id)
+                    PlaybackManager.onCatalogMetadataResolutionFinished(metadata.id)
                     return@resolveOriginalMetadata
                 }
                 if (
@@ -419,6 +424,7 @@ internal class ApplePlaybackMetadataCoordinator(
                 } else {
                     PlaybackManager.onCatalogMetadataResolved(metadata.id)
                 }
+                PlaybackManager.onCatalogMetadataResolutionFinished(metadata.id)
             },
         )
     }

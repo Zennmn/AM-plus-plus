@@ -53,6 +53,7 @@ class ModuleSettingsSchemaTest {
                 "title_correction_mode" to "original_hyper",
                 "custom_lyrics_enabled" to false,
                 "automatic_lyrics_enabled" to true,
+                "metadata_lyrics_fallback_enabled" to false,
                 "lyrics_font_enabled" to false,
                 "lyrics_font_file_id" to "",
                 "lyrics_font_display_name" to "",
@@ -88,6 +89,7 @@ class ModuleSettingsSchemaTest {
                 "title_correction_mode" to "original_hyper",
                 "custom_lyrics_enabled" to false,
                 "automatic_lyrics_enabled" to true,
+                "metadata_lyrics_fallback_enabled" to false,
                 "lyrics_font_enabled" to false,
                 "lyrics_font_file_id" to "",
                 "lyrics_font_display_name" to "",
@@ -218,6 +220,22 @@ class ModuleSettingsSchemaTest {
         assertEquals(
             false,
             ModuleSettingsSchema.decode(encoded).automaticLyricsEnabled,
+        )
+    }
+
+    @Test
+    fun `metadata lyrics fallback defaults off and round trips`() {
+        assertEquals(
+            false,
+            ModuleSettingsSchema.decode(emptyMap<String, Any?>()).metadataLyricsFallbackEnabled,
+        )
+        val encoded = ModuleSettingsSchema.encodeOrdinarySettings(
+            ModuleSettings(metadataLyricsFallbackEnabled = true),
+        )
+        assertEquals(true, encoded["metadata_lyrics_fallback_enabled"])
+        assertEquals(
+            true,
+            ModuleSettingsSchema.decode(encoded).metadataLyricsFallbackEnabled,
         )
     }
 

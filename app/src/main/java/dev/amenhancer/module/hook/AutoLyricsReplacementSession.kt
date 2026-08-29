@@ -7,6 +7,9 @@ import dev.amenhancer.module.config.HostPrivateEmbeddedStorage
 import dev.amenhancer.module.lyrics.CustomLyricsFilePolicy
 import dev.amenhancer.module.lyrics.CustomLyricsDraft
 import dev.amenhancer.module.lyrics.CustomLyricsSaveResult
+import dev.amenhancer.module.lyrics.AutomaticMetadataLyricsResolver
+import dev.amenhancer.module.lyrics.MetadataLyricsImporter
+import dev.amenhancer.module.lyrics.FileQqMusicSessionStore
 import dev.amenhancer.module.lyrics.TtmlInputPolicy
 import dev.amenhancer.module.model.CustomLyricsSources
 import java.io.File
@@ -60,6 +63,7 @@ internal object DisabledAutoLyricsCache : AutoLyricsCache {
 /** Target-process wiring for the opt-in automatic resolver. */
 internal data class AutoLyricsRuntime(
     val resolver: AutoLyricsSourceResolver,
+    val metadataResolver: AutomaticMetadataLyricsResolver?,
     val cache: AutoLyricsCache,
     val executor: Executor,
     val publisher: AutoLyricsPublisher? = null,
@@ -69,6 +73,7 @@ internal data class AutoLyricsRuntime(
 internal fun createAutoLyricsRuntime(
     application: Application,
     suppressedIds: Set<Long> = emptySet(),
+    metadataFallbackEnabled: Boolean = false,
 ): AutoLyricsRuntime {
     val root = File(application.filesDir, AUTO_CACHE_DIRECTORY)
     val lyricTransport = HttpLyricTransport(
@@ -91,6 +96,23 @@ internal fun createAutoLyricsRuntime(
         amLyrics = AmLyricsClient(lyricTransport),
         lunabeat = lunabeat,
     )
+    val metadataResolver = if (metadataFallbackEnabled) {
+        val metadataTransport = HttpLyricTransport(
+            connectTimeoutMs = 2_500,
+            readTimeoutMs = 4_000,
+            requestDeadlineMs = 4_000,
+            maxResponseBytes = 1 shl 20,
+        )
+        AutomaticMetadataLyricsResolver.fixed(
+            MetadataLyricsImporter.withTransport(
+                metadataTransport,
+                FileQqMusicSessionStore(File(root, "qq-music-session.json")),
+            ),
+            logger = ModernXposedRuntime::log,
+        )
+    } else {
+        null
+    }
     val cache = FileAutoLyricsCache(root)
     val configuredContent = EmbeddedContentManager(
         session = EmbeddedConfigurationSession(HostPrivateEmbeddedStorage(application)),
@@ -159,6 +181,7 @@ internal fun createAutoLyricsRuntime(
     }
     return AutoLyricsRuntime(
         resolver = resolver,
+        metadataResolver = metadataResolver,
         cache = cache,
         executor = executor,
         publisher = publisher,
@@ -280,6 +303,7 @@ internal class FileAutoLyricsCache(
  */
 internal class AutoLyricsReplacementSession(
     private val fetchCandidate: (Long) -> AutoLyricsCandidate?,
+    private val fetchMetadataCandidate: ((StablePlaybackMetadata) -> AutoLyricsCandidate?)? = null,
     private val cache: AutoLyricsCache,
     private val parseTtml: (String) -> Any?,
     private val isAlive: (Any?) -> Boolean,
@@ -301,31 +325,68 @@ internal class AutoLyricsReplacementSession(
     private val lock = Any()
     private val pending = mutableMapOf<Long, Long>()
     private val failedUntil = mutableMapOf<Long, Long>()
+    private val appleIdSourcesAttempted = mutableSetOf<Long>()
+    private var stableMetadata: StablePlaybackMetadata? = null
     private var generation = 0L
     private var activeSongKnown = false
     private var activeAppleMusicId: Long? = null
+    private var pendingProvisionalRequestId: Long? = null
     private val activeTakeovers = mutableSetOf<Long>()
 
-    /** Invalidates in-flight results and native pointers only when playback changes. */
+    /**
+     * Receives the player-level identity promptly so Apple-ID sources can start
+     * without waiting for title correction. When metadata fallback is enabled,
+     * a different raw ID is provisional after a stable identity exists: only
+     * [onStableMetadata] may confirm that it is an actual song transition.
+     */
     fun onSongChanged(appleMusicId: Long?) {
         val changed = synchronized(lock) {
-            val sameSong = activeSongKnown == (appleMusicId != null) &&
-                activeAppleMusicId == appleMusicId
-            if (!sameSong) {
-                generation += 1L
-                activeSongKnown = appleMusicId != null
-                activeAppleMusicId = appleMusicId
-                pending.clear()
-                failedUntil.clear()
-                activeTakeovers.clear()
+            if (appleMusicId == activeAppleMusicId) {
+                pendingProvisionalRequestId = null
             }
-            !sameSong
+            if (shouldDeferRawSongChangeLocked(appleMusicId)) {
+                false
+            } else {
+                changeActiveSongLocked(appleMusicId)
+            }
         }
         if (changed) {
             synchronized(pointers) {
                 pointers.clear()
             }
         }
+    }
+
+    /** Supplies terminal title/artist/album/duration without starting an ineligible lookup. */
+    fun onStableMetadata(metadata: StablePlaybackMetadata?) {
+        var changed = false
+        val shouldRequest = synchronized(lock) {
+            if (metadata == null) {
+                changed = changeActiveSongLocked(null)
+                return@synchronized false
+            }
+            val requestWasEligible = pendingProvisionalRequestId == metadata.appleMusicId
+            changed = changeActiveSongLocked(metadata.appleMusicId)
+            stableMetadata = metadata
+            failedUntil.remove(metadata.appleMusicId)
+            requestWasEligible || (!changed &&
+                metadata.appleMusicId in appleIdSourcesAttempted &&
+                    synchronized(pointers) { metadata.appleMusicId !in pointers })
+        }
+        if (changed) {
+            synchronized(pointers) {
+                pointers.clear()
+            }
+        }
+        if (metadata != null) {
+            logger(
+                "automatic lyrics stable metadata: id=${metadata.appleMusicId}, " +
+                    "outcome=${metadata.outcome}, title=${metadata.title}, " +
+                    "artist=${metadata.artist}, duration=${metadata.durationMs}, " +
+                    "confirmedChange=$changed, resume=$shouldRequest",
+            )
+        }
+        if (shouldRequest) request(metadata!!.appleMusicId)
     }
 
     fun replacementFor(appleMusicId: Long): Any? {
@@ -336,9 +397,15 @@ internal class AutoLyricsReplacementSession(
     }
 
     fun ensureRequested(appleMusicId: Long) {
-        if (appleMusicId > 0L && isCurrentSong(appleMusicId) && isAllowed(appleMusicId)) {
-            request(appleMusicId)
+        val shouldRequest = synchronized(lock) {
+            if (appleMusicId <= 0L || !isAllowed(appleMusicId)) return@synchronized false
+            if (isCurrentSongLocked(appleMusicId)) return@synchronized true
+            if (shouldDeferRawSongChangeLocked(appleMusicId)) {
+                pendingProvisionalRequestId = appleMusicId
+            }
+            false
         }
+        if (shouldRequest) request(appleMusicId)
     }
 
     fun isTracking(appleMusicId: Long): Boolean = synchronized(lock) {
@@ -433,7 +500,26 @@ internal class AutoLyricsReplacementSession(
                 if (published) preparedCandidate = candidate
             }
             if (!published && isCurrentRequest(appleMusicId, requestGeneration)) {
-                val candidate = runCatching { fetchCandidate(appleMusicId) }.getOrNull()
+                val shouldFetchAppleId = synchronized(lock) {
+                    appleMusicId !in appleIdSourcesAttempted
+                }
+                val candidate = if (shouldFetchAppleId) {
+                    val startedAt = nowMs()
+                    runCatching { fetchCandidate(appleMusicId) }.getOrNull().also { result ->
+                        logger(
+                            "automatic lyrics Apple-ID stage finished: id=$appleMusicId, " +
+                                "elapsedMs=${(nowMs() - startedAt).coerceAtLeast(0L)}, " +
+                                "source=${result?.source}",
+                        )
+                        synchronized(lock) {
+                            if (isCurrentRequestLocked(appleMusicId, requestGeneration)) {
+                                appleIdSourcesAttempted += appleMusicId
+                            }
+                        }
+                    }
+                } else {
+                    null
+                }
                 if (candidate != null && isCurrentRequest(appleMusicId, requestGeneration)) {
                     preparedPointer = preparePointer(
                         candidate.ttml,
@@ -449,6 +535,37 @@ internal class AutoLyricsReplacementSession(
                         }
                     }
                 }
+            }
+            if (!published && isCurrentRequest(appleMusicId, requestGeneration)) {
+                val metadata = synchronized(lock) {
+                    stableMetadata?.takeIf { it.appleMusicId == appleMusicId }
+                }
+                val candidate = metadata?.let { stable ->
+                    val startedAt = nowMs()
+                    runCatching { fetchMetadataCandidate?.invoke(stable) }.getOrNull().also { result ->
+                        logger(
+                            "automatic lyrics metadata stage finished: id=$appleMusicId, " +
+                                "elapsedMs=${(nowMs() - startedAt).coerceAtLeast(0L)}, " +
+                                "source=${result?.source}",
+                        )
+                    }
+                }
+                if (candidate != null && isCurrentRequest(appleMusicId, requestGeneration)) {
+                    preparedPointer = preparePointer(
+                        candidate.ttml,
+                        appleMusicId,
+                        candidate.source,
+                        requestGeneration,
+                    )
+                    published = preparedPointer != null
+                    if (published) {
+                        preparedCandidate = candidate
+                        if (isCurrentRequest(appleMusicId, requestGeneration)) {
+                            runCatching { cache.write(appleMusicId, candidate.ttml) }
+                        }
+                    }
+                }
+                if (metadata == null) return
             }
             if (!published || preparedCandidate == null ||
                 !isCurrentRequest(appleMusicId, requestGeneration)
@@ -540,6 +657,29 @@ internal class AutoLyricsReplacementSession(
     private fun isPrepared(pointer: Any?, appleMusicId: Long): Boolean = runCatching {
         pointer != null && verifyPtr(pointer) && readAdamId(pointer) == appleMusicId
     }.getOrDefault(false)
+
+    private fun shouldDeferRawSongChangeLocked(appleMusicId: Long?): Boolean =
+        fetchMetadataCandidate != null &&
+            activeSongKnown &&
+            stableMetadata?.appleMusicId == activeAppleMusicId &&
+            appleMusicId != activeAppleMusicId
+
+    /** Returns true only when a confirmed identity replaces the active song. */
+    private fun changeActiveSongLocked(appleMusicId: Long?): Boolean {
+        val sameSong = activeSongKnown == (appleMusicId != null) &&
+            activeAppleMusicId == appleMusicId
+        if (sameSong) return false
+        generation += 1L
+        activeSongKnown = appleMusicId != null
+        activeAppleMusicId = appleMusicId
+        pending.clear()
+        failedUntil.clear()
+        appleIdSourcesAttempted.clear()
+        stableMetadata = null
+        pendingProvisionalRequestId = null
+        activeTakeovers.clear()
+        return true
+    }
 
     private fun isCurrentSong(appleMusicId: Long): Boolean = synchronized(lock) {
         isCurrentSongLocked(appleMusicId)

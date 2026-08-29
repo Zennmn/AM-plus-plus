@@ -6,6 +6,7 @@ import java.net.InetSocketAddress
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -33,6 +34,14 @@ class HttpLyricTransportTest {
         try {
             when (exchange.requestURI.path) {
                 "/ok" -> respond(exchange, 200, "hello world")
+                "/post" -> {
+                    val body = exchange.requestBody.readBytes().toString(Charsets.UTF_8)
+                    respond(exchange, 200, "${exchange.requestMethod}:$body:${exchange.requestHeaders.getFirst("X-Test")}")
+                }
+                "/hang" -> {
+                    Thread.sleep(2_000L)
+                    respond(exchange, 200, "too late")
+                }
                 "/missing" -> respond(exchange, 404, "not found")
                 "/large" -> respond(exchange, 200, "x".repeat(200))
                 "/etag" -> {
@@ -86,6 +95,36 @@ class HttpLyricTransportTest {
         val second = transport.getResponse("$baseUrl/etag", first?.etag)
         assertEquals(304, second?.statusCode)
         assertNull(second?.body)
+    }
+
+    @Test
+    fun `post sends a bounded body and caller headers`() {
+        val transport = HttpLyricTransport(maxResponseBytes = 64)
+        val response = transport.post(
+            "$baseUrl/post",
+            "params=abc".toByteArray(Charsets.UTF_8),
+            mapOf("X-Test" to "yes"),
+        )
+
+        assertEquals(200, response?.statusCode)
+        assertEquals("POST:params=abc:yes", response?.body?.toString(Charsets.UTF_8))
+    }
+
+    @Test
+    fun `post disconnects at the end to end request deadline`() {
+        val transport = HttpLyricTransport(
+            connectTimeoutMs = 5_000,
+            readTimeoutMs = 5_000,
+            requestDeadlineMs = 100,
+            maxResponseBytes = 64,
+        )
+
+        val startedAt = System.nanoTime()
+        val response = transport.post("$baseUrl/hang", "body".toByteArray())
+        val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L
+
+        assertNull(response)
+        assertTrue("elapsed=${elapsedMs}ms", elapsedMs < 750L)
     }
 
 }

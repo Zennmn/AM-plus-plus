@@ -10,6 +10,7 @@ import io.github.proify.lyricon.amprovider.xposed.AppleMusicProviderRuntime
 import io.github.proify.lyricon.amprovider.xposed.AppleMusicVersion
 import io.github.proify.lyricon.amprovider.xposed.MediaMetadataCache
 import io.github.proify.lyricon.amprovider.xposed.ProviderLogger
+import io.github.proify.lyricon.amprovider.xposed.PlaybackManager
 import io.github.proify.lyricon.amprovider.xposed.hooks.AppleFrameworkMetadataHooks
 import io.github.proify.lyricon.amprovider.xposed.hooks.AppleContentLocalizationHooks
 import io.github.proify.lyricon.amprovider.xposed.hooks.ApplePlaybackHooks
@@ -40,6 +41,7 @@ internal class HleMetadataRuntime(
     private val application: Application,
     private val classLoader: ClassLoader,
     private val mode: TitleCorrectionMode = TitleCorrectionMode.ORIGINAL_HYPER,
+    private val stableMetadata: StablePlaybackMetadataCoordinator? = null,
 ) {
     private val version = runCatching {
         val info = application.packageManager.getPackageInfo(
@@ -126,6 +128,18 @@ internal class HleMetadataRuntime(
     fun install(): TargetCapabilityInstall {
         runtime.attach(application, hookResolver)
         MediaMetadataCache.setProfile(mode.cacheNamespace)
+        PlaybackManager.setMetadataResolutionFinishedListener { mediaId ->
+            val metadata = MediaMetadataCache.getMetadataById(mediaId)
+                ?: return@setMetadataResolutionFinishedListener
+            val alias = runCatching { effectiveAlias(mediaId) }.getOrNull()
+            stableMetadata?.onResolutionFinished(
+                appleMusicId = mediaId.toLongOrNull() ?: return@setMetadataResolutionFinishedListener,
+                title = alias?.title ?: metadata.originalTitle ?: metadata.title,
+                artist = alias?.artist ?: metadata.originalArtist ?: metadata.artist,
+                album = alias?.album ?: metadata.originalAlbum,
+                durationMs = metadata.duration,
+            )
+        }
         catalogResolver.applyContentUiLanguage(mode.contentUiLanguageSelection)
         catalogResolver.setPersistentLocalizedCacheEnabled(true)
 

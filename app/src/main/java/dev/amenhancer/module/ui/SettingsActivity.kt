@@ -56,6 +56,10 @@ import dev.amenhancer.module.lyrics.CustomLyricsOnlineImportResult
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImporter
 import dev.amenhancer.module.lyrics.CustomLyricsRestoreResult
 import dev.amenhancer.module.lyrics.CustomLyricsRestorePolicy
+import dev.amenhancer.module.lyrics.MetadataLyricsImporter
+import dev.amenhancer.module.lyrics.FileQqMusicSessionStore
+import dev.amenhancer.module.lyrics.MetadataLyricsQuery
+import dev.amenhancer.module.lyrics.MetadataLyricsSource
 import dev.amenhancer.module.model.CustomLyricsEntry
 import dev.amenhancer.module.model.CustomLyricsManifest
 import dev.amenhancer.module.model.CustomLyricsSources
@@ -89,6 +93,14 @@ class SettingsActivity : Activity() {
     private val customLyricsListState = CustomLyricsListState()
     private var customLyricsSearchQuery = ""
     private var customLyricsListRegion: LinearLayout? = null
+    @Volatile
+    private var metadataRequestGeneration = 0L
+    private val metadataLyricsImporter by lazy {
+        MetadataLyricsImporter.withTransport(
+            HttpLyricTransport(),
+            FileQqMusicSessionStore(java.io.File(filesDir, "ampp-qq-music-session.json")),
+        )
+    }
 
     private val serviceListener: (XposedServiceSnapshot) -> Unit = { snapshot ->
         runOnUiThread { if (::content.isInitialized) render(snapshot) }
@@ -124,6 +136,7 @@ class SettingsActivity : Activity() {
     }
 
     override fun onDestroy() {
+        metadataRequestGeneration += 1
         if (::currentSongIdentityRequester.isInitialized) currentSongIdentityRequester.cancel()
         super.onDestroy()
     }
@@ -561,6 +574,16 @@ class SettingsActivity : Activity() {
                 enabled = writable && settings.customLyricsEnabled,
             ) { enabled ->
                 store.saveSettings(store.settings().copy(automaticLyricsEnabled = enabled))
+                content.post { render() }
+            })
+            addView(insetDivider())
+            addView(settingRow(
+                title = "QQ/网易云自动兜底（实验性）",
+                summary = "三个 Apple ID 歌词源未命中时，再按歌名、歌手、专辑和时长查找逐字歌词 · 默认关闭",
+                checked = settings.metadataLyricsFallbackEnabled,
+                enabled = writable && settings.customLyricsEnabled && settings.automaticLyricsEnabled,
+            ) { enabled ->
+                store.saveSettings(store.settings().copy(metadataLyricsFallbackEnabled = enabled))
             })
         }
 
@@ -901,7 +924,13 @@ class SettingsActivity : Activity() {
         }
     }
 
-    private fun requestCurrentSongId(appleMusicId: EditText, displayName: EditText) {
+    private fun requestCurrentSongId(
+        appleMusicId: EditText,
+        displayName: EditText,
+        titleInput: EditText? = null,
+        artistInput: EditText? = null,
+        albumInput: EditText? = null,
+    ) {
         if (!currentSongIdentityRequester.request { currentSong ->
                 if (currentSong == null) {
                     toast("未获取到当前歌曲信息，请先在 Apple Music 播放一首歌")
@@ -909,6 +938,12 @@ class SettingsActivity : Activity() {
                 }
                 appleMusicId.setText(currentSong.appleMusicId.toString())
                 appleMusicId.setSelection(appleMusicId.length())
+                titleInput?.setText(currentSong.title.orEmpty())
+                titleInput?.setSelection(titleInput.length())
+                artistInput?.setText(currentSong.artist.orEmpty())
+                artistInput?.setSelection(artistInput.length())
+                albumInput?.setText(currentSong.album.orEmpty())
+                albumInput?.setSelection(albumInput.length())
                 formatCurrentSongDisplayName(currentSong.title, currentSong.artist)?.let {
                     displayName.setText(it)
                     displayName.setSelection(displayName.length())
@@ -994,6 +1029,15 @@ class SettingsActivity : Activity() {
             hint = "显示名称（可选）",
             initial = existing?.primary?.displayName.orEmpty(),
         )
+        val titleInput = lyricEditorInput(
+            hint = "歌曲名（QQ/网易云搜索）",
+        )
+        val artistInput = lyricEditorInput(
+            hint = "歌手（QQ/网易云搜索）",
+        )
+        val albumInput = lyricEditorInput(
+            hint = "专辑（可选，用于区分版本）",
+        )
         val ttml = lyricEditorInput(
             hint = "TTML 内容",
             initial = initialTtml,
@@ -1010,6 +1054,9 @@ class SettingsActivity : Activity() {
         updateSourceLabel()
         form.addView(appleMusicId)
         form.addView(displayName)
+        form.addView(titleInput)
+        form.addView(artistInput)
+        form.addView(albumInput)
         form.addView(sourceLabel)
         form.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1043,6 +1090,42 @@ class SettingsActivity : Activity() {
                 LinearLayout.LayoutParams(0, dp(44), 1f),
             )
         })
+        form.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(
+                fontActionButton("从 QQ 音乐导入", true) {
+                    importFromMetadata(
+                        MetadataLyricsSource.QQ_MUSIC,
+                        displayName,
+                        titleInput,
+                        artistInput,
+                        albumInput,
+                        ttml,
+                    ) { importedSource ->
+                        source = importedSource
+                        updateSourceLabel()
+                    }
+                },
+                LinearLayout.LayoutParams(0, dp(44), 1f),
+            )
+            addView(spacer(8), LinearLayout.LayoutParams(dp(8), dp(1)))
+            addView(
+                fontActionButton("从网易云导入", true) {
+                    importFromMetadata(
+                        MetadataLyricsSource.NETEASE_CLOUD_MUSIC,
+                        displayName,
+                        titleInput,
+                        artistInput,
+                        albumInput,
+                        ttml,
+                    ) { importedSource ->
+                        source = importedSource
+                        updateSourceLabel()
+                    }
+                },
+                LinearLayout.LayoutParams(0, dp(44), 1f),
+            )
+        })
         form.addView(ttml, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -1066,7 +1149,9 @@ class SettingsActivity : Activity() {
                     updateSourceLabel()
                 }
             })
-            addView(dialogActionButton("获取 ID") { requestCurrentSongId(appleMusicId, displayName) })
+            addView(dialogActionButton("获取 ID") {
+                requestCurrentSongId(appleMusicId, displayName, titleInput, artistInput, albumInput)
+            })
             addView(dialogActionButton("取消") { dialog.dismiss() })
             addView(dialogActionButton("保存") save@{
                 val ids = CustomLyricsIdParser.parse(appleMusicId.text.toString())
@@ -1101,7 +1186,10 @@ class SettingsActivity : Activity() {
         dialog.setOnShowListener {
             existing?.primary?.let { entry -> loadExistingCustomTtml(entry, ttml) }
         }
-        dialog.setOnDismissListener { currentSongIdentityRequester.cancel() }
+        dialog.setOnDismissListener {
+            metadataRequestGeneration += 1
+            currentSongIdentityRequester.cancel()
+        }
         dialog.show()
     }
 
@@ -1203,6 +1291,80 @@ class SettingsActivity : Activity() {
         backgroundExecutor.execute {
             val result = onlineLyricsImporter().importLunabeat(appleMusicId)
             showOnlineImportResult(result, ttmlInput, onImported)
+        }
+    }
+
+    private fun importFromMetadata(
+        source: MetadataLyricsSource,
+        displayNameInput: EditText,
+        titleInput: EditText,
+        artistInput: EditText,
+        albumInput: EditText,
+        ttmlInput: EditText,
+        onImported: (String) -> Unit,
+    ) {
+        val requestGeneration = metadataRequestGeneration + 1
+        metadataRequestGeneration = requestGeneration
+        val title = titleInput.text.toString().trim()
+        val artist = artistInput.text.toString().trim()
+        if (title.isBlank()) {
+            titleInput.error = "请输入歌曲名"
+            return
+        }
+        if (artist.isBlank()) {
+            artistInput.error = "请输入歌手"
+            return
+        }
+        val query = MetadataLyricsQuery(
+            title = title,
+            artist = artist,
+            album = albumInput.text.toString().trim().takeIf(String::isNotBlank),
+        )
+        toast("正在搜索 ${source.displayName}…")
+        backgroundExecutor.execute {
+            val candidates = runCatching { metadataLyricsImporter.searchCandidates(source, query) }
+                .getOrDefault(emptyList())
+            runOnUiThread {
+                if (isFinishing || isDestroyed || requestGeneration != metadataRequestGeneration ||
+                    !titleInput.isAttachedToWindow
+                ) return@runOnUiThread
+                if (candidates.isEmpty()) {
+                    toast("${source.displayName} 没有匹配候选")
+                    return@runOnUiThread
+                }
+                AlertDialog.Builder(this)
+                    .setTitle("选择 ${source.displayName} 歌曲")
+                    .setItems(candidates.map { it.displayName }.toTypedArray()) { _, which ->
+                        val candidate = candidates.getOrNull(which) ?: return@setItems
+                        if (displayNameInput.text.isNullOrBlank()) {
+                            displayNameInput.setText("${candidate.title} - ${candidate.artist}".trim(' ', '-'))
+                        }
+                        toast("正在获取 ${candidate.displayName}…")
+                        backgroundExecutor.execute {
+                            val result = runCatching { metadataLyricsImporter.importCandidate(candidate) }
+                                .getOrElse {
+                                    CustomLyricsOnlineImportResult.Failed(
+                                        it.message.orEmpty().ifBlank { "在线导入失败" },
+                                    )
+                                }
+                            runOnUiThread {
+                                if (isFinishing || isDestroyed || requestGeneration != metadataRequestGeneration ||
+                                    !ttmlInput.isAttachedToWindow
+                                ) return@runOnUiThread
+                                when (result) {
+                                    is CustomLyricsOnlineImportResult.Imported -> {
+                                        ttmlInput.setText(result.ttml)
+                                        onImported(result.source)
+                                        toast("已导入 ${source.displayName} 歌词，请确认后保存")
+                                    }
+                                    is CustomLyricsOnlineImportResult.Failed -> toast(result.message)
+                                }
+                            }
+                        }
+                    }
+                    .setNegativeButton("取消", null)
+                    .show()
+            }
         }
     }
 
@@ -1365,6 +1527,8 @@ class SettingsActivity : Activity() {
         CustomLyricsSources.AMLL -> "AMLL"
         CustomLyricsSources.AM_LYRICS -> "AM-Lyrics 仓库"
         CustomLyricsSources.LUNABEAT -> "Lunabeat"
+        CustomLyricsSources.QQ_MUSIC -> "QQ 音乐"
+        CustomLyricsSources.NETEASE_CLOUD_MUSIC -> "网易云音乐"
         else -> "手动 TTML"
     }
 

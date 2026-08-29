@@ -78,7 +78,7 @@ class CustomLyricsReadyReapplyTest {
         val currentItem = LyricsItem("77")
         val fragment = LyricsFragment(LyricsItem("42"))
         val pointer = Any()
-        val cache = CurrentSongIdentityCache().apply {
+        val cache = immediateIdentityCache().apply {
             publish(LyricsItem("42"), CurrentSongDetails(42L))
             publish(currentItem, CurrentSongDetails(77L))
         }
@@ -96,7 +96,7 @@ class CustomLyricsReadyReapplyTest {
     fun `ready late publish never rebinds a stale fragment when the replacement is no longer ready`() {
         val currentItem = LyricsItem("77")
         val fragment = LyricsFragment(LyricsItem("42"))
-        val cache = CurrentSongIdentityCache().apply {
+        val cache = immediateIdentityCache().apply {
             publish(LyricsItem("42"), CurrentSongDetails(42L))
             publish(currentItem, CurrentSongDetails(77L))
         }
@@ -115,7 +115,7 @@ class CustomLyricsReadyReapplyTest {
         val currentItem = LyricsItem("77")
         val fragment = LyricsFragment(LyricsItem("999"))
         val pointer = Any()
-        val cache = CurrentSongIdentityCache().apply {
+        val cache = immediateIdentityCache().apply {
             publish(LyricsItem("42"), CurrentSongDetails(42L))
             publish(currentItem, CurrentSongDetails(77L))
         }
@@ -133,7 +133,7 @@ class CustomLyricsReadyReapplyTest {
     fun `ready late publish never rebinds when the current song moved past the ready id`() {
         val fragment = LyricsFragment(LyricsItem("42"))
         val pointer = Any()
-        val cache = CurrentSongIdentityCache().apply {
+        val cache = immediateIdentityCache().apply {
             publish(LyricsItem("42"), CurrentSongDetails(42L))
             publish(LyricsItem("77"), CurrentSongDetails(77L))
             publish(LyricsItem("99"), CurrentSongDetails(99L))
@@ -353,11 +353,16 @@ class CustomLyricsReadyReapplyTest {
         assertEquals(0, pending.size)
     }
 
+    private fun immediateIdentityCache() = CurrentSongIdentityCache(
+        invalidIdentityDebounceMs = 0L,
+        validIdentityDebounceMs = 0L,
+    )
+
     private fun reapply(
         fragment: Any,
         ready: (Long) -> Any? = { null },
         usable: (Any) -> Boolean = { true },
-        cache: CurrentSongIdentityCache = CurrentSongIdentityCache(),
+        cache: CurrentSongIdentityCache = immediateIdentityCache(),
     ): Pair<CustomLyricsReadyReapply, MutableList<String>> {
         val logs = mutableListOf<String>()
         val fragmentClass = fragment.javaClass

@@ -48,6 +48,42 @@ class CustomLyricsUpdateTransactionTest {
     }
 
     @Test
+    fun `changed entry can promote a metadata source while retaining local fields`() {
+        val bytes = ttml("same").toByteArray()
+        val old = manifest(
+            CustomLyricsEntry(
+                appleMusicId = 42L,
+                displayName = "本地名称",
+                fileId = "lyrics_old",
+                sizeBytes = bytes.size.toLong(),
+                sha256 = CustomLyricsFilePolicy.sha256(bytes),
+                source = CustomLyricsSources.QQ_MUSIC,
+                enabled = false,
+            ),
+        )
+        val result = CustomLyricsUpdateTransaction(
+            fileIdFactory = { "lyrics_new" },
+            writeRemoteFile = { _, _ -> true },
+            publishManifest = { true },
+            deleteRemoteFile = {},
+        ).apply(
+            oldManifest = old,
+            items = listOf(
+                CustomLyricsUpdateItem.Changed(
+                    appleMusicId = 42L,
+                    source = CustomLyricsSources.QQ_MUSIC,
+                    bytes = bytes,
+                    replacementSource = CustomLyricsSources.LUNABEAT,
+                ),
+            ),
+        ) as CustomLyricsUpdateResult.Updated
+
+        assertEquals(CustomLyricsSources.LUNABEAT, result.manifest.entries.single().source)
+        assertEquals("本地名称", result.manifest.entries.single().displayName)
+        assertFalse(result.manifest.entries.single().enabled)
+    }
+
+    @Test
     fun `unchanged skipped and failed entries do not rotate manifest`() {
         val bytes = ttml("same").toByteArray()
         val old = manifest(

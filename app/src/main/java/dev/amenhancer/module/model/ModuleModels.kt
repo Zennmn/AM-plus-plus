@@ -19,6 +19,8 @@ data class ModuleSettings(
     val customLyricsEnabled: Boolean = false,
     /** Enables background AMLL/Lunabeat/user-repository lyric completion. */
     val automaticLyricsEnabled: Boolean = true,
+    /** Extends automatic completion with metadata-matched QQ/NetEase sources. */
+    val metadataLyricsFallbackEnabled: Boolean = false,
     val fontManifest: LyricsFontManifest = LyricsFontManifest.disabled(),
     val customLyricsManifest: CustomLyricsManifest = CustomLyricsManifest.empty(),
     val schemaVersion: Int = ModuleConstants.CONFIG_SCHEMA_VERSION,
@@ -67,6 +69,12 @@ object CustomLyricsSources {
     const val AMLL = "amll-ttml-db"
     const val AM_LYRICS = "am-lyrics"
     const val LUNABEAT = "lunabeat-ttml-hub"
+    /** Explicit metadata imports; unlike the Apple-ID sources these are not updateable. */
+    const val QQ_MUSIC = "qq-music"
+    const val NETEASE_CLOUD_MUSIC = "netease-cloud-music"
+    /** Short aliases kept for callers that refer to the platforms as QM/NE. */
+    const val QM = QQ_MUSIC
+    const val NE = NETEASE_CLOUD_MUSIC
 }
 
 enum class FeatureState {

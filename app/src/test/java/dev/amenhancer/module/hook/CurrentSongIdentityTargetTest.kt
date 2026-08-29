@@ -36,6 +36,30 @@ class CurrentSongIdentityTargetTest {
     }
 
     @Test
+    fun `seam exposes the optional collection name for metadata lookup`() {
+        val seam = CurrentItemIdentitySeam(resolver(SongFragment::class.java))
+        assertNull(seam.resolve(SongFragment.installMethod()))
+
+        assertEquals(
+            CurrentSongDetails(67890L, "No lyrics", "Artist", "Album"),
+            seam.detailsOfItem(SongItem("67890", "No lyrics", "Artist", "Album")),
+        )
+    }
+
+    @Test
+    fun `seam exposes the optional millisecond duration for strict metadata matching`() {
+        val seam = CurrentItemIdentitySeam(resolver(SongFragment::class.java))
+        assertNull(seam.resolve(SongFragment.installMethod()))
+
+        assertEquals(
+            180_123L,
+            seam.detailsOfItem(
+                SongItem("67890", "Song", "Artist", "Album", 180_123L),
+            )?.durationMs,
+        )
+    }
+
+    @Test
     fun `seam can rebind a stale lyrics fragment to the verified current item`() {
         val seam = CurrentItemIdentitySeam(resolver(SongFragment::class.java))
         assertNull(seam.resolve(SongFragment.installMethod()))
@@ -89,7 +113,7 @@ class CurrentSongIdentityTargetTest {
 
     @Test
     fun `cache stores the exact adam id`() {
-        val cache = CurrentSongIdentityCache()
+        val cache = CurrentSongIdentityCache(invalidIdentityDebounceMs = 0L)
         val item = Any()
 
         cache.publish(item, CurrentSongDetails(12345L, "Song title", "Artist name"))
@@ -103,7 +127,7 @@ class CurrentSongIdentityTargetTest {
 
     @Test
     fun `cache fails closed for unavailable identities`() {
-        val cache = CurrentSongIdentityCache()
+        val cache = CurrentSongIdentityCache(invalidIdentityDebounceMs = 0L)
         cache.publish(Any(), CurrentSongDetails(12345L))
 
         cache.publish(null, null)
@@ -115,8 +139,60 @@ class CurrentSongIdentityTargetTest {
     }
 
     @Test
+    fun `transient unavailable identity does not clear a live song`() {
+        val cache = CurrentSongIdentityCache(invalidIdentityDebounceMs = 100L)
+        val events = mutableListOf<TargetCurrentSong?>()
+        cache.addListener { events += it }
+        val item = Any()
+
+        cache.publish(item, CurrentSongDetails(12345L))
+        cache.publish(null, null)
+        Thread.sleep(20L)
+
+        assertEquals(12345L, cache.current()?.details?.appleMusicId)
+        assertEquals(0, events.count { it == null })
+        cache.publish(item, CurrentSongDetails(12345L))
+        Thread.sleep(150L)
+        assertEquals(12345L, cache.current()?.details?.appleMusicId)
+        assertEquals(0, events.count { it == null })
+    }
+
+    @Test
+    fun `transient different valid identity does not replace the current song`() {
+        val cache = CurrentSongIdentityCache(
+            invalidIdentityDebounceMs = 0L,
+            validIdentityDebounceMs = 100L,
+        )
+        val events = mutableListOf<TargetCurrentSong?>()
+        cache.addListener { events += it }
+
+        cache.publish(Any(), CurrentSongDetails(42L))
+        cache.publish(Any(), CurrentSongDetails(43L))
+        Thread.sleep(20L)
+        cache.publish(Any(), CurrentSongDetails(42L))
+        Thread.sleep(150L)
+
+        assertEquals(42L, cache.current()?.details?.appleMusicId)
+        assertTrue(events.none { it?.details?.appleMusicId == 43L })
+    }
+
+    @Test
+    fun `persistent different valid identity replaces the current song after its grace window`() {
+        val cache = CurrentSongIdentityCache(
+            invalidIdentityDebounceMs = 0L,
+            validIdentityDebounceMs = 100L,
+        )
+        cache.publish(Any(), CurrentSongDetails(42L))
+        cache.publish(Any(), CurrentSongDetails(43L))
+
+        Thread.sleep(150L)
+
+        assertEquals(43L, cache.current()?.details?.appleMusicId)
+    }
+
+    @Test
     fun `cache replays and publishes identity changes to listeners`() {
-        val cache = CurrentSongIdentityCache()
+        val cache = CurrentSongIdentityCache(invalidIdentityDebounceMs = 0L)
         val first = Any()
         val second = Any()
         val events = mutableListOf<TargetCurrentSong?>()
@@ -134,7 +210,10 @@ class CurrentSongIdentityTargetTest {
 
     @Test
     fun `cache only permits rebinding from a recently published identity`() {
-        val cache = CurrentSongIdentityCache()
+        val cache = CurrentSongIdentityCache(
+            invalidIdentityDebounceMs = 0L,
+            validIdentityDebounceMs = 0L,
+        )
 
         cache.publish(Any(), CurrentSongDetails(182861090L))
         cache.publish(Any(), CurrentSongDetails(7335408332109193189L))
@@ -245,10 +324,14 @@ private class SongItem(
     private val id: String,
     private val title: String = "Song title",
     private val artistName: String = "Artist name",
+    private val collectionName: String = "",
+    private val duration: Long = 0L,
 ) {
     fun getId(): String = id
     fun getTitle(): String = title
     fun getArtistName(): String = artistName
+    fun getCollectionName(): String = collectionName
+    fun getDuration(): Long = duration
 }
 
 private class SongFragment(item: SongItem?) {

@@ -18,6 +18,8 @@ internal object CustomLyricsManifestPolicy {
         CustomLyricsSources.AMLL,
         CustomLyricsSources.AM_LYRICS,
         CustomLyricsSources.LUNABEAT,
+        CustomLyricsSources.QQ_MUSIC,
+        CustomLyricsSources.NETEASE_CLOUD_MUSIC,
     )
 
     fun sanitize(manifest: CustomLyricsManifest): CustomLyricsManifest {

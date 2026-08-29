@@ -59,8 +59,17 @@ internal data class TargetAdaptation(
                             .filterNot { entry -> entry.enabled }
                             .mapTo(mutableSetOf(), CustomLyricsEntry::appleMusicId)
                     }.getOrDefault(emptySet())
-                    createAutoLyricsRuntime(application, suppressedAutoIds)
+                    createAutoLyricsRuntime(
+                        application,
+                        suppressedAutoIds,
+                        metadataFallbackEnabled = settings.metadataLyricsFallbackEnabled,
+                    )
                 }
+            val stableMetadata = autoLyricsRuntime?.metadataResolver?.let {
+                StablePlaybackMetadataCoordinator(settings.titleCorrectionEnabled).also { coordinator ->
+                    currentSong.addListener { song -> coordinator.onCurrentSong(song?.details) }
+                }
+            }
             return TargetAdaptation(
                 identity = build.displayName,
                 currentSong = currentSong,
@@ -77,6 +86,7 @@ internal data class TargetAdaptation(
                     symbols = resolver,
                     currentSong = currentSong,
                     autoLyricsRuntime = autoLyricsRuntime,
+                    stableMetadata = stableMetadata,
                 ),
                 currentSongIdentity = AppleMusicCurrentSongIdentityTarget(
                     application,
@@ -99,6 +109,7 @@ internal data class TargetAdaptation(
                             application = application,
                             classLoader = classLoader,
                             mode = settings.titleCorrectionMode,
+                            stableMetadata = stableMetadata,
                         ).install()
                     }.getOrElse { error ->
                         ModernXposedRuntime.log("HLE metadata runtime install failed", error)

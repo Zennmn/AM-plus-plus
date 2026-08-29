@@ -13,6 +13,10 @@ import dev.amenhancer.module.CurrentSongDetails
 import dev.amenhancer.module.CurrentSongIdentityProtocol
 import java.util.ArrayDeque
 import java.util.concurrent.CopyOnWriteArraySet
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 internal data class TargetCurrentSong(
@@ -21,11 +25,27 @@ internal data class TargetCurrentSong(
 )
 
 /** Shared target-process state from Apple's player-level metadata funnel. */
-internal class CurrentSongIdentityCache {
+internal class CurrentSongIdentityCache(
+    private val invalidIdentityDebounceMs: Long = DEFAULT_INVALID_IDENTITY_DEBOUNCE_MS,
+    @Suppress("UNUSED_PARAMETER")
+    private val validIdentityDebounceMs: Long = if (invalidIdentityDebounceMs > 0L) {
+        DEFAULT_VALID_IDENTITY_DEBOUNCE_MS
+    } else {
+        0L
+    },
+) {
     private val current = AtomicReference<TargetCurrentSong?>(null)
     private val listeners = CopyOnWriteArraySet<(TargetCurrentSong?) -> Unit>()
     private val recentIds = ArrayDeque<Long>()
     private val recentIdsLock = Any()
+    private val invalidationLock = Any()
+    private val invalidationGeneration = AtomicLong(0L)
+    private val invalidationExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "ampp-current-song-identity").apply { isDaemon = true }
+    }
+    private var pendingInvalidation: ScheduledFuture<*>? = null
+    private var pendingValidIdentityChange: ScheduledFuture<*>? = null
+    private var pendingValidIdentity: TargetCurrentSong? = null
 
     fun publish(item: Any?, details: CurrentSongDetails?) {
         val published = if (item != null && details != null && details.appleMusicId > 0L) {
@@ -33,6 +53,25 @@ internal class CurrentSongIdentityCache {
         } else {
             null
         }
+        if (published == null && current.get() != null && invalidIdentityDebounceMs > 0L) {
+            scheduleInvalidation()
+            return
+        }
+        val currentId = current.get()?.details?.appleMusicId
+        if (
+            published != null &&
+            currentId != null &&
+            currentId != published.details.appleMusicId &&
+            validIdentityDebounceMs > 0L
+        ) {
+            scheduleValidIdentityChange(published)
+            return
+        }
+        cancelPendingIdentityChanges()
+        commit(published)
+    }
+
+    private fun commit(published: TargetCurrentSong?) {
         current.set(published)
         synchronized(recentIdsLock) {
             if (published == null) {
@@ -45,6 +84,65 @@ internal class CurrentSongIdentityCache {
         }
         listeners.forEach { listener ->
             runCatching { listener(published) }
+        }
+    }
+
+    private fun scheduleInvalidation() {
+        synchronized(invalidationLock) {
+            pendingValidIdentityChange?.cancel(false)
+            pendingValidIdentityChange = null
+            pendingValidIdentity = null
+            pendingInvalidation?.cancel(false)
+            val generation = invalidationGeneration.incrementAndGet()
+            pendingInvalidation = invalidationExecutor.schedule({
+                val shouldClear = synchronized(invalidationLock) {
+                    generation == invalidationGeneration.get() && current.get() != null
+                }
+                if (!shouldClear) return@schedule
+                commit(null)
+            }, invalidIdentityDebounceMs, TimeUnit.MILLISECONDS)
+        }
+    }
+
+    /**
+     * Apple Music can transiently publish a stale, but otherwise valid, queue
+     * item while a song is changing. Confirm a different ID briefly before
+     * letting it invalidate the active automatic-lyrics generation.
+     */
+    private fun scheduleValidIdentityChange(candidate: TargetCurrentSong) {
+        synchronized(invalidationLock) {
+            val pending = pendingValidIdentity
+            if (pending?.details?.appleMusicId == candidate.details.appleMusicId) {
+                pendingValidIdentity = candidate
+                return
+            }
+            pendingInvalidation?.cancel(false)
+            pendingInvalidation = null
+            pendingValidIdentityChange?.cancel(false)
+            val generation = invalidationGeneration.incrementAndGet()
+            pendingValidIdentity = candidate
+            pendingValidIdentityChange = invalidationExecutor.schedule({
+                val confirmed = synchronized(invalidationLock) {
+                    if (generation != invalidationGeneration.get()) return@synchronized null
+                    pendingValidIdentity.also {
+                        pendingValidIdentity = null
+                        pendingValidIdentityChange = null
+                    }
+                } ?: return@schedule
+                if (current.get()?.details?.appleMusicId == confirmed.details.appleMusicId) return@schedule
+                commit(confirmed)
+            }, validIdentityDebounceMs, TimeUnit.MILLISECONDS)
+        }
+    }
+
+    private fun cancelPendingIdentityChanges() {
+        synchronized(invalidationLock) {
+            invalidationGeneration.incrementAndGet()
+            pendingInvalidation?.cancel(false)
+            pendingInvalidation = null
+            pendingValidIdentityChange?.cancel(false)
+            pendingValidIdentityChange = null
+            pendingValidIdentity = null
         }
     }
 
@@ -66,6 +164,12 @@ internal class CurrentSongIdentityCache {
 
     private companion object {
         const val MAX_RECENT_IDS = 8
+        // The Apple-ID and metadata fallback stages may legitimately run for
+        // several seconds. Do not clear a live identity while that chain is
+        // still in flight; a persistently different next-song identity is
+        // still confirmed within the shorter valid-ID window below.
+        const val DEFAULT_INVALID_IDENTITY_DEBOUNCE_MS = 30_000L
+        const val DEFAULT_VALID_IDENTITY_DEBOUNCE_MS = 750L
     }
 }
 
@@ -98,6 +202,12 @@ internal class CurrentSongIdentityRequestResponder(
                         }
                         it.artist?.let { artist ->
                             putString(CurrentSongIdentityProtocol.EXTRA_SONG_ARTIST, artist)
+                        }
+                        it.album?.let { album ->
+                            putString(CurrentSongIdentityProtocol.EXTRA_SONG_ALBUM, album)
+                        }
+                        it.durationMs?.takeIf { duration -> duration > 0L }?.let { duration ->
+                            putLong(CurrentSongIdentityProtocol.EXTRA_SONG_DURATION_MS, duration)
                         }
                     }
                 },

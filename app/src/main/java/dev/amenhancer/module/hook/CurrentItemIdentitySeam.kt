@@ -9,7 +9,8 @@ import java.lang.reflect.Method
  * item field (`com.apple.android.music.player.fragment.m#c` of type
  * `com.apple.android.music.model.BaseContentItem`) read through `getId()` and
  * parsed with [parseCurrentItemAdamId]. The same item optionally supplies
- * `getTitle()` and `getArtistName()` for the standalone current-song form.
+ * `getTitle()`, `getArtistName()` and (when exposed by the host build)
+ * `getCollectionName()` for the standalone current-song form.
  *
  * Lyric replacement and current-song identity capability share this exact
  * contract; neither consumer may reinterpret the identity as a title or
@@ -24,6 +25,8 @@ internal class CurrentItemIdentitySeam(
     private lateinit var currentItemGetId: Method
     private var currentItemGetTitle: Method? = null
     private var currentItemGetArtistName: Method? = null
+    private var currentItemGetAlbum: Method? = null
+    private var currentItemGetDuration: Method? = null
 
     /** The verified current item field resolution summary, or null before resolve. */
     var fieldSummary: String? = null
@@ -52,6 +55,9 @@ internal class CurrentItemIdentitySeam(
         currentItemGetId = getId
         currentItemGetTitle = resolveStringGetter(currentItemFieldValue.type, "getTitle")
         currentItemGetArtistName = resolveStringGetter(currentItemFieldValue.type, "getArtistName")
+        currentItemGetAlbum = resolveStringGetter(currentItemFieldValue.type, "getCollectionName")
+            ?: resolveStringGetter(currentItemFieldValue.type, "getAlbumName")
+        currentItemGetDuration = resolveLongGetter(currentItemFieldValue.type, "getDuration")
         fieldSummary = currentItemResolution.summary
         metadataSummary = buildList {
             if (currentItemGetTitle == null) add("current-item-title-method unavailable")
@@ -89,6 +95,8 @@ internal class CurrentItemIdentitySeam(
                 appleMusicId = appleMusicId,
                 title = invokeStringGetter(currentItemGetTitle, item),
                 artist = invokeStringGetter(currentItemGetArtistName, item),
+                album = invokeStringGetter(currentItemGetAlbum, item),
+                durationMs = invokeLongGetter(currentItemGetDuration, item),
             )
         }.getOrNull()
     }
@@ -101,10 +109,23 @@ internal class CurrentItemIdentitySeam(
             ?.apply { isAccessible = true }
     }.getOrNull()
 
+    private fun resolveLongGetter(itemType: Class<*>, name: String): Method? = runCatching {
+        itemType.getMethod(name)
+            .takeIf { method ->
+                method.returnType == Long::class.javaPrimitiveType ||
+                    Number::class.java.isAssignableFrom(method.returnType)
+            }
+            ?.apply { isAccessible = true }
+    }.getOrNull()
+
     private fun invokeStringGetter(method: Method?, receiver: Any): String? = method
         ?.let { runCatching { it.invoke(receiver) as? String }.getOrNull() }
         ?.trim()
         ?.takeIf(String::isNotEmpty)
+
+    private fun invokeLongGetter(method: Method?, receiver: Any): Long? = method
+        ?.let { runCatching { (it.invoke(receiver) as? Number)?.toLong() }.getOrNull() }
+        ?.takeIf { it > 0L }
 }
 
 /** Parses Apple's current item identity; only a positive Adam ID is accepted. */
