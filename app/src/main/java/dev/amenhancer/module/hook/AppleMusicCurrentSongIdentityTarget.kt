@@ -33,6 +33,8 @@ internal class CurrentSongIdentityCache(
     } else {
         0L
     },
+    /** Optional interlock used by deterministic identity-generation tests. */
+    private val beforeScheduledCommit: (() -> Unit)? = null,
 ) {
     private val current = AtomicReference<TargetCurrentSong?>(null)
     private val listeners = CopyOnWriteArraySet<(TargetCurrentSong?) -> Unit>()
@@ -72,19 +74,57 @@ internal class CurrentSongIdentityCache(
     }
 
     private fun commit(published: TargetCurrentSong?) {
-        current.set(published)
-        synchronized(recentIdsLock) {
-            if (published == null) {
-                recentIds.clear()
-            } else {
-                recentIds.remove(published.details.appleMusicId)
-                recentIds.addLast(published.details.appleMusicId)
-                while (recentIds.size > MAX_RECENT_IDS) recentIds.removeFirst()
+        commitIfGeneration(published = published)
+    }
+
+    /**
+     * Commits a scheduled result only while its generation is still current.
+     * The generation check and state mutation share [invalidationLock], so a
+     * newer publish cannot slip between the guard and the write. Listener
+     * callbacks stay outside the lock because they may schedule work of their
+     * own.
+     */
+    private fun commitIfGeneration(
+        published: TargetCurrentSong?,
+        expectedGeneration: Long? = null,
+        requireCurrent: Boolean = false,
+        requireDifferentId: Long? = null,
+    ): Boolean {
+        val committed = synchronized(invalidationLock) {
+            if (expectedGeneration != null && expectedGeneration != invalidationGeneration.get()) {
+                return@synchronized false
             }
+            // This hook is a deterministic test interlock. It runs while the
+            // same lock protects the guard; any re-entrant publish advances
+            // the generation and is rejected by the second check below.
+            if (expectedGeneration != null) beforeScheduledCommit?.invoke()
+            if (expectedGeneration != null && expectedGeneration != invalidationGeneration.get()) {
+                return@synchronized false
+            }
+            if (requireCurrent && current.get() == null) return@synchronized false
+            if (
+                requireDifferentId != null &&
+                current.get()?.details?.appleMusicId == requireDifferentId
+            ) {
+                return@synchronized false
+            }
+            current.set(published)
+            synchronized(recentIdsLock) {
+                if (published == null) {
+                    recentIds.clear()
+                } else {
+                    recentIds.remove(published.details.appleMusicId)
+                    recentIds.addLast(published.details.appleMusicId)
+                    while (recentIds.size > MAX_RECENT_IDS) recentIds.removeFirst()
+                }
+            }
+            true
         }
+        if (!committed) return false
         listeners.forEach { listener ->
             runCatching { listener(published) }
         }
+        return true
     }
 
     private fun scheduleInvalidation() {
@@ -95,11 +135,11 @@ internal class CurrentSongIdentityCache(
             pendingInvalidation?.cancel(false)
             val generation = invalidationGeneration.incrementAndGet()
             pendingInvalidation = invalidationExecutor.schedule({
-                val shouldClear = synchronized(invalidationLock) {
-                    generation == invalidationGeneration.get() && current.get() != null
-                }
-                if (!shouldClear) return@schedule
-                commit(null)
+                commitIfGeneration(
+                    published = null,
+                    expectedGeneration = generation,
+                    requireCurrent = true,
+                )
             }, invalidIdentityDebounceMs, TimeUnit.MILLISECONDS)
         }
     }
@@ -129,8 +169,11 @@ internal class CurrentSongIdentityCache(
                         pendingValidIdentityChange = null
                     }
                 } ?: return@schedule
-                if (current.get()?.details?.appleMusicId == confirmed.details.appleMusicId) return@schedule
-                commit(confirmed)
+                commitIfGeneration(
+                    published = confirmed,
+                    expectedGeneration = generation,
+                    requireDifferentId = confirmed.details.appleMusicId,
+                )
             }, validIdentityDebounceMs, TimeUnit.MILLISECONDS)
         }
     }

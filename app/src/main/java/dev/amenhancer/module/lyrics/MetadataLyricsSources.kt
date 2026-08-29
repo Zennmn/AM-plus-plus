@@ -277,7 +277,11 @@ internal object MetadataLyricsTtmlWriter {
 internal object MetadataLyricsParser {
     private val linePattern = Regex("^\\[(\\d+),(\\d+)](.*)$")
     private val qrcWordPattern = Regex("((?:(?!\\(\\d+,\\d+\\)).)*)\\((\\d+),(\\d+)\\)")
-    private val yrcWordPattern = Regex("\\((\\d+),(\\d+),\\d+\\)([^()]*)")
+    // Stop a word only at the next valid YRC timing marker. Parentheses are
+    // otherwise ordinary lyric text (for example "(Oh)" or "(Yeah)").
+    private val yrcWordPattern = Regex(
+        "\\((\\d+),(\\d+),\\d+\\)((?:(?!\\(\\d+,\\d+,\\d+\\)).)*)",
+    )
     private val lrcTimePattern = Regex("\\[(\\d{2}):(\\d{2})[.:](\\d{2,3})]")
     private val qrcXmlPattern = Regex("(?s)<Lyric_1\\s+LyricType=\\\"1\\\"\\s+LyricContent=\\\"(.*?)\\\"/>")
 

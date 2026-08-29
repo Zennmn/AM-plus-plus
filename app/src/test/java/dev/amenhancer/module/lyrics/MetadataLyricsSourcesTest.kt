@@ -5,6 +5,7 @@ import dev.amenhancer.module.hook.LyricHttpTransport
 import dev.amenhancer.module.model.CustomLyricsSources
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -66,6 +67,21 @@ class MetadataLyricsSourcesTest {
         assertFalse(document!!.wordTimed)
         assertEquals(2, document.lines.size)
         assertEquals(listOf("第一句", null), document.translations)
+    }
+
+    @Test
+    fun `yrc parser preserves ordinary parenthesized word text`() {
+        val document = MetadataLyricsParser.parseYrc(
+            yrc = "[0,1000](0,500,0)(Oh)(500,500,0)hey",
+            lrc = null,
+        )
+
+        assertNotNull(document)
+        val parsed = document!!
+        assertTrue(parsed.hasRealWordTiming())
+        assertEquals(listOf("(Oh)", "hey"), parsed.lines.single().words.map { it.text })
+        assertEquals(listOf(0L, 500L), parsed.lines.single().words.map { it.startMs })
+        assertEquals(listOf(500L, 1000L), parsed.lines.single().words.map { it.endMs })
     }
 
     @Test

@@ -191,6 +191,51 @@ class CurrentSongIdentityTargetTest {
     }
 
     @Test
+    fun `scheduled valid identity cannot commit after a newer publish`() {
+        val staleId = 42L
+        val candidateId = 43L
+        var cache: CurrentSongIdentityCache? = null
+        val events = mutableListOf<Long>()
+        cache = CurrentSongIdentityCache(
+            invalidIdentityDebounceMs = 0L,
+            validIdentityDebounceMs = 100L,
+            beforeScheduledCommit = {
+                cache!!.publish(Any(), CurrentSongDetails(staleId))
+            },
+        )
+        cache!!.addListener { song -> song?.details?.appleMusicId?.let(events::add) }
+        cache!!.publish(Any(), CurrentSongDetails(staleId))
+        cache!!.publish(Any(), CurrentSongDetails(candidateId))
+        Thread.sleep(150L)
+
+        assertTrue(
+            "a cancelled callback must not publish the stale candidate after a newer identity",
+            events.none { it == candidateId } && cache.current()?.details?.appleMusicId == staleId,
+        )
+    }
+
+    @Test
+    fun `scheduled invalidation cannot clear after a newer publish`() {
+        val currentId = 42L
+        var cache: CurrentSongIdentityCache? = null
+        val events = mutableListOf<Long?>()
+        cache = CurrentSongIdentityCache(
+            invalidIdentityDebounceMs = 100L,
+            validIdentityDebounceMs = 100L,
+            beforeScheduledCommit = {
+                cache!!.publish(Any(), CurrentSongDetails(currentId))
+            },
+        )
+        cache!!.addListener { song -> events += song?.details?.appleMusicId }
+        cache!!.publish(Any(), CurrentSongDetails(currentId))
+        cache!!.publish(null, null)
+        Thread.sleep(150L)
+
+        assertEquals(currentId, cache!!.current()?.details?.appleMusicId)
+        assertTrue(events.none { it == null })
+    }
+
+    @Test
     fun `cache replays and publishes identity changes to listeners`() {
         val cache = CurrentSongIdentityCache(invalidIdentityDebounceMs = 0L)
         val first = Any()
