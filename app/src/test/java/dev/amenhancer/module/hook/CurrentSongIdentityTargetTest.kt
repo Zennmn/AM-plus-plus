@@ -7,6 +7,9 @@ import dev.amenhancer.module.model.FeatureState
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -195,18 +198,20 @@ class CurrentSongIdentityTargetTest {
         val staleId = 42L
         val candidateId = 43L
         var cache: CurrentSongIdentityCache? = null
-        val events = mutableListOf<Long>()
+        val events = CopyOnWriteArrayList<Long>()
+        val scheduled = CountDownLatch(1)
         cache = CurrentSongIdentityCache(
             invalidIdentityDebounceMs = 0L,
             validIdentityDebounceMs = 100L,
             beforeScheduledCommit = {
+                scheduled.countDown()
                 cache!!.publish(Any(), CurrentSongDetails(staleId))
             },
         )
         cache!!.addListener { song -> song?.details?.appleMusicId?.let(events::add) }
         cache!!.publish(Any(), CurrentSongDetails(staleId))
         cache!!.publish(Any(), CurrentSongDetails(candidateId))
-        Thread.sleep(150L)
+        assertTrue(scheduled.await(1L, TimeUnit.SECONDS))
 
         assertTrue(
             "a cancelled callback must not publish the stale candidate after a newer identity",
@@ -218,18 +223,20 @@ class CurrentSongIdentityTargetTest {
     fun `scheduled invalidation cannot clear after a newer publish`() {
         val currentId = 42L
         var cache: CurrentSongIdentityCache? = null
-        val events = mutableListOf<Long?>()
+        val events = CopyOnWriteArrayList<Long?>()
+        val scheduled = CountDownLatch(1)
         cache = CurrentSongIdentityCache(
             invalidIdentityDebounceMs = 100L,
             validIdentityDebounceMs = 100L,
             beforeScheduledCommit = {
+                scheduled.countDown()
                 cache!!.publish(Any(), CurrentSongDetails(currentId))
             },
         )
         cache!!.addListener { song -> events += song?.details?.appleMusicId }
         cache!!.publish(Any(), CurrentSongDetails(currentId))
         cache!!.publish(null, null)
-        Thread.sleep(150L)
+        assertTrue(scheduled.await(1L, TimeUnit.SECONDS))
 
         assertEquals(currentId, cache!!.current()?.details?.appleMusicId)
         assertTrue(events.none { it == null })
