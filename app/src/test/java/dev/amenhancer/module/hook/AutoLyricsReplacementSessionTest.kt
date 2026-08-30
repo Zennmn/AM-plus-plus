@@ -4,7 +4,10 @@ import dev.amenhancer.module.CurrentSongDetails
 import dev.amenhancer.module.model.CustomLyricsSources
 import java.util.ArrayDeque
 import java.nio.file.Files
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -484,6 +487,124 @@ class AutoLyricsReplacementSessionTest {
     }
 
     @Test
+    fun `corrected metadata arriving during a raw lookup is queried after the raw lookup finishes`() {
+        val queued = QueuedExecutor()
+        val rawLookupStarted = CountDownLatch(1)
+        val releaseRawLookup = CountDownLatch(1)
+        val queriedTitles = mutableListOf<String>()
+        val session = session(
+            queued = queued,
+            fetch = { null },
+            fetchMetadata = { metadata ->
+                queriedTitles += metadata.title
+                if (metadata.title == "Raw") {
+                    rawLookupStarted.countDown()
+                    releaseRawLookup.await(1L, TimeUnit.SECONDS)
+                    null
+                } else {
+                    AutoLyricsCandidate("corrected", WORD_TTML)
+                }
+            },
+            parse = { Pointer() },
+        )
+
+        session.onSongChanged(42L)
+        session.onStableMetadata(
+            stableMetadata(42L, "Raw").copy(outcome = StableMetadataOutcome.TIMED_OUT),
+        )
+        session.ensureRequested(42L)
+        val worker = thread(start = true) { queued.runAll() }
+        try {
+            assertTrue("raw lookup did not start", rawLookupStarted.await(1L, TimeUnit.SECONDS))
+            session.onStableMetadata(stableMetadata(42L, "Corrected"))
+        } finally {
+            releaseRawLookup.countDown()
+            worker.join(1_000L)
+        }
+
+        assertTrue("raw lookup worker did not finish", !worker.isAlive)
+        assertEquals(listOf("Raw", "Corrected"), queriedTitles)
+    }
+
+    @Test
+    fun `a successful raw lookup cannot persist after corrected metadata arrives`() {
+        val queued = QueuedExecutor()
+        val cache = MemoryCache()
+        val rawLookupStarted = CountDownLatch(1)
+        val releaseRawLookup = CountDownLatch(1)
+        val session = session(
+            queued = queued,
+            cache = cache,
+            fetch = { null },
+            fetchMetadata = { metadata ->
+                if (metadata.title == "Raw") {
+                    rawLookupStarted.countDown()
+                    releaseRawLookup.await(1L, TimeUnit.SECONDS)
+                    AutoLyricsCandidate("raw", STALE_WORD_TTML)
+                } else {
+                    AutoLyricsCandidate("corrected", WORD_TTML)
+                }
+            },
+            parse = { Pointer() },
+        )
+
+        session.onSongChanged(42L)
+        session.onStableMetadata(
+            stableMetadata(42L, "Raw").copy(outcome = StableMetadataOutcome.TIMED_OUT),
+        )
+        session.ensureRequested(42L)
+        val worker = thread(start = true) { queued.runAll() }
+        try {
+            assertTrue("raw lookup did not start", rawLookupStarted.await(1L, TimeUnit.SECONDS))
+            session.onStableMetadata(stableMetadata(42L, "Corrected"))
+        } finally {
+            releaseRawLookup.countDown()
+            worker.join(1_000L)
+        }
+
+        assertTrue("raw lookup worker did not finish", !worker.isAlive)
+        assertEquals(WORD_TTML, cache.values[42L])
+    }
+
+    @Test
+    fun `corrected metadata does not invalidate an in flight Apple ID source`() {
+        val queued = QueuedExecutor()
+        val appleIdLookupStarted = CountDownLatch(1)
+        val releaseAppleIdLookup = CountDownLatch(1)
+        val pointer = Pointer()
+        val session = session(
+            queued = queued,
+            fetch = {
+                appleIdLookupStarted.countDown()
+                releaseAppleIdLookup.await(1L, TimeUnit.SECONDS)
+                AutoLyricsCandidate("amll", WORD_TTML)
+            },
+            fetchMetadata = { null },
+            parse = { pointer },
+        )
+
+        session.onSongChanged(42L)
+        session.onStableMetadata(
+            stableMetadata(42L, "Raw").copy(outcome = StableMetadataOutcome.TIMED_OUT),
+        )
+        session.ensureRequested(42L)
+        val worker = thread(start = true) { queued.runAll() }
+        try {
+            assertTrue(
+                "Apple ID lookup did not start",
+                appleIdLookupStarted.await(1L, TimeUnit.SECONDS),
+            )
+            session.onStableMetadata(stableMetadata(42L, "Corrected"))
+        } finally {
+            releaseAppleIdLookup.countDown()
+            worker.join(1_000L)
+        }
+
+        assertTrue("Apple ID lookup worker did not finish", !worker.isAlive)
+        assertSame(pointer, session.readyReplacementFor(42L))
+    }
+
+    @Test
     fun `file cache persists only Word TTML and reloads it by Adam ID`() {
         val directory = Files.createTempDirectory("ampp-auto-lyrics-test").toFile()
         try {
@@ -556,10 +677,17 @@ class AutoLyricsReplacementSessionTest {
     private class QueuedExecutor : Executor {
         private val tasks = ArrayDeque<() -> Unit>()
         override fun execute(command: Runnable) {
-            tasks.addLast { command.run() }
+            synchronized(tasks) {
+                tasks.addLast { command.run() }
+            }
         }
         fun runAll() {
-            while (tasks.isNotEmpty()) tasks.removeFirst().invoke()
+            while (true) {
+                val task = synchronized(tasks) {
+                    if (tasks.isEmpty()) null else tasks.removeFirst()
+                } ?: return
+                task.invoke()
+            }
         }
     }
 
@@ -567,6 +695,10 @@ class AutoLyricsReplacementSessionTest {
         const val WORD_TTML =
             "<tt xmlns:itunes=\"urn\" itunes:timing=\"Word\"><body>" +
                 "<p><span begin=\"0s\" end=\"1s\">hello</span></p>" +
+                "</body></tt>"
+        const val STALE_WORD_TTML =
+            "<tt xmlns:itunes=\"urn\" itunes:timing=\"Word\"><body>" +
+                "<p><span begin=\"0s\" end=\"1s\">stale</span></p>" +
                 "</body></tt>"
         const val LINE_TTML =
             "<tt xmlns:itunes=\"urn\" itunes:timing=\"Line\"><body>" +

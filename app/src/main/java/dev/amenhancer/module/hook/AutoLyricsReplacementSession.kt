@@ -327,11 +327,12 @@ internal class AutoLyricsReplacementSession(
             size > CACHE_CAPACITY
     }
     private val lock = Any()
-    private val pending = mutableMapOf<Long, Long>()
+    private val pending = mutableMapOf<Long, RequestToken>()
     private val failedUntil = mutableMapOf<Long, Long>()
     private val appleIdSourcesAttempted = mutableSetOf<Long>()
     private var stableMetadata: StablePlaybackMetadata? = null
     private var generation = 0L
+    private var metadataRevision = 0L
     private var activeSongKnown = false
     private var activeAppleMusicId: Long? = null
     private var pendingProvisionalRequestId: Long? = null
@@ -365,6 +366,7 @@ internal class AutoLyricsReplacementSession(
     fun onStableMetadata(metadata: StablePlaybackMetadata?) {
         var changed = false
         var lyricsQueryChanged = false
+        var currentMetadataRevision = 0L
         val shouldRequest = synchronized(lock) {
             if (metadata == null) {
                 changed = changeActiveSongLocked(null)
@@ -375,7 +377,11 @@ internal class AutoLyricsReplacementSession(
             changed = changeActiveSongLocked(metadata.appleMusicId)
             lyricsQueryChanged = previousMetadata?.hasSameLyricsQueryPayload(metadata) != true
             stableMetadata = metadata
-            if (lyricsQueryChanged) failedUntil.remove(metadata.appleMusicId)
+            if (lyricsQueryChanged) {
+                metadataRevision += 1L
+                failedUntil.remove(metadata.appleMusicId)
+            }
+            currentMetadataRevision = metadataRevision
             requestWasEligible || (!changed && lyricsQueryChanged &&
                 metadata.appleMusicId in appleIdSourcesAttempted &&
                     synchronized(pointers) { metadata.appleMusicId !in pointers })
@@ -391,7 +397,7 @@ internal class AutoLyricsReplacementSession(
                     "outcome=${metadata.outcome}, title=${metadata.title}, " +
                     "artist=${metadata.artist}, duration=${metadata.durationMs}, " +
                     "confirmedChange=$changed, queryChanged=$lyricsQueryChanged, " +
-                    "resume=$shouldRequest",
+                    "metadataRevision=$currentMetadataRevision, resume=$shouldRequest",
             )
         }
         if (shouldRequest) request(metadata!!.appleMusicId)
@@ -472,27 +478,32 @@ internal class AutoLyricsReplacementSession(
     private fun request(appleMusicId: Long) {
         synchronized(lock) {
             if (!isCurrentSongLocked(appleMusicId)) return
-            val requestGeneration = generation
-            if (pending[appleMusicId] == requestGeneration) return
+            val requestToken = RequestToken(generation, metadataRevision)
+            if (pending[appleMusicId] == requestToken) return
             synchronized(pointers) {
                 if (appleMusicId in pointers) return
             }
             val retryAt = failedUntil[appleMusicId] ?: 0L
             if (retryAt > nowMs()) return
-            pending[appleMusicId] = requestGeneration
+            pending[appleMusicId] = requestToken
             try {
-                executor.execute { prepare(appleMusicId, requestGeneration) }
+                executor.execute { prepare(appleMusicId, requestToken) }
             } catch (_: RejectedExecutionException) {
-                if (pending[appleMusicId] == requestGeneration) pending.remove(appleMusicId)
+                if (pending[appleMusicId] == requestToken) pending.remove(appleMusicId)
                 logger("automatic lyrics prepare was rejected for $appleMusicId")
             }
         }
     }
 
-    private fun prepare(appleMusicId: Long, requestGeneration: Long) {
+    private fun prepare(appleMusicId: Long, requestToken: RequestToken) {
+        val requestGeneration = requestToken.songGeneration
         var published = false
         var preparedCandidate: AutoLyricsCandidate? = null
         var preparedPointer: Any? = null
+        var preparedMetadataToken: RequestToken? = null
+        var observedMetadataToken: RequestToken? = null
+        var metadataSuperseded = false
+        var metadataCacheWritten = false
         try {
             if (!isCurrentRequest(appleMusicId, requestGeneration)) return
             val cached = runCatching { cache.read(appleMusicId) }.getOrNull()
@@ -546,41 +557,70 @@ internal class AutoLyricsReplacementSession(
                 }
             }
             if (!published && isCurrentRequest(appleMusicId, requestGeneration)) {
-                val metadata = synchronized(lock) {
-                    stableMetadata?.takeIf { it.appleMusicId == appleMusicId }
+                val metadataSnapshot = synchronized(lock) {
+                    MetadataLookupSnapshot(
+                        metadata = stableMetadata?.takeIf { it.appleMusicId == appleMusicId },
+                        token = RequestToken(requestGeneration, metadataRevision),
+                    )
                 }
-                val candidate = metadata?.let { stable ->
+                observedMetadataToken = metadataSnapshot.token
+                val candidate = metadataSnapshot.metadata?.let { stable ->
                     val startedAt = nowMs()
                     runCatching { fetchMetadataCandidate?.invoke(stable) }.getOrNull().also { result ->
                         logger(
                             "automatic lyrics metadata stage finished: id=$appleMusicId, " +
                                 "elapsedMs=${(nowMs() - startedAt).coerceAtLeast(0L)}, " +
-                                "source=${result?.source}",
+                                "source=${result?.source}, " +
+                                "metadataRevision=${metadataSnapshot.token.metadataRevision}",
                         )
                     }
                 }
-                if (candidate != null && isCurrentRequest(appleMusicId, requestGeneration)) {
+                val metadataStillCurrent = isCurrentMetadataRequest(
+                    appleMusicId,
+                    metadataSnapshot.token,
+                )
+                if (!metadataStillCurrent) metadataSuperseded = true
+                if (candidate != null && metadataStillCurrent) {
                     preparedPointer = preparePointer(
                         candidate.ttml,
                         appleMusicId,
                         candidate.source,
                         requestGeneration,
+                        metadataToken = metadataSnapshot.token,
                     )
                     published = preparedPointer != null
                     if (published) {
                         preparedCandidate = candidate
-                        if (isCurrentRequest(appleMusicId, requestGeneration)) {
-                            runCatching { cache.write(appleMusicId, candidate.ttml) }
+                        preparedMetadataToken = metadataSnapshot.token
+                        if (isCurrentMetadataRequest(appleMusicId, metadataSnapshot.token)) {
+                            metadataCacheWritten = runCatching {
+                                cache.write(appleMusicId, candidate.ttml)
+                            }.getOrDefault(false)
                         }
                     }
                 }
             }
+            observedMetadataToken?.let { token ->
+                if (!isCurrentMetadataRequest(appleMusicId, token)) metadataSuperseded = true
+            }
+            val metadataCandidateCurrent = preparedMetadataToken?.let { token ->
+                isCurrentMetadataRequest(appleMusicId, token)
+            } ?: true
             if (!published || preparedCandidate == null ||
-                !isCurrentRequest(appleMusicId, requestGeneration)
+                !isCurrentRequest(appleMusicId, requestGeneration) ||
+                !metadataCandidateCurrent
             ) {
+                if (!metadataCandidateCurrent) metadataSuperseded = true
                 removePointerIf(appleMusicId, preparedPointer)
-                if (!published || preparedCandidate == null) {
-                    markFailedIfCurrent(appleMusicId, requestGeneration)
+                if (metadataCacheWritten && metadataSuperseded) {
+                    runCatching { cache.delete(appleMusicId) }
+                }
+                if ((!published || preparedCandidate == null) && !metadataSuperseded) {
+                    markFailedIfCurrent(
+                        appleMusicId,
+                        requestGeneration,
+                        metadataToken = observedMetadataToken,
+                    )
                 }
                 return
             }
@@ -588,20 +628,36 @@ internal class AutoLyricsReplacementSession(
                 runCatching { it.publish(appleMusicId, preparedCandidate!!) }
                     .getOrDefault(AutoLyricsPublishResult.FAILED)
             }
+            val candidateStillCurrent = preparedMetadataToken?.let { token ->
+                isCurrentMetadataRequest(appleMusicId, token)
+            } ?: isCurrentRequest(appleMusicId, requestGeneration)
+            if (!candidateStillCurrent) {
+                if (preparedMetadataToken != null) metadataSuperseded = true
+                removePointerIf(appleMusicId, preparedPointer)
+                if (metadataCacheWritten) runCatching { cache.delete(appleMusicId) }
+                return
+            }
             when (publishResult) {
                 null,
                 AutoLyricsPublishResult.PUBLISHED -> {
                     if (publishResult == AutoLyricsPublishResult.PUBLISHED) {
                         runCatching { cache.delete(appleMusicId) }
                     }
-                    if (isCurrentRequest(appleMusicId, requestGeneration)) {
+                    val publicationStillCurrent = preparedMetadataToken?.let { token ->
+                        isCurrentMetadataRequest(appleMusicId, token)
+                    } ?: isCurrentRequest(appleMusicId, requestGeneration)
+                    if (publicationStillCurrent) {
                         onReplacementPublished?.invoke(appleMusicId)
                         synchronized(lock) {
-                            if (isCurrentRequestLocked(appleMusicId, requestGeneration)) {
+                            val stillCurrent = preparedMetadataToken?.let { token ->
+                                isCurrentMetadataRequestLocked(appleMusicId, token)
+                            } ?: isCurrentRequestLocked(appleMusicId, requestGeneration)
+                            if (stillCurrent) {
                                 failedUntil.remove(appleMusicId)
                             }
                         }
                     } else {
+                        if (preparedMetadataToken != null) metadataSuperseded = true
                         removePointerIf(appleMusicId, preparedPointer)
                     }
                 }
@@ -611,12 +667,32 @@ internal class AutoLyricsReplacementSession(
                 }
                 AutoLyricsPublishResult.FAILED -> {
                     removePointerIf(appleMusicId, preparedPointer)
-                    markFailedIfCurrent(appleMusicId, requestGeneration)
+                    val failureRecorded = markFailedIfCurrent(
+                        appleMusicId,
+                        requestGeneration,
+                        metadataToken = preparedMetadataToken,
+                    )
+                    if (!failureRecorded && preparedMetadataToken != null) {
+                        metadataSuperseded = true
+                    }
                 }
             }
         } finally {
-            synchronized(lock) {
-                if (pending[appleMusicId] == requestGeneration) pending.remove(appleMusicId)
+            val retryLatestMetadata = synchronized(lock) {
+                observedMetadataToken?.let { token ->
+                    if (!isCurrentMetadataRequestLocked(appleMusicId, token)) {
+                        metadataSuperseded = true
+                    }
+                }
+                if (pending[appleMusicId] == requestToken) pending.remove(appleMusicId)
+                metadataSuperseded &&
+                    isCurrentRequestLocked(appleMusicId, requestGeneration) &&
+                    stableMetadata?.appleMusicId == appleMusicId
+            }
+            if (retryLatestMetadata) {
+                removePointerIf(appleMusicId, preparedPointer)
+                if (metadataCacheWritten) runCatching { cache.delete(appleMusicId) }
+                request(appleMusicId)
             }
         }
     }
@@ -626,6 +702,7 @@ internal class AutoLyricsReplacementSession(
         appleMusicId: Long,
         source: String,
         requestGeneration: Long,
+        metadataToken: RequestToken? = null,
     ): Any? {
         if (!TtmlTimingPolicy.isWord(ttml)) {
             logger("automatic lyrics candidate rejected as non-word source=$source id=$appleMusicId")
@@ -644,7 +721,12 @@ internal class AutoLyricsReplacementSession(
             return null
         }
         val accepted = synchronized(lock) {
-            if (!isCurrentRequestLocked(appleMusicId, requestGeneration)) {
+            val requestCurrent = if (metadataToken == null) {
+                isCurrentRequestLocked(appleMusicId, requestGeneration)
+            } else {
+                isCurrentMetadataRequestLocked(appleMusicId, metadataToken)
+            }
+            if (!requestCurrent) {
                 false
             } else {
                 synchronized(pointers) { pointers[appleMusicId] = pointer }
@@ -654,12 +736,20 @@ internal class AutoLyricsReplacementSession(
         return pointer.takeIf { accepted }
     }
 
-    private fun markFailedIfCurrent(appleMusicId: Long, requestGeneration: Long) {
-        synchronized(lock) {
-            if (isCurrentRequestLocked(appleMusicId, requestGeneration)) {
-                failedUntil[appleMusicId] = nowMs() + retryCooldownMs
-            }
+    private fun markFailedIfCurrent(
+        appleMusicId: Long,
+        requestGeneration: Long,
+        metadataToken: RequestToken? = null,
+    ): Boolean = synchronized(lock) {
+        val requestCurrent = if (metadataToken == null) {
+            isCurrentRequestLocked(appleMusicId, requestGeneration)
+        } else {
+            isCurrentMetadataRequestLocked(appleMusicId, metadataToken)
         }
+        if (requestCurrent) {
+            failedUntil[appleMusicId] = nowMs() + retryCooldownMs
+        }
+        requestCurrent
     }
 
     private fun isPrepared(pointer: Any?, appleMusicId: Long): Boolean = runCatching {
@@ -692,6 +782,7 @@ internal class AutoLyricsReplacementSession(
         failedUntil.clear()
         appleIdSourcesAttempted.clear()
         stableMetadata = null
+        metadataRevision = 0L
         pendingProvisionalRequestId = null
         activeTakeovers.clear()
         return true
@@ -712,12 +803,33 @@ internal class AutoLyricsReplacementSession(
             isCurrentSongLocked(appleMusicId) &&
             isAllowed(appleMusicId)
 
+    private fun isCurrentMetadataRequest(
+        appleMusicId: Long,
+        token: RequestToken,
+    ): Boolean = synchronized(lock) { isCurrentMetadataRequestLocked(appleMusicId, token) }
+
+    private fun isCurrentMetadataRequestLocked(
+        appleMusicId: Long,
+        token: RequestToken,
+    ): Boolean = isCurrentRequestLocked(appleMusicId, token.songGeneration) &&
+        metadataRevision == token.metadataRevision
+
     private fun removePointerIf(appleMusicId: Long, pointer: Any?) {
         if (pointer == null) return
         synchronized(pointers) {
             if (pointers[appleMusicId] === pointer) pointers.remove(appleMusicId)
         }
     }
+
+    private data class RequestToken(
+        val songGeneration: Long,
+        val metadataRevision: Long,
+    )
+
+    private data class MetadataLookupSnapshot(
+        val metadata: StablePlaybackMetadata?,
+        val token: RequestToken,
+    )
 
     private companion object {
         const val CACHE_CAPACITY = 32
