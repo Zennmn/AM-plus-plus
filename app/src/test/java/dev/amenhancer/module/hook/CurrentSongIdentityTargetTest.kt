@@ -11,6 +11,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -240,6 +241,48 @@ class CurrentSongIdentityTargetTest {
 
         assertEquals(currentId, cache!!.current()?.details?.appleMusicId)
         assertTrue(events.none { it == null })
+    }
+
+    @Test
+    fun `identity listener notification stays ordered with state commits`() {
+        val cache = CurrentSongIdentityCache(invalidIdentityDebounceMs = 0L)
+        val events = CopyOnWriteArrayList<Long?>()
+        val invalidationListenerEntered = CountDownLatch(1)
+        val releaseInvalidationListener = CountDownLatch(1)
+        val nextIdentityFinished = CountDownLatch(1)
+        cache.publish(Any(), CurrentSongDetails(42L))
+        cache.addListener { song ->
+            if (song == null) {
+                invalidationListenerEntered.countDown()
+                releaseInvalidationListener.await(1L, TimeUnit.SECONDS)
+            }
+            events += song?.details?.appleMusicId
+        }
+        events.clear()
+
+        val invalidation = Thread { cache.publish(null, null) }
+        invalidation.start()
+        assertTrue(invalidationListenerEntered.await(1L, TimeUnit.SECONDS))
+
+        val nextIdentity = Thread {
+            cache.publish(Any(), CurrentSongDetails(43L))
+            nextIdentityFinished.countDown()
+        }
+        nextIdentity.start()
+        try {
+            assertFalse(
+                "a new identity must not notify before the old event is delivered",
+                nextIdentityFinished.await(100L, TimeUnit.MILLISECONDS),
+            )
+        } finally {
+            releaseInvalidationListener.countDown()
+        }
+
+        assertTrue(nextIdentityFinished.await(1L, TimeUnit.SECONDS))
+        invalidation.join(1_000L)
+        nextIdentity.join(1_000L)
+        assertEquals(listOf(null, 43L), events)
+        assertEquals(43L, cache.current()?.details?.appleMusicId)
     }
 
     @Test

@@ -342,6 +342,40 @@ class AutoLyricsReplacementSessionTest {
     }
 
     @Test
+    fun `failed Apple ID lookup retries after its cooldown when metadata fallback is disabled`() {
+        val queued = QueuedExecutor()
+        var now = 0L
+        var appleIdFetches = 0
+        val pointer = Pointer()
+        val session = session(
+            queued = queued,
+            fetch = {
+                appleIdFetches += 1
+                if (appleIdFetches == 2) AutoLyricsCandidate("amll", WORD_TTML) else null
+            },
+            parse = { pointer },
+            nowMs = { now },
+            retryCooldownMs = 30L,
+        )
+
+        session.onSongChanged(42L)
+        session.ensureRequested(42L)
+        queued.runAll()
+        assertEquals(1, appleIdFetches)
+
+        session.ensureRequested(42L)
+        queued.runAll()
+        assertEquals(1, appleIdFetches)
+
+        now = 31L
+        session.ensureRequested(42L)
+        queued.runAll()
+
+        assertEquals(2, appleIdFetches)
+        assertSame(pointer, session.readyReplacementFor(42L))
+    }
+
+    @Test
     fun `file cache persists only Word TTML and reloads it by Adam ID`() {
         val directory = Files.createTempDirectory("ampp-auto-lyrics-test").toFile()
         try {
@@ -362,6 +396,8 @@ class AutoLyricsReplacementSessionTest {
         parse: (String) -> Any?,
         onPublished: (Long) -> Unit = {},
         isAllowed: (Long) -> Boolean = { true },
+        nowMs: () -> Long = { System.currentTimeMillis() },
+        retryCooldownMs: Long = 30_000L,
     ): AutoLyricsReplacementSession {
         return AutoLyricsReplacementSession(
             fetchCandidate = fetch,
@@ -379,6 +415,8 @@ class AutoLyricsReplacementSessionTest {
             isAllowed = isAllowed,
             executor = queued,
             logger = {},
+            nowMs = nowMs,
+            retryCooldownMs = retryCooldownMs,
         )
     }
 

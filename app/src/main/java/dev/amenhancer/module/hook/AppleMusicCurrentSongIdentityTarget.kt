@@ -79,10 +79,10 @@ internal class CurrentSongIdentityCache(
 
     /**
      * Commits a scheduled result only while its generation is still current.
-     * The generation check and state mutation share [invalidationLock], so a
-     * newer publish cannot slip between the guard and the write. Listener
-     * callbacks stay outside the lock because they may schedule work of their
-     * own.
+     * The generation check, state mutation, and listener notification share
+     * [invalidationLock]. This keeps the externally observed event order in
+     * step with [current]; listeners should enqueue any expensive work rather
+     * than perform it synchronously.
      */
     private fun commitIfGeneration(
         published: TargetCurrentSong?,
@@ -118,13 +118,10 @@ internal class CurrentSongIdentityCache(
                     while (recentIds.size > MAX_RECENT_IDS) recentIds.removeFirst()
                 }
             }
+            notifyListenersLocked(published)
             true
         }
-        if (!committed) return false
-        listeners.forEach { listener ->
-            runCatching { listener(published) }
-        }
-        return true
+        return committed
     }
 
     private fun scheduleInvalidation() {
@@ -190,9 +187,11 @@ internal class CurrentSongIdentityCache(
     }
 
     fun addListener(listener: (TargetCurrentSong?) -> Unit) {
-        listeners += listener
-        current.get()?.let { published ->
-            runCatching { listener(published) }
+        synchronized(invalidationLock) {
+            listeners += listener
+            current.get()?.let { published ->
+                runCatching { listener(published) }
+            }
         }
     }
 
@@ -203,6 +202,18 @@ internal class CurrentSongIdentityCache(
         if (publishedAdamId == null || publishedAdamId <= 0L) return false
         if (fragmentAdamId == null) return true
         return synchronized(recentIdsLock) { fragmentAdamId in recentIds }
+    }
+
+    /** Must be called while [invalidationLock] is held. */
+    private fun notifyListenersLocked(published: TargetCurrentSong?) {
+        listeners.toList().forEach { listener ->
+            val stillCurrent = if (published == null) {
+                current.get() == null
+            } else {
+                current.get() === published
+            }
+            if (stillCurrent) runCatching { listener(published) }
+        }
     }
 
     private companion object {

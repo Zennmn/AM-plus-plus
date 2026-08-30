@@ -47,7 +47,7 @@ internal class StablePlaybackMetadataCoordinator(
 
     fun onCurrentSong(details: CurrentSongDetails?) {
         var event: StablePlaybackMetadata? = null
-        var cleared = false
+        var clearedGeneration: Long? = null
         var timeout: Pair<Long, Long>? = null
         synchronized(lock) {
             if (details == null) {
@@ -55,7 +55,7 @@ internal class StablePlaybackMetadataCoordinator(
                     generation += 1L
                     raw = null
                     stable = null
-                    cleared = true
+                    clearedGeneration = generation
                 }
                 return@synchronized
             }
@@ -85,7 +85,7 @@ internal class StablePlaybackMetadataCoordinator(
                 }
             }
         }
-        if (cleared) listeners.forEach { listener -> runCatching { listener(null) } }
+        clearedGeneration?.let(::notifyCleared)
         event?.let(::notifyListeners)
         timeout?.let { (appleMusicId, expectedGeneration) ->
             schedule(timeoutMs) { publishTimeout(appleMusicId, expectedGeneration) }
@@ -112,9 +112,12 @@ internal class StablePlaybackMetadataCoordinator(
     }
 
     fun addListener(listener: (StablePlaybackMetadata?) -> Unit) {
-        listeners += listener
-        val snapshot = synchronized(lock) { stable }
-        snapshot?.let { runCatching { listener(it) } }
+        synchronized(lock) {
+            listeners += listener
+            stable?.takeIf(::isCurrentEventLocked)?.let {
+                runCatching { listener(it) }
+            }
+        }
     }
 
     fun current(): StablePlaybackMetadata? = synchronized(lock) { stable }
@@ -129,8 +132,29 @@ internal class StablePlaybackMetadataCoordinator(
     }
 
     private fun notifyListeners(event: StablePlaybackMetadata) {
-        listeners.forEach { listener -> runCatching { listener(event) } }
+        synchronized(lock) {
+            if (!isCurrentEventLocked(event)) return
+            listeners.toList().forEach { listener ->
+                if (isCurrentEventLocked(event)) {
+                    runCatching { listener(event) }
+                }
+            }
+        }
     }
+
+    private fun notifyCleared(expectedGeneration: Long) {
+        synchronized(lock) {
+            if (generation != expectedGeneration || stable != null) return
+            listeners.toList().forEach { listener ->
+                if (generation == expectedGeneration && stable == null) {
+                    runCatching { listener(null) }
+                }
+            }
+        }
+    }
+
+    private fun isCurrentEventLocked(event: StablePlaybackMetadata): Boolean =
+        generation == event.generation && stable === event
 
     private fun buildStable(
         details: CurrentSongDetails,

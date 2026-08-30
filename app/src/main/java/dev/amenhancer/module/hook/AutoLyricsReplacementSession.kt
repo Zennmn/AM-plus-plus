@@ -501,7 +501,8 @@ internal class AutoLyricsReplacementSession(
             }
             if (!published && isCurrentRequest(appleMusicId, requestGeneration)) {
                 val shouldFetchAppleId = synchronized(lock) {
-                    appleMusicId !in appleIdSourcesAttempted
+                    appleMusicId !in appleIdSourcesAttempted ||
+                        failedUntil[appleMusicId]?.let { it <= nowMs() } == true
                 }
                 val candidate = if (shouldFetchAppleId) {
                     val startedAt = nowMs()
@@ -565,7 +566,6 @@ internal class AutoLyricsReplacementSession(
                         }
                     }
                 }
-                if (metadata == null) return
             }
             if (!published || preparedCandidate == null ||
                 !isCurrentRequest(appleMusicId, requestGeneration)

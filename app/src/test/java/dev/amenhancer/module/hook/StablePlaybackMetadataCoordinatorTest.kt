@@ -65,4 +65,25 @@ class StablePlaybackMetadataCoordinatorTest {
         assertEquals("原名", coordinator.current()?.title)
         assertEquals(StableMetadataOutcome.CORRECTED, coordinator.current()?.outcome)
     }
+
+    @Test
+    fun `stale resolution event cannot notify after a newer song`() {
+        val coordinator = StablePlaybackMetadataCoordinator(true, schedule = { _, _ -> })
+        val events = mutableListOf<Long>()
+        var interlocked = false
+        coordinator.addListener { event ->
+            if (event?.appleMusicId == 42L && !interlocked) {
+                interlocked = true
+                coordinator.onCurrentSong(CurrentSongDetails(43L, "B", "Artist"))
+                coordinator.onResolutionFinished(43L, "B", "Artist", null, 90_000L)
+            }
+        }
+        coordinator.addListener { event -> event?.let { events += it.appleMusicId } }
+
+        coordinator.onCurrentSong(CurrentSongDetails(42L, "A", "Artist"))
+        coordinator.onResolutionFinished(42L, "A", "Artist", null, 90_000L)
+
+        assertEquals(listOf(43L), events)
+        assertEquals(43L, coordinator.current()?.appleMusicId)
+    }
 }
