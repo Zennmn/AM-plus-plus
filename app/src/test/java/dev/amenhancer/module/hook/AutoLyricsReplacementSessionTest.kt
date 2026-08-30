@@ -226,6 +226,69 @@ class AutoLyricsReplacementSessionTest {
     }
 
     @Test
+    fun `a transient null request cannot publish after Chinese Word lyrics arrive`() {
+        val queued = QueuedExecutor()
+        var publications = 0
+        val session = session(
+            queued = queued,
+            fetch = { AutoLyricsCandidate("amll", WORD_TTML) },
+            parse = { Pointer() },
+            publisher = { _, _ ->
+                publications += 1
+                AutoLyricsPublication(AutoLyricsPublishResult.PUBLISHED)
+            },
+        )
+
+        session.onSongChanged(42L)
+        session.replacementFor(42L)
+        assertNull(
+            session.takeoverReplacementFor(
+                42L,
+                Any(),
+                TtmlDocumentMetadata(
+                    TtmlTimingMode.WORD,
+                    language = "zh-Hant",
+                    hasTranslation = true,
+                ),
+            ),
+        )
+        queued.runAll()
+
+        assertEquals(0, publications)
+        assertNull(session.readyReplacementFor(42L))
+    }
+
+    @Test
+    fun `the automatic pointer cannot reject its own active takeover`() {
+        val queued = QueuedExecutor()
+        val pointer = Pointer()
+        val session = session(
+            queued = queued,
+            fetch = { AutoLyricsCandidate("amll", WORD_TTML) },
+            parse = { pointer },
+        )
+
+        session.onSongChanged(42L)
+        session.replacementFor(42L)
+        queued.runAll()
+        session.markTakeoverApplied(42L)
+
+        assertSame(
+            pointer,
+            session.takeoverReplacementFor(
+                42L,
+                pointer,
+                TtmlDocumentMetadata(
+                    TtmlTimingMode.WORD,
+                    language = "zh-Hans",
+                    hasTranslation = false,
+                ),
+            ),
+        )
+        assertSame(pointer, session.readyReplacementFor(42L))
+    }
+
+    @Test
     fun `non Word candidates fail open and never reach the native parser`() {
         val queued = QueuedExecutor()
         var parses = 0
