@@ -104,11 +104,16 @@ internal class StablePlaybackMetadataCoordinator(
             val current = raw?.takeIf { it.appleMusicId == appleMusicId }
             if (current == null) {
                 pendingResolutions[appleMusicId] = values
-                return
+                return@synchronized null
             }
-            resolvedEvent(current, values, generation).also { stable = it }
+            val resolved = resolvedEvent(current, values, generation)
+            if (resolved == stable) {
+                return@synchronized null
+            }
+            stable = resolved
+            resolved
         }
-        notifyListeners(event)
+        event?.let(::notifyListeners)
     }
 
     fun addListener(listener: (StablePlaybackMetadata?) -> Unit) {

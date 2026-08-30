@@ -91,7 +91,7 @@ private fun isMeaningfulMetadataTranslation(value: String?): Boolean {
 
 /**
  * Normalizes platform metadata without changing the strings shown to the user.
- * Matching is intentionally conservative: title and at least one artist token
+ * Matching is intentionally conservative: title and an unambiguous artist part
  * must match before a result can be presented for manual confirmation.
  */
 internal object MetadataLyricsMatcher {
@@ -100,6 +100,18 @@ internal object MetadataLyricsMatcher {
         "(?i)\\s*[\\[(（【].*?(live|remix|version|edit|acoustic|instrumental|remaster|现场|翻唱|伴奏).*?[\\])）】]\\s*$",
     )
     private val artistSeparators = Regex("(?i)\\s*(?:,|/|\\\\|&|、|;|\\bx\\b|\\bfeat\\.?\\b|\\bft\\.?\\b|\\bwith\\b|\\b和\\b)\\s*")
+    private val genericArtistTokens = setOf(
+        "a",
+        "an",
+        "and",
+        "dj",
+        "feat",
+        "ft",
+        "mc",
+        "of",
+        "the",
+        "with",
+    )
 
     fun normalize(value: String?): String = value.orEmpty()
         .let { Normalizer.normalize(it, Normalizer.Form.NFKC) }
@@ -111,29 +123,40 @@ internal object MetadataLyricsMatcher {
         .replace(versionSuffix, "")
         .let(::normalize)
 
-    fun artistTokens(value: String?): Set<String> = artistSeparators
+    private fun artistParts(value: String?): List<ArtistPart> = artistSeparators
         .split(value.orEmpty())
-        .flatMap { part ->
-            val normalizedPart = normalize(part)
-            buildList {
-                normalizedPart.takeIf(String::isNotBlank)?.let(::add)
-                part.split(Regex("\\s+")).map(::normalize).forEach { token ->
-                    if (token.length >= 2) add(token)
-                }
-            }
+        .mapNotNull { part ->
+            val normalized = normalize(part).takeIf(String::isNotBlank) ?: return@mapNotNull null
+            val canonical = part.split(Regex("\\s+"))
+                .map(::normalize)
+                .filter { it.length >= 2 }
+                .filterNot(genericArtistTokens::contains)
+                .joinToString("")
+                .ifBlank { normalized }
+            ArtistPart(canonical)
         }
-        .filter { it.isNotBlank() }
+
+    /** Returns canonical full artist parts without generic space-delimited words. */
+    fun artistTokens(value: String?): Set<String> = artistParts(value)
+        .map(ArtistPart::canonical)
         .toSet()
+
+    private fun artistsMatch(
+        requested: List<ArtistPart>,
+        candidate: List<ArtistPart>,
+    ): Boolean = requested.any { requestedPart ->
+        candidate.any { candidatePart -> requestedPart.canonical == candidatePart.canonical }
+    }
 
     fun titleMatches(query: String, candidate: String): Boolean =
         normalize(query) == normalize(candidate) || baseTitle(query) == baseTitle(candidate)
 
     fun score(query: MetadataLyricsQuery, candidate: MetadataLyricsCandidate): Int? {
         if (!titleMatches(query.title, candidate.title)) return null
-        val requestedArtists = artistTokens(query.artist)
-        val candidateArtists = artistTokens(candidate.artist)
+        val requestedArtists = artistParts(query.artist)
+        val candidateArtists = artistParts(candidate.artist)
         if (requestedArtists.isEmpty() || candidateArtists.isEmpty()) return null
-        if (requestedArtists.intersect(candidateArtists).isEmpty()) return null
+        if (!artistsMatch(requestedArtists, candidateArtists)) return null
 
         var score = 80
         val requestedAlbum = normalize(query.album)
@@ -168,6 +191,10 @@ internal object MetadataLyricsMatcher {
         .take(MAX_CANDIDATES)
 
     private const val MAX_CANDIDATES = 20
+
+    private data class ArtistPart(
+        val canonical: String,
+    )
 }
 
 /** Converts canonical source lines to the TTML shape Apple Music accepts. */

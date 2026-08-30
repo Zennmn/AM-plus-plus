@@ -42,6 +42,21 @@ class MetadataLyricsSourcesTest {
     }
 
     @Test
+    fun `artist matching does not treat generic words as artist identity`() {
+        val query = MetadataLyricsQuery("Song", "The Beatles", durationMs = 180_000L)
+        val candidate = MetadataLyricsCandidate(
+            source = MetadataLyricsSource.QQ_MUSIC,
+            externalId = "weeknd",
+            title = "Song",
+            artist = "The Weeknd",
+            album = "Album",
+            durationMs = 180_000L,
+        )
+
+        assertTrue(MetadataLyricsMatcher.filterAndRank(query, listOf(candidate)).isEmpty())
+    }
+
+    @Test
     fun `qrc parser keeps word timing and aligns translated lines`() {
         val document = MetadataLyricsParser.parseQrc(
             original = "[0,1000]你(0,500)好(500,500)\n[1200,800]世(1200,400)界(1600,400)",

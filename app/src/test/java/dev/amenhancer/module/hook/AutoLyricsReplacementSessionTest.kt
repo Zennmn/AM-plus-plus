@@ -1,5 +1,6 @@
 package dev.amenhancer.module.hook
 
+import dev.amenhancer.module.CurrentSongDetails
 import dev.amenhancer.module.model.CustomLyricsSources
 import java.util.ArrayDeque
 import java.nio.file.Files
@@ -373,6 +374,35 @@ class AutoLyricsReplacementSessionTest {
 
         assertEquals(2, appleIdFetches)
         assertSame(pointer, session.readyReplacementFor(42L))
+    }
+
+    @Test
+    fun `duplicate stable metadata does not clear a failed lyric lookup cooldown`() {
+        val queued = QueuedExecutor()
+        var metadataFetches = 0
+        val session = session(
+            queued = queued,
+            fetch = { null },
+            fetchMetadata = {
+                metadataFetches += 1
+                null
+            },
+            parse = { null },
+        )
+        val coordinator = StablePlaybackMetadataCoordinator(true, schedule = { _, _ -> })
+        coordinator.addListener(session::onStableMetadata)
+
+        session.onSongChanged(42L)
+        session.ensureRequested(42L)
+        coordinator.onCurrentSong(CurrentSongDetails(42L, "Song", "Artist"))
+        coordinator.onResolutionFinished(42L, "Song", "Artist", "Album", 180_000L)
+        queued.runAll()
+        assertEquals(1, metadataFetches)
+
+        coordinator.onResolutionFinished(42L, "Song", "Artist", "Album", 180_000L)
+        queued.runAll()
+
+        assertEquals(1, metadataFetches)
     }
 
     @Test
