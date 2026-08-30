@@ -21,11 +21,12 @@ import java.lang.reflect.Modifier
  * The hook path is pure coordination: no IO, no network, no native parse, no
  * lyric-state mutation. [decideLyricsItemUpdate] rejects same-item metadata
  * refreshes, o2 calls whose tail already invoked I2 (Apple's own install),
- * untracked songs, dead fragments and invalid ids; every other gate fails
- * open. The handled-id ledger is keyed by fragment identity, never equals,
- * holds fragments weakly and is bounded, so a replacement fragment with equal
- * state can never be confused with a handled one and repeated same-item
- * metadata publishes cannot loop I2.
+ * dead fragments and invalid ids. An item that automatic lyrics has not begun
+ * tracking yet is handed to the ready-late ledger until the delayed player
+ * identity confirms it. The handled-id ledger is keyed by fragment identity,
+ * never equals, holds fragments weakly and is bounded, so a replacement
+ * fragment with equal state can never be confused with a handled one and
+ * repeated same-item metadata publishes cannot loop I2.
  */
 internal class LyricsItemUpdateCoordinator(
     private val installMethod: Method,
@@ -62,6 +63,7 @@ internal class LyricsItemUpdateCoordinator(
             )
         ) {
             LyricsItemUpdateAction.IGNORE -> Unit
+            LyricsItemUpdateAction.WAIT_FOR_IDENTITY,
             LyricsItemUpdateAction.RECORD_MISS -> {
                 val appleMusicId = appleMusicId ?: return
                 recordHandled(fragment, appleMusicId)
@@ -148,6 +150,9 @@ internal enum class LyricsItemUpdateAction {
     /** Leave Apple's own behavior untouched. */
     IGNORE,
 
+    /** Keep the fragment until the delayed current-song identity confirms this item. */
+    WAIT_FOR_IDENTITY,
+
     /** Re-enter the exact I2 path with the ready replacement now. */
     REENTER,
 
@@ -159,8 +164,9 @@ internal enum class LyricsItemUpdateAction {
  * Pure item-update decision. The verified flags `a` field is Apple's own
  * item-changed signal; the previously-handled id prevents repeated I2 on
  * same-item metadata updates; an o2 call whose tail already invoked I2 needs
- * no module re-entry; untracked songs, unusable fragments and invalid ids
- * keep the native path untouched.
+ * no module re-entry; unusable fragments and invalid ids keep the native path
+ * untouched. A valid but not-yet-tracked item waits for identity confirmation
+ * instead of losing the only fragment transition event.
  */
 internal fun decideLyricsItemUpdate(
     itemChanged: Boolean,
@@ -175,7 +181,7 @@ internal fun decideLyricsItemUpdate(
     val id = itemAdamId ?: return LyricsItemUpdateAction.IGNORE
     if (id <= 0L) return LyricsItemUpdateAction.IGNORE
     if (id == previouslyHandledAdamId) return LyricsItemUpdateAction.IGNORE
-    if (!tracked) return LyricsItemUpdateAction.IGNORE
+    if (!tracked) return LyricsItemUpdateAction.WAIT_FOR_IDENTITY
     return if (replacementReady) {
         LyricsItemUpdateAction.REENTER
     } else {

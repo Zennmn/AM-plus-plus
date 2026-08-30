@@ -31,6 +31,7 @@ class CustomLyricsItemUpdateStructuralRegressionTest {
 
         assertTrue(target.contains("AppleMusicSymbols.LyricsItemUpdateMethod"))
         assertTrue(target.contains("LyricsItemUpdateCoordinator("))
+        assertTrue(target.contains("mainHandler.post { readyReapply.onCurrentSongChanged(published) }"))
         assertTrue(
             target.indexOf("AppleMusicSymbols.LyricsInstallMethod") <
                 target.indexOf("AppleMusicSymbols.LyricsItemUpdateMethod"),

@@ -109,20 +109,21 @@ class LyricsItemUpdateCoordinatorTest {
     }
 
     @Test
-    fun `an untracked item keeps the native path untouched`() {
+    fun `an untracked item defers the fragment until identity confirmation`() {
         val fragment = ItemUpdateFragment()
-        val pointer = Any()
+        val previousPointer = Any()
+        fragment.installed = previousPointer
         val (coordinator, reapply, _) = coordinator(
             fragment,
-            ready = { pointer },
+            ready = { null },
             tracking = { false },
         )
 
         update(coordinator, fragment, "77")
 
         assertEquals(0, fragment.installs)
-        assertNull(fragment.installed)
-        assertEquals(0, pending(reapply).size)
+        assertSame(previousPointer, fragment.installed)
+        assertEquals(1, pending(reapply).size)
     }
 
     @Test
@@ -311,9 +312,9 @@ class LyricsItemUpdateCoordinatorTest {
     }
 
     @Test
-    fun `decision ignores untracked items even when a replacement is ready`() {
+    fun `decision waits for identity when the item is not tracked yet`() {
         assertEquals(
-            LyricsItemUpdateAction.IGNORE,
+            LyricsItemUpdateAction.WAIT_FOR_IDENTITY,
             decideLyricsItemUpdate(
                 itemChanged = true,
                 appleInvokedI2 = false,

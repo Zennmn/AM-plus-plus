@@ -197,6 +197,14 @@ internal class CurrentSongIdentityCache(
 
     fun current(): TargetCurrentSong? = current.get()
 
+    /** Runs a short UI commit only while the exact published identity is still current. */
+    fun runIfCurrent(published: TargetCurrentSong, action: () -> Unit): Boolean =
+        synchronized(invalidationLock) {
+            if (current.get() !== published) return@synchronized false
+            action()
+            true
+        }
+
     /** Allows a stale fragment ID only when it was recently observed as current. */
     fun canRebind(fragmentAdamId: Long?, publishedAdamId: Long?): Boolean {
         if (publishedAdamId == null || publishedAdamId <= 0L) return false

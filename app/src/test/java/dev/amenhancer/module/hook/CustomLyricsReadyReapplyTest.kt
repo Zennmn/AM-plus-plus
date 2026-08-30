@@ -29,6 +29,52 @@ class CustomLyricsReadyReapplyTest {
     }
 
     @Test
+    fun `confirmed next song clears the previous lyric session through i2`() {
+        val currentItem = LyricsItem("77")
+        val previousPointer = Any()
+        val nextPointer = Any()
+        val fragment = LyricsFragment(currentItem).apply { installed = previousPointer }
+        var ready: Any? = null
+        val cache = immediateIdentityCache().apply {
+            publish(currentItem, CurrentSongDetails(77L))
+        }
+        val (reapply, _) = reapply(fragment, ready = { ready }, cache = cache)
+
+        reapply.recordMiss(fragment, 77L)
+        reapply.onCurrentSongChanged(requireNotNull(cache.current()))
+
+        assertNull(fragment.installed)
+        assertEquals(1, fragment.installs)
+        assertEquals(1, pendingLedger(reapply).size)
+
+        ready = nextPointer
+        reapply.onReplacementPublished(77L)
+
+        assertSame(nextPointer, fragment.installed)
+        assertEquals(2, fragment.installs)
+    }
+
+    @Test
+    fun `stale identity callback cannot clear lyrics after a newer song is current`() {
+        val itemB = LyricsItem("77")
+        val itemC = LyricsItem("88")
+        val currentPointer = Any()
+        val fragment = LyricsFragment(itemC).apply { installed = currentPointer }
+        val cache = immediateIdentityCache().apply {
+            publish(itemB, CurrentSongDetails(77L))
+        }
+        val staleB = requireNotNull(cache.current())
+        val (reapply, _) = reapply(fragment, cache = cache)
+        reapply.recordMiss(fragment, 77L)
+
+        cache.publish(itemC, CurrentSongDetails(88L))
+        reapply.onCurrentSongChanged(staleB)
+
+        assertSame(currentPointer, fragment.installed)
+        assertEquals(0, fragment.installs)
+    }
+
+    @Test
     fun `ready late applies only to the exact recorded apple music id`() {
         val fragment = LyricsFragment(LyricsItem("42"))
         val pointer = Any()
@@ -423,7 +469,7 @@ class CustomLyricsReadyReapplyTest {
         var attempts: Int = 0
 
         @Suppress("UNUSED_PARAMETER")
-        fun I2(ptr: Any) {
+        fun I2(ptr: Any?) {
             attempts += 1
             if (failOnInstall) throw IllegalStateException("I2 exploded")
             installed = ptr
@@ -440,7 +486,7 @@ class CustomLyricsReadyReapplyTest {
         fun isAdded(): Boolean = added
 
         @Suppress("UNUSED_PARAMETER")
-        fun I2(ptr: Any) = Unit
+        fun I2(ptr: Any?) = Unit
     }
 
     private class ThrowingLyricsFragment(item: LyricsItem?) {
@@ -449,7 +495,7 @@ class CustomLyricsReadyReapplyTest {
         var attempts: Int = 0
 
         @Suppress("UNUSED_PARAMETER")
-        fun I2(ptr: Any) {
+        fun I2(ptr: Any?) {
             attempts += 1
             throw IllegalStateException("I2 exploded")
         }

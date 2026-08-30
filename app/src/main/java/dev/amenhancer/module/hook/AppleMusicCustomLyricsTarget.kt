@@ -371,6 +371,9 @@ internal class AppleMusicCustomLyricsTarget(
             val appleMusicId = current?.details?.appleMusicId
             appleMusicId?.let(session::ensureRequested)
             autoSession?.onSongChanged(appleMusicId)
+            current?.let { published ->
+                mainHandler.post { readyReapply.onCurrentSongChanged(published) }
+            }
             appleMusicId?.let { id ->
                 timingObservations.metadataOfAppleMusicId(id)
                     ?.takeIf(::shouldTryAutoLyricsForMetadata)

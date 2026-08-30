@@ -82,19 +82,7 @@ internal class CustomLyricsReadyReapply(
      */
     fun onReplacementPublished(appleMusicId: Long) {
         if (appleMusicId <= 0L) return
-        val waiting = synchronized(pending) {
-            sweepCleared()
-            val matches = mutableListOf<Any>()
-            val iterator = pending.iterator()
-            while (iterator.hasNext()) {
-                val entry = iterator.next()
-                if (entry.appleMusicId == appleMusicId) {
-                    entry.key.get()?.let(matches::add)
-                    iterator.remove()
-                }
-            }
-            matches
-        }
+        val waiting = takeWaiting(appleMusicId)
         for (fragment in waiting) {
             try {
                 if (!isFragmentUsable(fragment)) continue
@@ -108,6 +96,45 @@ internal class CustomLyricsReadyReapply(
                 installMethod.invoke(fragment, replacement)
             } catch (error: Throwable) {
                 logger("custom lyrics ready-late re-entry failed: $error")
+            }
+        }
+    }
+
+    /**
+     * Completes an item change that Apple's o2 published before the delayed
+     * current-song identity was confirmed. Re-entering I2 with a ready
+     * replacement installs it immediately; a null re-entry first clears the
+     * previous song's rows and lets the normal I2 hook start/record the new
+     * automatic lookup. The exact identity snapshot is guarded atomically so
+     * a posted B callback can never mutate a fragment after C became current.
+     */
+    fun onCurrentSongChanged(published: TargetCurrentSong) {
+        val appleMusicId = published.details.appleMusicId
+        if (appleMusicId <= 0L) return
+        val waiting = takeWaiting(appleMusicId)
+        for (fragment in waiting) {
+            if (!isFragmentUsable(fragment)) continue
+            currentSong.runIfCurrent(published) {
+                try {
+                    val fragmentAdamId = seam.currentItemAdamIdOf(fragment)
+                    if (
+                        fragmentAdamId != appleMusicId &&
+                        !rebindStaleFragmentToCurrent(fragment, fragmentAdamId, appleMusicId)
+                    ) {
+                        return@runIfCurrent
+                    }
+                    val replacement = readyReplacementFor(appleMusicId)
+                    installMethod.invoke(fragment, replacement)
+                    if (replacement == null) {
+                        // The production I2 hook normally records this miss
+                        // after starting the now-current automatic lookup.
+                        // Keep it here as well because stable metadata may
+                        // confirm just after I2 and make that lookup eligible.
+                        recordMiss(fragment, appleMusicId)
+                    }
+                } catch (error: Throwable) {
+                    logger("custom lyrics identity-confirmed re-entry failed: $error")
+                }
             }
         }
     }
@@ -133,6 +160,20 @@ internal class CustomLyricsReadyReapply(
         if (publishedAdamId != appleMusicId) return false
         if (!currentSong.canRebind(fragmentAdamId, publishedAdamId)) return false
         return seam.bindCurrentItemOf(fragment, published.item)
+    }
+
+    private fun takeWaiting(appleMusicId: Long): List<Any> = synchronized(pending) {
+        sweepCleared()
+        val matches = mutableListOf<Any>()
+        val iterator = pending.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            if (entry.appleMusicId == appleMusicId) {
+                entry.key.get()?.let(matches::add)
+                iterator.remove()
+            }
+        }
+        matches
     }
 
     /** Removes entries whose fragment has been collected. Must hold [pending]. */
