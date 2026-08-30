@@ -96,6 +96,25 @@ class LyricsItemUpdateCoordinatorTest {
     }
 
     @Test
+    fun `apple handled intermediate item resets a later return to the same song`() {
+        val fragment = ItemUpdateFragment()
+        val (coordinator, reapply, _) = coordinator(
+            fragment,
+            ready = { null },
+            tracking = { false },
+        )
+
+        update(coordinator, fragment, "77", appleInvokedI2 = false)
+        assertEquals(1, pending(reapply).size)
+
+        reapply.dismiss(fragment)
+        update(coordinator, fragment, "42", appleInvokedI2 = true)
+        update(coordinator, fragment, "77", appleInvokedI2 = false)
+
+        assertEquals(1, pending(reapply).size)
+    }
+
+    @Test
     fun `a same item metadata refresh with the changed flag off is ignored`() {
         val fragment = ItemUpdateFragment()
         val pointer = Any()
@@ -262,9 +281,9 @@ class LyricsItemUpdateCoordinatorTest {
     }
 
     @Test
-    fun `decision ignores apple i2 already invoked in the same o2 call`() {
+    fun `decision observes apple i2 without requesting module re-entry`() {
         assertEquals(
-            LyricsItemUpdateAction.IGNORE,
+            LyricsItemUpdateAction.OBSERVE_APPLE_HANDLED,
             decideLyricsItemUpdate(
                 itemChanged = true,
                 appleInvokedI2 = true,

@@ -63,6 +63,10 @@ internal class LyricsItemUpdateCoordinator(
             )
         ) {
             LyricsItemUpdateAction.IGNORE -> Unit
+            LyricsItemUpdateAction.OBSERVE_APPLE_HANDLED -> {
+                val appleMusicId = appleMusicId ?: return
+                recordHandled(fragment, appleMusicId)
+            }
             LyricsItemUpdateAction.WAIT_FOR_IDENTITY,
             LyricsItemUpdateAction.RECORD_MISS -> {
                 val appleMusicId = appleMusicId ?: return
@@ -150,6 +154,9 @@ internal enum class LyricsItemUpdateAction {
     /** Leave Apple's own behavior untouched. */
     IGNORE,
 
+    /** Apple already installed this item; advance only the handled generation. */
+    OBSERVE_APPLE_HANDLED,
+
     /** Keep the fragment until the delayed current-song identity confirms this item. */
     WAIT_FOR_IDENTITY,
 
@@ -177,9 +184,10 @@ internal fun decideLyricsItemUpdate(
     tracked: Boolean,
     replacementReady: Boolean,
 ): LyricsItemUpdateAction {
-    if (!itemChanged || appleInvokedI2 || !fragmentUsable) return LyricsItemUpdateAction.IGNORE
+    if (!itemChanged || !fragmentUsable) return LyricsItemUpdateAction.IGNORE
     val id = itemAdamId ?: return LyricsItemUpdateAction.IGNORE
     if (id <= 0L) return LyricsItemUpdateAction.IGNORE
+    if (appleInvokedI2) return LyricsItemUpdateAction.OBSERVE_APPLE_HANDLED
     if (id == previouslyHandledAdamId) return LyricsItemUpdateAction.IGNORE
     if (!tracked) return LyricsItemUpdateAction.WAIT_FOR_IDENTITY
     return if (replacementReady) {
