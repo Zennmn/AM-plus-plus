@@ -32,6 +32,12 @@ internal sealed interface EmbeddedLyricsMutationResult {
     data class Failed(val message: String) : EmbeddedLyricsMutationResult
 }
 
+/** Exact entry and index version created by one automatic publication. */
+internal data class EmbeddedLyricsPublicationReceipt(
+    val entry: CustomLyricsEntry,
+    val indexState: CustomLyricsIndexState,
+)
+
 /**
  * Host-local content facade for the embedded settings UI.
  *
@@ -136,17 +142,27 @@ internal class EmbeddedContentManager(
         replacingAppleMusicId: Long? = null,
     ): CustomLyricsSaveResult = synchronized(mutationLock) {
         session.withCustomLyricsMutation {
-            val current = currentLyricsManifest()
-            CustomLyricsImportTransaction(
-                fileIdFactory = { fileIdFactory("lyrics") },
-                writeRemoteFile = session::writeFile,
-                publishManifest = { next ->
-                    session.commitCustomLyrics(next) is CustomLyricsIndexCommitResult.Committed
-                },
-                deleteRemoteFile = { fileId -> session.deleteFile(fileId) },
-            ).upsert(current, draft, replacingAppleMusicId)
+            saveLyricsWithinMutation(draft, replacingAppleMusicId)
         }
     }
+
+    /** Publishes and captures its exact index version without releasing the mutation lock. */
+    fun saveLyricsWithReceipt(draft: CustomLyricsDraft): EmbeddedLyricsPublicationReceipt? =
+        synchronized(mutationLock) {
+            session.withCustomLyricsMutation {
+                var committed: CustomLyricsIndexCommitResult.Committed? = null
+                val saved = saveLyricsWithinMutation(
+                    draft = draft,
+                    onCommitted = { committed = it },
+                ) as? CustomLyricsSaveResult.Saved
+                    ?: return@withCustomLyricsMutation null
+                val commit = committed ?: return@withCustomLyricsMutation null
+                EmbeddedLyricsPublicationReceipt(
+                    entry = saved.entry,
+                    indexState = CustomLyricsIndexState(commit.pointer, commit.manifest),
+                )
+            }
+        }
 
     /**
      * Atomically imports one TTML body for several Apple Music IDs.
@@ -278,39 +294,24 @@ internal class EmbeddedContentManager(
     fun deleteLyrics(appleMusicId: Long): EmbeddedLyricsMutationResult =
         deleteLyrics(listOf(appleMusicId))
 
-    /** Removes an automatic entry only when its persisted body and metadata still match. */
-    fun removeLyricsIfMatches(
-        appleMusicId: Long,
-        source: String,
-        displayName: String?,
-        ttml: String,
-    ): Boolean = synchronized(mutationLock) {
+    /** Removes an automatic entry only when its complete persisted receipt still matches. */
+    fun removeLyricsIfMatches(receipt: EmbeddedLyricsPublicationReceipt): Boolean = synchronized(mutationLock) {
         session.withCustomLyricsMutation {
-            val entry = currentLyricsManifest().entries.singleOrNull {
-                it.appleMusicId == appleMusicId
-            } ?: return@withCustomLyricsMutation false
-            val inspected = CustomLyricsFilePolicy.inspect(ttml)
-                as? dev.amenhancer.module.lyrics.CustomLyricsInspection.Accepted
+            val current = session.customLyricsIndexState()
+            if (current != receipt.indexState) return@withCustomLyricsMutation false
+            val expected = receipt.entry
+            val entry = current.manifest.entries.singleOrNull { it.appleMusicId == expected.appleMusicId }
                 ?: return@withCustomLyricsMutation false
-            if (
-                entry.source != source ||
-                entry.displayName != CustomLyricsManifestPolicy.sanitizeDisplayName(
-                    displayName?.takeIf(String::isNotBlank)
-                        ?: "自动缓存歌词 · $appleMusicId",
-                ) ||
-                !entry.sha256.equals(inspected.sha256, ignoreCase = true)
-            ) {
-                return@withCustomLyricsMutation false
-            }
-            val next = CustomLyricsManifest(currentLyricsManifest().entries.filterNot {
-                it.appleMusicId == appleMusicId
+            if (entry != expected) return@withCustomLyricsMutation false
+            val next = CustomLyricsManifest(current.manifest.entries.filterNot {
+                it.appleMusicId == expected.appleMusicId
             })
-            when (val result = publishLyrics(next)) {
-                is EmbeddedLyricsMutationResult.Updated -> {
+            when (session.commitCustomLyricsIfUnchanged(current, next)) {
+                is CustomLyricsIndexCommitResult.Committed -> {
                     runCatching { session.deleteFile(entry.fileId) }
                     true
                 }
-                is EmbeddedLyricsMutationResult.Failed -> false
+                is CustomLyricsIndexCommitResult.Failed -> false
             }
         }
     }
@@ -367,6 +368,25 @@ internal class EmbeddedContentManager(
 
     private fun currentLyricsManifest(): CustomLyricsManifest =
         CustomLyricsIndexRepository.resolve(session.values(), session::openFile)
+
+    private fun saveLyricsWithinMutation(
+        draft: CustomLyricsDraft,
+        replacingAppleMusicId: Long? = null,
+        onCommitted: (CustomLyricsIndexCommitResult.Committed) -> Unit = {},
+    ): CustomLyricsSaveResult = CustomLyricsImportTransaction(
+        fileIdFactory = { fileIdFactory("lyrics") },
+        writeRemoteFile = session::writeFile,
+        publishManifest = { next ->
+            when (val result = session.commitCustomLyrics(next)) {
+                is CustomLyricsIndexCommitResult.Committed -> {
+                    onCommitted(result)
+                    true
+                }
+                is CustomLyricsIndexCommitResult.Failed -> false
+            }
+        },
+        deleteRemoteFile = { fileId -> session.deleteFile(fileId) },
+    ).upsert(currentLyricsManifest(), draft, replacingAppleMusicId)
 
     private fun publishLyrics(next: CustomLyricsManifest): EmbeddedLyricsMutationResult =
         when (val result = session.commitCustomLyrics(next)) {

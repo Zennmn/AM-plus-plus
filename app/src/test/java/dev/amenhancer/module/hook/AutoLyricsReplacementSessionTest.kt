@@ -1,7 +1,13 @@
 package dev.amenhancer.module.hook
 
 import dev.amenhancer.module.CurrentSongDetails
+import dev.amenhancer.module.config.CustomLyricsIndexState
+import dev.amenhancer.module.config.EmbeddedLyricsPublicationReceipt
+import dev.amenhancer.module.lyrics.CustomLyricsFilePolicy
+import dev.amenhancer.module.lyrics.CustomLyricsInspection
 import dev.amenhancer.module.model.CustomLyricsSources
+import dev.amenhancer.module.model.CustomLyricsEntry
+import dev.amenhancer.module.model.CustomLyricsManifest
 import java.util.ArrayDeque
 import java.nio.file.Files
 import java.util.concurrent.CountDownLatch
@@ -82,7 +88,7 @@ class AutoLyricsReplacementSessionTest {
                 assertEquals(42L, id)
                 assertEquals(CustomLyricsSources.AUTO_CACHE, candidate.source)
                 published += 1
-                AutoLyricsPublishResult.PUBLISHED
+                AutoLyricsPublication(AutoLyricsPublishResult.PUBLISHED)
             },
             executor = queued,
             logger = {},
@@ -156,7 +162,7 @@ class AutoLyricsReplacementSessionTest {
             readAdamId = { (it as Pointer).adamId },
             bindAdamId = { value, id -> (value as Pointer).adamId = id; true },
             onReplacementPublished = { published += 1 },
-            publisher = { _, _ -> AutoLyricsPublishResult.ALREADY_CONFIGURED },
+            publisher = { _, _ -> AutoLyricsPublication(AutoLyricsPublishResult.ALREADY_CONFIGURED) },
             executor = queued,
             logger = {},
         )
@@ -570,19 +576,39 @@ class AutoLyricsReplacementSessionTest {
     fun `metadata change during publication rolls back stale configured lyrics`() {
         val queued = QueuedExecutor()
         var persisted: String? = null
+        var publishedReceipt: EmbeddedLyricsPublicationReceipt? = null
         lateinit var session: AutoLyricsReplacementSession
         val sessionPublisher = AutoLyricsPublisher { _, candidate ->
             if (persisted != null) {
-                AutoLyricsPublishResult.ALREADY_CONFIGURED
+                AutoLyricsPublication(AutoLyricsPublishResult.ALREADY_CONFIGURED)
             } else {
                 persisted = candidate.ttml
+                val inspected = CustomLyricsFilePolicy.inspect(candidate.ttml)
+                    as CustomLyricsInspection.Accepted
+                val entry = CustomLyricsEntry(
+                    appleMusicId = 42L,
+                    displayName = candidate.displayName ?: "Automatic",
+                    fileId = "auto-${candidate.source}",
+                    sizeBytes = inspected.bytes.size.toLong(),
+                    sha256 = inspected.sha256,
+                    source = candidate.source,
+                    enabled = true,
+                )
+                publishedReceipt = EmbeddedLyricsPublicationReceipt(
+                    entry = entry,
+                    indexState = CustomLyricsIndexState(
+                        pointer = null,
+                        manifest = CustomLyricsManifest(listOf(entry)),
+                    ),
+                )
                 session.onStableMetadata(stableMetadata(42L, "Corrected"))
-                AutoLyricsPublishResult.PUBLISHED
+                AutoLyricsPublication(AutoLyricsPublishResult.PUBLISHED, publishedReceipt)
             }
         }
-        val rollback = AutoLyricsPublisherRollback { _, candidate ->
-            if (persisted == candidate.ttml) {
+        val rollback = AutoLyricsPublisherRollback { receipt ->
+            if (publishedReceipt == receipt) {
                 persisted = null
+                publishedReceipt = null
                 true
             } else {
                 false

@@ -3,10 +3,10 @@ package dev.amenhancer.module.hook
 import android.app.Application
 import dev.amenhancer.module.config.EmbeddedConfigurationSession
 import dev.amenhancer.module.config.EmbeddedContentManager
+import dev.amenhancer.module.config.EmbeddedLyricsPublicationReceipt
 import dev.amenhancer.module.config.HostPrivateEmbeddedStorage
 import dev.amenhancer.module.lyrics.CustomLyricsFilePolicy
 import dev.amenhancer.module.lyrics.CustomLyricsDraft
-import dev.amenhancer.module.lyrics.CustomLyricsSaveResult
 import dev.amenhancer.module.lyrics.AutomaticMetadataLyricsResolver
 import dev.amenhancer.module.lyrics.MetadataLyricsImporter
 import dev.amenhancer.module.lyrics.FileQqMusicSessionStore
@@ -51,14 +51,20 @@ internal enum class AutoLyricsPublishResult {
     FAILED,
 }
 
+/** Result of publishing, including the exact manifest entry created by the publisher. */
+internal data class AutoLyricsPublication(
+    val result: AutoLyricsPublishResult,
+    val receipt: EmbeddedLyricsPublicationReceipt? = null,
+)
+
 /** Publishes a validated automatic lyric into the normal configured index. */
 internal fun interface AutoLyricsPublisher {
-    fun publish(appleMusicId: Long, candidate: AutoLyricsCandidate): AutoLyricsPublishResult
+    fun publish(appleMusicId: Long, candidate: AutoLyricsCandidate): AutoLyricsPublication
 }
 
 /** Best-effort compare-and-delete for a publication superseded by metadata. */
 internal fun interface AutoLyricsPublisherRollback {
-    fun rollback(appleMusicId: Long, candidate: AutoLyricsCandidate): Boolean
+    fun rollback(receipt: EmbeddedLyricsPublicationReceipt): Boolean
 }
 
 /** No-op cache used when a target adapter cannot provide host-private storage. */
@@ -132,37 +138,36 @@ internal fun createAutoLyricsRuntime(
             configuredContent.listLyrics().firstOrNull { it.appleMusicId == appleMusicId }
         }.getOrNull()
         when {
-            existing != null && existing.enabled -> AutoLyricsPublishResult.ALREADY_CONFIGURED
-            existing != null -> AutoLyricsPublishResult.FAILED
+            existing != null && existing.enabled -> AutoLyricsPublication(
+                AutoLyricsPublishResult.ALREADY_CONFIGURED,
+            )
+            existing != null -> AutoLyricsPublication(AutoLyricsPublishResult.FAILED)
             else -> {
                 val displayName = candidate.displayName
                     ?.takeIf(String::isNotBlank)
                     ?: "自动缓存歌词 · $appleMusicId"
-                when (
-                    runCatching {
-                        configuredContent.saveLyrics(
-                            CustomLyricsDraft(
-                                appleMusicId = appleMusicId,
-                                displayName = displayName,
-                                ttml = candidate.ttml,
-                                source = candidate.source,
-                            ),
-                        )
-                    }.getOrNull()
-                ) {
-                    is CustomLyricsSaveResult.Saved -> AutoLyricsPublishResult.PUBLISHED
-                    else -> AutoLyricsPublishResult.FAILED
+                val receipt = runCatching {
+                    configuredContent.saveLyricsWithReceipt(
+                        CustomLyricsDraft(
+                            appleMusicId = appleMusicId,
+                            displayName = displayName,
+                            ttml = candidate.ttml,
+                            source = candidate.source,
+                        ),
+                    )
+                }.getOrNull()
+                when (receipt) {
+                    is EmbeddedLyricsPublicationReceipt -> AutoLyricsPublication(
+                        AutoLyricsPublishResult.PUBLISHED,
+                        receipt,
+                    )
+                    else -> AutoLyricsPublication(AutoLyricsPublishResult.FAILED)
                 }
             }
         }
     }
-    val publisherRollback = AutoLyricsPublisherRollback { appleMusicId, candidate ->
-        configuredContent.removeLyricsIfMatches(
-            appleMusicId = appleMusicId,
-            source = candidate.source,
-            displayName = candidate.displayName,
-            ttml = candidate.ttml,
-        )
+    val publisherRollback = AutoLyricsPublisherRollback { receipt ->
+        configuredContent.removeLyricsIfMatches(receipt)
     }
     val executor = ThreadPoolExecutor(
         1,
@@ -186,7 +191,7 @@ internal fun createAutoLyricsRuntime(
                         publisher.publish(
                             appleMusicId,
                             AutoLyricsCandidate(CustomLyricsSources.AUTO_CACHE, ttml),
-                        )
+                        ).result
                     }.getOrDefault(AutoLyricsPublishResult.FAILED)
                 ) {
                     AutoLyricsPublishResult.PUBLISHED,
@@ -640,18 +645,19 @@ internal class AutoLyricsReplacementSession(
                 }
                 return
             }
-            val publishResult = publisher?.let {
+            val publication = publisher?.let {
                 runCatching { it.publish(appleMusicId, preparedCandidate!!) }
-                    .getOrDefault(AutoLyricsPublishResult.FAILED)
+                    .getOrDefault(AutoLyricsPublication(AutoLyricsPublishResult.FAILED))
             }
+            val publishResult = publication?.result
             val candidateStillCurrent = preparedMetadataToken?.let { token ->
                 isCurrentMetadataRequest(appleMusicId, token)
             } ?: isCurrentRequest(appleMusicId, requestGeneration)
             if (!candidateStillCurrent) {
                 if (preparedMetadataToken != null) metadataSuperseded = true
-                if (publishResult == AutoLyricsPublishResult.PUBLISHED && preparedCandidate != null) {
+                if (publishResult == AutoLyricsPublishResult.PUBLISHED && publication?.receipt != null) {
                     runCatching {
-                        publisherRollback?.rollback(appleMusicId, preparedCandidate!!)
+                        publisherRollback?.rollback(publication.receipt)
                     }
                 }
                 removePointerIf(appleMusicId, preparedPointer)
@@ -679,9 +685,9 @@ internal class AutoLyricsReplacementSession(
                         }
                     } else {
                         if (preparedMetadataToken != null) metadataSuperseded = true
-                        if (publishResult == AutoLyricsPublishResult.PUBLISHED && preparedCandidate != null) {
+                        if (publishResult == AutoLyricsPublishResult.PUBLISHED && publication?.receipt != null) {
                             runCatching {
-                                publisherRollback?.rollback(appleMusicId, preparedCandidate!!)
+                                publisherRollback?.rollback(publication.receipt)
                             }
                         }
                         removePointerIf(appleMusicId, preparedPointer)

@@ -4,6 +4,7 @@ import dev.amenhancer.module.hook.LyricHttpResponse
 import dev.amenhancer.module.hook.LyricHttpTransport
 import dev.amenhancer.module.model.CustomLyricsSources
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import org.junit.Assert.assertEquals
@@ -452,6 +453,39 @@ class MetadataLyricsSourcesTest {
         assertTrue(transport.bodies.first().startsWith("params="))
     }
 
+    @Test
+    fun `netease client does not hold a monitor across concurrent network searches`() {
+        val transport = ConcurrentNeteaseTransport()
+        val client = NeteaseCloudLyricsClient(transport)
+        assertEquals("99", client.search(MetadataLyricsQuery("Song", "Artist")).single().externalId)
+        transport.blockSearch = true
+        transport.searchCalls.set(0)
+
+        val first = thread(start = true) {
+            client.search(MetadataLyricsQuery("Song", "Artist"))
+        }
+        try {
+            assertTrue(transport.firstSearchStarted.await(1L, TimeUnit.SECONDS))
+            val second = thread(start = true) {
+                client.search(MetadataLyricsQuery("Song", "Artist"))
+            }
+            try {
+                assertTrue(
+                    "second search was serialized behind the first network call",
+                    transport.secondSearchStarted.await(500L, TimeUnit.MILLISECONDS),
+                )
+            } finally {
+                transport.releaseSearches.countDown()
+                second.join(1_000L)
+            }
+        } finally {
+            transport.releaseSearches.countDown()
+            first.join(1_000L)
+        }
+
+        assertTrue("first search did not finish", !first.isAlive)
+    }
+
     private class FakeTransport(
         private val response: String,
     ) : LyricHttpTransport {
@@ -472,6 +506,43 @@ class MetadataLyricsSourcesTest {
                 response
             }
             return LyricHttpResponse(200, responseBody.toByteArray(Charsets.UTF_8))
+        }
+    }
+
+    private class ConcurrentNeteaseTransport : LyricHttpTransport {
+        val firstSearchStarted = CountDownLatch(1)
+        val secondSearchStarted = CountDownLatch(1)
+        val releaseSearches = CountDownLatch(1)
+        val searchCalls = AtomicInteger()
+        @Volatile var blockSearch = false
+
+        override fun get(url: String): String? = null
+
+        override fun post(
+            url: String,
+            body: ByteArray,
+            headers: Map<String, String>,
+        ): LyricHttpResponse {
+            val response = when {
+                url.contains("/eapi/register/anonimous") -> """{"code":200,"userId":7}"""
+                url.contains("/eapi/search/song/list/page") -> {
+                    if (blockSearch) {
+                        when (searchCalls.incrementAndGet()) {
+                            1 -> firstSearchStarted.countDown()
+                            2 -> secondSearchStarted.countDown()
+                        }
+                        releaseSearches.await(1L, TimeUnit.SECONDS)
+                    }
+                    """
+                    {"code":200,"data":{"resources":[{"baseInfo":{"simpleSongData":{
+                      "id":99,"name":"Song","ar":[{"name":"Artist"}],
+                      "al":{"name":"Album"},"dt":181000,"alia":[]
+                    }}}]}}
+                    """.trimIndent()
+                }
+                else -> "{}"
+            }
+            return LyricHttpResponse(200, response.toByteArray(Charsets.UTF_8))
         }
     }
 

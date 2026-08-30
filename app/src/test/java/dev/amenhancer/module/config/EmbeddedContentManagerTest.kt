@@ -4,6 +4,7 @@ import dev.amenhancer.module.font.FontFilePolicy
 import dev.amenhancer.module.font.FontImportResult
 import dev.amenhancer.module.lyrics.CustomLyricsBackupEncodeResult
 import dev.amenhancer.module.lyrics.CustomLyricsBatchSaveResult
+import dev.amenhancer.module.lyrics.CustomLyricsDraft
 import dev.amenhancer.module.lyrics.CustomLyricsMultiIdDraft
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImportResult
 import dev.amenhancer.module.lyrics.CustomLyricsRestoreResult
@@ -140,31 +141,71 @@ class EmbeddedContentManagerTest {
             fileIdFactory = sequenceFileIds("lyrics_rollback"),
         )
         val body = ttml("automatic")
-        val saved = manager.addLyrics(
-            appleMusicId = 707L,
-            displayName = "Automatic",
-            ttml = body,
-            source = CustomLyricsSources.QQ_MUSIC,
-        ) as CustomLyricsSaveResult.Saved
+        val receipt = manager.saveLyricsWithReceipt(
+            CustomLyricsDraft(
+                appleMusicId = 707L,
+                displayName = "Automatic",
+                ttml = body,
+                source = CustomLyricsSources.QQ_MUSIC,
+            ),
+        )!!
 
         assertFalse(
             manager.removeLyricsIfMatches(
-                appleMusicId = 707L,
-                source = CustomLyricsSources.QQ_MUSIC,
-                displayName = "Automatic",
-                ttml = ttml("changed"),
+                receipt.copy(entry = receipt.entry.copy(sha256 = "0".repeat(64))),
             ),
         )
         assertTrue(
-            manager.removeLyricsIfMatches(
-                appleMusicId = 707L,
-                source = CustomLyricsSources.QQ_MUSIC,
-                displayName = "Automatic",
-                ttml = body,
-            ),
+            manager.removeLyricsIfMatches(receipt),
         )
         assertTrue(manager.listLyrics().none { it.appleMusicId == 707L })
-        assertFalse(storage.files.containsKey(saved.entry.fileId))
+        assertFalse(storage.files.containsKey(receipt.entry.fileId))
+    }
+
+    @Test
+    fun `automatic publication rollback preserves an entry disabled by the user`() {
+        val storage = MemoryStorage()
+        val manager = EmbeddedContentManager(
+            session = EmbeddedConfigurationSession(storage),
+            fileIdFactory = sequenceFileIds("lyrics_user_disabled"),
+        )
+        val body = ttml("automatic")
+        val receipt = manager.saveLyricsWithReceipt(
+            CustomLyricsDraft(
+                appleMusicId = 708L,
+                displayName = "Automatic",
+                ttml = body,
+                source = CustomLyricsSources.NETEASE_CLOUD_MUSIC,
+            ),
+        )!!
+        assertTrue(manager.setLyricsEnabled(708L, false) is EmbeddedLyricsMutationResult.Updated)
+
+        assertFalse(manager.removeLyricsIfMatches(receipt))
+        assertFalse(manager.listLyrics().single { it.appleMusicId == 708L }.enabled)
+        assertTrue(storage.files.containsKey(receipt.entry.fileId))
+    }
+
+    @Test
+    fun `automatic publication rollback rejects an entry restored to the same fields`() {
+        val storage = MemoryStorage()
+        val manager = EmbeddedContentManager(
+            session = EmbeddedConfigurationSession(storage),
+            fileIdFactory = sequenceFileIds("lyrics_user_toggled"),
+        )
+        val receipt = manager.saveLyricsWithReceipt(
+            CustomLyricsDraft(
+                appleMusicId = 709L,
+                displayName = "Automatic",
+                ttml = ttml("automatic"),
+                source = CustomLyricsSources.QQ_MUSIC,
+            ),
+        )!!
+        assertTrue(manager.setLyricsEnabled(709L, false) is EmbeddedLyricsMutationResult.Updated)
+        assertTrue(manager.setLyricsEnabled(709L, true) is EmbeddedLyricsMutationResult.Updated)
+
+        assertEquals(receipt.entry, manager.listLyrics().single { it.appleMusicId == 709L })
+        assertFalse(manager.removeLyricsIfMatches(receipt))
+        assertTrue(storage.files.containsKey(receipt.entry.fileId))
     }
 
     @Test

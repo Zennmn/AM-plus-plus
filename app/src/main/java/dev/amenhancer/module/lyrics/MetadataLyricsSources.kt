@@ -637,13 +637,14 @@ internal class QqMusicLyricsClient(
 internal class NeteaseCloudLyricsClient(
     private val transport: LyricHttpTransport,
 ) {
+    private val sessionLock = Any()
     private val cookieMap = linkedMapOf<String, String>()
     private val deviceId = UUID.randomUUID().toString().replace("-", "")
     private val clientSign = generateClientSign()
     private var userId = 0L
     private var initialized = false
+    private var sessionGeneration = 0L
 
-    @Synchronized
     fun search(query: MetadataLyricsQuery): List<MetadataLyricsCandidate> = runCatching {
         val raw = doRequest(
             path = SEARCH_PATH,
@@ -677,7 +678,6 @@ internal class NeteaseCloudLyricsClient(
         }
     }.getOrDefault(emptyList())
 
-    @Synchronized
     fun fetch(candidate: MetadataLyricsCandidate): MetadataLyricsDocument? = runCatching {
         val id = candidate.externalId.toLongOrNull()?.takeIf { it > 0L } ?: return@runCatching null
         val raw = doRequest(
@@ -693,7 +693,7 @@ internal class NeteaseCloudLyricsClient(
     }.getOrNull()
 
     private fun doRequest(path: String, params: JSONObject, attempt: Int = 0): String? {
-        if (!ensureSession()) return null
+        val session = ensureSession() ?: return null
         val payload = JSONObject(params.toString()).put(
             "header",
             JSONObject()
@@ -714,21 +714,29 @@ internal class NeteaseCloudLyricsClient(
                 "Content-Type" to "application/x-www-form-urlencoded",
                 "User-Agent" to USER_AGENT,
                 "Referer" to "https://music.163.com/",
-                "Cookie" to cookieMap.entries.joinToString("; ") { "${it.key}=${it.value}" },
+                "Cookie" to session.cookies,
             ),
         ) ?: return null
         val decrypted = response.body?.let(::decodeNeteaseBody).orEmpty()
         val code = runCatching { JSONObject(decrypted).optInt("code", 0) }.getOrDefault(0)
         if ((response.statusCode == 301 || response.statusCode == 401 || code == 301 || code == 401) && attempt == 0) {
-            initialized = false
-            cookieMap.clear()
+            synchronized(sessionLock) {
+                if (session.generation == sessionGeneration) {
+                    initialized = false
+                    userId = 0L
+                    cookieMap.clear()
+                    sessionGeneration += 1L
+                }
+            }
             return doRequest(path, params, 1)
         }
         return decrypted.takeIf(String::isNotBlank)
     }
 
-    private fun ensureSession(): Boolean {
-        if (initialized && userId > 0L) return true
+    private fun ensureSession(): NeteaseSessionSnapshot? {
+        synchronized(sessionLock) {
+            sessionSnapshotLocked()?.let { return it }
+        }
         val preCookies = linkedMapOf(
             "os" to "pc",
             "deviceId" to deviceId,
@@ -762,19 +770,38 @@ internal class NeteaseCloudLyricsClient(
                 "Referer" to "https://music.163.com/",
                 "Cookie" to preCookies.entries.joinToString("; ") { "${it.key}=${it.value}" },
             ),
-        ) ?: return false
+        ) ?: return null
         val decrypted = response.body?.let(::decodeNeteaseBody).orEmpty()
-        val json = runCatching { JSONObject(decrypted) }.getOrNull() ?: return false
-        if (json.optInt("code", 0) != 200) return false
-        userId = json.optLong("userId", 0L)
-        if (userId <= 0L) return false
-        cookieMap.clear()
-        cookieMap.putAll(preCookies)
-        response.headers.cookieValues().forEach { (name, value) -> cookieMap[name] = value }
-        cookieMap["WNMCID"] = "${randomLetters(6)}.${System.currentTimeMillis()}.01.0"
-        initialized = true
-        return true
+        val json = runCatching { JSONObject(decrypted) }.getOrNull() ?: return null
+        if (json.optInt("code", 0) != 200) return null
+        val registeredUserId = json.optLong("userId", 0L)
+        if (registeredUserId <= 0L) return null
+        synchronized(sessionLock) {
+            if (!initialized) {
+                userId = registeredUserId
+                cookieMap.clear()
+                cookieMap.putAll(preCookies)
+                response.headers.cookieValues().forEach { (name, value) -> cookieMap[name] = value }
+                cookieMap["WNMCID"] = "${randomLetters(6)}.${System.currentTimeMillis()}.01.0"
+                initialized = true
+                sessionGeneration += 1L
+            }
+            return sessionSnapshotLocked()
+        }
     }
+
+    private fun sessionSnapshotLocked(): NeteaseSessionSnapshot? {
+        if (!initialized || userId <= 0L) return null
+        return NeteaseSessionSnapshot(
+            cookies = cookieMap.entries.joinToString("; ") { "${it.key}=${it.value}" },
+            generation = sessionGeneration,
+        )
+    }
+
+    private data class NeteaseSessionSnapshot(
+        val cookies: String,
+        val generation: Long,
+    )
 
     private fun decodeNeteaseBody(body: ByteArray): String {
         val text = body.toString(Charsets.UTF_8)
