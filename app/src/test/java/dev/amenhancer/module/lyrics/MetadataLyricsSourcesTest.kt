@@ -75,6 +75,23 @@ class MetadataLyricsSourcesTest {
     }
 
     @Test
+    fun `qrc xml entities are decoded before ttml escaping`() {
+        val document = MetadataLyricsParser.parseQrc(
+            original = """<Lyric_1 LyricType="1" LyricContent="[0,1000]A &amp; B &lt;tag&gt; &#x1F3B5;(0,1000)"/>""",
+            translated = """<Lyric_1 LyricType="1" LyricContent="[0,1000]C &quot;D&quot; &apos;E&apos; &#35;(0,1000)"/>""",
+        )
+
+        assertEquals("A & B <tag> 🎵", document?.lines?.single()?.words?.joinToString("") { it.text })
+        assertEquals(listOf("C \"D\" 'E' #"), document?.translations)
+
+        val ttml = document?.let(MetadataLyricsTtmlWriter::build)
+        assertTrue(ttml?.contains(">A &amp; B &lt;tag&gt; 🎵</span>") == true)
+        assertTrue(ttml?.contains("<text for=\"L1\">C &quot;D&quot; &apos;E&apos; #</text>") == true)
+        assertFalse(ttml?.contains("&amp;amp;") == true)
+        assertFalse(ttml?.contains("&amp;lt;") == true)
+    }
+
+    @Test
     fun `yrc parser falls back to line lrc and aligns translation`() {
         val document = MetadataLyricsParser.parseYrc(
             yrc = "not a yrc payload",

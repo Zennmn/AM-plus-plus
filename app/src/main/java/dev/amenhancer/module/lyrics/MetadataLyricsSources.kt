@@ -311,10 +311,11 @@ internal object MetadataLyricsParser {
     )
     private val lrcTimePattern = Regex("\\[(\\d{2}):(\\d{2})[.:](\\d{2,3})]")
     private val qrcXmlPattern = Regex("(?s)<Lyric_1\\s+LyricType=\\\"1\\\"\\s+LyricContent=\\\"(.*?)\\\"/>")
+    private val xmlEntityPattern = Regex("&(?:#([0-9]+)|#[xX]([0-9A-Fa-f]+)|(amp|lt|gt|quot|apos));")
 
     fun parseQrc(original: String?, translated: String? = null): MetadataLyricsDocument? {
         val raw = original?.takeIf(String::isNotBlank) ?: return null
-        val content = qrcXmlPattern.find(raw)?.groupValues?.getOrNull(1) ?: raw
+        val content = extractQrcContent(raw)
         val (lines, hasWordTiming) = parseQrcTimedLines(content)
         if (lines.isEmpty()) return null
         return MetadataLyricsDocument(lines, align(lines, parseAuxiliary(translated)), hasWordTiming)
@@ -347,10 +348,45 @@ internal object MetadataLyricsParser {
 
     private fun parseAuxiliary(raw: String?): List<MetadataLyricsLine> {
         val value = raw?.takeIf(String::isNotBlank) ?: return emptyList()
-        val content = qrcXmlPattern.find(value)?.groupValues?.getOrNull(1) ?: value
+        val content = extractQrcContent(value)
         val qrc = parseQrcTimedLines(content).first
         return qrc.ifEmpty { parseLrc(value) }
     }
+
+    /** XML-wrapped QRC stores its timed payload as an escaped attribute value. */
+    private fun extractQrcContent(raw: String): String {
+        val encoded = qrcXmlPattern.find(raw)?.groupValues?.getOrNull(1) ?: return raw
+        return xmlEntityPattern.replace(encoded) { entity ->
+            when (entity.groupValues[3]) {
+                "amp" -> "&"
+                "lt" -> "<"
+                "gt" -> ">"
+                "quot" -> "\""
+                "apos" -> "'"
+                else -> decodeXmlCharacterReference(entity) ?: entity.value
+            }
+        }
+    }
+
+    private fun decodeXmlCharacterReference(entity: MatchResult): String? {
+        val decimal = entity.groupValues[1]
+        val hexadecimal = entity.groupValues[2]
+        val codePoint = when {
+            decimal.isNotEmpty() -> decimal.toIntOrNull(10)
+            hexadecimal.isNotEmpty() -> hexadecimal.toIntOrNull(16)
+            else -> null
+        } ?: return null
+        if (!isXmlCharacter(codePoint)) return null
+        return String(Character.toChars(codePoint))
+    }
+
+    private fun isXmlCharacter(codePoint: Int): Boolean =
+        codePoint == 0x9 ||
+            codePoint == 0xA ||
+            codePoint == 0xD ||
+            codePoint in 0x20..0xD7FF ||
+            codePoint in 0xE000..0xFFFD ||
+            codePoint in 0x10000..0x10FFFF
 
     /** QQ QRC associates each timestamp with the text immediately before it. */
     private fun parseQrcTimedLines(content: String): Pair<List<MetadataLyricsLine>, Boolean> {
