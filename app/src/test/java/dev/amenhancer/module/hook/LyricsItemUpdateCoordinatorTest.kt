@@ -56,11 +56,11 @@ class LyricsItemUpdateCoordinatorTest {
         ready = pointer
         update(coordinator, fragment, "77")
 
-        assertEquals(2, fragment.installs)
+        assertEquals(3, fragment.installs)
     }
 
     @Test
-    fun `an item change without a ready replacement records a ready late miss`() {
+    fun `an item change without a ready replacement clears and records a ready late miss`() {
         val fragment = ItemUpdateFragment()
         var ready: Any? = null
         val pointer = Any()
@@ -72,14 +72,14 @@ class LyricsItemUpdateCoordinatorTest {
         update(coordinator, fragment, "77")
 
         assertNull(fragment.installed)
-        assertEquals(0, fragment.installs)
+        assertEquals(1, fragment.installs)
         assertEquals(1, pending(reapply).size)
 
         ready = pointer
         reapply.onReplacementPublished(77L)
 
         assertSame(pointer, fragment.installed)
-        assertEquals(1, fragment.installs)
+        assertEquals(2, fragment.installs)
     }
 
     @Test
@@ -111,6 +111,32 @@ class LyricsItemUpdateCoordinatorTest {
         update(coordinator, fragment, "42", appleInvokedI2 = true)
         update(coordinator, fragment, "77", appleInvokedI2 = false)
 
+        assertEquals(1, pending(reapply).size)
+    }
+
+    @Test
+    fun `return within identity debounce clears the intermediate lyric session`() {
+        val fragment = ItemUpdateFragment()
+        val intermediateLyrics = Any()
+        val cache = CurrentSongIdentityCache().apply {
+            publish(item("77"), CurrentSongDetails(77L))
+        }
+        val (coordinator, reapply, _) = coordinator(
+            fragment,
+            ready = { null },
+            tracking = { id -> cache.current()?.details?.appleMusicId == id },
+            cache = cache,
+        )
+        cache.addListener { current ->
+            current?.let(reapply::onCurrentSongChanged)
+        }
+
+        update(coordinator, fragment, "42", appleInvokedI2 = true)
+        fragment.installed = intermediateLyrics
+        update(coordinator, fragment, "77", appleInvokedI2 = false)
+
+        assertEquals(1, fragment.installs)
+        assertNull(fragment.installed)
         assertEquals(1, pending(reapply).size)
     }
 
@@ -219,11 +245,11 @@ class LyricsItemUpdateCoordinatorTest {
         ready = pointer
         update(coordinator, fragment, "99")
         assertSame(pointer, fragment.installed)
-        assertEquals(1, fragment.installs)
+        assertEquals(2, fragment.installs)
         assertEquals(0, pending(reapply).size)
 
         reapply.onReplacementPublished(77L)
-        assertEquals(1, fragment.installs)
+        assertEquals(2, fragment.installs)
     }
 
     @Test
@@ -508,7 +534,7 @@ class LyricsItemUpdateCoordinatorTest {
         var attempts: Int = 0
 
         @Suppress("UNUSED_PARAMETER")
-        fun I2(ptr: Any) {
+        fun I2(ptr: Any?) {
             attempts += 1
             if (failOnInstall) throw IllegalStateException("I2 exploded")
             installed = ptr

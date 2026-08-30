@@ -67,11 +67,20 @@ internal class LyricsItemUpdateCoordinator(
                 val appleMusicId = appleMusicId ?: return
                 recordHandled(fragment, appleMusicId)
             }
-            LyricsItemUpdateAction.WAIT_FOR_IDENTITY,
+            LyricsItemUpdateAction.WAIT_FOR_IDENTITY -> {
+                val appleMusicId = appleMusicId ?: return
+                recordHandled(fragment, appleMusicId)
+                readyReapply.recordMiss(fragment, appleMusicId)
+            }
             LyricsItemUpdateAction.RECORD_MISS -> {
                 val appleMusicId = appleMusicId ?: return
                 recordHandled(fragment, appleMusicId)
                 readyReapply.recordMiss(fragment, appleMusicId)
+                try {
+                    installMethod.invoke(fragment, *arrayOf<Any?>(null))
+                } catch (error: Throwable) {
+                    logger("custom lyrics item update clear failed: $error")
+                }
             }
             LyricsItemUpdateAction.REENTER -> {
                 val appleMusicId = appleMusicId ?: return
@@ -163,7 +172,7 @@ internal enum class LyricsItemUpdateAction {
     /** Re-enter the exact I2 path with the ready replacement now. */
     REENTER,
 
-    /** The replacement is still preparing; hand the fragment to the ready-late ledger. */
+    /** Clear the previous rows, then hand the fragment to the ready-late ledger. */
     RECORD_MISS,
 }
 
@@ -173,7 +182,9 @@ internal enum class LyricsItemUpdateAction {
  * same-item metadata updates; an o2 call whose tail already invoked I2 needs
  * no module re-entry; unusable fragments and invalid ids keep the native path
  * untouched. A valid but not-yet-tracked item waits for identity confirmation
- * instead of losing the only fragment transition event.
+ * instead of losing the only fragment transition event. Once the identity is
+ * already tracked, a missing replacement still requires an immediate null I2
+ * commit so an intervening song's lyric rows cannot remain visible.
  */
 internal fun decideLyricsItemUpdate(
     itemChanged: Boolean,
