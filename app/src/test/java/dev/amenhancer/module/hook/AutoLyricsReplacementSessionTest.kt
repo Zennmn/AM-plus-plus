@@ -406,6 +406,84 @@ class AutoLyricsReplacementSessionTest {
     }
 
     @Test
+    fun `unchanged terminal metadata after timeout keeps a failed lyric lookup cooldown`() {
+        val queued = QueuedExecutor()
+        val scheduled = mutableListOf<() -> Unit>()
+        val outcomes = mutableListOf<StableMetadataOutcome>()
+        var metadataFetches = 0
+        val session = session(
+            queued = queued,
+            fetch = { null },
+            fetchMetadata = {
+                metadataFetches += 1
+                null
+            },
+            parse = { null },
+        )
+        val coordinator = StablePlaybackMetadataCoordinator(
+            correctionEnabled = true,
+            schedule = { _, task -> scheduled += task },
+        )
+        coordinator.addListener { metadata ->
+            metadata?.outcome?.let(outcomes::add)
+            session.onStableMetadata(metadata)
+        }
+
+        session.onSongChanged(42L)
+        session.ensureRequested(42L)
+        coordinator.onCurrentSong(
+            CurrentSongDetails(42L, "Song", "Artist", "Album", 180_000L),
+        )
+        scheduled.single().invoke()
+        queued.runAll()
+        assertEquals(1, metadataFetches)
+
+        coordinator.onResolutionFinished(42L, "Song", "Artist", "Album", 180_000L)
+        queued.runAll()
+
+        assertEquals(
+            listOf(StableMetadataOutcome.TIMED_OUT, StableMetadataOutcome.UNCHANGED),
+            outcomes,
+        )
+        assertEquals(1, metadataFetches)
+    }
+
+    @Test
+    fun `corrected terminal metadata after timeout retries a failed lyric lookup`() {
+        val queued = QueuedExecutor()
+        val scheduled = mutableListOf<() -> Unit>()
+        var metadataFetches = 0
+        val session = session(
+            queued = queued,
+            fetch = { null },
+            fetchMetadata = {
+                metadataFetches += 1
+                null
+            },
+            parse = { null },
+        )
+        val coordinator = StablePlaybackMetadataCoordinator(
+            correctionEnabled = true,
+            schedule = { _, task -> scheduled += task },
+        )
+        coordinator.addListener(session::onStableMetadata)
+
+        session.onSongChanged(42L)
+        session.ensureRequested(42L)
+        coordinator.onCurrentSong(
+            CurrentSongDetails(42L, "Romanized", "Artist", "Album", 180_000L),
+        )
+        scheduled.single().invoke()
+        queued.runAll()
+        assertEquals(1, metadataFetches)
+
+        coordinator.onResolutionFinished(42L, "原名", "Artist", "Album", 180_000L)
+        queued.runAll()
+
+        assertEquals(2, metadataFetches)
+    }
+
+    @Test
     fun `file cache persists only Word TTML and reloads it by Adam ID`() {
         val directory = Files.createTempDirectory("ampp-auto-lyrics-test").toFile()
         try {

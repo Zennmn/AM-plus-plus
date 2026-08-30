@@ -364,16 +364,19 @@ internal class AutoLyricsReplacementSession(
     /** Supplies terminal title/artist/album/duration without starting an ineligible lookup. */
     fun onStableMetadata(metadata: StablePlaybackMetadata?) {
         var changed = false
+        var lyricsQueryChanged = false
         val shouldRequest = synchronized(lock) {
             if (metadata == null) {
                 changed = changeActiveSongLocked(null)
                 return@synchronized false
             }
             val requestWasEligible = pendingProvisionalRequestId == metadata.appleMusicId
+            val previousMetadata = stableMetadata
             changed = changeActiveSongLocked(metadata.appleMusicId)
+            lyricsQueryChanged = previousMetadata?.hasSameLyricsQueryPayload(metadata) != true
             stableMetadata = metadata
-            failedUntil.remove(metadata.appleMusicId)
-            requestWasEligible || (!changed &&
+            if (lyricsQueryChanged) failedUntil.remove(metadata.appleMusicId)
+            requestWasEligible || (!changed && lyricsQueryChanged &&
                 metadata.appleMusicId in appleIdSourcesAttempted &&
                     synchronized(pointers) { metadata.appleMusicId !in pointers })
         }
@@ -387,7 +390,8 @@ internal class AutoLyricsReplacementSession(
                 "automatic lyrics stable metadata: id=${metadata.appleMusicId}, " +
                     "outcome=${metadata.outcome}, title=${metadata.title}, " +
                     "artist=${metadata.artist}, duration=${metadata.durationMs}, " +
-                    "confirmedChange=$changed, resume=$shouldRequest",
+                    "confirmedChange=$changed, queryChanged=$lyricsQueryChanged, " +
+                    "resume=$shouldRequest",
             )
         }
         if (shouldRequest) request(metadata!!.appleMusicId)
@@ -661,6 +665,14 @@ internal class AutoLyricsReplacementSession(
     private fun isPrepared(pointer: Any?, appleMusicId: Long): Boolean = runCatching {
         pointer != null && verifyPtr(pointer) && readAdamId(pointer) == appleMusicId
     }.getOrDefault(false)
+
+    private fun StablePlaybackMetadata.hasSameLyricsQueryPayload(
+        other: StablePlaybackMetadata,
+    ): Boolean = appleMusicId == other.appleMusicId &&
+        title == other.title &&
+        artist == other.artist &&
+        album == other.album &&
+        durationMs == other.durationMs
 
     private fun shouldDeferRawSongChangeLocked(appleMusicId: Long?): Boolean =
         fetchMetadataCandidate != null &&
