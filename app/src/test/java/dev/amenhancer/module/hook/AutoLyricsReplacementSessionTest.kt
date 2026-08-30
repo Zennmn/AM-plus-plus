@@ -567,6 +567,48 @@ class AutoLyricsReplacementSessionTest {
     }
 
     @Test
+    fun `metadata change during publication rolls back stale configured lyrics`() {
+        val queued = QueuedExecutor()
+        var persisted: String? = null
+        lateinit var session: AutoLyricsReplacementSession
+        val sessionPublisher = AutoLyricsPublisher { _, candidate ->
+            if (persisted != null) {
+                AutoLyricsPublishResult.ALREADY_CONFIGURED
+            } else {
+                persisted = candidate.ttml
+                session.onStableMetadata(stableMetadata(42L, "Corrected"))
+                AutoLyricsPublishResult.PUBLISHED
+            }
+        }
+        val rollback = AutoLyricsPublisherRollback { _, candidate ->
+            if (persisted == candidate.ttml) {
+                persisted = null
+                true
+            } else {
+                false
+            }
+        }
+        session = session(
+            queued = queued,
+            fetch = { null },
+            fetchMetadata = { metadata ->
+                if (metadata.title == "Raw") AutoLyricsCandidate("raw", STALE_WORD_TTML)
+                else AutoLyricsCandidate("corrected", WORD_TTML)
+            },
+            parse = { Pointer() },
+            publisher = sessionPublisher,
+            publisherRollback = rollback,
+        )
+
+        session.onSongChanged(42L)
+        session.onStableMetadata(stableMetadata(42L, "Raw"))
+        session.ensureRequested(42L)
+        queued.runAll()
+
+        assertEquals(WORD_TTML, persisted)
+    }
+
+    @Test
     fun `corrected metadata does not invalidate an in flight Apple ID source`() {
         val queued = QueuedExecutor()
         val appleIdLookupStarted = CountDownLatch(1)
@@ -624,6 +666,8 @@ class AutoLyricsReplacementSessionTest {
         fetchMetadata: ((StablePlaybackMetadata) -> AutoLyricsCandidate?)? = null,
         parse: (String) -> Any?,
         onPublished: (Long) -> Unit = {},
+        publisher: AutoLyricsPublisher? = null,
+        publisherRollback: AutoLyricsPublisherRollback? = null,
         isAllowed: (Long) -> Boolean = { true },
         nowMs: () -> Long = { System.currentTimeMillis() },
         retryCooldownMs: Long = 30_000L,
@@ -641,6 +685,8 @@ class AutoLyricsReplacementSessionTest {
                 true
             },
             onReplacementPublished = onPublished,
+            publisher = publisher,
+            publisherRollback = publisherRollback,
             isAllowed = isAllowed,
             executor = queued,
             logger = {},

@@ -278,6 +278,43 @@ internal class EmbeddedContentManager(
     fun deleteLyrics(appleMusicId: Long): EmbeddedLyricsMutationResult =
         deleteLyrics(listOf(appleMusicId))
 
+    /** Removes an automatic entry only when its persisted body and metadata still match. */
+    fun removeLyricsIfMatches(
+        appleMusicId: Long,
+        source: String,
+        displayName: String?,
+        ttml: String,
+    ): Boolean = synchronized(mutationLock) {
+        session.withCustomLyricsMutation {
+            val entry = currentLyricsManifest().entries.singleOrNull {
+                it.appleMusicId == appleMusicId
+            } ?: return@withCustomLyricsMutation false
+            val inspected = CustomLyricsFilePolicy.inspect(ttml)
+                as? dev.amenhancer.module.lyrics.CustomLyricsInspection.Accepted
+                ?: return@withCustomLyricsMutation false
+            if (
+                entry.source != source ||
+                entry.displayName != CustomLyricsManifestPolicy.sanitizeDisplayName(
+                    displayName?.takeIf(String::isNotBlank)
+                        ?: "自动缓存歌词 · $appleMusicId",
+                ) ||
+                !entry.sha256.equals(inspected.sha256, ignoreCase = true)
+            ) {
+                return@withCustomLyricsMutation false
+            }
+            val next = CustomLyricsManifest(currentLyricsManifest().entries.filterNot {
+                it.appleMusicId == appleMusicId
+            })
+            when (val result = publishLyrics(next)) {
+                is EmbeddedLyricsMutationResult.Updated -> {
+                    runCatching { session.deleteFile(entry.fileId) }
+                    true
+                }
+                is EmbeddedLyricsMutationResult.Failed -> false
+            }
+        }
+    }
+
     fun backupLyrics(out: OutputStream): CustomLyricsBackupEncodeResult = synchronized(mutationLock) {
         CustomLyricsBackupCodec.encode(currentLyricsManifest(), ::readFile, out)
     }

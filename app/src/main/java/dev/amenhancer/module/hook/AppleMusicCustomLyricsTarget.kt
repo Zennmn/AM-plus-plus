@@ -146,6 +146,7 @@ internal class AppleMusicCustomLyricsTarget(
                     mainHandler.post { readyReapply.onReplacementPublished(appleMusicId) }
                 },
                 publisher = runtime.publisher,
+                publisherRollback = runtime.publisherRollback,
                 isAllowed = { appleMusicId ->
                     appleMusicId !in runtime.suppressedIds &&
                         appleMusicId !in configuredManualIds &&

@@ -3,6 +3,9 @@ package dev.amenhancer.module.lyrics
 import dev.amenhancer.module.hook.LyricHttpResponse
 import dev.amenhancer.module.hook.LyricHttpTransport
 import dev.amenhancer.module.model.CustomLyricsSources
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -261,6 +264,54 @@ class MetadataLyricsSourcesTest {
 
         assertEquals(null, result)
         assertTrue("elapsed=${elapsedMs}ms", elapsedMs < 750L)
+    }
+
+    @Test
+    fun `automatic metadata resolver can retry immediately after an interrupt ignoring worker exits`() {
+        val firstStarted = CountDownLatch(1)
+        val releaseFirst = CountDownLatch(1)
+        var calls = 0
+        val resolver = AutomaticMetadataLyricsResolver(
+            sources = listOf(
+                AutomaticMetadataLyricsSource(
+                    source = MetadataLyricsSource.QQ_MUSIC,
+                    search = {
+                        calls += 1
+                        if (calls == 1) {
+                            firstStarted.countDown()
+                            while (releaseFirst.count == 1L) {
+                                try {
+                                    Thread.sleep(10L)
+                                } catch (_: InterruptedException) {
+                                    // Simulate a transport that ignores cancellation briefly.
+                                }
+                            }
+                            emptyList()
+                        } else {
+                            listOf(candidate(MetadataLyricsSource.QQ_MUSIC, "retry", 100_000L))
+                        }
+                    },
+                    fetch = { englishWordDocument(translated = true) },
+                ),
+            ),
+            budgetMs = 20L,
+        )
+
+        val first = thread(start = true) {
+            resolver.fetch(MetadataLyricsQuery("Song", "Artist", durationMs = 100_000L))
+        }
+        try {
+            assertTrue(firstStarted.await(1L, TimeUnit.SECONDS))
+            assertNotNull(resolver.fetch(MetadataLyricsQuery("Song", "Artist", durationMs = 100_000L)))
+            releaseFirst.countDown()
+            first.join(1_000L)
+        } finally {
+            releaseFirst.countDown()
+            first.join(1_000L)
+        }
+
+        assertTrue("worker did not finish", !first.isAlive)
+        assertEquals(2, calls)
     }
 
     @Test

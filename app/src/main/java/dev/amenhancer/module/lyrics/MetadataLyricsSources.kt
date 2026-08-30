@@ -885,16 +885,6 @@ internal class AutomaticMetadataLyricsResolver(
     private val budgetMs: Long = DEFAULT_BUDGET_MS,
     private val logger: (String) -> Unit = {},
 ) {
-    private val hardDeadlineExecutor = ThreadPoolExecutor(
-        0,
-        1,
-        WORKER_KEEP_ALIVE_SECONDS,
-        TimeUnit.SECONDS,
-        SynchronousQueue(),
-        { runnable -> Thread(runnable, "ampp-metadata-lyrics").apply { isDaemon = true } },
-        ThreadPoolExecutor.AbortPolicy(),
-    )
-
     fun fetch(query: MetadataLyricsQuery): AutomaticMetadataLyricsResult? {
         if (query.title.isBlank() || query.artist.isBlank() || query.durationMs == null || query.durationMs <= 0L) {
             logger(
@@ -903,25 +893,38 @@ internal class AutomaticMetadataLyricsResolver(
             )
             return null
         }
-        val future = runCatching {
-            hardDeadlineExecutor.submit<AutomaticMetadataLyricsResult?> { fetchWithinBudget(query) }
-        }.getOrElse {
-            logger("metadata automatic lyrics worker unavailable")
-            return null
-        }
+        val executor = ThreadPoolExecutor(
+            0,
+            1,
+            WORKER_KEEP_ALIVE_SECONDS,
+            TimeUnit.SECONDS,
+            SynchronousQueue(),
+            { runnable -> Thread(runnable, "ampp-metadata-lyrics").apply { isDaemon = true } },
+            ThreadPoolExecutor.AbortPolicy(),
+        )
         return try {
-            future.get(budgetMs.coerceAtLeast(1L), TimeUnit.MILLISECONDS)
-        } catch (_: TimeoutException) {
-            future.cancel(true)
-            logger("metadata automatic lyrics hard deadline expired after ${budgetMs}ms")
-            null
-        } catch (_: InterruptedException) {
-            future.cancel(true)
-            Thread.currentThread().interrupt()
-            null
-        } catch (_: Exception) {
-            future.cancel(true)
-            null
+            val future = runCatching {
+                executor.submit<AutomaticMetadataLyricsResult?> { fetchWithinBudget(query) }
+            }.getOrElse {
+                logger("metadata automatic lyrics worker unavailable")
+                return null
+            }
+            try {
+                future.get(budgetMs.coerceAtLeast(1L), TimeUnit.MILLISECONDS)
+            } catch (_: TimeoutException) {
+                future.cancel(true)
+                logger("metadata automatic lyrics hard deadline expired after ${budgetMs}ms")
+                null
+            } catch (_: InterruptedException) {
+                future.cancel(true)
+                Thread.currentThread().interrupt()
+                null
+            } catch (_: Exception) {
+                future.cancel(true)
+                null
+            }
+        } finally {
+            executor.shutdownNow()
         }
     }
 

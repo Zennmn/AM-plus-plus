@@ -133,6 +133,41 @@ class EmbeddedContentManagerTest {
     }
 
     @Test
+    fun `automatic publication rollback removes only an unchanged matching entry`() {
+        val storage = MemoryStorage()
+        val manager = EmbeddedContentManager(
+            session = EmbeddedConfigurationSession(storage),
+            fileIdFactory = sequenceFileIds("lyrics_rollback"),
+        )
+        val body = ttml("automatic")
+        val saved = manager.addLyrics(
+            appleMusicId = 707L,
+            displayName = "Automatic",
+            ttml = body,
+            source = CustomLyricsSources.QQ_MUSIC,
+        ) as CustomLyricsSaveResult.Saved
+
+        assertFalse(
+            manager.removeLyricsIfMatches(
+                appleMusicId = 707L,
+                source = CustomLyricsSources.QQ_MUSIC,
+                displayName = "Automatic",
+                ttml = ttml("changed"),
+            ),
+        )
+        assertTrue(
+            manager.removeLyricsIfMatches(
+                appleMusicId = 707L,
+                source = CustomLyricsSources.QQ_MUSIC,
+                displayName = "Automatic",
+                ttml = body,
+            ),
+        )
+        assertTrue(manager.listLyrics().none { it.appleMusicId == 707L })
+        assertFalse(storage.files.containsKey(saved.entry.fileId))
+    }
+
+    @Test
     fun `multi id lyric save enable and delete are one host transaction`() {
         val storage = MemoryStorage()
         val manager = EmbeddedContentManager(

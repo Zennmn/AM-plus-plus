@@ -56,6 +56,11 @@ internal fun interface AutoLyricsPublisher {
     fun publish(appleMusicId: Long, candidate: AutoLyricsCandidate): AutoLyricsPublishResult
 }
 
+/** Best-effort compare-and-delete for a publication superseded by metadata. */
+internal fun interface AutoLyricsPublisherRollback {
+    fun rollback(appleMusicId: Long, candidate: AutoLyricsCandidate): Boolean
+}
+
 /** No-op cache used when a target adapter cannot provide host-private storage. */
 internal object DisabledAutoLyricsCache : AutoLyricsCache {
     override fun read(appleMusicId: Long): String? = null
@@ -69,6 +74,7 @@ internal data class AutoLyricsRuntime(
     val cache: AutoLyricsCache,
     val executor: Executor,
     val publisher: AutoLyricsPublisher? = null,
+    val publisherRollback: AutoLyricsPublisherRollback? = null,
     val suppressedIds: Set<Long> = emptySet(),
 )
 
@@ -150,6 +156,14 @@ internal fun createAutoLyricsRuntime(
             }
         }
     }
+    val publisherRollback = AutoLyricsPublisherRollback { appleMusicId, candidate ->
+        configuredContent.removeLyricsIfMatches(
+            appleMusicId = appleMusicId,
+            source = candidate.source,
+            displayName = candidate.displayName,
+            ttml = candidate.ttml,
+        )
+    }
     val executor = ThreadPoolExecutor(
         1,
         1,
@@ -189,6 +203,7 @@ internal fun createAutoLyricsRuntime(
         cache = cache,
         executor = executor,
         publisher = publisher,
+        publisherRollback = publisherRollback,
         suppressedIds = suppressedIds,
     )
 }
@@ -316,6 +331,7 @@ internal class AutoLyricsReplacementSession(
     private val bindAdamId: (Any, Long) -> Boolean,
     private val onReplacementPublished: ((Long) -> Unit)? = null,
     private val publisher: AutoLyricsPublisher? = null,
+    private val publisherRollback: AutoLyricsPublisherRollback? = null,
     private val isAllowed: (Long) -> Boolean = { true },
     private val executor: Executor,
     private val logger: (String) -> Unit,
@@ -633,6 +649,11 @@ internal class AutoLyricsReplacementSession(
             } ?: isCurrentRequest(appleMusicId, requestGeneration)
             if (!candidateStillCurrent) {
                 if (preparedMetadataToken != null) metadataSuperseded = true
+                if (publishResult == AutoLyricsPublishResult.PUBLISHED && preparedCandidate != null) {
+                    runCatching {
+                        publisherRollback?.rollback(appleMusicId, preparedCandidate!!)
+                    }
+                }
                 removePointerIf(appleMusicId, preparedPointer)
                 if (metadataCacheWritten) runCatching { cache.delete(appleMusicId) }
                 return
@@ -658,6 +679,11 @@ internal class AutoLyricsReplacementSession(
                         }
                     } else {
                         if (preparedMetadataToken != null) metadataSuperseded = true
+                        if (publishResult == AutoLyricsPublishResult.PUBLISHED && preparedCandidate != null) {
+                            runCatching {
+                                publisherRollback?.rollback(appleMusicId, preparedCandidate!!)
+                            }
+                        }
                         removePointerIf(appleMusicId, preparedPointer)
                     }
                 }
