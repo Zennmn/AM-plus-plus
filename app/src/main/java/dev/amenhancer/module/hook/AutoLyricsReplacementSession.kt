@@ -27,6 +27,8 @@ import java.util.concurrent.TimeUnit
 import org.json.JSONArray
 
 private const val AUTO_CACHE_DIRECTORY = "ampp-auto-lyrics"
+/** Leave a small margin before the resolver's four-second lookup budget. */
+private const val AUTO_LYRICS_HTTP_DEADLINE_MS = 3_500
 
 /** A validated candidate returned by one of the automatic lyric sources. */
 internal data class AutoLyricsCandidate(
@@ -79,11 +81,13 @@ internal fun createAutoLyricsRuntime(
     val lyricTransport = HttpLyricTransport(
         connectTimeoutMs = 4_000,
         readTimeoutMs = 8_000,
+        requestDeadlineMs = AUTO_LYRICS_HTTP_DEADLINE_MS,
         maxResponseBytes = TtmlInputPolicy.MAX_TTML_BYTES,
     )
     val indexTransport = HttpLyricTransport(
         connectTimeoutMs = 4_000,
         readTimeoutMs = 8_000,
+        requestDeadlineMs = AUTO_LYRICS_HTTP_DEADLINE_MS,
         maxResponseBytes = LunabeatClient.INDEX_MAX_BYTES,
     )
     val lunabeat = LunabeatClient(

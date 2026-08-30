@@ -4,9 +4,8 @@ import dev.amenhancer.module.lyrics.TtmlInputPolicy
 import dev.amenhancer.module.lyrics.AmllTtmlFormatConverter
 import dev.amenhancer.module.model.CustomLyricsSources
 import java.net.URLEncoder
+import java.util.concurrent.Executors
 import java.util.concurrent.Future
-import java.util.concurrent.SynchronousQueue
-import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import org.json.JSONArray
@@ -40,26 +39,11 @@ internal class AutoLyricsSourceResolver(
     private val sources: List<AutoLyricsSource>,
     private val parallelBudgetMs: Long? = null,
 ) {
-    private val sourceExecutor = parallelBudgetMs
-        ?.takeIf { it > 0L && sources.isNotEmpty() }
-        ?.let {
-            ThreadPoolExecutor(
-                0,
-                sources.size.coerceAtLeast(1),
-                SOURCE_WORKER_KEEP_ALIVE_SECONDS,
-                TimeUnit.SECONDS,
-                SynchronousQueue(),
-                { runnable -> Thread(runnable, "ampp-auto-lyrics-source").apply { isDaemon = true } },
-                ThreadPoolExecutor.AbortPolicy(),
-            )
-        }
-
     fun fetch(appleMusicId: Long): AutoLyricsCandidate? {
         if (appleMusicId <= 0L) return null
-        val executor = sourceExecutor
         val budgetMs = parallelBudgetMs
-        if (executor != null && budgetMs != null) {
-            return fetchInParallel(appleMusicId, executor, budgetMs)
+        if (budgetMs != null && budgetMs > 0L && sources.isNotEmpty()) {
+            return fetchInParallel(appleMusicId, budgetMs)
         }
         sources.forEach { source ->
             fetchValidated(source, appleMusicId)?.let { return it }
@@ -69,17 +53,22 @@ internal class AutoLyricsSourceResolver(
 
     private fun fetchInParallel(
         appleMusicId: Long,
-        executor: ThreadPoolExecutor,
         budgetMs: Long,
     ): AutoLyricsCandidate? {
-        val futures = sources.mapNotNull { source ->
-            runCatching {
-                executor.submit<AutoLyricsCandidate?> { fetchValidated(source, appleMusicId) }
-            }.getOrNull()
+        // The executor belongs to this lookup only. A source that ignores
+        // Future.cancel(true) may outlive the budget, but it can no longer
+        // consume the workers needed by the next song's lookup.
+        val executor = Executors.newFixedThreadPool(sources.size.coerceAtLeast(1)) { runnable ->
+            Thread(runnable, "ampp-auto-lyrics-source").apply { isDaemon = true }
         }
-        if (futures.isEmpty()) return null
+        val futures = mutableListOf<Future<AutoLyricsCandidate?>>()
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMs)
         try {
+            sources.forEach { source ->
+                futures += executor.submit<AutoLyricsCandidate?> {
+                    fetchValidated(source, appleMusicId)
+                }
+            }
             futures.forEach { future ->
                 val remainingNanos = deadline - System.nanoTime()
                 if (remainingNanos <= 0L) return@forEach
@@ -96,6 +85,10 @@ internal class AutoLyricsSourceResolver(
             futures.forEach { future ->
                 if (!future.isDone) future.cancel(true)
             }
+            // Do not keep an idle pool alive between songs. Running source
+            // calls are interrupted; if a transport ignores interruption,
+            // its daemon thread remains isolated from future lookups.
+            executor.shutdownNow()
         }
     }
 
@@ -132,7 +125,6 @@ internal class AutoLyricsSourceResolver(
         )
 
         private const val APPLE_ID_SOURCE_BUDGET_MS = 4_000L
-        private const val SOURCE_WORKER_KEEP_ALIVE_SECONDS = 15L
     }
 }
 
