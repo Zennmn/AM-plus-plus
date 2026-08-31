@@ -80,7 +80,7 @@ private object RightLyricsPaneLayout {
     private const val CONTROLS_TAP_TARGET = "controls_tap_target"
     private const val ALPHA_GRADIENT_FRAME_LAYOUT =
         "com.apple.android.music.common.views.AlphaGradientFrameLayout"
-    private const val TOP_EDGE_FRACTION = 0.30f
+    private const val TOP_EDGE_FRACTION = 0.15f
     private const val TOP_CLEAR_FRACTION = 0.075f
     private const val TOP_CLEAR_WITHIN_FADE_FRACTION = 0.25f
     private const val BOTTOM_EDGE_FRACTION = 0.15f
@@ -158,6 +158,22 @@ private object RightLyricsPaneLayout {
                 ?: error("AlphaGradientFrameLayout.e was unavailable")
             topFadeColorsField.set(gradients, topFadeColors)
             topFadePositionsField.set(gradients, topFadePositions)
+            val bottomFadeColors = intArrayOf(
+                Color.BLACK,
+                Color.TRANSPARENT,
+                Color.TRANSPARENT,
+            )
+            val bottomFadePositions = floatArrayOf(
+                0f,
+                1f - TOP_CLEAR_WITHIN_FADE_FRACTION,
+                1f,
+            )
+            val bottomFadeColorsField = findField(gradients.javaClass, "b")
+                ?: error("AlphaGradientFrameLayout.b was unavailable")
+            val bottomFadePositionsField = findField(gradients.javaClass, "f")
+                ?: error("AlphaGradientFrameLayout.f was unavailable")
+            bottomFadeColorsField.set(gradients, bottomFadeColors)
+            bottomFadePositionsField.set(gradients, bottomFadePositions)
             val topEdgeSize = (gradients.height * TOP_EDGE_FRACTION)
                 .roundToInt()
                 .coerceAtLeast(1)
@@ -479,7 +495,8 @@ internal class AppleMusicDualPaneTarget(
             return TargetCapabilityInstall.Degraded(
                 "Installed controller=$controllerHooks navigationMeasure=$navigationMenuMeasureHooks " +
                     "chrome=$chromeHooks lyricsChrome=$lyricsChromeHooks " +
-                    "lyricsMetrics=$lyricsMetricsHooks lyricsTypography=$lyricsTypographyHooks " +
+                    "lyricsMetrics=$lyricsMetricsHooks " +
+                    "lyricsTypography=$lyricsTypographyHooks " +
                     "staticIntercept=$staticInterceptStatus hook(s)" +
                     failureSummary,
             )
@@ -1154,6 +1171,8 @@ private object ConstraintLayoutPane {
     private const val PLAYER_CONTAINER = "player_container"
     private const val PLAYER_SHEET_CONTAINER = "player_sheet_container"
     private const val PLAYER_CONTAINER_ELEVATION = "player_container_elevation"
+    private const val ARTWORK_CONTAINER = "artwork_container"
+    private const val METADATA_BARRIER_TOP = "metadata_barrier_top"
     private const val PLAYER_ROOT = "player_root"
     private const val PLAYER_FRAGMENTS_HOST = "player_fragments_host"
     private const val PARENT_ID = 0
@@ -1349,7 +1368,97 @@ private object ConstraintLayoutPane {
             },
         )
 
-        return DualPaneState(root, playerHost, lyricsHost)
+        val state = DualPaneState(root, playerHost, lyricsHost)
+        installTabletArtworkLayout(playerRoot, playerHost)
+        return state
+    }
+
+    /**
+     * Keep Apple's native cover size, but center it in the vertical interval
+     * from the left pane top to Apple's metadata barrier (the title row).
+     */
+    private fun installTabletArtworkLayout(
+        playerRoot: ViewGroup,
+        playerHost: View,
+    ) {
+        val artworkId = playerRoot.resources.getIdentifier(
+            ARTWORK_CONTAINER,
+            "id",
+            ModuleConstants.TARGET_PACKAGE,
+        )
+        if (artworkId == 0) return
+        val barrierId = playerRoot.resources.getIdentifier(
+            METADATA_BARRIER_TOP,
+            "id",
+            ModuleConstants.TARGET_PACKAGE,
+        )
+        if (barrierId == 0) return
+        val nativeSizeByArtwork = WeakHashMap<View, Int>()
+        fun apply() {
+            if (!TabletModeQualifier.isEligible(playerRoot.context)) return
+            val artwork = playerHost.findViewById<View>(artworkId) ?: return
+            val barrier = playerHost.findViewById<View>(barrierId) ?: return
+            val parent = artwork.parent as? ViewGroup ?: return
+            if (parent.width <= 0 || parent.height <= 0 || artwork.width <= 0) return
+            val nativeSizePx = nativeSizeByArtwork[artwork]
+                ?: artwork.width.takeIf { it > 0 }?.also { nativeSizeByArtwork[artwork] = it }
+                ?: return
+            val hostLocation = IntArray(2)
+            val windowRootLocation = IntArray(2)
+            val artworkLocation = IntArray(2)
+            val barrierLocation = IntArray(2)
+            playerHost.getLocationInWindow(hostLocation)
+            playerRoot.rootView.getLocationInWindow(windowRootLocation)
+            artwork.getLocationInWindow(artworkLocation)
+            barrier.getLocationInWindow(barrierLocation)
+            val statusBarInsetTopPx = playerRoot.rootWindowInsets?.systemWindowInsetTop
+                ?: playerRoot.resources.getIdentifier("status_bar_height", "dimen", "android")
+                    .takeIf { it != 0 }
+                    ?.let(playerRoot.resources::getDimensionPixelSize)
+                ?: 0
+            val intervalTopPx = maxOf(
+                hostLocation[1],
+                windowRootLocation[1] + statusBarInsetTopPx,
+            )
+            val availableHeightPx = (barrierLocation[1] - intervalTopPx).toFloat()
+            val layout = TabletArtworkLayoutPolicy.resolve(
+                availableHeightPx = availableHeightPx,
+                nativeSizePx = nativeSizePx.toFloat(),
+            ) ?: return
+            val params = artwork.layoutParams as? ViewGroup.MarginLayoutParams ?: return
+            if (constraintField(params.javaClass, "startToStart") == null) return
+            val sizePx = (layout.sizePx + 0.5f).toInt().coerceAtLeast(1)
+            val desiredArtworkTopPx = intervalTopPx + layout.edgeGapPx
+            val artworkDeltaPx = desiredArtworkTopPx - artworkLocation[1]
+            if (kotlin.math.abs(artworkDeltaPx) > 0.5f) {
+                artwork.translationY += artworkDeltaPx
+            }
+            val alreadyApplied =
+                params.width == sizePx &&
+                    params.height == sizePx &&
+                    params.topMargin == 0 &&
+                    params.bottomMargin == 0 &&
+                    constraintField(params.javaClass, "topToTop")?.getInt(params) == PARENT_ID &&
+                    constraintField(params.javaClass, "topToBottom")?.getInt(params) == -1
+            if (alreadyApplied) return
+            params.width = sizePx
+            params.height = sizePx
+            params.topMargin = 0
+            params.bottomMargin = 0
+            params.setObject("dimensionRatio", null)
+            params.setInt("topToTop", PARENT_ID)
+            params.setInt("topToBottom", -1)
+            artwork.layoutParams = params
+            artwork.requestLayout()
+        }
+        val listener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> apply() }
+        playerRoot.addOnLayoutChangeListener(listener)
+        (playerHost.parent as? View)
+            ?.takeUnless { it === playerRoot }
+            ?.addOnLayoutChangeListener(listener)
+        playerHost.addOnLayoutChangeListener(listener)
+        playerRoot.post { apply() }
+        playerHost.post { apply() }
     }
 
     private fun configureTabsFrame(

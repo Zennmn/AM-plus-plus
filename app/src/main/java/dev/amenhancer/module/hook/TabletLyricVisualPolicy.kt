@@ -28,10 +28,7 @@ internal object TabletLyricVisualPolicy {
         scaledDensity: Float,
     ): Float {
         if (scaledDensity <= 0f) return MIN_FONT_PX
-        val targetPx = max(
-            max(viewportHeightPx * FONT_HEIGHT_FRACTION, viewportWidthPx * FONT_WIDTH_FRACTION),
-            MIN_FONT_PX,
-        )
+        val targetPx = textSizePx(viewportWidthPx, viewportHeightPx)
         return targetPx / scaledDensity
     }
 
@@ -41,4 +38,8 @@ internal object TabletLyricVisualPolicy {
         isHighlighted: Boolean = false,
     ): Float = if (isHighlighted) 0f else max(focusBlurRadius, edgeBlurRadius)
     private const val EDGE_MAX_BLUR_PX = 5f
+    private fun textSizePx(viewportWidthPx: Float, viewportHeightPx: Float): Float = max(
+        max(viewportHeightPx * FONT_HEIGHT_FRACTION, viewportWidthPx * FONT_WIDTH_FRACTION),
+        MIN_FONT_PX,
+    )
 }
