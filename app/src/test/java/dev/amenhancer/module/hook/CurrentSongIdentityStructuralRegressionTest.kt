@@ -96,22 +96,21 @@ class CurrentSongIdentityStructuralRegressionTest {
     }
 
     @Test
-    fun `embedded settings shares the in-process cache without a manifest permission`() {
+    fun `embedded settings shares the in-process cache without a broadcast bridge`() {
         val target = projectFile(
             "app/src/main/java/dev/amenhancer/module/hook/AppleMusicCurrentSongIdentityTarget.kt",
         )
-        val protocol = projectFile(
-            "app/src/main/java/dev/amenhancer/module/CurrentSongIdentityProtocol.kt",
+        val details = projectFile(
+            "app/src/main/java/dev/amenhancer/module/CurrentSongDetails.kt",
         )
         val manifest = projectFile("app/src/main/AndroidManifest.xml")
         val entry = projectFile("app/src/main/java/dev/amenhancer/module/hook/HookEntry.kt")
 
-        assertTrue(target.contains("CurrentSongIdentityRequestResponder"))
-        assertTrue(target.contains("registerRequestResponder: Boolean = true"))
         assertTrue(entry.contains("currentSong = { currentSong.current()?.details }"))
         assertTrue(entry.contains("EmbeddedRuntimeSettingsController"))
-        assertTrue(protocol.contains("EXTRA_SONG_TITLE"))
-        assertTrue(protocol.contains("EXTRA_SONG_ARTIST"))
+        assertTrue(details.contains("data class CurrentSongDetails"))
+        assertFalse(target.contains("BroadcastReceiver"))
+        assertFalse(target.contains("registerRequestResponder"))
         assertFalse(manifest.contains("android:protectionLevel=\"signature\""))
         assertFalse(manifest.contains("permission.REQUEST_CURRENT_SONG_ID"))
     }

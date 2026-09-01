@@ -13,6 +13,8 @@ data class ModuleSettings(
     val cjkKaraokeAnimationEnabled: Boolean = true,
     val navigationCompensationEnabled: Boolean = false,
     val lyricBlurRadiusOffsetPx: Int = 0,
+    /** Fixed logical density for Apple Music; 0 follows the system density. */
+    val appleMusicDpiOverrideDpi: Int = FOLLOW_SYSTEM_APPLE_MUSIC_DPI,
     val titleCorrectionEnabled: Boolean = false,
     /** Selected metadata profile; ignored while [titleCorrectionEnabled] is false. */
     val titleCorrectionMode: TitleCorrectionMode = TitleCorrectionMode.ORIGINAL_HYPER,
@@ -26,6 +28,15 @@ data class ModuleSettings(
     companion object {
         const val MIN_LYRIC_BLUR_RADIUS_OFFSET_PX = -10
         const val MAX_LYRIC_BLUR_RADIUS_OFFSET_PX = 10
+        const val FOLLOW_SYSTEM_APPLE_MUSIC_DPI = 0
+        const val MIN_APPLE_MUSIC_DPI = 160
+        const val MAX_APPLE_MUSIC_DPI = 640
+
+        fun isValidAppleMusicDpi(value: Int): Boolean =
+            value == FOLLOW_SYSTEM_APPLE_MUSIC_DPI || value in MIN_APPLE_MUSIC_DPI..MAX_APPLE_MUSIC_DPI
+
+        fun normalizeAppleMusicDpi(value: Int): Int =
+            value.takeIf(::isValidAppleMusicDpi) ?: FOLLOW_SYSTEM_APPLE_MUSIC_DPI
     }
 }
 

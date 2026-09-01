@@ -12,7 +12,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Guards ConfigStore.saveSettings' write contract: an ordinary runtime write
+ * Guards the ordinary runtime settings write contract: an ordinary write
  * must never carry a remote-file manifest key, so a stale ModuleSettings
  * cannot overwrite a manifest committed by a file transaction afterwards.
  */
@@ -108,6 +108,7 @@ class OrdinarySettingsWritePolicyTest {
                 "cjk_karaoke_animation_enabled" to true,
                 "navigation_compensation_enabled" to false,
                 "lyric_blur_radius_offset_px" to 6,
+                "apple_music_dpi_override_dpi" to 0,
                 "title_correction_enabled" to false,
                 "title_correction_mode" to "original_hyper",
                 "custom_lyrics_enabled" to false,

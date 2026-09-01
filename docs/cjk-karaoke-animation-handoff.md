@@ -19,7 +19,7 @@
    - `com.apple.android.music.utils.I0$a.a(CharSequence, Set)`
 2. AM++ 不接管 Apple 的 duration/length 触发条件。`z.a0` 前只读取当前 `z$a.G/H -> e` 的 grouping metadata：`e.f`（累计 duration）、`e.g`（累计字符数）、`e.c`（词文本）和 `e.k`（拆分 binding）。只有规范化后恰好一个 CJK Unicode 字符、`e.f` 等于当前 native duration、`e.g == 1` 且没有多 binding 时，才临时放开 `k0/j0`；合并词保留 Apple 原始分类，不会进入长辉光分支。
 3. 放行仍限定在 `z.a0` 的线程局部调用范围内，不会全局修改 Apple 的静态字符集合，也不会改变 `g0` 的原始 CJK 排版路径。
-4. 设置页和嵌入式设置页都有独立开关：
+4. Apple Music 内嵌设置页提供独立开关：
    - key：`cjk_karaoke_animation_enabled`
    - 字段：`ModuleSettings.cjkKaraokeAnimationEnabled`
    - 默认值：`true`
@@ -33,7 +33,7 @@
 - 版本符号：`app/src/main/java/dev/amenhancer/module/hook/TargetSymbols.kt`
 - Feature 注册：`app/src/main/java/dev/amenhancer/module/hook/FeatureInstallation.kt`
 - 设置模型/schema：`app/src/main/java/dev/amenhancer/module/model/ModuleModels.kt`、`app/src/main/java/dev/amenhancer/module/config/ModuleSettingsSchema.kt`
-- 设置 UI：`app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt`、`app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsHost.kt`
+- 设置 UI：`app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsHost.kt`
 
 ## 已知边界
 

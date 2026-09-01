@@ -33,6 +33,9 @@ internal object ModuleSettingsSchema {
                 ModuleSettings.MIN_LYRIC_BLUR_RADIUS_OFFSET_PX,
                 ModuleSettings.MAX_LYRIC_BLUR_RADIUS_OFFSET_PX,
             ) ?: 0,
+        appleMusicDpiOverrideDpi = ModuleSettings.normalizeAppleMusicDpi(
+            values.number(KEY_APPLE_MUSIC_DPI_OVERRIDE_DPI) ?: ModuleSettings.FOLLOW_SYSTEM_APPLE_MUSIC_DPI,
+        ),
         titleCorrectionEnabled = values.boolean(
             KEY_TITLE_CORRECTION_ENABLED,
             default = false,
@@ -71,6 +74,9 @@ internal object ModuleSettingsSchema {
             KEY_LYRIC_BLUR_RADIUS_OFFSET to settings.lyricBlurRadiusOffsetPx.coerceIn(
                 ModuleSettings.MIN_LYRIC_BLUR_RADIUS_OFFSET_PX,
                 ModuleSettings.MAX_LYRIC_BLUR_RADIUS_OFFSET_PX,
+            ),
+            KEY_APPLE_MUSIC_DPI_OVERRIDE_DPI to ModuleSettings.normalizeAppleMusicDpi(
+                settings.appleMusicDpiOverrideDpi,
             ),
             KEY_TITLE_CORRECTION_ENABLED to settings.titleCorrectionEnabled,
             KEY_TITLE_CORRECTION_MODE to settings.titleCorrectionMode.storageValue,
@@ -222,6 +228,7 @@ internal object ModuleSettingsSchema {
         KEY_CJK_KARAOKE_ANIMATION_ENABLED,
         KEY_NAVIGATION_COMPENSATION,
         KEY_LYRIC_BLUR_RADIUS_OFFSET,
+        KEY_APPLE_MUSIC_DPI_OVERRIDE_DPI,
         KEY_TITLE_CORRECTION_ENABLED,
         KEY_TITLE_CORRECTION_MODE,
         KEY_TITLE_CORRECTION_TARGET_LANGUAGE,
@@ -251,6 +258,7 @@ internal object ModuleSettingsSchema {
     private const val KEY_CJK_KARAOKE_ANIMATION_ENABLED = "cjk_karaoke_animation_enabled"
     private const val KEY_NAVIGATION_COMPENSATION = "navigation_compensation_enabled"
     private const val KEY_LYRIC_BLUR_RADIUS_OFFSET = "lyric_blur_radius_offset_px"
+    private const val KEY_APPLE_MUSIC_DPI_OVERRIDE_DPI = "apple_music_dpi_override_dpi"
     private const val KEY_TITLE_CORRECTION_ENABLED = "title_correction_enabled"
     private const val KEY_TITLE_CORRECTION_MODE = "title_correction_mode"
     private const val KEY_TITLE_CORRECTION_TARGET_LANGUAGE = "title_correction_target_language"

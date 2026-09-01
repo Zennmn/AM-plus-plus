@@ -302,16 +302,11 @@ class HleMetadataIntegrationStructuralTest {
     }
 
     @Test
-    fun `settings expose profile selector without restoring refresh action`() {
-        val standalone = source("app/src/main/java/dev/amenhancer/module/ui/SettingsActivity.kt")
+    fun `embedded settings expose profile selector without restoring refresh action`() {
         val embedded = source("app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsHost.kt")
-        assertTrue(standalone.contains("歌曲名显示修正"))
         assertTrue(embedded.contains("歌曲名显示修正"))
-        assertTrue(standalone.contains("歌曲名修正模式"))
         assertTrue(embedded.contains("歌曲名修正模式"))
-        assertTrue(standalone.contains("titleCorrectionMode"))
         assertTrue(embedded.contains("titleCorrectionMode"))
-        assertFalse(standalone.contains("刷新资料库"))
         assertFalse(embedded.contains("刷新资料库"))
     }
 

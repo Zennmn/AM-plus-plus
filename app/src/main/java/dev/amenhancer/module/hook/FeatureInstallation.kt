@@ -52,7 +52,6 @@ internal object FeatureInstallation {
                     classLoader = targetClassLoader,
                     lyricsTypefaceSession = lyricsTypefaceSession,
                     currentSong = currentSong,
-                    registerCurrentSongResponder = false,
                 ),
             )
         }
@@ -283,6 +282,10 @@ private fun productionFeatureInstallationModule(
             FeatureInstallationPlan(feature = CurrentSongIdentityFeature()),
             FeatureInstallationPlan(feature = TitleCorrectionFeature()),
             FeatureInstallationPlan(feature = CustomLyricsFeature()),
+            // The actual resource hook is installed during the Application
+            // before-hook; this plan records its final health alongside the
+            // regular post-Application features.
+            FeatureInstallationPlan(feature = AppleMusicDpiOverrideFeature()),
         ),
         installLayoutInflationHooks = LayoutInflationRegistry::install,
         registerApplicationCreated = { config, targetClassLoader, onCreated ->
