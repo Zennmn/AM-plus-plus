@@ -24,8 +24,23 @@ class AppleMusicDpiOverrideStructuralTest {
         assertTrue(runtime.contains("Resources::class.java.getDeclaredMethod"))
         assertTrue(runtime.contains("registerActivityLifecycleCallbacks(this)"))
         assertTrue(runtime.contains("registerComponentCallbacks(this)"))
+        assertTrue(runtime.contains("activityOnConfigurationChanged"))
+        assertTrue(runtime.contains("Activity::class.java.getDeclaredMethod"))
         assertTrue(runtime.contains("onActivityPreCreated"))
         assertTrue(runtime.contains("resources === Resources.getSystem()"))
+    }
+
+    @Test
+    fun `failed installation deactivates already registered seams`() {
+        val runtime = source("app/src/main/java/dev/amenhancer/module/hook/AppleMusicDpiOverride.kt")
+
+        assertTrue(runtime.contains("runtimeEnabled"))
+        assertTrue(runtime.contains("if (!runtimeEnabled.get()) return"))
+        assertTrue(runtime.contains("deactivateAfterInstallFailure(application)"))
+        assertTrue(runtime.contains("targetDpi = AppleMusicDpiOverridePolicy.FOLLOW_SYSTEM_DPI"))
+        assertTrue(runtime.contains("unregisterActivityLifecycleCallbacks(this)"))
+        assertTrue(runtime.contains("unregisterComponentCallbacks(this)"))
+        assertTrue(runtime.contains("message = \"DPI 覆盖安装失败，已停用覆盖\""))
     }
 
     @Test

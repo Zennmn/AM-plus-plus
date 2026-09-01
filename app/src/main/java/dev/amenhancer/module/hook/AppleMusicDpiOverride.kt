@@ -155,6 +155,11 @@ internal object AppleMusicDpiOverrideRuntime : Application.ActivityLifecycleCall
     ComponentCallbacks {
     private val installationAttempted = AtomicBoolean(false)
     private val resourceHookInstalled = AtomicBoolean(false)
+    // Hooks registered through libxposed cannot be reliably removed.  Keep a
+    // separate activation gate so a partially failed install becomes inert.
+    private val runtimeEnabled = AtomicBoolean(false)
+    private val activityCallbacksRegistered = AtomicBoolean(false)
+    private val componentCallbacksRegistered = AtomicBoolean(false)
     private val trackedResources = Collections.synchronizedMap(WeakHashMap<Resources, Boolean>())
     private val reentrancy = ThreadLocal<Boolean>()
 
@@ -176,6 +181,7 @@ internal object AppleMusicDpiOverrideRuntime : Application.ActivityLifecycleCall
         if (!installationAttempted.compareAndSet(false, true)) return status
 
         val normalized = AppleMusicDpiOverridePolicy.normalizeDpi(configuredDpi)
+        runtimeEnabled.set(false)
         targetDpi = normalized
         applicationReference = WeakReference(application)
 
@@ -200,8 +206,15 @@ internal object AppleMusicDpiOverrideRuntime : Application.ActivityLifecycleCall
         return runCatching {
             installResourceHook()
             application.registerActivityLifecycleCallbacks(this)
+            activityCallbacksRegistered.set(true)
             application.registerComponentCallbacks(this)
-            applyToResources(application.resources)
+            componentCallbacksRegistered.set(true)
+            if (!applyToResources(application.resources, allowInactive = true)) {
+                error("initial Apple Music DPI resource update failed")
+            }
+            // Do not expose the hooks to later callbacks until every
+            // registration and the initial resource update has succeeded.
+            runtimeEnabled.set(true)
             status = AppleMusicDpiOverrideStatus(
                 state = AppleMusicDpiOverrideState.ACTIVE,
                 targetDpi = normalized,
@@ -210,13 +223,47 @@ internal object AppleMusicDpiOverrideRuntime : Application.ActivityLifecycleCall
             ModernXposedRuntime.log("Apple Music DPI override active: $normalized")
             status
         }.getOrElse { error ->
+            deactivateAfterInstallFailure(application)
             status = AppleMusicDpiOverrideStatus(
                 state = AppleMusicDpiOverrideState.DEGRADED,
-                targetDpi = normalized,
-                message = "DPI 覆盖安装失败，已保持原始资源",
+                targetDpi = AppleMusicDpiOverridePolicy.FOLLOW_SYSTEM_DPI,
+                message = "DPI 覆盖安装失败，已停用覆盖",
             )
             ModernXposedRuntime.log("Apple Music DPI override failed open", error)
             status
+        }
+    }
+
+    /**
+     * Make all hooks/callbacks inert after an install failure.  Modern Xposed
+     * does not expose an unhook handle here, so deactivation must be explicit
+     * and happen before the failure status is published.
+     */
+    private fun deactivateAfterInstallFailure(application: Application) {
+        runtimeEnabled.set(false)
+        targetDpi = AppleMusicDpiOverridePolicy.FOLLOW_SYSTEM_DPI
+        applicationReference = null
+        synchronized(trackedResources) {
+            trackedResources.clear()
+        }
+
+        if (componentCallbacksRegistered.compareAndSet(true, false)) {
+            runCatching { application.unregisterComponentCallbacks(this) }
+                .onFailure { error ->
+                    ModernXposedRuntime.log(
+                        "Apple Music DPI component callback cleanup failed",
+                        error,
+                    )
+                }
+        }
+        if (activityCallbacksRegistered.compareAndSet(true, false)) {
+            runCatching { application.unregisterActivityLifecycleCallbacks(this) }
+                .onFailure { error ->
+                    ModernXposedRuntime.log(
+                        "Apple Music DPI activity callback cleanup failed",
+                        error,
+                    )
+                }
         }
     }
 
@@ -229,7 +276,7 @@ internal object AppleMusicDpiOverrideRuntime : Application.ActivityLifecycleCall
         )
         ModernXposedRuntime.hookMethod(updateConfiguration, object : ModernMethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
-                if (reentrancy.get() == true) return
+                if (!runtimeEnabled.get() || reentrancy.get() == true) return
                 val resources = param.thisObject as? Resources ?: return
                 if (resources === Resources.getSystem()) return
                 transformUpdateArguments(param, resources)
@@ -249,9 +296,31 @@ internal object AppleMusicDpiOverrideRuntime : Application.ActivityLifecycleCall
                 applyToResources(activity.resources)
             }
         })
+
+        // ResourcesManager updates an existing Activity's ResourcesImpl
+        // directly for split-screen/display overrides, then dispatches this
+        // callback.  That path bypasses Resources.updateConfiguration and the
+        // Application ComponentCallbacks registered below, so reapply here
+        // before the host Activity callback runs.
+        val activityOnConfigurationChanged = Activity::class.java.getDeclaredMethod(
+            "onConfigurationChanged",
+            Configuration::class.java,
+        )
+        ModernXposedRuntime.hookMethod(
+            activityOnConfigurationChanged,
+            object : ModernMethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (!runtimeEnabled.get()) return
+                    val activity = param.thisObject as? Activity ?: return
+                    if (activity.application?.packageName != ModuleConstants.TARGET_PACKAGE) return
+                    applyToResources(activity.resources)
+                }
+            },
+        )
     }
 
     private fun transformUpdateArguments(param: ModernMethodHook.MethodHookParam, resources: Resources) {
+        if (!runtimeEnabled.get()) return
         val sourceConfiguration = runCatching {
             (param.args.getOrNull(0) as? Configuration)?.let(::Configuration)
                 ?: Configuration(resources.configuration)
@@ -266,44 +335,53 @@ internal object AppleMusicDpiOverrideRuntime : Application.ActivityLifecycleCall
         param.args[1] = sourceMetrics
     }
 
-    private fun applyToResources(resources: Resources) {
-        if (targetDpi == AppleMusicDpiOverridePolicy.FOLLOW_SYSTEM_DPI ||
+    private fun applyToResources(resources: Resources, allowInactive: Boolean = false): Boolean {
+        if ((!allowInactive && !runtimeEnabled.get()) ||
+            targetDpi == AppleMusicDpiOverridePolicy.FOLLOW_SYSTEM_DPI ||
             resources === Resources.getSystem() ||
             reentrancy.get() == true
         ) {
-            return
+            return false
         }
         trackedResources[resources] = true
-        val configuration = runCatching { Configuration(resources.configuration) }.getOrNull() ?: return
+        val configuration = runCatching { Configuration(resources.configuration) }.getOrNull()
+            ?: return false
         val metrics = runCatching {
             DisplayMetrics().also { it.setTo(resources.displayMetrics) }
-        }.getOrNull() ?: return
-        if (!AppleMusicDpiOverridePolicy.apply(configuration, metrics, targetDpi)) return
+        }.getOrNull() ?: return false
+        if (!AppleMusicDpiOverridePolicy.apply(configuration, metrics, targetDpi)) return true
 
         reentrancy.set(true)
         try {
             @Suppress("DEPRECATION")
             resources.updateConfiguration(configuration, metrics)
+            return true
         } catch (error: Throwable) {
             ModernXposedRuntime.log("Apple Music DPI resource update failed open", error)
+            return false
         } finally {
             reentrancy.remove()
         }
     }
 
     override fun onActivityPreCreated(activity: Activity, savedInstanceState: Bundle?) {
-        if (activity.application?.packageName == ModuleConstants.TARGET_PACKAGE) {
+        if (runtimeEnabled.get() &&
+            activity.application?.packageName == ModuleConstants.TARGET_PACKAGE
+        ) {
             applyToResources(activity.resources)
         }
     }
 
     override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
-        if (activity.application?.packageName == ModuleConstants.TARGET_PACKAGE) {
+        if (runtimeEnabled.get() &&
+            activity.application?.packageName == ModuleConstants.TARGET_PACKAGE
+        ) {
             applyToResources(activity.resources)
         }
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
+        if (!runtimeEnabled.get()) return
         val application = applicationReference?.get() ?: return
         applyToResources(application.resources)
         val resources = synchronized(trackedResources) { trackedResources.keys.toList() }
