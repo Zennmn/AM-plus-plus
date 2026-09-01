@@ -80,7 +80,7 @@ private object RightLyricsPaneLayout {
     private const val CONTROLS_TAP_TARGET = "controls_tap_target"
     private const val ALPHA_GRADIENT_FRAME_LAYOUT =
         "com.apple.android.music.common.views.AlphaGradientFrameLayout"
-    private const val TOP_EDGE_FRACTION = 0.30f
+    private const val TOP_EDGE_FRACTION = 0.15f
     private const val TOP_CLEAR_FRACTION = 0.075f
     private const val TOP_CLEAR_WITHIN_FADE_FRACTION = 0.25f
     private const val BOTTOM_EDGE_FRACTION = 0.15f
@@ -158,6 +158,22 @@ private object RightLyricsPaneLayout {
                 ?: error("AlphaGradientFrameLayout.e was unavailable")
             topFadeColorsField.set(gradients, topFadeColors)
             topFadePositionsField.set(gradients, topFadePositions)
+            val bottomFadeColors = intArrayOf(
+                Color.BLACK,
+                Color.TRANSPARENT,
+                Color.TRANSPARENT,
+            )
+            val bottomFadePositions = floatArrayOf(
+                0f,
+                1f - TOP_CLEAR_WITHIN_FADE_FRACTION,
+                1f,
+            )
+            val bottomFadeColorsField = findField(gradients.javaClass, "b")
+                ?: error("AlphaGradientFrameLayout.b was unavailable")
+            val bottomFadePositionsField = findField(gradients.javaClass, "f")
+                ?: error("AlphaGradientFrameLayout.f was unavailable")
+            bottomFadeColorsField.set(gradients, bottomFadeColors)
+            bottomFadePositionsField.set(gradients, bottomFadePositions)
             val topEdgeSize = (gradients.height * TOP_EDGE_FRACTION)
                 .roundToInt()
                 .coerceAtLeast(1)
@@ -479,7 +495,8 @@ internal class AppleMusicDualPaneTarget(
             return TargetCapabilityInstall.Degraded(
                 "Installed controller=$controllerHooks navigationMeasure=$navigationMenuMeasureHooks " +
                     "chrome=$chromeHooks lyricsChrome=$lyricsChromeHooks " +
-                    "lyricsMetrics=$lyricsMetricsHooks lyricsTypography=$lyricsTypographyHooks " +
+                    "lyricsMetrics=$lyricsMetricsHooks " +
+                    "lyricsTypography=$lyricsTypographyHooks " +
                     "staticIntercept=$staticInterceptStatus hook(s)" +
                     failureSummary,
             )
@@ -920,6 +937,12 @@ internal class AppleMusicDualPaneTarget(
         invokeCompatible(transaction, listOf("e", "replace"), state.playerHost.id, songFragment, songTag)
         invokeCompatible(transaction, listOf("e", "replace"), state.lyricsHost.id, lyricsFragment, lyricsTag)
         invokeCompatible(transaction, listOf("h", "commit"), false)
+        // FragmentManager executes the commit on the main queue. Keep this
+        // post so the callback is requested after that transaction, while the
+        // callback itself waits for a measured pre-draw before applying layout.
+        state.playerHost.post {
+            state.artworkLayoutReapply?.invoke()
+        }
         return true
     }
 
@@ -1154,6 +1177,9 @@ private object ConstraintLayoutPane {
     private const val PLAYER_CONTAINER = "player_container"
     private const val PLAYER_SHEET_CONTAINER = "player_sheet_container"
     private const val PLAYER_CONTAINER_ELEVATION = "player_container_elevation"
+    private const val ARTWORK_CONTAINER = "artwork_container"
+    private const val METADATA_BARRIER_TOP = "metadata_barrier_top"
+    private const val ARTWORK_LAYOUT_REAPPLY_MAX_PRE_DRAWS = 8
     private const val PLAYER_ROOT = "player_root"
     private const val PLAYER_FRAGMENTS_HOST = "player_fragments_host"
     private const val PARENT_ID = 0
@@ -1349,7 +1375,159 @@ private object ConstraintLayoutPane {
             },
         )
 
-        return DualPaneState(root, playerHost, lyricsHost)
+        val artworkLayoutReapply = installTabletArtworkLayout(playerRoot, playerHost)
+        return DualPaneState(root, playerHost, lyricsHost, artworkLayoutReapply)
+    }
+
+    /**
+     * Keep Apple's native cover size, but center it in the vertical interval
+     * from the left pane top to Apple's metadata barrier (the title row).
+     */
+    private fun installTabletArtworkLayout(
+        playerRoot: ViewGroup,
+        playerHost: View,
+    ): (() -> Unit)? {
+        val artworkId = playerRoot.resources.getIdentifier(
+            ARTWORK_CONTAINER,
+            "id",
+            ModuleConstants.TARGET_PACKAGE,
+        )
+        if (artworkId == 0) return null
+        val barrierId = playerRoot.resources.getIdentifier(
+            METADATA_BARRIER_TOP,
+            "id",
+            ModuleConstants.TARGET_PACKAGE,
+        )
+        if (barrierId == 0) return null
+        val nativeSizeByArtwork = WeakHashMap<View, Int>()
+        fun apply(): Boolean {
+            if (!TabletModeQualifier.isEligible(playerRoot.context)) return true
+            val artwork = playerHost.findViewById<View>(artworkId) ?: return false
+            val barrier = playerHost.findViewById<View>(barrierId) ?: return false
+            val parent = artwork.parent as? ViewGroup ?: return false
+            if (parent.width <= 0 || parent.height <= 0 || artwork.width <= 0) return false
+            val nativeSizePx = nativeSizeByArtwork[artwork]
+                ?: artwork.width.takeIf { it > 0 }?.also { nativeSizeByArtwork[artwork] = it }
+                ?: return false
+            val hostLocation = IntArray(2)
+            val windowRootLocation = IntArray(2)
+            val artworkLocation = IntArray(2)
+            val barrierLocation = IntArray(2)
+            playerHost.getLocationInWindow(hostLocation)
+            playerRoot.rootView.getLocationInWindow(windowRootLocation)
+            artwork.getLocationInWindow(artworkLocation)
+            barrier.getLocationInWindow(barrierLocation)
+            val statusBarInsetTopPx = playerRoot.rootWindowInsets?.systemWindowInsetTop
+                ?: playerRoot.resources.getIdentifier("status_bar_height", "dimen", "android")
+                    .takeIf { it != 0 }
+                    ?.let(playerRoot.resources::getDimensionPixelSize)
+                ?: 0
+            val intervalTopPx = maxOf(
+                hostLocation[1],
+                windowRootLocation[1] + statusBarInsetTopPx,
+            )
+            val availableHeightPx = (barrierLocation[1] - intervalTopPx).toFloat()
+            val layout = TabletArtworkLayoutPolicy.resolve(
+                availableHeightPx = availableHeightPx,
+                nativeSizePx = nativeSizePx.toFloat(),
+            ) ?: return false
+            val params = artwork.layoutParams as? ViewGroup.MarginLayoutParams ?: return true
+            if (constraintField(params.javaClass, "startToStart") == null) return true
+            val sizePx = (layout.sizePx + 0.5f).toInt().coerceAtLeast(1)
+            val desiredArtworkTopPx = intervalTopPx + layout.edgeGapPx
+            val artworkDeltaPx = desiredArtworkTopPx - artworkLocation[1]
+            if (kotlin.math.abs(artworkDeltaPx) > 0.5f) {
+                artwork.translationY += artworkDeltaPx
+            }
+            val alreadyApplied =
+                params.width == sizePx &&
+                    params.height == sizePx &&
+                    params.topMargin == 0 &&
+                    params.bottomMargin == 0 &&
+                    constraintField(params.javaClass, "topToTop")?.getInt(params) == PARENT_ID &&
+                    constraintField(params.javaClass, "topToBottom")?.getInt(params) == -1
+            if (alreadyApplied) return true
+            params.width = sizePx
+            params.height = sizePx
+            params.topMargin = 0
+            params.bottomMargin = 0
+            params.setObject("dimensionRatio", null)
+            params.setInt("topToTop", PARENT_ID)
+            params.setInt("topToBottom", -1)
+            artwork.layoutParams = params
+            artwork.requestLayout()
+            return true
+        }
+        val listener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> apply() }
+        playerRoot.addOnLayoutChangeListener(listener)
+        (playerHost.parent as? View)
+            ?.takeUnless { it === playerRoot }
+            ?.addOnLayoutChangeListener(listener)
+        playerHost.addOnLayoutChangeListener(listener)
+        playerRoot.post { apply() }
+        playerHost.post { apply() }
+        fun scheduleArtworkLayoutReapplyAfterMeasure() {
+            var attemptsRemaining = ARTWORK_LAYOUT_REAPPLY_MAX_PRE_DRAWS
+            var observedTree: ViewTreeObserver? = null
+            var attachListener: View.OnAttachStateChangeListener? = null
+            lateinit var preDrawListener: ViewTreeObserver.OnPreDrawListener
+
+            fun removePreDrawListener() {
+                observedTree?.takeIf(ViewTreeObserver::isAlive)
+                    ?.removeOnPreDrawListener(preDrawListener)
+                observedTree = null
+            }
+
+            fun finish() {
+                removePreDrawListener()
+                attachListener?.let { listener ->
+                    playerHost.removeOnAttachStateChangeListener(listener)
+                }
+                attachListener = null
+            }
+
+            fun registerPreDraw() {
+                if (!playerHost.isAttachedToWindow) return
+                val tree = playerHost.viewTreeObserver
+                if (!tree.isAlive) {
+                    playerHost.post { registerPreDraw() }
+                    return
+                }
+                removePreDrawListener()
+                observedTree = tree
+                playerHost.viewTreeObserver.addOnPreDrawListener(preDrawListener)
+            }
+
+            preDrawListener = ViewTreeObserver.OnPreDrawListener {
+                val applied = apply()
+                attemptsRemaining -= 1
+                if (applied || attemptsRemaining <= 0 || !playerHost.isAttachedToWindow) {
+                    finish()
+                } else {
+                    // A failed pre-draw may not itself cause another traversal
+                    // (for example while FragmentManager is still adding the
+                    // child). Keep the bounded retry observable to ViewRoot.
+                    playerHost.requestLayout()
+                }
+                true
+            }
+
+            val newAttachListener = object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(view: View) {
+                    registerPreDraw()
+                }
+
+                override fun onViewDetachedFromWindow(view: View) {
+                    removePreDrawListener()
+                }
+            }
+            attachListener = newAttachListener
+            playerHost.addOnAttachStateChangeListener(newAttachListener)
+            if (playerHost.isAttachedToWindow) {
+                registerPreDraw()
+            }
+        }
+        return ::scheduleArtworkLayoutReapplyAfterMeasure
     }
 
     private fun configureTabsFrame(
@@ -1663,6 +1841,7 @@ internal class DualPaneState(
     val root: ViewGroup,
     val playerHost: View,
     val lyricsHost: FrameLayout,
+    val artworkLayoutReapply: (() -> Unit)? = null,
 ) {
     var lyricsAttachRequested: Boolean = false
     var lyricsAttached: Boolean = false

@@ -5,9 +5,9 @@ import org.junit.Test
 
 class TabletLyricAnchorPolicyTest {
     @Test
-    fun `moves the synchronized highlight anchor from stock eight percent to thirty three percent`() {
+    fun `moves the synchronized highlight anchor from stock eight percent to fixed thirty percent`() {
         assertEquals(
-            787,
+            715,
             TabletLyricAnchorPolicy.highlightOffset(
                 currentOffset = 187,
                 containerHeight = 2_400,

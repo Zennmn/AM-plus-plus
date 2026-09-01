@@ -10,5 +10,5 @@ internal object TabletLyricAnchorPolicy {
     }
 
     private const val STOCK_ANCHOR_FRACTION = 0.08f
-    private const val TARGET_ANCHOR_FRACTION = 0.33f
+    private const val TARGET_ANCHOR_FRACTION = 0.30f
 }

@@ -115,6 +115,45 @@ class DualPaneStructuralRegressionTest {
     }
 
     @Test
+    fun `applies AMLL artwork size and title gap to the native left pane`() {
+        assertTrue(source.contains("private const val ARTWORK_CONTAINER = \"artwork_container\""))
+        assertTrue(source.contains("private const val METADATA_BARRIER_TOP = \"metadata_barrier_top\""))
+        assertTrue(source.contains("installTabletArtworkLayout(playerRoot, playerHost)"))
+        assertTrue(source.contains("TabletArtworkLayoutPolicy.resolve("))
+        assertTrue(source.contains("nativeSizeByArtwork[artwork]"))
+        assertTrue(source.contains("val statusBarInsetTopPx = playerRoot.rootWindowInsets?.systemWindowInsetTop"))
+        assertTrue(source.contains("windowRootLocation[1] + statusBarInsetTopPx"))
+        assertTrue(source.contains("val availableHeightPx = (barrierLocation[1] - intervalTopPx).toFloat()"))
+        assertTrue(source.contains("val desiredArtworkTopPx = intervalTopPx + layout.edgeGapPx"))
+        assertTrue(source.contains("artwork.translationY += artworkDeltaPx"))
+        assertTrue(source.contains("params.topMargin = 0"))
+        assertTrue(source.contains("params.bottomMargin = 0"))
+        assertTrue(source.contains("params.setObject(\"dimensionRatio\", null)"))
+        assertTrue(source.contains("params.setInt(\"topToTop\", PARENT_ID)"))
+        assertTrue(source.contains("params.setInt(\"topToBottom\", -1)"))
+        assertTrue(source.contains("nativeSizePx = nativeSizePx.toFloat()"))
+    }
+
+    @Test
+    fun `waits for measured artwork after paired fragments are committed`() {
+        val commitIndex = source.indexOf(
+            "invokeCompatible(transaction, listOf(\"h\", \"commit\"), false)",
+        )
+        val reapplyIndex = source.indexOf("state.artworkLayoutReapply?.invoke()", commitIndex)
+        assertTrue(commitIndex >= 0)
+        assertTrue(reapplyIndex > commitIndex)
+        assertTrue(source.contains("val artworkLayoutReapply = installTabletArtworkLayout(playerRoot, playerHost)"))
+        assertTrue(source.contains("DualPaneState(root, playerHost, lyricsHost, artworkLayoutReapply)"))
+        assertTrue(source.contains("ARTWORK_LAYOUT_REAPPLY_MAX_PRE_DRAWS"))
+        assertTrue(source.contains("scheduleArtworkLayoutReapplyAfterMeasure"))
+        assertTrue(source.contains("playerHost.viewTreeObserver.addOnPreDrawListener"))
+        assertTrue(source.contains("playerHost.addOnAttachStateChangeListener"))
+        assertTrue(source.contains("playerHost.removeOnAttachStateChangeListener"))
+        assertTrue(source.contains("playerHost.requestLayout()"))
+        assertTrue(source.contains("removeOnPreDrawListener"))
+    }
+
+    @Test
     fun `reapplies bottom navigation params after target layout initialization`() {
         assertTrue(source.contains("bottomNavigation.post {"))
     }
@@ -243,7 +282,7 @@ class DualPaneStructuralRegressionTest {
         assertTrue(source.contains("DualPaneShell.installImmediately(root)"))
         assertTrue(source.contains("installForControllerRoot(controllerInstance, param.result as? View, \"onCreateView\")"))
         assertFalse(source.contains("PendingDualPaneState"))
-        val synchronousInstallSource = source.substringBefore("private fun installFlatPlayerBoundarySync")
+        val synchronousInstallSource = source.substringBefore("private fun installTabletArtworkLayout")
         assertFalse(synchronousInstallSource.contains("addOnAttachStateChangeListener"))
         assertFalse(synchronousInstallSource.contains("onViewAttachedToWindow"))
         assertTrue(source.contains("[AMENH-2]"))
