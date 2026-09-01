@@ -135,17 +135,22 @@ class DualPaneStructuralRegressionTest {
     }
 
     @Test
-    fun `reapplies artwork after paired fragments are committed`() {
+    fun `waits for measured artwork after paired fragments are committed`() {
         val commitIndex = source.indexOf(
             "invokeCompatible(transaction, listOf(\"h\", \"commit\"), false)",
         )
-        val reapplyIndex = source.indexOf("state.artworkLayoutReapply?.let", commitIndex)
+        val reapplyIndex = source.indexOf("state.artworkLayoutReapply?.invoke()", commitIndex)
         assertTrue(commitIndex >= 0)
         assertTrue(reapplyIndex > commitIndex)
         assertTrue(source.contains("val artworkLayoutReapply = installTabletArtworkLayout(playerRoot, playerHost)"))
         assertTrue(source.contains("DualPaneState(root, playerHost, lyricsHost, artworkLayoutReapply)"))
-        assertTrue(source.contains("state.playerHost.post {"))
-        assertTrue(source.contains("reapply()"))
+        assertTrue(source.contains("ARTWORK_LAYOUT_REAPPLY_MAX_PRE_DRAWS"))
+        assertTrue(source.contains("scheduleArtworkLayoutReapplyAfterMeasure"))
+        assertTrue(source.contains("playerHost.viewTreeObserver.addOnPreDrawListener"))
+        assertTrue(source.contains("playerHost.addOnAttachStateChangeListener"))
+        assertTrue(source.contains("playerHost.removeOnAttachStateChangeListener"))
+        assertTrue(source.contains("playerHost.requestLayout()"))
+        assertTrue(source.contains("removeOnPreDrawListener"))
     }
 
     @Test
@@ -277,7 +282,7 @@ class DualPaneStructuralRegressionTest {
         assertTrue(source.contains("DualPaneShell.installImmediately(root)"))
         assertTrue(source.contains("installForControllerRoot(controllerInstance, param.result as? View, \"onCreateView\")"))
         assertFalse(source.contains("PendingDualPaneState"))
-        val synchronousInstallSource = source.substringBefore("private fun installFlatPlayerBoundarySync")
+        val synchronousInstallSource = source.substringBefore("private fun installTabletArtworkLayout")
         assertFalse(synchronousInstallSource.contains("addOnAttachStateChangeListener"))
         assertFalse(synchronousInstallSource.contains("onViewAttachedToWindow"))
         assertTrue(source.contains("[AMENH-2]"))

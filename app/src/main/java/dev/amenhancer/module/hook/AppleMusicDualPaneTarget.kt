@@ -937,13 +937,11 @@ internal class AppleMusicDualPaneTarget(
         invokeCompatible(transaction, listOf("e", "replace"), state.playerHost.id, songFragment, songTag)
         invokeCompatible(transaction, listOf("e", "replace"), state.lyricsHost.id, lyricsFragment, lyricsTag)
         invokeCompatible(transaction, listOf("h", "commit"), false)
-        state.artworkLayoutReapply?.let { reapply ->
-            // FragmentManager executes the commit on the main queue. Enqueue
-            // after it so the song fragment's artwork view exists before the
-            // first centering pass is attempted.
-            state.playerHost.post {
-                reapply()
-            }
+        // FragmentManager executes the commit on the main queue. Keep this
+        // post so the callback is requested after that transaction, while the
+        // callback itself waits for a measured pre-draw before applying layout.
+        state.playerHost.post {
+            state.artworkLayoutReapply?.invoke()
         }
         return true
     }
@@ -1181,6 +1179,7 @@ private object ConstraintLayoutPane {
     private const val PLAYER_CONTAINER_ELEVATION = "player_container_elevation"
     private const val ARTWORK_CONTAINER = "artwork_container"
     private const val METADATA_BARRIER_TOP = "metadata_barrier_top"
+    private const val ARTWORK_LAYOUT_REAPPLY_MAX_PRE_DRAWS = 8
     private const val PLAYER_ROOT = "player_root"
     private const val PLAYER_FRAGMENTS_HOST = "player_fragments_host"
     private const val PARENT_ID = 0
@@ -1401,15 +1400,15 @@ private object ConstraintLayoutPane {
         )
         if (barrierId == 0) return null
         val nativeSizeByArtwork = WeakHashMap<View, Int>()
-        fun apply() {
-            if (!TabletModeQualifier.isEligible(playerRoot.context)) return
-            val artwork = playerHost.findViewById<View>(artworkId) ?: return
-            val barrier = playerHost.findViewById<View>(barrierId) ?: return
-            val parent = artwork.parent as? ViewGroup ?: return
-            if (parent.width <= 0 || parent.height <= 0 || artwork.width <= 0) return
+        fun apply(): Boolean {
+            if (!TabletModeQualifier.isEligible(playerRoot.context)) return true
+            val artwork = playerHost.findViewById<View>(artworkId) ?: return false
+            val barrier = playerHost.findViewById<View>(barrierId) ?: return false
+            val parent = artwork.parent as? ViewGroup ?: return false
+            if (parent.width <= 0 || parent.height <= 0 || artwork.width <= 0) return false
             val nativeSizePx = nativeSizeByArtwork[artwork]
                 ?: artwork.width.takeIf { it > 0 }?.also { nativeSizeByArtwork[artwork] = it }
-                ?: return
+                ?: return false
             val hostLocation = IntArray(2)
             val windowRootLocation = IntArray(2)
             val artworkLocation = IntArray(2)
@@ -1431,9 +1430,9 @@ private object ConstraintLayoutPane {
             val layout = TabletArtworkLayoutPolicy.resolve(
                 availableHeightPx = availableHeightPx,
                 nativeSizePx = nativeSizePx.toFloat(),
-            ) ?: return
-            val params = artwork.layoutParams as? ViewGroup.MarginLayoutParams ?: return
-            if (constraintField(params.javaClass, "startToStart") == null) return
+            ) ?: return false
+            val params = artwork.layoutParams as? ViewGroup.MarginLayoutParams ?: return true
+            if (constraintField(params.javaClass, "startToStart") == null) return true
             val sizePx = (layout.sizePx + 0.5f).toInt().coerceAtLeast(1)
             val desiredArtworkTopPx = intervalTopPx + layout.edgeGapPx
             val artworkDeltaPx = desiredArtworkTopPx - artworkLocation[1]
@@ -1447,7 +1446,7 @@ private object ConstraintLayoutPane {
                     params.bottomMargin == 0 &&
                     constraintField(params.javaClass, "topToTop")?.getInt(params) == PARENT_ID &&
                     constraintField(params.javaClass, "topToBottom")?.getInt(params) == -1
-            if (alreadyApplied) return
+            if (alreadyApplied) return true
             params.width = sizePx
             params.height = sizePx
             params.topMargin = 0
@@ -1457,6 +1456,7 @@ private object ConstraintLayoutPane {
             params.setInt("topToBottom", -1)
             artwork.layoutParams = params
             artwork.requestLayout()
+            return true
         }
         val listener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> apply() }
         playerRoot.addOnLayoutChangeListener(listener)
@@ -1466,7 +1466,70 @@ private object ConstraintLayoutPane {
         playerHost.addOnLayoutChangeListener(listener)
         playerRoot.post { apply() }
         playerHost.post { apply() }
-        return { apply() }
+        fun scheduleArtworkLayoutReapplyAfterMeasure() {
+            var attemptsRemaining = ARTWORK_LAYOUT_REAPPLY_MAX_PRE_DRAWS
+            var observedTree: ViewTreeObserver? = null
+            var attachListener: View.OnAttachStateChangeListener? = null
+            lateinit var preDrawListener: ViewTreeObserver.OnPreDrawListener
+
+            fun removePreDrawListener() {
+                observedTree?.takeIf(ViewTreeObserver::isAlive)
+                    ?.removeOnPreDrawListener(preDrawListener)
+                observedTree = null
+            }
+
+            fun finish() {
+                removePreDrawListener()
+                attachListener?.let(playerHost::removeOnAttachStateChangeListener)
+                attachListener = null
+            }
+
+            fun registerPreDraw() {
+                if (!playerHost.isAttachedToWindow) return
+                val tree = playerHost.viewTreeObserver
+                if (!tree.isAlive) {
+                    playerHost.post { registerPreDraw() }
+                    return
+                }
+                removePreDrawListener()
+                observedTree = tree
+                playerHost.viewTreeObserver.addOnPreDrawListener(preDrawListener)
+            }
+
+            preDrawListener = ViewTreeObserver.OnPreDrawListener {
+                val applied = apply()
+                attemptsRemaining -= 1
+                if (applied || attemptsRemaining <= 0 || !playerHost.isAttachedToWindow) {
+                    finish()
+                } else {
+                    // A failed pre-draw may not itself cause another traversal
+                    // (for example while FragmentManager is still adding the
+                    // child). Keep the bounded retry observable to ViewRoot.
+                    playerHost.requestLayout()
+                }
+                true
+            }
+
+            val newAttachListener = object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(view: View) {
+                    view.removeOnAttachStateChangeListener(this)
+                    attachListener = null
+                    registerPreDraw()
+                }
+
+                override fun onViewDetachedFromWindow(view: View) {
+                    removePreDrawListener()
+                }
+            }
+            attachListener = newAttachListener
+            playerHost.addOnAttachStateChangeListener(newAttachListener)
+            if (playerHost.isAttachedToWindow) {
+                playerHost.removeOnAttachStateChangeListener(newAttachListener)
+                attachListener = null
+                registerPreDraw()
+            }
+        }
+        return ::scheduleArtworkLayoutReapplyAfterMeasure
     }
 
     private fun configureTabsFrame(
