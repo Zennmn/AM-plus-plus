@@ -135,6 +135,20 @@ class DualPaneStructuralRegressionTest {
     }
 
     @Test
+    fun `reapplies artwork after paired fragments are committed`() {
+        val commitIndex = source.indexOf(
+            "invokeCompatible(transaction, listOf(\"h\", \"commit\"), false)",
+        )
+        val reapplyIndex = source.indexOf("state.artworkLayoutReapply?.let", commitIndex)
+        assertTrue(commitIndex >= 0)
+        assertTrue(reapplyIndex > commitIndex)
+        assertTrue(source.contains("val artworkLayoutReapply = installTabletArtworkLayout(playerRoot, playerHost)"))
+        assertTrue(source.contains("DualPaneState(root, playerHost, lyricsHost, artworkLayoutReapply)"))
+        assertTrue(source.contains("state.playerHost.post {"))
+        assertTrue(source.contains("reapply()"))
+    }
+
+    @Test
     fun `reapplies bottom navigation params after target layout initialization`() {
         assertTrue(source.contains("bottomNavigation.post {"))
     }

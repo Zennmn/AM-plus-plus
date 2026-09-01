@@ -937,6 +937,14 @@ internal class AppleMusicDualPaneTarget(
         invokeCompatible(transaction, listOf("e", "replace"), state.playerHost.id, songFragment, songTag)
         invokeCompatible(transaction, listOf("e", "replace"), state.lyricsHost.id, lyricsFragment, lyricsTag)
         invokeCompatible(transaction, listOf("h", "commit"), false)
+        state.artworkLayoutReapply?.let { reapply ->
+            // FragmentManager executes the commit on the main queue. Enqueue
+            // after it so the song fragment's artwork view exists before the
+            // first centering pass is attempted.
+            state.playerHost.post {
+                reapply()
+            }
+        }
         return true
     }
 
@@ -1368,9 +1376,8 @@ private object ConstraintLayoutPane {
             },
         )
 
-        val state = DualPaneState(root, playerHost, lyricsHost)
-        installTabletArtworkLayout(playerRoot, playerHost)
-        return state
+        val artworkLayoutReapply = installTabletArtworkLayout(playerRoot, playerHost)
+        return DualPaneState(root, playerHost, lyricsHost, artworkLayoutReapply)
     }
 
     /**
@@ -1380,19 +1387,19 @@ private object ConstraintLayoutPane {
     private fun installTabletArtworkLayout(
         playerRoot: ViewGroup,
         playerHost: View,
-    ) {
+    ): (() -> Unit)? {
         val artworkId = playerRoot.resources.getIdentifier(
             ARTWORK_CONTAINER,
             "id",
             ModuleConstants.TARGET_PACKAGE,
         )
-        if (artworkId == 0) return
+        if (artworkId == 0) return null
         val barrierId = playerRoot.resources.getIdentifier(
             METADATA_BARRIER_TOP,
             "id",
             ModuleConstants.TARGET_PACKAGE,
         )
-        if (barrierId == 0) return
+        if (barrierId == 0) return null
         val nativeSizeByArtwork = WeakHashMap<View, Int>()
         fun apply() {
             if (!TabletModeQualifier.isEligible(playerRoot.context)) return
@@ -1459,6 +1466,7 @@ private object ConstraintLayoutPane {
         playerHost.addOnLayoutChangeListener(listener)
         playerRoot.post { apply() }
         playerHost.post { apply() }
+        return { apply() }
     }
 
     private fun configureTabsFrame(
@@ -1772,6 +1780,7 @@ internal class DualPaneState(
     val root: ViewGroup,
     val playerHost: View,
     val lyricsHost: FrameLayout,
+    val artworkLayoutReapply: (() -> Unit)? = null,
 ) {
     var lyricsAttachRequested: Boolean = false
     var lyricsAttached: Boolean = false
