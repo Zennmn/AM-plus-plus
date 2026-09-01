@@ -1480,7 +1480,9 @@ private object ConstraintLayoutPane {
 
             fun finish() {
                 removePreDrawListener()
-                attachListener?.let(playerHost::removeOnAttachStateChangeListener)
+                attachListener?.let { listener ->
+                    playerHost.removeOnAttachStateChangeListener(listener)
+                }
                 attachListener = null
             }
 
@@ -1512,8 +1514,6 @@ private object ConstraintLayoutPane {
 
             val newAttachListener = object : View.OnAttachStateChangeListener {
                 override fun onViewAttachedToWindow(view: View) {
-                    view.removeOnAttachStateChangeListener(this)
-                    attachListener = null
                     registerPreDraw()
                 }
 
@@ -1524,8 +1524,6 @@ private object ConstraintLayoutPane {
             attachListener = newAttachListener
             playerHost.addOnAttachStateChangeListener(newAttachListener)
             if (playerHost.isAttachedToWindow) {
-                playerHost.removeOnAttachStateChangeListener(newAttachListener)
-                attachListener = null
                 registerPreDraw()
             }
         }
