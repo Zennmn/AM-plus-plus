@@ -43,7 +43,6 @@ internal data class TargetAdaptation(
             classLoader: ClassLoader,
             lyricsTypefaceSession: LyricsTypefaceSession,
             currentSong: CurrentSongIdentityCache = CurrentSongIdentityCache(),
-            registerCurrentSongResponder: Boolean = true,
         ): TargetAdaptation {
             val build = targetBuild(application)
             val resolver = IndexedTargetSymbolResolver(
@@ -79,10 +78,8 @@ internal data class TargetAdaptation(
                     autoLyricsRuntime = autoLyricsRuntime,
                 ),
                 currentSongIdentity = AppleMusicCurrentSongIdentityTarget(
-                    application,
                     resolver,
                     currentSong,
-                    registerCurrentSongResponder,
                 ),
                 catalogLanguage = AppleMusicCatalogLanguageTarget(
                     symbols = resolver,

@@ -12,7 +12,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Guards ConfigStore.saveSettings' write contract: an ordinary runtime write
+ * Guards the ordinary runtime settings write contract: an ordinary write
  * must never carry a remote-file manifest key, so a stale ModuleSettings
  * cannot overwrite a manifest committed by a file transaction afterwards.
  */

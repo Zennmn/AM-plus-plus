@@ -52,7 +52,6 @@ internal object FeatureInstallation {
                     classLoader = targetClassLoader,
                     lyricsTypefaceSession = lyricsTypefaceSession,
                     currentSong = currentSong,
-                    registerCurrentSongResponder = false,
                 ),
             )
         }

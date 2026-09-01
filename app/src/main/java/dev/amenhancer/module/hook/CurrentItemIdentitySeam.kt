@@ -9,7 +9,7 @@ import java.lang.reflect.Method
  * item field (`com.apple.android.music.player.fragment.m#c` of type
  * `com.apple.android.music.model.BaseContentItem`) read through `getId()` and
  * parsed with [parseCurrentItemAdamId]. The same item optionally supplies
- * `getTitle()` and `getArtistName()` for the standalone current-song form.
+ * `getTitle()` and `getArtistName()` for embedded current-song editing.
  *
  * Lyric replacement and current-song identity capability share this exact
  * contract; neither consumer may reinterpret the identity as a title or
@@ -29,7 +29,7 @@ internal class CurrentItemIdentitySeam(
     var fieldSummary: String? = null
         private set
 
-    /** Optional metadata contracts used by the standalone current-song UI. */
+    /** Optional metadata contracts used by embedded current-song editing. */
     var metadataSummary: String? = null
         private set
 
