@@ -192,6 +192,10 @@ class HookEntry : XposedModule() {
                                 return
                             }
                             val config = TargetConfigClient(bootstrap.reader)
+                            AppleMusicDpiOverrideRuntime.install(
+                                application = application,
+                                configuredDpi = config.settings().appleMusicDpiOverrideDpi,
+                            )
                             runCatching { FeatureInstallation.registerResources(config) }
                                 .getOrElse { error ->
                                     resourcePreparationFailed.set(true)

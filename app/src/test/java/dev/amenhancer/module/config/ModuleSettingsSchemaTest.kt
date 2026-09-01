@@ -49,6 +49,7 @@ class ModuleSettingsSchemaTest {
                 "cjk_karaoke_animation_enabled" to true,
                 "navigation_compensation_enabled" to false,
                 "lyric_blur_radius_offset_px" to 6,
+                "apple_music_dpi_override_dpi" to 0,
                 "title_correction_enabled" to false,
                 "title_correction_mode" to "original_hyper",
                 "custom_lyrics_enabled" to false,
@@ -84,6 +85,7 @@ class ModuleSettingsSchemaTest {
                 "cjk_karaoke_animation_enabled" to true,
                 "navigation_compensation_enabled" to false,
                 "lyric_blur_radius_offset_px" to 0,
+                "apple_music_dpi_override_dpi" to 0,
                 "title_correction_enabled" to false,
                 "title_correction_mode" to "original_hyper",
                 "custom_lyrics_enabled" to false,
@@ -180,6 +182,32 @@ class ModuleSettingsSchemaTest {
                 mapOf("lyric_blur_radius_offset_px" to -99),
             ).lyricBlurRadiusOffsetPx,
         )
+    }
+
+    @Test
+    fun `Apple Music DPI accepts fixed values, reset, and fails open for malformed values`() {
+        assertEquals(
+            480,
+            ModuleSettingsSchema.decode(
+                mapOf("apple_music_dpi_override_dpi" to 480),
+            ).appleMusicDpiOverrideDpi,
+        )
+        assertEquals(
+            ModuleSettings.FOLLOW_SYSTEM_APPLE_MUSIC_DPI,
+            ModuleSettingsSchema.decode(
+                mapOf("apple_music_dpi_override_dpi" to 641),
+            ).appleMusicDpiOverrideDpi,
+        )
+        assertEquals(
+            240,
+            ModuleSettingsSchema.decode(
+                mapOf("apple_music_dpi_override_dpi" to 240),
+            ).appleMusicDpiOverrideDpi,
+        )
+        val encoded = ModuleSettingsSchema.encodeOrdinarySettings(
+            ModuleSettings(appleMusicDpiOverrideDpi = 240),
+        )
+        assertEquals(240, encoded["apple_music_dpi_override_dpi"])
     }
 
     @Test

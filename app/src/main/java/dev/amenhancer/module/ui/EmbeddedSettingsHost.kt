@@ -2277,6 +2277,11 @@ internal class EmbeddedSettingsHost private constructor(
             addView(embeddedBlurRadiusRow(activity, settings.lyricBlurRadiusOffsetPx) {
                 onSettingsChanged(settings.copy(lyricBlurRadiusOffsetPx = it))
             })
+            addView(embeddedDivider(activity))
+            addView(embeddedDpiOverrideRow(activity, settings.appleMusicDpiOverrideDpi) {
+                onSettingsChanged(settings.copy(appleMusicDpiOverrideDpi = it))
+                pageRefresh?.invoke()
+            })
         })
         parent.addView(embeddedSpacer(activity, 20))
         parent.addView(embeddedFontCard(
@@ -3096,6 +3101,68 @@ internal class EmbeddedSettingsHost private constructor(
                 }
             })
         }, matchWidthWrapContent())
+    }
+
+    private fun embeddedDpiOverrideRow(
+        activity: Activity,
+        value: Int,
+        onChanged: (Int) -> Unit,
+    ): View = embeddedNavigationRow(
+        activity = activity,
+        title = "Apple Music 内部 DPI",
+        summary = if (value == ModuleSettings.FOLLOW_SYSTEM_APPLE_MUSIC_DPI) {
+            "跟随系统 · 填写 160–640，0 可清除覆盖"
+        } else {
+            "$value dpi · 完全重开 Apple Music 后生效"
+        },
+        iconDrawable = EmbeddedGlyphDrawable(
+            EmbeddedGlyphKind.VideoDisplay,
+            EmbeddedSettingsPalette.accent,
+        ),
+        inlineSummary = true,
+        onClick = { showEmbeddedDpiOverrideDialog(activity, value, onChanged) },
+    )
+
+    private fun showEmbeddedDpiOverrideDialog(
+        activity: Activity,
+        currentValue: Int,
+        onSelected: (Int) -> Unit,
+    ) {
+        val input = embeddedLyricsEditorInput(
+            activity = activity,
+            hint = "160–640，0 表示跟随系统",
+            initial = currentValue.toString(),
+            numeric = true,
+        )
+        val content = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(
+                dp(activity, if (isEmbeddedPhone(activity)) 4 else 8),
+                0,
+                dp(activity, if (isEmbeddedPhone(activity)) 4 else 8),
+                0,
+            )
+            addView(input, matchWidthWrapContent())
+        }
+        val dialog = AlertDialog.Builder(activity)
+            .setTitle("Apple Music 内部 DPI")
+            .setMessage("仅影响 Apple Music 进程内的资源密度，不会修改系统显示密度。保存后需完全停止并重开 Apple Music。")
+            .setView(content)
+            .setNegativeButton("取消", null)
+            .setPositiveButton("保存", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val parsed = input.text?.toString()?.trim()?.toIntOrNull()
+                if (parsed == null || !ModuleSettings.isValidAppleMusicDpi(parsed)) {
+                    input.error = "请输入 0 或 160–640 之间的整数"
+                    return@setOnClickListener
+                }
+                onSelected(parsed)
+                dialog.dismiss()
+            }
+        }
+        dialog.show()
     }
 
     private fun showEmbeddedTitleCorrectionModePicker(
