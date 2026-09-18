@@ -2191,23 +2191,7 @@ internal class AppleInternalCatalogResolver(
     }
 
     private fun findDirectCatalogQueryMethod(clazz: Class<*>, methodName: String): Method {
-        var current: Class<*>? = clazz
-        while (current != null) {
-            current.declaredMethods.firstOrNull { method ->
-                method.name == methodName &&
-                    method.parameterTypes.let { types ->
-                        types.size == 3 &&
-                            types[0] == String::class.java &&
-                            Map::class.java.isAssignableFrom(types[1]) &&
-                            types[2].name == "kotlin.coroutines.Continuation"
-                    }
-            }?.let { method ->
-                method.isAccessible = true
-                return method
-            }
-            current = current.superclass
-        }
-        throw NoSuchMethodException("${clazz.name}#$methodName(String,Map,Continuation)")
+        return AppleCatalogQueryMethod.resolve(clazz, methodName)
     }
 
     private fun createEmptyCoroutineContext(contextType: Class<*>): Any =

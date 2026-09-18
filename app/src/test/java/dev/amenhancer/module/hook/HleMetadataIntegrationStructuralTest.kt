@@ -6,6 +6,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HleMetadataIntegrationStructuralTest {
+    @Test
+    fun `nullable embedded module native directory does not abort HLE construction`() {
+        val runtime = source("app/src/main/java/dev/amenhancer/module/hook/HleMetadataRuntime.kt")
+        assertTrue(
+            runtime.contains(
+                "runCatching { module.getModuleApplicationInfo().nativeLibraryDir }\n" +
+                    "            .getOrNull().orEmpty()",
+            ),
+        )
+    }
+
     private fun source(relative: String): String = sequenceOf(
         File(relative),
         File("../$relative"),
