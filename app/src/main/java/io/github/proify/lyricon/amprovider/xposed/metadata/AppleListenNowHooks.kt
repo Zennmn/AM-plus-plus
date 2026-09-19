@@ -870,7 +870,7 @@ internal class AppleListenNowHooks(
     ): InAppListenNowArtworkIdentity {
         val target = collectionItemRuntimeTarget
         val id = runCatching {
-            AppleReflection.call(
+            AppleReflection.callIfPresent(
                 item,
                 target.runtimeMemberName(AppleMusicRuntimeMember.COLLECTION_ITEM_GET_ID_METHOD),
             )?.toString()
@@ -879,7 +879,7 @@ internal class AppleListenNowHooks(
             ?.trim()
             .orEmpty()
         val persistentId = runCatching {
-            (AppleReflection.call(
+            (AppleReflection.callIfPresent(
                 item,
                 target.runtimeMemberName(
                     AppleMusicRuntimeMember.COLLECTION_ITEM_GET_PERSISTENT_ID_METHOD
@@ -887,7 +887,7 @@ internal class AppleListenNowHooks(
             ) as? Number)?.toLong()
         }.getOrNull() ?: 0L
         val contentType = runCatching {
-            (AppleReflection.call(
+            (AppleReflection.callIfPresent(
                 item,
                 target.runtimeMemberName(
                     AppleMusicRuntimeMember.COLLECTION_ITEM_GET_CONTENT_TYPE_METHOD
@@ -896,7 +896,7 @@ internal class AppleListenNowHooks(
         }.getOrNull() ?: -1
         val artworkTokenEntries = runCatching {
             @Suppress("UNCHECKED_CAST")
-            (AppleReflection.call(
+            (AppleReflection.callIfPresent(
                 item,
                 target.runtimeMemberName(
                     AppleMusicRuntimeMember.ARTWORK_GET_ALL_ARTWORK_TOKENS_METHOD
@@ -912,7 +912,7 @@ internal class AppleListenNowHooks(
         }.getOrDefault(emptyList())
         val artworkTokens = artworkTokenEntries.joinToString("|")
         val fetchableArtworkToken = runCatching {
-            AppleReflection.call(
+            AppleReflection.callIfPresent(
                 item,
                 target.runtimeMemberName(
                     AppleMusicRuntimeMember.ARTWORK_GET_FETCHABLE_ARTWORK_TOKEN_METHOD
@@ -920,7 +920,7 @@ internal class AppleListenNowHooks(
             )?.toString()
         }.getOrNull()?.trim().orEmpty()
         val artworkToken = runCatching {
-            AppleReflection.call(
+            AppleReflection.callIfPresent(
                 item,
                 target.runtimeMemberName(
                     AppleMusicRuntimeMember.ARTWORK_GET_ARTWORK_TOKEN_METHOD

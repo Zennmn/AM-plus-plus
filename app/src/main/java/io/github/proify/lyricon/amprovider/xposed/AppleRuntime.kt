@@ -26,10 +26,21 @@ internal object AppleReflection {
         parameterCount: Int? = null,
         parameterTypes: List<Class<*>>? = null,
     ): Method {
+        return findMethodOrNull(clazz, name, parameterCount, parameterTypes)
+            ?: throw NoSuchMethodException("${clazz.name}#$name/${parameterCount ?: parameterTypes?.size ?: "*"}")
+    }
+
+    /** Optional profile members are absent on some entity types; absence is not exceptional. */
+    fun findMethodOrNull(
+        clazz: Class<*>,
+        name: String,
+        parameterCount: Int? = null,
+        parameterTypes: List<Class<*>>? = null,
+    ): Method? {
         val method = methodsNamed(clazz, name).firstOrNull { candidate ->
             (parameterCount == null || candidate.parameterCount == parameterCount) &&
                 (parameterTypes == null || candidate.parameterTypes.contentEquals(parameterTypes.toTypedArray()))
-        } ?: throw NoSuchMethodException("${clazz.name}#$name/${parameterCount ?: parameterTypes?.size ?: "*"}")
+        } ?: return null
         method.isAccessible = true
         return method
     }
@@ -39,6 +50,16 @@ internal object AppleReflection {
         val method = methodsNamed(instance.javaClass, name).firstOrNull {
             parametersMatch(it.parameterTypes, args)
         } ?: throw NoSuchMethodException("${instance.javaClass.name}#$name/${args.size}")
+        method.isAccessible = true
+        return method.invoke(instance, *args)
+    }
+
+    /** Reuses the class index (including misses), but never caches mutable getter results. */
+    fun callIfPresent(instance: Any?, name: String, vararg args: Any?): Any? {
+        if (instance == null) return null
+        val method = methodsNamed(instance.javaClass, name).firstOrNull {
+            parametersMatch(it.parameterTypes, args)
+        } ?: return null
         method.isAccessible = true
         return method.invoke(instance, *args)
     }

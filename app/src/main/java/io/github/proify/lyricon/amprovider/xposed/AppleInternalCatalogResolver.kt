@@ -3129,11 +3129,8 @@ internal class AppleInternalCatalogResolver(
             localizedArtist = localizedArtist,
         )
 
-        internal fun isCollaborationArtistName(artist: String): Boolean {
-            val normalized = artist.trim()
-            if (normalized.isEmpty()) return false
-            return COLLABORATION_ARTIST_PATTERNS.any { pattern -> pattern.containsMatchIn(normalized) }
-        }
+        internal fun isCollaborationArtistName(artist: String): Boolean =
+            collaborationArtistCache.isCollaboration(artist)
 
         internal fun isOriginalTitle(alias: Alias, localizedTitle: String): Boolean =
             normalize(alias.title) != normalize(localizedTitle) &&
@@ -3176,6 +3173,10 @@ internal class AppleInternalCatalogResolver(
             Regex("\\s[xX]\\s"),
             Regex("[,、;/／]"),
         )
+
+        private val collaborationArtistCache = AppleCollaborationArtistCache { credit ->
+            COLLABORATION_ARTIST_PATTERNS.any { pattern -> pattern.containsMatchIn(credit) }
+        }
 
         internal fun shouldCacheCatalogIdentity(
             isrc: String?,
