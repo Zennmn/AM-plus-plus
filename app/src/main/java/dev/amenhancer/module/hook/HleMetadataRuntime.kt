@@ -60,7 +60,7 @@ internal class HleMetadataRuntime(
         version = version,
         application = application,
         nativeLibraryDir = runCatching { module.getModuleApplicationInfo().nativeLibraryDir }
-            .getOrDefault(""),
+            .getOrNull().orEmpty(),
     )
     private val runtime = AppleMusicProviderRuntime(module, classLoader)
     private val playbackHooks = ApplePlaybackHooks()
