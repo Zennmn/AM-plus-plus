@@ -20,7 +20,7 @@ class PhoneLiquidGlassStructuralRegressionTest {
         ?: error("$relativePath was not found from the unit-test working directory")
 
     @Test
-    fun `persists the setting while keeping its embedded entry removed`() {
+    fun `persists the setting with its embedded phone entry`() {
         val models = source("dev/amenhancer/module/model/ModuleModels.kt")
         val session = source("dev/amenhancer/module/config/EmbeddedConfigurationSession.kt")
         val schema = source("dev/amenhancer/module/config/ModuleSettingsSchema.kt")
@@ -42,7 +42,7 @@ class PhoneLiquidGlassStructuralRegressionTest {
         assertTrue(storage.contains("ampp-embedded-settings"))
         assertTrue(client.contains("valuesProvider"))
         assertFalse(settings.contains("手机 Liquid Glass"))
-        assertFalse(settings.contains("phoneLiquidGlassEnabled = phoneLiquidGlass.isChecked"))
+        assertTrue(settings.contains("phoneLiquidGlassEnabled = it"))
     }
 
     @Test
@@ -56,91 +56,10 @@ class PhoneLiquidGlassStructuralRegressionTest {
     }
 
     @Test
-    fun `registers both target layouts without entering the tablet path`() {
-        val glass = source("dev/amenhancer/module/hook/PhoneLiquidGlassFeature.kt")
-        val tablet = source("dev/amenhancer/module/hook/AppleMusicDualPaneTarget.kt")
-
-        assertTrue(glass.contains("\"bottom_navigation\""))
-        assertTrue(glass.contains("\"mini_player\""))
-        assertTrue(tablet.contains("fun isOfficialTablet(context: Context): Boolean"))
-        assertTrue(glass.contains("!TabletModeQualifier.isOfficialTablet(context)"))
-        assertTrue(glass.contains("config.settings().phoneLiquidGlassEnabled"))
-        assertTrue(glass.contains("installMiniPlayerWhenAvailable(root, config, attempt = 0)"))
-        assertTrue(glass.contains("navigationRoot.findViewById<FrameLayout>(it)"))
-        assertFalse(glass.contains("TabletModeQualifier.isEligible"))
-    }
-
-    @Test
-    fun `uses render node backdrop blur with a navigation-host-only target`() {
-        val glass = source("dev/amenhancer/module/hook/PhoneLiquidGlassFeature.kt")
-
-        assertTrue(glass.contains("import eightbitlab.com.blurview.BlurView"))
-        assertTrue(glass.contains("import eightbitlab.com.blurview.BlurTarget"))
-        assertTrue(glass.contains("setupWith(target, 4f, false)"))
-        assertTrue(glass.contains("parent.addView(target, index, hostParams)"))
-        assertTrue(glass.contains("target.addView("))
-        assertTrue(glass.contains("syncNavigationUnderlap(outerHost, target, hostId)"))
-        assertTrue(glass.contains("expandNavigationHostPath(outerHost, hostId)"))
-        assertTrue(glass.contains("outerHost.setPadding("))
-        assertTrue(glass.contains("params.bottomMargin = 0"))
-        assertTrue(glass.contains("FrameLayout.LayoutParams("))
-        assertFalse(glass.contains("clearCoordinatorBehavior"))
-        assertTrue(glass.contains("Color.argb(20, 255, 255, 255)"))
-        assertTrue(glass.contains("makePlayerSheetTransparentWhileCollapsed"))
-        assertTrue(glass.contains("awaitingInitialCollapse"))
-        assertFalse(glass.contains("if (awaitingInitialCollapse) sheet.alpha = 0f"))
-        assertTrue(glass.contains("PLAYER_FRAGMENTS_HOST"))
-        assertTrue(glass.contains("INITIAL_PLAYER_PROTECTION_MS = 3_000L"))
-        assertTrue(glass.contains("val visuallyCollapsed = collapsed || awaitingInitialCollapse"))
-        assertTrue(glass.contains("window.navigationBarColor = Color.TRANSPARENT"))
-        assertTrue(glass.contains("window.setDecorFitsSystemWindows(false)"))
-        assertTrue(glass.contains("window.isNavigationBarContrastEnforced = false"))
-        assertTrue(glass.contains("View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION"))
-        assertTrue(glass.contains("configurePlayerSheetWhenAttached(root, attempt = 0)"))
-        assertTrue(glass.contains("PLAYER_BACKGROUND_LAYERS"))
-        assertTrue(glass.contains("PLAYER_TOP_SHADOW"))
-        assertTrue(glass.contains("BOTTOM_NAVIGATION_ROOT_STACKED"))
-        assertTrue(glass.contains("if (current === stackedRoot) break"))
-        assertTrue(glass.contains("LayerDrawable"))
-        assertTrue(glass.contains("NAV_GLASS_HEIGHT_DP = 60"))
-        assertTrue(glass.contains("NAV_GLASS_HORIZONTAL_INSET_DP = 14"))
-        assertTrue(glass.contains("width = maxOf(1, navigation.width - menuInset * 2)"))
-        assertTrue(glass.contains("menu.translationX = 0f"))
-        assertTrue(glass.contains("LiquidSelectionIndicator"))
-        assertTrue(glass.contains("NAV_SELECTION_MOTION_DURATION_MS = 480L"))
-        assertTrue(glass.contains("SweepGradient"))
-        assertTrue(glass.contains("navigationItemPressAnimator"))
-        assertFalse(glass.contains("item.setOnClickListener"))
-        assertFalse(glass.contains("chromeBackdropColor"))
-        assertTrue(glass.contains("setBlurRadius(GLASS_BLUR_RADIUS)"))
-        assertTrue(glass.contains("setFrameClearDrawable(ColorDrawable(Color.TRANSPARENT))"))
-        assertTrue(glass.contains("addView(blurView, 0"))
-        assertTrue(glass.contains("BOTTOM_NAVIGATION_TABS_FRAME"))
-        assertTrue(glass.contains("clearNavigationContainerBackgrounds(navigation)"))
-        assertTrue(glass.contains("MINI_PLAYER_CONTENT"))
-        assertTrue(glass.contains("NAVIGATION_HOST_GROUP"))
-        assertTrue(glass.contains("wrapNavigationHostInBlurTarget"))
-        assertTrue(glass.contains("parent.removeViewAt(index)"))
-        assertTrue(glass.contains("android.R.attr.state_checked"))
-        assertFalse(glass.contains("android.R.id.content"))
-        assertFalse(glass.contains("\"player_container\""))
-        assertFalse(glass.contains("DualPaneShell"))
-    }
-
-    @Test
-    fun `pins the apache blur dependency and reports a separate feature`() {
-        val appBuild = projectFile("app/build.gradle.kts")
-        val settingsBuild = projectFile("settings.gradle.kts")
-        val notices = projectFile("THIRD_PARTY_NOTICES.md")
-        val constants = source("dev/amenhancer/module/ModuleConstants.kt")
-
-        assertTrue(appBuild.contains("com.github.Dimezis:BlurView:version-3.2.0"))
-        assertTrue(settingsBuild.contains("https://jitpack.io"))
-        assertTrue(notices.contains("Dimezis/BlurView"))
-        assertTrue(notices.contains("Apache License, Version 2.0"))
-        assertTrue(constants.contains("FEATURE_PHONE_LIQUID_GLASS"))
-        val glass = source("dev/amenhancer/module/hook/PhoneLiquidGlassFeature.kt")
-        assertTrue(glass.contains("FeatureInstallResult.degraded"))
-        assertTrue(glass.contains("WIP: resource hooks registered"))
+    fun `reference sources retain their pinned provenance`() {
+        val provenance = projectFile("backdrop/UPSTREAM.md")
+        assertTrue(provenance.contains("65ab177e90e5c1d8c62e70cf7755841982da65f6"))
+        assertTrue(projectFile("backdrop/LICENSE").contains("Apache License"))
+        assertTrue(projectFile("settings.gradle.kts").contains(":backdrop"))
     }
 }

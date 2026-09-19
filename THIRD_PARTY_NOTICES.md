@@ -27,23 +27,16 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## BlurView
+## AndroidLiquidGlass / Backdrop
 
-This project uses `Dimezis/BlurView`, version 3.2.0.
+Includes Backdrop 2.0.1 and catalog components from Kyant0/AndroidLiquidGlass,
+commit `65ab177e90e5c1d8c62e70cf7755841982da65f6`.
 
-Copyright 2025 Dmytro Saviuk
+Copyright 2025 Kyant. Licensed under the Apache License, Version 2.0.
+Full license: `backdrop/LICENSE`; also packaged as `assets/licenses/AndroidLiquidGlass.txt`.
+Source provenance and AM++ changes: `backdrop/UPSTREAM.md`.
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+Compose Multiplatform 1.12.0 and io.github.kyant0:shapes:1.2.1 are Apache-2.0 dependencies.
 
 ## libxposed API and service
 
@@ -56,7 +49,7 @@ Licensed under the Apache License, Version 2.0. The license is available at:
 
 ## Kotlin standard library
 
-This project uses `org.jetbrains.kotlin:kotlin-stdlib:1.9.24`.
+This project uses `org.jetbrains.kotlin:kotlin-stdlib:2.4.10`.
 
 Licensed under the Apache License, Version 2.0. The license is available at:
 

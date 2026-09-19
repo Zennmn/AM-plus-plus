@@ -2,6 +2,7 @@ import java.util.Properties
 
 plugins {
     id("com.android.application")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 val releaseSigningPropertiesFile = rootProject.file("keystore.properties")
@@ -27,6 +28,7 @@ val releaseSigningAvailable = listOf(
 ).all { !it.isNullOrBlank() }
 
 android {
+    buildFeatures { compose = true; buildConfig = true }
     namespace = "dev.amenhancer.module"
     compileSdk = 37
     buildToolsVersion = "37.0.0"
@@ -76,11 +78,11 @@ android {
 }
 
 dependencies {
+    implementation(project(":glass"))
     compileOnly("io.github.libxposed:api:102.0.0")
     compileOnly("io.github.libxposed:service:102.0.0")
     testCompileOnly("io.github.libxposed:service:102.0.0")
-    implementation("com.github.Dimezis:BlurView:version-3.2.0")
-    implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.24")
+    implementation("org.jetbrains.kotlin:kotlin-stdlib:2.4.10")
     implementation("androidx.recyclerview:recyclerview:1.4.0")
     // HLE's exact Apple Music profile resolver uses DexKit only as a
     // compatibility fallback when a profiled class/member is absent.

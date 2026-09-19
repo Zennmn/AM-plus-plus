@@ -61,7 +61,7 @@ AM++ 是一个通过 libxposed API 102 注入 Apple Music 的增强模块，目�
 | 歌词模糊半径调节 | `0px` | 可在设置中对模糊半径增加或减少 `-10..10px`。 |
 | 自定义歌词注入 | 关闭 | 按 Apple Music ID 替换 TTML，支持手动 TTML、AMLL、AM-Lyrics 和 Lunabeat 导入。 |
 | 歌词字体替换 | 关闭 | 导入 TTF/OTF 后应用到播放器歌词布局，可恢复原字体；示例使用 MiSans。 |
-| 手机液态玻璃 | 关闭 | 手机底栏和 mini-player 的实时模糊、半透明材质与选中胶囊，目前为 WIP。 |
+| 手机液态玻璃 | 关闭 | Android 13+、Apple Music 6.5.2 (1586)：基于 AndroidLiquidGlass 的底栏透镜、拖拽胶囊和迷你播放器；真机视觉验收中。 |
 | 平板底栏补偿 | 关闭 | 平板底栏显示异常时使用的兼容性选项。 |
 
 双向歌词模糊的核心逻辑移植并适配自 [a23bc/amlyricblur](https://github.com/a23bc/amlyricblur)。
@@ -170,14 +170,16 @@ Lunabeat 会缓存 manifest 和歌曲索引，优先使用本地索引；仅当�
 
 ### 手机液态玻璃
 
-在设置页开启“手机液态玻璃底栏”后重新打开 Apple Music。该功能只在手机路径启用，会修改底部导航栏和 mini-player 的背景材质与选中状态动画，目前仍可能出现视觉闪烁。
+在设置页开启“手机液态玻璃底栏”后，强制停止并重新打开 Apple Music。完整效果仅支持 Android 13+、Apple Music 6.5.2 (1586) 的手机布局；其他版本及平板保留原生底栏。
+
+底栏采用 AndroidLiquidGlass 的 LiquidBottomTabs；迷你播放器采用 LiquidButton 材质和按压形变，继续使用原生播放控件。页面背景通过共享硬件 RenderNode 采样。代码、构建验证与真机视觉验收分开记录，详见 [玻璃重构与验收](docs/liquid-glass.md)。
 
 ## 构建技术
 
 - [Kotlin](https://kotlinlang.org/)，项目主要实现语言。
 - [Android Gradle Plugin](https://developer.android.com/build)，用于 Android 应用构建。
 - [libxposed API / service](https://github.com/LSPosed/LSPosed)，用于模块加载、Hook 和跨进程配置文件服务。
-- [BlurView](https://github.com/Dimezis/BlurView)，用于手机液态玻璃的背景模糊。
+- [AndroidLiquidGlass / Backdrop](https://github.com/Kyant0/AndroidLiquidGlass)，用于玻璃折射、高光、色散及参考交互；源码固定提交纳入本仓库。
 
 ## 从源码构建
 

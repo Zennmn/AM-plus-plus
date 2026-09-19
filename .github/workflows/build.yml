@@ -29,6 +29,9 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Verify pinned glass renderer
+        run: python3 scripts/verify-glass-reference.py
+
       - name: Prepare release signing
         if: github.event_name != 'pull_request'
         env:
@@ -40,7 +43,7 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           chmod +x gradlew
-          ./gradlew test lintVitalRelease assembleRelease --no-daemon
+          ./gradlew test :app:lintDebug :app:lintVitalRelease :glass:lintDebug :glass-lab:lintDebug :app:assembleRelease :glass-lab:assembleDebug :glass-lab:assembleDebugAndroidTest --no-daemon
 
       - name: Verify release signature
         if: github.event_name != 'pull_request'
@@ -57,7 +60,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           chmod +x gradlew
-          ./gradlew test lintVitalRelease assembleDebug --no-daemon
+          ./gradlew test :app:lintDebug :app:lintVitalRelease :glass:lintDebug :glass-lab:lintDebug :app:assembleDebug :glass-lab:assembleDebug :glass-lab:assembleDebugAndroidTest --no-daemon
 
       - name: Upload release APK
         if: github.event_name != 'pull_request'
@@ -73,4 +76,13 @@ jobs:
         with:
           name: AM-plus-plus-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload glass comparison APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: AM-plus-plus-glass-lab
+          path: |
+            glass-lab/build/outputs/apk/debug/glass-lab-debug.apk
+            glass-lab/build/outputs/apk/androidTest/debug/glass-lab-debug-androidTest.apk
           if-no-files-found: error

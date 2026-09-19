@@ -2189,7 +2189,7 @@ internal class EmbeddedSettingsHost private constructor(
             addView(embeddedSettingRow(
                 activity,
                 "手机液态玻璃底栏",
-                "仅手机启用 · 更改后需强制停止并重开 Apple Music",
+                "Android 13+ · Apple Music 6.5.2 · 手机启用，需重开应用",
                 settings.phoneLiquidGlassEnabled,
                 badge = "WIP",
                 badgeAtToggle = true,
