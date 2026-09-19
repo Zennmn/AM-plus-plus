@@ -1,5 +1,7 @@
 # 液态玻璃重构与验收
 
+适配后续 Apple Music 版本请参阅 [液态玻璃新版本适配](liquid-glass-adaptation.md)，其中列出当前版本门控、Hook/资源依赖、展开交接和验收步骤。
+
 ## 实现边界
 
 - 基准：AndroidLiquidGlass `65ab177e90e5c1d8c62e70cf7755841982da65f6`，Backdrop 2.0.1。
