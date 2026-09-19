@@ -92,6 +92,15 @@ internal object PhoneGlassRuntime {
                 sessions.values.firstNotNullOfOrNull { it.redirectedPadding(param.thisObject) }?.let { param.args[3] = it }
             }
         })
+        // Only the explicitly managed player layers are affected. Preserve the
+        // host's changing target alpha (track changes, motion artwork, lyrics).
+        ModernXposedRuntime.hookMethod(View::class.java.getDeclaredMethod("setAlpha", Float::class.javaPrimitiveType), object : ModernMethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                val alpha = (param.args[0] as Number).toFloat()
+                sessions.values.firstNotNullOfOrNull { it.redirectedLayerAlpha(param.thisObject, alpha) }
+                    ?.let { param.args[0] = it }
+            }
+        })
         hooksInstalled = true
     }
 

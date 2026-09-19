@@ -50,6 +50,8 @@ internal class PhoneGlassSession(
     private val failure: (Throwable) -> Unit,
 ) : AutoCloseable, ViewTreeObserver.OnPreDrawListener {
     private val states = IdentityHashMap<View, NativeViewState>()
+    private val layerAlphas = IdentityHashMap<View, NativeLayerAlpha>()
+    private var writingLayerAlpha = false
     private var navFrame: FrameLayout? = null
     private var navigation: View? = null
     private var source: ViewGroup? = null
@@ -436,20 +438,33 @@ internal class PhoneGlassSession(
             if (v.outlineProvider !== desired) v.outlineProvider = desired
         }
         listOf("player_top_shadow", "background_layers", "player_fragments_host").mapNotNull(::find).forEach { v ->
-            val original = save(v)
-            v.alpha = original.alpha * materialProgress
+            applyLayerAlpha(v, materialProgress)
         }
         // The motion subtree includes rectangular legibility/blur overlays and can
         // still have thumbnail-sized bounds early in the native transition. Reveal
         // it only after the glass has faded and the opaque player background is back.
         find("motion_switcher")?.let { v ->
-            val original = save(v)
-            v.alpha = original.alpha * blend(0.6f, 0.85f)
+            applyLayerAlpha(v, blend(0.6f, 0.85f))
         }
         find("player_root")?.background = if (materialProgress < 1f) null else states[find("player_root")]?.background
     }
 
     fun onSlide(progress: Float) { slide = progress.coerceIn(0f, 1f) }
+
+    fun redirectedLayerAlpha(view: Any?, alpha: Float): Float? {
+        if (closed || writingLayerAlpha) return null
+        return layerAlphas[view]?.hostWrite(alpha)
+    }
+
+    private fun applyLayerAlpha(view: View, factor: Float) {
+        save(view)
+        val state = layerAlphas.getOrPut(view) { NativeLayerAlpha(view.alpha) }
+        state.factor = factor
+        if (view.alpha != state.effective) {
+            writingLayerAlpha = true
+            try { view.alpha = state.effective } finally { writingLayerAlpha = false }
+        }
+    }
 
     fun redirectedPadding(view: Any?): Int? = if (activated && view === source) {
         if (underlap) 0 else if (navFrame?.isShown == true) GlassPolicy.occupiedHeight(density, bottomInset, miniVisible) else 0
@@ -492,6 +507,8 @@ internal class PhoneGlassSession(
         listOfNotNull(navGlass, miniGlass).forEach { (it.parent as? ViewGroup)?.removeView(it) }
         states.forEach { (view, state) -> state.restore(view) }
         states.clear()
+        layerAlphas.forEach { (view, state) -> view.alpha = state.native }
+        layerAlphas.clear()
         nativePeek.latest?.let { runCatching { writePeek(it) } }
         activity.window.decorView.requestLayout()
     }
