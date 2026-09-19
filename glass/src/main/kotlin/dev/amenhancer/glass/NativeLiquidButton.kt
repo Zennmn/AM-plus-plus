@@ -2,6 +2,7 @@ package dev.amenhancer.glass
 
 import android.view.MotionEvent
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -37,6 +38,7 @@ class NativeButtonInput {
 fun NativeLiquidButton(
     backdrop: Backdrop,
     input: NativeButtonInput,
+    expansion: Float = 0f,
     transformContent: (Float, Float, Float, Float) -> Unit,
 ) {
     val containerColor = if (isSystemInDarkTheme()) Color(0xFF121212).copy(alpha = 0.4f)
@@ -56,7 +58,7 @@ fun NativeLiquidButton(
     Box(
         Modifier.fillMaxSize().drawBackdrop(
             backdrop = backdrop,
-            shape = { Capsule() },
+            shape = { if (expansion == 0f) Capsule() else RoundedCornerShape(lerp(32f, 24f, expansion).dp) },
             effects = { vibrancy(); blur(8f.dp.toPx()); lens(24f.dp.toPx(), 24f.dp.toPx()) },
             onDrawSurface = { drawRect(containerColor) },
             layerBlock = {

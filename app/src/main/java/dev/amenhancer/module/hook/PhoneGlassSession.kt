@@ -74,6 +74,8 @@ internal class PhoneGlassSession(
     private var menuKey: List<Any?> = emptyList()
     private val input = NativeButtonInput()
     private var slide = 0f
+    private var glassExpansion by androidx.compose.runtime.mutableFloatStateOf(0f)
+    private var miniOffsetInSheet = 0
     private var lastPeek = -1
     private var originalPeek = -1
     private var contentDownX = 0f
@@ -143,12 +145,15 @@ internal class PhoneGlassSession(
             glass.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
             glass.content {
                 HostConfiguration {
-                    NativeLiquidButton(bg, input) { sx, sy, x, y ->
+                    NativeLiquidButton(bg, input, glassExpansion) { sx, sy, x, y ->
                         miniContent?.let { v -> v.scaleX = sx; v.scaleY = sy; v.translationX = x; v.translationY = y }
                     }
                 }
             }
-            root.addView(glass, 0, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64), Gravity.TOP).apply {
+            // The native mini container disappears early in the opening animation.
+            // Keep the material behind the whole sheet, independent of that container.
+            val surfaceParent = find("player_sheet_container") as? FrameLayout ?: root
+            surfaceParent.addView(glass, 0, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64), Gravity.TOP).apply {
                 leftMargin = dp(16); rightMargin = dp(16)
             })
             if (activated) prepareMini()
@@ -350,17 +355,42 @@ internal class PhoneGlassSession(
         // rectangular shadow outline, not the navigation view's elevation.
         navFrame?.outlineProvider = null
         miniRoot?.background = null
-        miniGlass?.alpha = miniContent?.alpha ?: 1f
-        val progress = if (!miniVisible) 1f else maxOf(slide, 1f - (miniContent?.alpha ?: 1f)).coerceIn(0f, 1f)
+        val progress = slide.coerceIn(0f, 1f)
+        fun blend(start: Float, end: Float): Float {
+            val t = ((progress - start) / (end - start)).coerceIn(0f, 1f)
+            return t * t * (3f - 2f * t)
+        }
+        val materialProgress = blend(0f, 0.35f)
+        glassExpansion = materialProgress
+        miniGlass?.let { glass ->
+            val sheet = glass.parent as? FrameLayout
+            if (sheet != null && sheet !== miniRoot) {
+                if (miniVisible && progress == 0f) {
+                    val miniPosition = IntArray(2).also { miniRoot?.getLocationInWindow(it) }
+                    val sheetPosition = IntArray(2).also(sheet::getLocationInWindow)
+                    miniOffsetInSheet = miniPosition[1] - sheetPosition[1]
+                }
+                val margin = (dp(16) * (1f - materialProgress)).roundToInt()
+                val top = (miniOffsetInSheet * (1f - materialProgress)).roundToInt()
+                val height = (dp(64) + (sheet.height - dp(64)) * progress).roundToInt().coerceAtLeast(dp(64))
+                val params = glass.layoutParams as FrameLayout.LayoutParams
+                if (params.height != height || params.topMargin != top || params.leftMargin != margin) {
+                    params.height = height; params.topMargin = top
+                    params.leftMargin = margin; params.rightMargin = margin
+                    glass.layoutParams = params
+                }
+            }
+            glass.alpha = if (!miniVisible && progress == 0f) 0f else 1f - blend(0.35f, 0.6f)
+        }
         find("player_sheet_container")?.let { v ->
             val original = save(v)
             v.outlineProvider = if (progress == 0f) null else original.outlineProvider
         }
         listOf("player_top_shadow", "background_layers", "motion_switcher", "player_fragments_host").mapNotNull(::find).forEach { v ->
             val original = save(v)
-            v.alpha = original.alpha * progress
+            v.alpha = original.alpha * materialProgress
         }
-        find("player_root")?.background = if (progress == 0f) null else states[find("player_root")]?.background
+        find("player_root")?.background = if (materialProgress < 1f) null else states[find("player_root")]?.background
     }
 
     fun onSlide(progress: Float) { slide = progress.coerceIn(0f, 1f) }
