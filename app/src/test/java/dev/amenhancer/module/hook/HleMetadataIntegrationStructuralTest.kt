@@ -9,6 +9,7 @@ class HleMetadataIntegrationStructuralTest {
     @Test
     fun `nullable embedded module native directory does not abort HLE construction`() {
         val runtime = source("app/src/main/java/dev/amenhancer/module/hook/HleMetadataRuntime.kt")
+            .replace("\r\n", "\n")
         assertTrue(
             runtime.contains(
                 "runCatching { module.getModuleApplicationInfo().nativeLibraryDir }\n" +
