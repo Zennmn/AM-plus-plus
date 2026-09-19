@@ -102,10 +102,22 @@ internal class PhoneGlassSession(
     private val bottomInset get() = activity.window.decorView.rootWindowInsets?.getInsets(WindowInsets.Type.navigationBars())?.bottom ?: 0
     private val miniVisible get() = miniRoot?.isShown == true
 
-    private fun find(name: String): View? = activity.resources.getIdentifier(name, "id", ModuleConstants.TARGET_PACKAGE)
+    // Resource IDs are stable for this Activity's host APK. Keep values and Views live so
+    // configuration changes and replaced page/player hierarchies still take effect.
+    private val resourceIds = HashMap<String, Int>()
+
+    private fun resourceId(name: String, type: String): Int {
+        val key = "$type/$name"
+        resourceIds[key]?.let { return it }
+        val id = activity.resources.getIdentifier(name, type, ModuleConstants.TARGET_PACKAGE)
+        if (id != 0) resourceIds[key] = id
+        return id
+    }
+
+    private fun find(name: String): View? = resourceId(name, "id")
         .takeIf { it != 0 }?.let { activity.findViewById(it) }
 
-    private fun dimen(name: String): Int = activity.resources.getIdentifier(name, "dimen", ModuleConstants.TARGET_PACKAGE)
+    private fun dimen(name: String): Int = resourceId(name, "dimen")
         .takeIf { it != 0 }?.let { activity.resources.getDimensionPixelSize(it) } ?: 0
 
     private fun save(view: View): NativeViewState = states.getOrPut(view) { NativeViewState(view) }
@@ -222,7 +234,7 @@ internal class PhoneGlassSession(
         val selected = (ModernXposedRuntime.callMethod(nav, "getSelectedItemId") as Number).toInt()
         val night = activity.resources.configuration.uiMode and 0x30 == 0x20
         val fg = if (night) AndroidColor.WHITE else AndroidColor.BLACK
-        val accentId = activity.resources.getIdentifier("color_primary", "color", ModuleConstants.TARGET_PACKAGE)
+        val accentId = resourceId("color_primary", "color")
         val hostAccent = if (accentId != 0) activity.getColor(accentId) else 0xfffa233b.toInt()
         val items = (0 until menu.size()).map(menu::getItem).filter { it.isVisible }
         val key = items.flatMap { listOf(it.itemId, it.title?.toString(), it.isEnabled, it.icon) } + listOf(night, hostAccent)

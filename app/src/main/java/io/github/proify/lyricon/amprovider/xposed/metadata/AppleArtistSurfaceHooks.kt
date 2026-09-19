@@ -108,6 +108,10 @@ internal class AppleArtistSurfaceHooks(
         ConcurrentHashMap<String, MutableSet<String>>()
     private val topSongRetryIds = ConcurrentHashMap.newKeySet<String>()
 
+    private val artistClassesLock = Any()
+    @Volatile
+    private var resolvedArtistClasses: Map<String, ResolvedAppleMusicHookClass>? = null
+
     @Volatile
     private var latestProfileMediaId: String? = null
 
@@ -913,14 +917,29 @@ internal class AppleArtistSurfaceHooks(
         )
     }
 
-    private fun artistClasses(): Map<String, ResolvedAppleMusicHookClass>? = runCatching {
-        runtime.hookResolver.resolveClasses(AppleMusicHookPoint.ARTIST_SURFACE_CLASSES)
-            .associateBy { resolved ->
-                resolved.target.runtimeMemberName(AppleMusicRuntimeMember.ARTIST_RUNTIME_ROLE)
-            }
-    }.onFailure {
-        ProviderLogger.error("Apple Music 歌手页运行时类解析失败", it)
-    }.getOrNull()
+    private fun artistClasses(): Map<String, ResolvedAppleMusicHookClass>? {
+        resolvedArtistClasses?.let { return it }
+        return synchronized(artistClassesLock) {
+            resolvedArtistClasses ?: runCatching {
+                runtime.hookResolver.resolveClasses(AppleMusicHookPoint.ARTIST_SURFACE_CLASSES)
+                    .associateBy { resolved ->
+                        resolved.target.runtimeMemberName(AppleMusicRuntimeMember.ARTIST_RUNTIME_ROLE)
+                    }
+                    .also { classes ->
+                        // The global Epoxy final-bind hook reaches this for ordinary home cards
+                        // too. Resolve once, then reject unrelated model types using cached Classes.
+                        // Return partial results as before, but do not freeze an incomplete lookup.
+                        if (classes.keys.containsAll(listOf(
+                                "recycler", "media_entity", "base_controller", "artist_controller",
+                                "top_song_model", "header_model",
+                            ))
+                        ) resolvedArtistClasses = classes
+                    }
+            }.onFailure {
+                ProviderLogger.error("Apple Music 歌手页运行时类解析失败", it)
+            }.getOrNull()
+        }
+    }
 
     private fun reflectiveField(instance: Any, name: String): Any? =
         runCatching { AppleReflection.field(instance, name) }.getOrNull()

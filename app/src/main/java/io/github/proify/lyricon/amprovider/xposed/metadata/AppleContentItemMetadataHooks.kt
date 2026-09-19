@@ -106,7 +106,7 @@ internal class AppleContentItemMetadataHooks(
         ).forEach { (getter, runtimeMember) ->
             val methodName = baseContentItemRuntimeTarget.target.runtimeMemberName(runtimeMember)
             val method = runCatching {
-                AppleReflection.findMethod(contentItemClass, methodName, parameterCount = 0)
+                AppleReflection.findMethodOrNull(contentItemClass, methodName, parameterCount = 0)
             }.getOrNull() ?: return@forEach
             if (method.returnType != String::class.java || !hookedMethods.add(method)) {
                 return@forEach
@@ -182,7 +182,7 @@ internal class AppleContentItemMetadataHooks(
             }
         }
         val subscriptionStoreId = runCatching {
-            AppleReflection.call(
+            AppleReflection.callIfPresent(
                 contentItem,
                 baseContentItemRuntimeTarget.target.runtimeMemberName(
                     AppleMusicRuntimeMember.CONTENT_ITEM_SUBSCRIPTION_STORE_ID_GETTER
@@ -190,7 +190,7 @@ internal class AppleContentItemMetadataHooks(
             ) as? String
         }.getOrNull()
         val id = runCatching {
-            AppleReflection.call(
+            AppleReflection.callIfPresent(
                 contentItem,
                 baseContentItemRuntimeTarget.target.runtimeMemberName(
                     AppleMusicRuntimeMember.CONTENT_ITEM_ID_GETTER
@@ -198,7 +198,7 @@ internal class AppleContentItemMetadataHooks(
             ) as? String
         }.getOrNull()
         val persistentId = runCatching {
-            AppleReflection.call(
+            AppleReflection.callIfPresent(
                 contentItem,
                 baseContentItemRuntimeTarget.target.runtimeMemberName(
                     AppleMusicRuntimeMember.CONTENT_ITEM_PERSISTENT_ID_GETTER

@@ -210,7 +210,7 @@ internal fun mediaApiAttributeArtistIds(
     attributes ?: return emptyList()
     return getterNames
         .mapNotNull { getter ->
-            runCatching { AppleReflection.call(attributes, getter) }
+            runCatching { AppleReflection.callIfPresent(attributes, getter) }
                 .getOrNull()
                 ?.toString()
                 ?.trim()
