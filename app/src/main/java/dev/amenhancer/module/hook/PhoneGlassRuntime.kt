@@ -79,7 +79,10 @@ internal object PhoneGlassRuntime {
         val peek = method(behavior, "F", Int::class.javaPrimitiveType!!, Boolean::class.javaPrimitiveType!!)
         ModernXposedRuntime.hookMethod(peek, object : ModernMethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
-                sessions.values.firstOrNull { it.playerBehavior === param.thisObject && it.activated }?.let { param.args[0] = it.peekHeight() }
+                sessions.values.firstOrNull { it.playerBehavior === param.thisObject }?.let {
+                    it.observeNativePeek((param.args[0] as Number).toInt())
+                    if (it.activated) param.args[0] = it.peekHeight()
+                }
             }
         })
         // Apple's scrolling behavior reserves bottom padding on the content host.

@@ -93,6 +93,8 @@
 
 接入异常要关闭 session、释放节点/监听器/组合并恢复原生属性。当前失败 Activity 会停止重试，Hook 安装失败也要求重启宿主；测试修正后须强制停止再启动。新增属性修改要加入恢复记录，避免关闭功能后残留透明度、padding 或轮廓变化。
 
+播放器 Behavior 暂未赋值属于例外：挂载阶段每 50ms 重试一次，最多 20 次，成功或关闭 session 时取消待执行回调；耗尽后才报告失败。原生 peek 高度通过 Hook 持续记录宿主请求，模块自己的设置/恢复调用用重入保护排除。首次没有捕获到请求时，按 1586 stacked holder 的导航 inset + navigation_tabs_height + miniplayer_height 初始化回退值，不以 mini 当时是否可见决定恢复高度。
+
 ## 5. 验证工具的边界
 
 `scripts/verify-glass-host.py` **当前仅适用于 1586 XAPK**：它断言 manifest 版本和固定 base APK 文件名，检查三组方法及继承关系，并检查三个 layout 文件路径。它不验证资源 ID/容器类型、运行时层级、进度语义、背景采样或交互。不能删除版本断言后便把 PASS 当作新版适配成功。

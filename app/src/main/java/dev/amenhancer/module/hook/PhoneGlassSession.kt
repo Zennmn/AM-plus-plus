@@ -77,7 +77,16 @@ internal class PhoneGlassSession(
     private var glassExpansion by androidx.compose.runtime.mutableFloatStateOf(0f)
     private var miniOffsetInSheet = 0
     private var lastPeek = -1
-    private var originalPeek = -1
+    private val nativePeek = NativePeekHeight()
+    private val attachHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var behaviorRetries = 0
+    private var retryPending = false
+    private val retryAttach = Runnable {
+        retryPending = false
+        if (!closed && !failureScheduled && !activity.isDestroyed && !activity.isFinishing) {
+            try { attachAvailableViews() } catch (error: Throwable) { scheduleFailure(error) }
+        }
+    }
     private var contentDownX = 0f
     private var contentDownY = 0f
     private var observingPress = false
@@ -110,7 +119,11 @@ internal class PhoneGlassSession(
     }
 
     fun attachAvailableViews() {
-        if (closed) return
+        if (closed || failureScheduled) return
+        if (!config.settings().phoneLiquidGlassEnabled || TabletModeQualifier.isOfficialTablet(activity)) {
+            close()
+            return
+        }
         if (navGlass == null) {
             if (find("bottom_navigation_root_stacked") == null) return
             val frame = find("bottom_navigation_tabs_frame") as? FrameLayout ?: return
@@ -121,7 +134,17 @@ internal class PhoneGlassSession(
             navigation = nav
             source = content
             playerBehavior = findPlayerBehavior()
-            checkNotNull(playerBehavior) { "1586 player behavior not ready" }
+            if (playerBehavior == null) {
+                if (!retryPending) {
+                    check(behaviorRetries < 20) { "1586 player behavior not ready after retries" }
+                    behaviorRetries++
+                    retryPending = true
+                    attachHandler.postDelayed(retryAttach, 50L)
+                }
+                return
+            }
+            attachHandler.removeCallbacks(retryAttach)
+            retryPending = false
             val bg = ViewBackdrop(content, ::scheduleFailure).also { backdrop = it; it.start() }
             refreshMenu()
             val glass = GlassHostView(moduleContext()).also { navGlass = it }
@@ -264,7 +287,8 @@ internal class PhoneGlassSession(
         allowGlassOverflow(frame)
         find("navigation_tabs_divider")?.let { save(it); it.visibility = View.GONE }
         source?.let { save(it) }
-        originalPeek = bottomInset + dimen("navigation_tabs_height") + if (miniVisible) dimen("miniplayer_height") else 0
+        // The stacked native holder reserves miniplayer_height even when mini is hidden.
+        nativePeek.initialize(bottomInset + dimen("navigation_tabs_height") + dimen("miniplayer_height"))
         activated = true
         prepareMini()
         navGlass?.alpha = 1f
@@ -296,11 +320,17 @@ internal class PhoneGlassSession(
         val peek = peekHeight()
         if (lastPeek != peek) {
             lastPeek = peek
-            playerBehavior?.let { PhoneGlassRuntime.method(it.javaClass, "F", Int::class.javaPrimitiveType!!, Boolean::class.javaPrimitiveType!!).invoke(it, peek, false) }
+            writePeek(peek)
         }
     }
 
     fun peekHeight(): Int = GlassPolicy.occupiedHeight(density, bottomInset, miniVisible) + if (miniVisible) dimen("shadow_height") else 0
+
+    fun observeNativePeek(height: Int) = nativePeek.observe(height)
+
+    private fun writePeek(height: Int) = nativePeek.writeByModule {
+        playerBehavior?.let { PhoneGlassRuntime.method(it.javaClass, "F", Int::class.javaPrimitiveType!!, Boolean::class.javaPrimitiveType!!).invoke(it, height, false) }
+    }
 
     private fun updateUnderlap() {
         val root = source ?: return
@@ -428,13 +458,15 @@ internal class PhoneGlassSession(
         if (closed) return
         closed = true
         activated = false
+        attachHandler.removeCallbacks(retryAttach)
+        retryPending = false
         observer?.takeIf { it.isAlive }?.removeOnPreDrawListener(this)
         observer?.takeIf { it.isAlive }?.removeOnGlobalLayoutListener(layoutListener)
         backdrop?.close()
         listOfNotNull(navGlass, miniGlass).forEach { (it.parent as? ViewGroup)?.removeView(it) }
         states.forEach { (view, state) -> state.restore(view) }
         states.clear()
-        if (originalPeek >= 0) runCatching { playerBehavior?.let { PhoneGlassRuntime.method(it.javaClass, "F", Int::class.javaPrimitiveType!!, Boolean::class.javaPrimitiveType!!).invoke(it, originalPeek, false) } }
+        nativePeek.latest?.let { runCatching { writePeek(it) } }
         activity.window.decorView.requestLayout()
     }
 
