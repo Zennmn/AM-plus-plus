@@ -277,6 +277,16 @@ internal class PhoneGlassSession(
     private fun activate() {
         val nav = navigation ?: return
         val frame = navFrame ?: return
+        // First layout may have dispatched its slide callback before this session existed.
+        // Read the laid-out native state before changing peek height or hiding any layer.
+        val sheet = find("player_sheet_container") ?: return
+        if (!sheet.isLaidOut) return
+        val behavior = checkNotNull(playerBehavior)
+        val base = activity.classLoader.loadClass("com.google.android.material.bottomsheet.BottomSheetBehavior")
+        val state = base.getDeclaredField("G").apply { isAccessible = true }.getInt(behavior)
+        val collapsedTop = base.getDeclaredField("B").apply { isAccessible = true }.getInt(behavior)
+        val expandedTop = (PhoneGlassRuntime.method(base, "B").invoke(behavior) as Number).toInt()
+        slide = InitialGlassSlide.resolve(state, sheet.top, collapsedTop, expandedTop)
         save(nav)
         save(frame)
         nav.alpha = 0f
@@ -346,6 +356,14 @@ internal class PhoneGlassSession(
         }
         if (scanNeeded) {
             scanNeeded = false
+            val entries = states.entries.iterator()
+            while (entries.hasNext()) {
+                val (view, state) = entries.next()
+                if (state.scrollPadding && !isDescendant(view, root)) {
+                    state.restoreScroll(view)
+                    entries.remove()
+                }
+            }
             val candidates = descendants(root).filter { view ->
             view.isShown && view.height >= root.height / 2 && view.height > 0 && generateSequence(view.javaClass as Class<*>?) { it.superclass }.any {
                 it.name in setOf("androidx.recyclerview.widget.RecyclerView", "androidx.core.widget.NestedScrollView", "android.widget.ScrollView", "android.widget.ListView")
@@ -383,7 +401,7 @@ internal class PhoneGlassSession(
         navFrame?.background = null
         // Keep Z ordering (also used for touch dispatch); remove only the old
         // rectangular shadow outline, not the navigation view's elevation.
-        navFrame?.outlineProvider = null
+        navFrame?.let { if (it.outlineProvider != null) it.outlineProvider = null }
         miniRoot?.background = null
         val progress = slide.coerceIn(0f, 1f)
         fun blend(start: Float, end: Float): Float {
@@ -414,11 +432,19 @@ internal class PhoneGlassSession(
         }
         find("player_sheet_container")?.let { v ->
             val original = save(v)
-            v.outlineProvider = if (progress == 0f) null else original.outlineProvider
+            val desired = if (progress == 0f) null else original.outlineProvider
+            if (v.outlineProvider !== desired) v.outlineProvider = desired
         }
-        listOf("player_top_shadow", "background_layers", "motion_switcher", "player_fragments_host").mapNotNull(::find).forEach { v ->
+        listOf("player_top_shadow", "background_layers", "player_fragments_host").mapNotNull(::find).forEach { v ->
             val original = save(v)
             v.alpha = original.alpha * materialProgress
+        }
+        // The motion subtree includes rectangular legibility/blur overlays and can
+        // still have thumbnail-sized bounds early in the native transition. Reveal
+        // it only after the glass has faded and the opaque player background is back.
+        find("motion_switcher")?.let { v ->
+            val original = save(v)
+            v.alpha = original.alpha * blend(0.6f, 0.85f)
         }
         find("player_root")?.background = if (materialProgress < 1f) null else states[find("player_root")]?.background
     }
@@ -492,6 +518,10 @@ internal class PhoneGlassSession(
         private val clipPadding = (view as? ViewGroup)?.clipToPadding
         val outlineProvider = view.outlineProvider
         private val transform = floatArrayOf(view.scaleX, view.scaleY, view.translationX, view.translationY)
+        fun restoreScroll(view: View) {
+            view.setPadding(view.paddingLeft, view.paddingTop, view.paddingRight, padding[3])
+            if (view is ViewGroup) clipPadding?.let { view.clipToPadding = it }
+        }
         fun restore(view: View) {
             view.background = background; view.alpha = alpha; view.visibility = visibility
             view.outlineProvider = outlineProvider

@@ -26,6 +26,7 @@
 | --- | --- | --- |
 | `PlayerActivity$StackedBottomNavigationHolder.c(F)V` | after Hook 获取展开进度 | 参数是否仍是收起 0、展开 1；拖动、点击展开、取消和回收是否都会回调；当前用 declared Activity 字段找宿主，是否仍唯一且正确 |
 | `PlayerBottomSheetBehavior.F(IZ)V` | 改写并主动设置 peek 高度 | 方法实际控制收起高度，参数单位/布尔语义一致；当前沿继承链查方法，不能只搜当前类 |
+| `BottomSheetBehavior.G:I`、`B:I`、`B()I` | 首次接管时读取状态、收起位置及展开位置 | 1586 原始字段名为 G/B（不是 JADX 的 f45303G/f45298B）；在布局完成且修改 peek 之前读取，拖动/settling 时按当前位置计算进度 |
 | Activity 及父类中的 BottomSheetBehavior 类型字段 | 找到当前播放器 Behavior | 当前按类型名包含 `BottomSheetBehavior` 取首个非空字段；新版多个候选时要精确解析，不能接管其他面板 |
 | 导航对象 `getMenu()`、`getSelectedItemId()`、`setSelectedItemId(I)` | 读菜单并让原生导航执行选择 | 返回平台 `Menu`、菜单 ID 和选择语义；重复点击、返回栈、深链、禁用/隐藏项仍正常 |
 | `ViewGroup.dispatchTouchEvent(MotionEvent)` | 观察 mini root 输入，驱动按压效果 | 仅匹配当前 session 的 miniRoot；不消费原生点击和纵向拖拽 |
@@ -86,6 +87,8 @@
 当前玻璃挂在 `player_sheet_container` 后方，不跟随 mini root 的提前隐藏而消失。`onSlide` 将进度规范到 0..1；`updateTransition` 用 smoothstep 在 0..0.35 交接原生背景，在 0.35..0.6 淡出玻璃，同时高度从 64dp 向 sheet 高度变化，水平边距从 16dp 收到 0，顶部偏移归零，NativeLiquidButton 圆角随 expansion 变化。
 
 这些区间是当前视觉基准，不是新宿主的 API 契约。新版若进度范围、回调时序、sheet 坐标或原生层淡入时机变化，应先正确映射进度和层，再根据录屏调整交接。必须覆盖点击展开、慢拖、快速反向、取消、完全展开后收回；展开首帧不能先撤掉模糊。仅修改 mini alpha 或把玻璃挂回 mini root 会重现断层。
+
+动态封面 `motion_switcher` 单独在 0.6..0.85 渐入：其子树包含矩形渐变/模糊层，上拉初段可能仍是缩略图尺寸，不能随其他背景提前显示。该灰块修复已由用户真机确认。预绘制中的 outlineProvider 只在引用变化时设置，避免相同值触发持续失效；滚动 View 离开内容源树后恢复底部 padding/clipToPadding 并移除缓存，不因暂时隐藏而移除。
 
 ### 资源和恢复
 
