@@ -11,7 +11,7 @@
 | 配置与宿主资格 | `EmbeddedBootstrap`、`PhoneLiquidGlassFeature`、`GlassPolicy` | 精确 package/versionName/versionCode、Android 13+、官方手机判定、开关读取 |
 | 发现与 Hook | `PhoneLiquidGlassResourceHook`、`PhoneGlassRuntime` | 布局膨胀入口、进度回调、peek setter、实例归属 |
 | 宿主视图桥 | `PhoneGlassSession` | 容器类型/层级、菜单、背景源、insets、原生动画层 |
-| 模块自有 UI | `GlassHostView`、`GlassNavigation`、`NativeLiquidButton` | 模块资源/Compose 生命周期隔离、输入和坐标映射 |
+| 模块自有 UI | `GlassHostView`、`GlassNavigation`、`NativeLiquidButton`、`BottomScrim` | 模块资源/Compose 生命周期隔离、输入和坐标映射 |
 | 背景录制 | `ViewBackdrop` | 窗口底色加内容、硬件录制、失效更新、不包含玻璃自身 |
 
 当前 `GlassPolicy` 只有一组版本常量；`PhoneLiquidGlassFeature.install` 还有独立的 identity 检查，`PhoneGlassRuntime.discover` 再调用 `GlassPolicy.supports`。bootstrap 支持宿主，不等于玻璃支持该宿主。当前没有现成的多版本玻璃 profile，不能把下文建议的 profile 当作已实现能力。
@@ -75,6 +75,16 @@
 - 当前仅在 source 的 bottomMargin **恰等于 navigationBars bottom inset** 时移除该 margin。不能泛化为清零所有底部 margin，尤其是键盘避让。背景延伸与按钮安全距离分开计算，不能重复加 inset。
 - 不采样包含玻璃自身的祖先，否则可能形成反馈；不把收起的完整播放器背景混入页面源。
 
+### 底部渐变与抬高
+
+- 底栏下方还有一条全宽渐变条（`BottomScrim`）：它作为 `bottom_navigation_tabs_frame` 的第一个子 View 铺满整个 frame，玻璃胶囊最后添加，所以它只画在胶囊之下，同样不能进入采样源。
+- 效果分两层：blur(12dp) + vibrancy 先整块绘制，再经 `saveLayer` + `DstIn` 用 9 段 smoothstep 遮罩把模糊本身淡出，最后按同一条曲线叠加主题底色 wash（0.75 alpha，浅色 #FAFAFA / 深色 #121212）。只给 wash 做渐变、不遮罩模糊层会得到“上面一条硬边矩形”。新版若换了 frame 容器或原点，先确认 strip 的绘制范围来自 frame 的实际尺寸，再调整曲线和数值。
+- 渐变条用 `GlassHostView(bleedDp = 0)`，与胶囊的 32dp 绘制余量区分开：它必须刚好铺满 frame，多一圈 bleed 会让底部出现比屏幕更宽的模糊带。
+- 渐变条与底栏玻璃同生命周期：preDraw、activate、foreground、close 一起改 alpha，并对无障碍隐藏（`NO_HIDE_DESCENDANTS`）。关闭功能时要一并移除，只撤 tabs 会留下一条模糊带。
+- 抬高由 `GlassPolicy.BOTTOM_DP`（当前 16dp）统一控制，`occupiedHeight = (NAV_HEIGHT_DP + BOTTOM_DP [+ MINI_HEIGHT_DP + GAP_DP]) × density + bottomInset`。frame 高度是 NAV+BOTTOM+inset，peek 额外加 mini 可见时的 `shadow_height`，滚动避让与 underlap 判定复用同一个 occupied 值；这四处必须同源，单独改一处会表现为内容被压住或手势区上方多留白。
+- 抬高量取决于 inset 归属：1586 把 navigationBars 底 inset 计入 peek，同时把 source 上等值的 bottomMargin 归零。新版若改用 Compose insets、窗口 inset 或宿主自己让位，必须重新推导 BOTTOM_DP，不能照抄 16dp。
+- 面板模糊是本地覆写：vendored 的 `catalog/components/LiquidBottomTabs.kt` 两处 `blur(...)` 与 `NativeLiquidButton` 都读 `GlassPolicy.PANEL_BLUR_DP`（当前 4dp）。`verify-glass-reference.py` 只覆盖 `backdrop/src`，catalog 改动不在哈希清单内，改它不会有脚本提示。
+
 ### 绘制边界与输入
 
 - 保留 GlassHostView 的 32dp 绘制余量及祖先 overflow 处理；绘制范围增大不应扩大实际按钮命中区。
@@ -87,7 +97,7 @@
 - 当前底栏高 56dp，左右边距各 16dp，图标 24dp、文字 11sp；迷你播放器高 43dp，封面和播放/下一首按钮为 32dp。dp 随宿主密度换算，sp 还受字体缩放影响，横向宽度随父容器变化。
 - GlassPolicy 统一底栏和 mini 占位高度；底栏 panelHeight 同时控制玻璃面板与内部透镜/内容高度（面板减 8dp）。修改高度时同步检查宿主 FrameLayout、peek、滚动避让和展开起始高度，不能只缩放绘制层。
 - prepareMini 修改 mini root/content 的实际高度，并在 mini content 子树内定位 video_surface_container、mini_player_play_btn、mini_player_next_btn 修改宽高。新版必须核对这些 ID、约束、封面内部内容尺寸及按钮触摸行为；改动前保存原生状态，退出时恢复。
-- mini 折射范围和强度取 min(24dp, 实际最短边 × 0.375)，模糊仍为 8dp。43dp 面板若沿用 24dp 折射范围，会覆盖中央退化梯度，可能出现细白横线。应按实际尺寸限制折射，展开时也连续更新，不能仅隐藏一条线。
+- mini 折射范围和强度取 min(24dp, 实际最短边 × 0.375)，面板模糊读 `GlassPolicy.PANEL_BLUR_DP`（当前 4dp）。43dp 面板若沿用 24dp 折射范围，会覆盖中央退化梯度，可能出现细白横线。应按实际尺寸限制折射，展开时也连续更新，不能仅隐藏一条线。
 - 设置入口已移除 WIP、开启二次确认和版本号文案，直接保存开关并提示重开应用。这只是展示调整，未放宽 bootstrap/Feature/GlassPolicy 的精确版本、系统及手机资格限制；维护文档仍保留适配版本证据。
 
 ### 迷你播放器展开
@@ -140,6 +150,8 @@
 | 长按上沿截断/横条阴影 | 录制余量、祖先裁剪、旧 outline/分割线，而非先改 shader |
 | 缩矮后 mini 中央细白线 | 折射范围是否超过半高、是否随实际尺寸限制；同时排查原生分割线 |
 | 手势条上方白带 | source margin/inset、根 padding、背景是否实际覆盖底部 |
+| 底部渐变条上沿是硬边或整块矩形 | 模糊层是否被同一曲线遮罩（saveLayer + DstIn）、wash 是否单独渐变、strip 是否被 bleed 撑出屏幕 |
+| 抬高后内容被压住或手势区仍留白 | BOTTOM_DP 与 occupiedHeight 的四个消费点是否同源、inset 归属是否已变化 |
 | 点 mini 瞬间失去模糊 | 玻璃是否随 mini 隐藏、sheet 父级是否回退、slide 回调和原生背景交接 |
 | 展开后残留玻璃/关闭后异常 | slide 终点、动画层映射、close 恢复记录及实例归属 |
 
@@ -158,6 +170,7 @@
 - Menu and native action adapter:
 - Backdrop source / opaque base / Compose and native scroll scenes:
 - Insets / last-item avoidance / IME:
+- Bottom fade / lift: host view, mask curve, blur and wash values, occupied-height consumers:
 - Mini sheet parent / native background layers / transition evidence:
 - Missing or ambiguous dependencies / native fallback:
 - Old-version regression / new-version device matrix:
