@@ -152,7 +152,7 @@ internal class PhoneGlassSession(
             val glass = GlassHostView(moduleContext()).also { navGlass = it }
             glass.alpha = 0f
             glass.content { HostConfiguration { GlassNavigation(tabs, selectedId, accent, foreground, bg, ::selectTab) } }
-            frame.addView(glass, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64), Gravity.TOP).apply {
+            frame.addView(glass, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(GlassPolicy.NAV_HEIGHT_DP), Gravity.TOP).apply {
                 leftMargin = dp(16); rightMargin = dp(16)
             })
             observer = activity.window.decorView.viewTreeObserver.also { it.addOnPreDrawListener(this); it.addOnGlobalLayoutListener(layoutListener) }
@@ -178,7 +178,7 @@ internal class PhoneGlassSession(
             // The native mini container disappears early in the opening animation.
             // Keep the material behind the whole sheet, independent of that container.
             val surfaceParent = find("player_sheet_container") as? FrameLayout ?: root
-            surfaceParent.addView(glass, 0, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64), Gravity.TOP).apply {
+            surfaceParent.addView(glass, 0, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(GlassPolicy.MINI_HEIGHT_DP), Gravity.TOP).apply {
                 leftMargin = dp(16); rightMargin = dp(16)
             })
             if (activated) prepareMini()
@@ -314,11 +314,24 @@ internal class PhoneGlassSession(
     private fun prepareMini() {
         miniRoot?.let(::allowGlassOverflow)
         miniRoot?.let { save(it); it.background = null; it.clipChildren = false; it.clipToPadding = false }
+        miniRoot?.let { root ->
+            root.layoutParams = root.layoutParams.apply { height = dp(GlassPolicy.MINI_HEIGHT_DP) }
+        }
         miniContent?.let { content ->
             save(content)
             val params = content.layoutParams
+            params.height = dp(GlassPolicy.MINI_HEIGHT_DP)
             if (params is ViewGroup.MarginLayoutParams) { params.leftMargin = dp(16); params.rightMargin = dp(16) }
             content.layoutParams = params
+            listOf("video_surface_container", "mini_player_play_btn", "mini_player_next_btn").forEach { name ->
+                content.findViewById<View>(resourceId(name, "id"))?.let { child ->
+                    save(child)
+                    child.layoutParams = child.layoutParams.apply {
+                        width = dp(32)
+                        height = dp(32)
+                    }
+                }
+            }
         }
         listOf("player_root", "player_top_shadow", "background_layers", "motion_switcher", "player_fragments_host").mapNotNull(::find).forEach(::save)
     }
@@ -422,7 +435,8 @@ internal class PhoneGlassSession(
                 }
                 val margin = (dp(16) * (1f - materialProgress)).roundToInt()
                 val top = (miniOffsetInSheet * (1f - materialProgress)).roundToInt()
-                val height = (dp(64) + (sheet.height - dp(64)) * progress).roundToInt().coerceAtLeast(dp(64))
+                val collapsedHeight = dp(GlassPolicy.MINI_HEIGHT_DP)
+                val height = (collapsedHeight + (sheet.height - collapsedHeight) * progress).roundToInt().coerceAtLeast(collapsedHeight)
                 val params = glass.layoutParams as FrameLayout.LayoutParams
                 if (params.height != height || params.topMargin != top || params.leftMargin != margin) {
                     params.height = height; params.topMargin = top
