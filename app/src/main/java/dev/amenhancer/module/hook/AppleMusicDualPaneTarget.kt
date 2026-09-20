@@ -929,10 +929,25 @@ internal class AppleMusicDualPaneTarget(
         val manager = ModernXposedRuntime.callMethod(controller, "getChildFragmentManager") ?: return false
         if (isTargetStateSaved(manager)) return false
 
-        val songFragment = ModernXposedRuntime.callMethod(song, "f") ?: return false
-        val songTag = ModernXposedRuntime.callMethod(song, "g") as? String ?: return false
-        val lyricsFragment = ModernXposedRuntime.callMethod(lyrics, "f") ?: return false
-        val lyricsTag = ModernXposedRuntime.callMethod(lyrics, "g") as? String ?: return false
+        // 6.5.2 declares the fragment accessor as f() and 6.5.3 as e(); both declare the tag
+        // accessor as g(). Resolving by shape keeps the attachment working across the rename.
+        val fragmentAccessor = DualPaneStateAccessors.fragment(playerStateClass)
+        val tagAccessor = DualPaneStateAccessors.tag(playerStateClass)
+        if (fragmentAccessor == null || tagAccessor == null) {
+            debug(
+                "lyrics attachment skipped: state accessors fragment=" + (fragmentAccessor != null) +
+                    " tag=" + (tagAccessor != null),
+            )
+            return false
+        }
+        debug(
+            "state accessors resolved fragment=" + fragmentAccessor.name + " tag=" + tagAccessor.name,
+        )
+
+        val songFragment = fragmentAccessor.invoke(song) ?: return false
+        val songTag = tagAccessor.invoke(song) as? String ?: return false
+        val lyricsFragment = fragmentAccessor.invoke(lyrics) ?: return false
+        val lyricsTag = tagAccessor.invoke(lyrics) as? String ?: return false
         val transaction = createTargetTransaction(manager)
         invokeCompatible(transaction, listOf("e", "replace"), state.playerHost.id, songFragment, songTag)
         invokeCompatible(transaction, listOf("e", "replace"), state.lyricsHost.id, lyricsFragment, lyricsTag)
@@ -987,8 +1002,9 @@ internal class AppleMusicDualPaneTarget(
                 ?.let { setField(it, controller, song) }
 
         runCatching { ModernXposedRuntime.callMethod(controller, "C1", false) }
-        findField(controller.javaClass, "S")
-            ?.takeIf { it.type.name == "androidx.lifecycle.MutableLiveData" }
+        // 6.5.2 declares this state LiveData as field S and 6.5.3 as Q (both builds shift the
+        // controller fields after the two media items), so the field is located by its type.
+        findFieldByType(controller.javaClass) { field -> field.type.name == MUTABLE_LIVE_DATA }
             ?.let { field ->
                 runCatching {
                     val liveData = field.apply { isAccessible = true }.get(controller)
@@ -1847,9 +1863,42 @@ internal class DualPaneState(
     var lyricsAttached: Boolean = false
 }
 
+/**
+ * The player controller's state enum hands out the pane fragment and its fragment tag through
+ * two no-argument instance accessors.
+ *
+ * Verified from the host DEX: 6.5.2 (1586) declares `player.fragment.t0$n` with
+ * `f()Lcom/apple/android/music/common/fragment/a;` and `g()Ljava/lang/String;`, while 6.5.3
+ * (1599) declares `player.fragment.v0$n` with `e()Lcom/apple/android/music/common/fragment/a;`
+ * and the unchanged `g()Ljava/lang/String;`. Each build declares exactly one method per role, so
+ * both are matched by shape and an ambiguous or absent shape fails the attachment instead of
+ * guessing a member name from another version.
+ */
+internal object DualPaneStateAccessors {
+    fun fragment(stateClass: Class<*>): Method? = stateClass.declaredMethods.singleOrNull { method ->
+        isAccessor(method) &&
+            method.returnType != Void.TYPE &&
+            method.returnType != String::class.java &&
+            !method.returnType.isPrimitive &&
+            !method.returnType.isArray
+    }?.accessible()
+
+    fun tag(stateClass: Class<*>): Method? = stateClass.declaredMethods.singleOrNull { method ->
+        isAccessor(method) && method.returnType == String::class.java
+    }?.accessible()
+
+    private fun isAccessor(method: Method): Boolean =
+        !Modifier.isStatic(method.modifiers) &&
+            !method.isSynthetic &&
+            method.parameterCount == 0
+
+    private fun Method.accessible(): Method = apply { isAccessible = true }
+}
+
 private const val SONG_STATE = "SONG"
 private const val LYRICS_STATE = "LYRICS"
 private const val DEBUG_PREFIX = "[AMENH-2]"
+private const val MUTABLE_LIVE_DATA = "androidx.lifecycle.MutableLiveData"
 
 private fun debug(message: String) {
     val line = DEBUG_PREFIX + " " + message
@@ -1865,6 +1914,21 @@ private fun findField(type: Class<*>, name: String): Field? {
             it.isAccessible = true
             return it
         }
+        current = candidate.superclass
+    }
+}
+
+/** Walks the hierarchy for the first non-static field the predicate accepts. */
+private fun findFieldByType(type: Class<*>, predicate: (Field) -> Boolean): Field? {
+    var current: Class<*>? = type
+    while (true) {
+        val candidate = current ?: return null
+        candidate.declaredFields
+            .firstOrNull { field -> !Modifier.isStatic(field.modifiers) && predicate(field) }
+            ?.let {
+                it.isAccessible = true
+                return it
+            }
         current = candidate.superclass
     }
 }

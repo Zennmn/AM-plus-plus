@@ -205,3 +205,38 @@ Apple 内容 HTTP 本地化 Hook 安装失败
 ### 9.5 残留降级（与本项无关，互不影响）
 
 `IN_APP_ACTION_SHEET_BINDING`（DexKit `count=186`，播放菜单/操作表元数据）与主页 Listen Now 封面连续性 Hook 仍未在 6.5.3 上安装；两者各自只波及对应子面，不影响歌名/专辑名/歌手名覆盖。前者在 1599 上连宿主类都换了（6.5.2 的 `l7.e8` 及其父类 `l7.v1` 都不存在），需要单独按形状重找；后者需要在 1599 的资源类里重新定位封面连续性缝。
+
+---
+
+## 10. 第四轮真机回归：平板双栏右栏歌词空白（1.6.1 / 111）
+
+### 10.1 症状与定位
+
+6.5.3 平板开启双栏后，播放器右栏（歌词）整块空白，左栏封面/标题/控制与其余能力都正常。
+
+`AppleMusicDualPaneTarget.attachPairedFragments()` 是这条链路上唯一会静默收场的步骤：它先把控制器的状态写回 SONG，再用子 FragmentManager 事务把宿主自己的 SONG/LYRICS 两个 Fragment 换进左右 host。任一环节失败只写一行 `[AMENH-2]` debug 日志，界面表现就是右栏空白。
+
+### 10.2 符号再取证（宿主 DEX 实测）
+
+| 成员 | 6.5.2 (1586) | 6.5.3 (1599) | 判定依据 |
+| --- | --- | --- | --- |
+| 状态枚举 | `player.fragment.t0$n` | `player.fragment.v0$n` | 都是控制器内嵌枚举，常量 `SONG/LYRICS/QUEUE` 相同 |
+| Fragment 访问器 | `f()Lcom/apple/android/music/common/fragment/a;` | **`e()Lcom/apple/android/music/common/fragment/a;`** | 两代各只有 1 个无参实例方法返回非 String 类；1599 的 `i(v0$o)` 带参数 |
+| Tag 访问器 | `g()Ljava/lang/String;` | `g()Ljava/lang/String;` | 同名同签名 |
+| 状态 LiveData 字段 | `S:Landroidx/lifecycle/MutableLiveData;` | **`Q:Landroidx/lifecycle/MutableLiveData;`** | 控制器字段在 1599 整体前移两位（`P:t0$m → N:v0$m`），但两代都只有这一个 LiveData 字段 |
+| FragmentManager | `androidx/fragment/app/D`（`P()Z`） | `androidx/fragment/app/F`（`P()Z`） | 模块按 `getChildFragmentManager` 的返回类型反查，不写死类名 |
+| 事务类 | `androidx/fragment/app/a`（`<init>(…D;)V`、`h(Z)I`） | `androidx/fragment/app/a`（`<init>(…F;)V`、`h(Z)I`） | 两代都存在、方法名不变；`e(I,Fragment,String)` 由父类 `O`/`Q` 提供，`a` 分别是其子类 |
+
+也就是说，这条链路上只有「Fragment 访问器改名」与「状态 LiveData 字段位移」两处会断，事务与 Manager 部分两代通用。
+
+### 10.3 修复
+
+- 新增 `DualPaneStateAccessors`（`AppleMusicDualPaneTarget.kt`）：按形状解析状态枚举的两个访问器 —— 唯一的「无参实例方法、返回非 String/原始/数组类型」是 Fragment 访问器，唯一的「无参实例方法返回 String」是 tag 访问器。形状歧义或缺失时拒绝附件并打印诊断（fail-closed），不按声明顺序猜成员名。
+- `forceSongState()` 的状态 LiveData 改为按类型定位（`androidx.lifecycle.MutableLiveData`），不再写死 6.5.2 的字段名 `S`。
+- 6.5.2 行为不变：形状解析在两代都命中同一批成员（`f`/`g`、字段 `S`）。
+
+### 10.4 验证
+
+- JVM：新增 `DualPaneStateAccessorsTest`（5 项）覆盖 6.5.2 形状 `t0$n`、6.5.3 形状 `v0$n`、双访问器歧义必须 fail-closed，以及「源码不再按 6.5.2 成员名查找访问器/状态字段」的结构断言；夹具为 `app/src/test/java/com/apple/android/music/player/fragment/{t0,v0,x0}.java`。
+- 真机：日志应出现 `[AMENH-2] state accessors resolved fragment=e tag=g`，右栏出现歌词。
+- 全量任务与签名 Release 见 §5 的同一套命令。
