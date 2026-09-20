@@ -56,11 +56,19 @@ internal class HleMetadataRuntime(
         )
     }.getOrDefault(AppleMusicVersion(null, null))
 
+    private val moduleApplicationInfo = runCatching { module.getModuleApplicationInfo() }.getOrNull()
+
     private val hookResolver = AppleMusicHookResolver(
         version = version,
         application = application,
-        nativeLibraryDir = runCatching { module.getModuleApplicationInfo().nativeLibraryDir }
-            .getOrNull().orEmpty(),
+        nativeLibraryDir = moduleApplicationInfo?.nativeLibraryDir.orEmpty(),
+        // The module packages libdexkit.so inside the APK (extractNativeLibs=false), so the
+        // native library directory stays empty on install. The DexKit fallback resolver needs
+        // the package paths to load or unpack the library in that case.
+        moduleApkPaths = listOfNotNull(
+            moduleApplicationInfo?.sourceDir,
+            moduleApplicationInfo?.publicSourceDir,
+        ).distinct() + moduleApplicationInfo?.splitSourceDirs.orEmpty(),
     )
     private val runtime = AppleMusicProviderRuntime(module, classLoader)
     private val playbackHooks = ApplePlaybackHooks()
@@ -367,7 +375,10 @@ internal class HleMetadataRuntime(
         // profiled methods and let a conservative string hook overwrite the
         // identity-aware HLE result. The bridge below installs HLE's complete
         // Listen Now/library/data-binding/artist/collection surface instead.
-        surfaceBridge = HleMetadataSurfaceBridge(
+        // The content-item hooks are installed earlier and guard on `::surfaceBridge.isInitialized`,
+        // so a failed install must leave the field unset instead of exposing a half-initialised
+        // bridge that keeps throwing on every metadata read.
+        val installedBridge = HleMetadataSurfaceBridge(
             runtime = runtime,
             catalogResolver = catalogResolver,
             metadataStore = metadataStore,
@@ -381,7 +392,8 @@ internal class HleMetadataRuntime(
             restoreOriginalMetadata = mode == TitleCorrectionMode.ORIGINAL_HYPER,
             profileId = mode.cacheNamespace,
         )
-        surfaceBridge.install()
+        installedBridge.install()
+        surfaceBridge = installedBridge
         bridgeEnsureOverride = surfaceBridge::ensureOverride
         bridgeEnsureOverrides = surfaceBridge::ensureOverrides
         bridgeRegisterMetadata = surfaceBridge::registerMetadata

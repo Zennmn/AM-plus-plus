@@ -1,6 +1,10 @@
 # 手机液态玻璃：Apple Music 新版本适配
 
-本文依据当前 6.5.2 (1586) 实现编写，覆盖底栏、迷你播放器和展开过渡。它是维护流程，不代表任何未取证的新版本已经受支持。通用的 APK 取证、设置入口和版本适配流程见 [适配手册](apple-music-target-adaptation.md)，渲染基准和构建命令见 [实现与验收](liquid-glass.md)。
+本文依据当前 6.5.2 (1586) 实现编写，覆盖底栏、迷你播放器和展开过渡。它是维护流程，不代表任何未取证的新版本已经受支持。
+
+> **2026-09 更新：玻璃已按精确 tuple 支持 6.5.2 (1586) 与 6.5.3 (1599)。** `GlassPolicy.SUPPORTED_BUILDS` 列出全部受支持 tuple，`PhoneLiquidGlassFeature` 与 `PhoneGlassRuntime` 都按该集合判定；6.5.3 的宿主缝重新取证记录见 [6.5.3 适配记录](apple-music-6.5.3-adaptation.md)。几何常量仍是单一来源（NAV 56 / MINI 43 / H 16 / GAP 8 / BOTTOM 16 / scrim 12dp·0.75·9 stops / PANEL_BLUR 4dp），未发现 6.5.3 的 inset 归属或 peek 语义差异。
+
+通用的 APK 取证、设置入口和版本适配流程见 [适配手册](apple-music-target-adaptation.md)，渲染基准和构建命令见 [实现与验收](liquid-glass.md)。
 
 ## 1. 哪些需要适配
 
@@ -14,7 +18,7 @@
 | 模块自有 UI | `GlassHostView`、`GlassNavigation`、`NativeLiquidButton`、`BottomScrim` | 模块资源/Compose 生命周期隔离、输入和坐标映射 |
 | 背景录制 | `ViewBackdrop` | 窗口底色加内容、硬件录制、失效更新、不包含玻璃自身 |
 
-当前 `GlassPolicy` 只有一组版本常量；`PhoneLiquidGlassFeature.install` 还有独立的 identity 检查，`PhoneGlassRuntime.discover` 再调用 `GlassPolicy.supports`。bootstrap 支持宿主，不等于玻璃支持该宿主。当前没有现成的多版本玻璃 profile，不能把下文建议的 profile 当作已实现能力。
+`GlassPolicy.SUPPORTED_BUILDS` 是精确 tuple 集合（当前为 `6.5.2 (1586)`、`6.5.3 (1599)`）；`PhoneLiquidGlassFeature.install` 做同一集合的 identity 检查，`PhoneGlassRuntime.discover` 再调用 `GlassPolicy.supports`。bootstrap 支持宿主，不等于玻璃支持该宿主：新增宿主必须同时加入两处并在真机取证。几何常量目前对所有受支持 tuple 共用；只有当取证证明 inset 归属、peek 或层级语义不同时才按 tuple 拆分 profile。
 
 ## 2. 先建立新版证据表
 
@@ -120,7 +124,7 @@
 
 ## 5. 验证工具的边界
 
-`scripts/verify-glass-host.py` **当前仅适用于 1586 XAPK**：它断言 manifest 版本和固定 base APK 文件名，检查三组方法及继承关系，并检查三个 layout 文件路径。它不验证资源 ID/容器类型、运行时层级、进度语义、背景采样或交互。不能删除版本断言后便把 PASS 当作新版适配成功。
+`scripts/verify-host-profile.py` 取代了 1586 专用的 `verify-glass-host.py`：它按 `--version-name/--version-code`（或 XAPK 的 `manifest.json`）选择 profile，校验该版本档案里的每个 class/method/field，`--glass` 时再检查三组玻璃方法、继承关系和三个 layout 文件路径。它不验证资源 ID/容器类型、运行时层级、进度语义、背景采样或交互，所以 PASS 只代表静态档案成立，不能替代真机验收。
 
 适配时将脚本扩展成明确选择目标 profile，或增加新版专用校验；保留旧版检查，按实际包结构处理 APK/split，并补充所依赖资源的取证记录。`verify-glass-reference.py` 只证明 vendored 源码与固定上游一致，不证明宿主兼容。
 
@@ -136,7 +140,7 @@
 - 关闭功能、未支持版本、平板或接入失败时恢复原生，不影响其他能力。
 - Glass Lab 硬件 PixelCopy 与帧耗时；Lab 通过不等于宿主注入通过，构建测试 APK 不等于已运行测试。
 
-当前 1586 已获用户真机视觉认可，但完整自动 PixelCopy/性能矩阵仍未完成。新版验收必须独立记录，不能继承“已验证”结论。
+当前 1586 已获用户真机视觉认可，但完整自动 PixelCopy/性能矩阵仍未完成。1599 的玻璃实现与 1586 共用同一套代码路径，只有宿主缝重新取证；真机验收仍未开始。新版验收必须独立记录，不能继承“已验证”结论。
 
 ## 6. 故障定位速查
 

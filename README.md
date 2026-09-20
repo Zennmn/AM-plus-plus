@@ -61,7 +61,7 @@ AM++ 是一个通过 libxposed API 102 注入 Apple Music 的增强模块，目�
 | 歌词模糊半径调节 | `0px` | 可在设置中对模糊半径增加或减少 `-10..10px`。 |
 | 自定义歌词注入 | 关闭 | 按 Apple Music ID 替换 TTML，支持手动 TTML、AMLL、AM-Lyrics 和 Lunabeat 导入。 |
 | 歌词字体替换 | 关闭 | 导入 TTF/OTF 后应用到播放器歌词布局，可恢复原字体；示例使用 MiSans。 |
-| 手机液态玻璃 | 关闭 | Android 13+、Apple Music 6.5.2 (1586)：基于 AndroidLiquidGlass 的底栏透镜、拖拽胶囊和迷你播放器；真机视觉验收中。 |
+| 手机液态玻璃 | 关闭 | Android 13+、Apple Music 6.5.2 (1586) / 6.5.3 (1599)：基于 AndroidLiquidGlass 的底栏透镜、拖拽胶囊和迷你播放器；真机视觉验收中。 |
 | 平板底栏补偿 | 关闭 | 平板底栏显示异常时使用的兼容性选项。 |
 
 双向歌词模糊的核心逻辑移植并适配自 [a23bc/amlyricblur](https://github.com/a23bc/amlyricblur)。
@@ -106,7 +106,7 @@ AM++ 是一个通过 libxposed API 102 注入 Apple Music 的增强模块，目�
 | --- | --- |
 | Android | Android 8.0（API 26）及以上 |
 | Xposed 框架 | 支持 libxposed API 102、remote preferences 和 remote file 的实现 |
-| Apple Music | `6.5.0 (1580)`、`6.5.1 (1583)`、`6.5.2 (1586)` |
+| Apple Music | `6.5.0 (1580)`、`6.5.1 (1583)`、`6.5.2 (1586)`、`6.5.3 (1599)` |
 | 双向歌词模糊 | Android 12（API 31）及以上 |
 
 - Apple Music 的内部类、方法和资源会随版本混淆或调整，未列出的版本不保证兼容。
@@ -170,7 +170,7 @@ Lunabeat 会缓存 manifest 和歌曲索引，优先使用本地索引；仅当�
 
 ### 手机液态玻璃
 
-在设置页开启“手机液态玻璃底栏”后，强制停止并重新打开 Apple Music。完整效果仅支持 Android 13+、Apple Music 6.5.2 (1586) 的手机布局；其他版本及平板保留原生底栏。
+在设置页开启“手机液态玻璃底栏”后，强制停止并重新打开 Apple Music。完整效果仅支持 Android 13+、Apple Music 6.5.2 (1586) 与 6.5.3 (1599) 的手机布局；其他版本及平板保留原生底栏。
 
 底栏采用 AndroidLiquidGlass 的 LiquidBottomTabs；迷你播放器采用 LiquidButton 材质和按压形变，继续使用原生播放控件。页面背景通过共享硬件 RenderNode 采样。代码、构建验证与真机视觉验收分开记录，详见 [玻璃重构与验收](docs/liquid-glass.md)。
 

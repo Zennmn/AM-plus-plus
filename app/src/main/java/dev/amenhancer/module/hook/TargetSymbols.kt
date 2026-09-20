@@ -352,6 +352,59 @@ private object AppleMusicProfiles {
         ),
     )
 
+    /**
+     * Apple Music 6.5.3 (1599). Renames were re-derived from the base APK DEX with structural
+     * evidence only: identical member skeletons, unchanged call sites/descriptors and, where two
+     * candidates stayed ambiguous, the same compiled behavior (see the Compose policy singletons).
+     * [TargetSymbolId.PLAYER_METADATA_HUB] is deliberately absent: its 6.5.2 identity was a renamed
+     * lambda and no 6.5.3 candidate carries enough evidence yet, so the symbol keeps its
+     * EXACT_PREFERRED fallback instead of a guessed class.
+     */
+    private val appleMusic653 = AppleMusicProfile(
+        id = "apple-music-6.5.3-1599",
+        exactClasses = mapOf(
+            TargetSymbolId.PLAYER_CONTROLLER to "com.apple.android.music.player.fragment.v0",
+            TargetSymbolId.PLAYER_ACTIVITY to "com.apple.android.music.common.activity.PlayerActivity",
+            TargetSymbolId.EDITORIAL_VIDEO_OWNER to "com.apple.android.music.player.f1",
+            TargetSymbolId.LYRICS_FRAGMENT to "com.apple.android.music.player.fragment.PlayerLyricsViewFragment",
+            TargetSymbolId.LYRICS_CHROME to "com.apple.android.music.player.fragment.e",
+            TargetSymbolId.LYRICS_LINE_VECTOR to
+                "com.apple.android.music.ttml.javanative.model.LyricsLineVector",
+            TargetSymbolId.LYRICS_EVENT_PROCESSOR to
+                "com.apple.android.music.ttml.SongInfoTimeProcessor",
+            TargetSymbolId.LYRICS_HIGHLIGHT_CALLBACK_OWNER to
+                "com.apple.android.music.ttml.SongInfoTimeProcessor\$processEvents\$lineEventCallback\$1",
+            TargetSymbolId.LYRICS_VIEW_MODEL to
+                "com.apple.android.music.player.viewmodel.PlayerLyricsViewModel",
+            TargetSymbolId.STACKED_NAVIGATION_MENU to "Kd.b",
+            TargetSymbolId.SONG_INFO_PTR to
+                "com.apple.android.music.ttml.javanative.model.SongInfo\$SongInfoPtr",
+            TargetSymbolId.SONG_INFO_NATIVE to
+                "com.apple.android.music.ttml.javanative.model.SongInfo\$SongInfoNative",
+            TargetSymbolId.TTML_PARSER_NATIVE to
+                "com.apple.android.music.ttml.javanative.TTMLParser\$TTMLParserNative",
+            TargetSymbolId.LYRICS_CURRENT_ITEM_FIELD to
+                "com.apple.android.music.player.fragment.m",
+            TargetSymbolId.METADATA_TO_ITEM_CONVERTER to "com.apple.android.music.player.P",
+            TargetSymbolId.LYRICS_AVAILABILITY_OWNER to "com.apple.android.music.player.e1",
+            TargetSymbolId.MEDIA_ENTITY_TO_SONG_CONVERTER to "A8.D",
+            TargetSymbolId.STORE_FRONT_LANGUAGE_ARRAY_OWNER to "K5.a",
+            TargetSymbolId.CJK_KARAOKE_ANIMATION_OWNER to "com.apple.android.music.player.A",
+            TargetSymbolId.CJK_UNICODE_BLOCK_HELPER_OWNER to "com.apple.android.music.utils.E0\$a",
+        ),
+        exactMethods = mapOf(
+            TargetSymbolId.PLAYER_ACTIVITY_CREATE_STACKED_NAVIGATION_HOLDER to "k1",
+            TargetSymbolId.PLAYER_ACTIVITY_ROOT to "n0",
+            TargetSymbolId.LYRICS_ITEM_UPDATE_METHOD to "o2",
+            TargetSymbolId.STORE_FRONT_LANGUAGE_ARRAY_METHOD to "b",
+            TargetSymbolId.CJK_KARAOKE_ANIMATION_METHOD to "a0",
+            TargetSymbolId.CJK_UNICODE_BLOCK_HELPER_METHOD to "a",
+        ),
+        exactFields = mapOf(
+            TargetSymbolId.PLAYER_ACTIVITY_BEHAVIOR_FIELD to "c1",
+        ),
+    )
+
     private val appleMusic652 = AppleMusicProfile(
         id = "apple-music-6.5.2-1586",
         exactClasses = mapOf(
@@ -404,6 +457,7 @@ private object AppleMusicProfiles {
             build.versionName == "6.5.0" && build.versionCode == 1580L -> appleMusic650
             build.versionName == "6.5.1" && build.versionCode == 1583L -> appleMusic651
             build.versionName == "6.5.2" && build.versionCode == 1586L -> appleMusic652
+            build.versionName == "6.5.3" && build.versionCode == 1599L -> appleMusic653
             else -> null
         }
     }
@@ -1228,17 +1282,22 @@ internal object AppleMusicSymbols {
 
     /**
      * AMTool ia(26) "MediaApi language param choke": on Apple Music 6.5.1
-     * this is the static `s8.F.c0(Map): LinkedHashMap` helper.  Keep the
+     * this is the static `s8.F.c0(Map): LinkedHashMap` helper; 6.5.3 moves the
+     * same helper to `u8.E`.  Keep the
      * older package-shaped fallback for hosts that expose a non-obfuscated
      * equivalent, but prefer the pinned 6.5.1 identity whenever available.
      */
     val MediaApiLanguageParamMethod = TargetSymbolKey(
         id = "media-api-language-param-method",
         stableCandidates = {
-            load("s8.F")
-                ?.declaredMethods
-                ?.filter(::isMediaApiLanguageParamMethod)
-                .orEmpty()
+            listOf("s8.F", "u8.E")
+                .flatMap { className ->
+                    load(className)
+                        ?.declaredMethods
+                        ?.filter(::isMediaApiLanguageParamMethod)
+                        .orEmpty()
+                        .toList()
+                }
         },
         structuralCandidates = {
             methods(
@@ -2193,8 +2252,10 @@ private fun isMediaLibraryAlbumsQueryMethod(method: Method): Boolean =
 private fun isMediaLibraryQueryMethod(method: Method, name: String): Boolean =
     !Modifier.isStatic(method.modifiers) &&
         method.name == name &&
-        method.parameterTypes.singleOrNull()?.name == "G5.g" &&
-        method.returnType.name == "Vf.o"
+        // G5.g/Vf.o are the verified 6.5.0-6.5.2 names; 6.5.3 renames the same two
+        // types to H5.g/Zf.o (identical member sets, verified from both APKs).
+        method.parameterTypes.singleOrNull()?.name.let { it == "G5.g" || it == "H5.g" } &&
+        method.returnType.name.let { it == "Vf.o" || it == "Zf.o" }
 
 private fun isMediaLibraryReadyMethod(method: Method): Boolean =
     !Modifier.isStatic(method.modifiers) &&
@@ -2261,10 +2322,14 @@ private fun isLocaleHeaderMapMethod(method: Method): Boolean =
         method.parameterTypes.single().name == "aa.d" &&
         java.util.Map::class.java.isAssignableFrom(method.returnType)
 
+/** The obfuscated owner of the static MediaApi language helper (6.5.1/6.5.2, then 6.5.3). */
+private fun isMediaApiLanguageParamOwner(className: String): Boolean =
+    className == "s8.F" || className == "u8.E"
+
 private fun isMediaApiLanguageParamMethod(method: Method): Boolean =
     (
         Modifier.isStatic(method.modifiers) &&
-            method.declaringClass.name == "s8.F" &&
+            isMediaApiLanguageParamOwner(method.declaringClass.name) &&
             method.name == "c0" &&
             method.parameterCount == 1 &&
             java.util.Map::class.java.isAssignableFrom(method.parameterTypes.single()) &&

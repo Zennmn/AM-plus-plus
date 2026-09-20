@@ -398,6 +398,25 @@ internal data class AppleMusicHookProfile(
  * 已知候选，但只有通过对应方法签名校验的目标才会被采用。
  */
 internal object AppleMusicHookProfiles {
+    /**
+     * Repackaged OkHttp member names used by the content HTTP localization hook. Verified
+     * unchanged on 6.5.0/6.5.1/6.5.2 and on 6.5.3, because only the owning packages moved.
+     */
+    private val contentHttpRuntimeMemberNames = mapOf(
+        AppleMusicRuntimeMember.CONTENT_HTTP_CHAIN_REQUEST_FIELD to "e",
+        AppleMusicRuntimeMember.CONTENT_HTTP_REQUEST_URL_FIELD to "a",
+        AppleMusicRuntimeMember.CONTENT_HTTP_REQUEST_HEADERS_FIELD to "c",
+        AppleMusicRuntimeMember.CONTENT_HTTP_RESPONSE_STATUS_FIELD to "d",
+        AppleMusicRuntimeMember.CONTENT_HTTP_REQUEST_NEW_BUILDER_METHOD to "b",
+        AppleMusicRuntimeMember.CONTENT_HTTP_REQUEST_BUILDER_URL_METHOD to "h",
+        AppleMusicRuntimeMember.CONTENT_HTTP_REQUEST_BUILDER_HEADER_METHOD to "d",
+        AppleMusicRuntimeMember.CONTENT_HTTP_REQUEST_BUILDER_BUILD_METHOD to "b",
+        AppleMusicRuntimeMember.CONTENT_HTTP_HEADERS_GET_METHOD to "e",
+        AppleMusicRuntimeMember.CONTENT_HTTP_RESPONSE_REQUEST_FIELD to "a",
+        AppleMusicRuntimeMember.CONTENT_HTTP_RESPONSE_HEADERS_FIELD to "f",
+        AppleMusicRuntimeMember.CONTENT_HTTP_HEADERS_VALUES_FIELD to "a",
+    )
+
     private val APPLE_MUSIC_6_5_0 = AppleMusicHookProfile(
         id = "am-6.5.0-1580",
         versionName = "6.5.0",
@@ -484,6 +503,170 @@ internal object AppleMusicHookProfiles {
         ) + stableMetadataSurfaceHookTargets() +
             stableLibrarySurfaceHookTargets() + stableLyricsHookTargets() +
             stableAtmosDiagnosticHookTargets(),
+    )
+
+    private val APPLE_MUSIC_6_5_3 = AppleMusicHookProfile(
+        id = "am-6.5.3-1599",
+        versionName = "6.5.3",
+        versionCodes = setOf(1599L),
+        hookTargets = mapOf(
+            // Verified from Apple Music 6.5.3 (1599) base APK DEX. Renames were established by
+            // structural evidence (identical member skeletons, unchanged call sites and, for the
+            // Compose policy singletons, identical bytecode), never by name alone.
+            AppleMusicHookPoint.EXO_AUDIO_SESSION_ID to listOf(exoAudioSessionIdTarget()),
+            AppleMusicHookPoint.LOCAL_MEDIA_PLAYER_AUDIO_VARIANT_CHANGED to listOf(
+                localMediaPlayerAudioVariantChangedTarget(),
+            ),
+            // The MediaApi request-parameter localization seam stayed on the class that owns the
+            // storefront field and the direct query: 1599's u8.E#c0(Map)LinkedHashMap is the same
+            // method as 1586's s8.F#c0(Map)LinkedHashMap, and the device log confirms it is the
+            // one receiving the module's catalog parameter map. Pinning it keeps the hook off the
+            // DexKit fallback, which previously resolved the same method only by contract.
+            AppleMusicHookPoint.MEDIA_API_LOCALIZATION to listOf(
+                AppleMusicHookTarget("u8.E", "c0", 1),
+            ),
+            // The content HTTP localization interceptor moved u8.a -> w8.a: the module
+            // storefront/language rewrite (and the removal of its own request token) happens
+            // here, so pinning the wrong owner silently breaks every original-title lookup.
+            AppleMusicHookPoint.CONTENT_HTTP_LOCALIZATION to listOf(
+                contentHttpLocalizationTarget653(),
+            ),
+            // libraries/epoxy: the controller, method name, parameter count and the
+            // library2/a parameter are unchanged; library2.M became library2.H and the
+            // request context x6.c became z6.b.
+            AppleMusicHookPoint.LIBRARY_EPOXY_BUILD to listOf(
+                AppleMusicHookTarget(
+                    className =
+                        "com.apple.android.music.library2.LibraryMainContentEpoxyController",
+                    methodName = "buildModels",
+                    parameterCount = 5,
+                    parameterTypeNames = listOf(
+                        "com.apple.android.music.library2.H",
+                        "java.util.List",
+                        "java.util.List",
+                        "com.apple.android.music.library2.a",
+                        "z6.b",
+                    ),
+                    returnTypeName = "void",
+                ),
+            ),
+            // The NeverEqualPolicy singleton moved from z0.s0 to z0.p0. Both 1586's verified
+            // z0.s0 and 1599's z0.p0 compile to the same const/4 v0,#0 + return v0 body.
+            AppleMusicHookPoint.COMPOSE_NEVER_EQUAL_POLICY to listOf(
+                AppleMusicHookTarget("z0.p0"),
+            ),
+            // The library Compose view-model getter was renamed again (6.5.0 B0, 6.5.1 A0 ->
+            // 6.5.3 F0) with an unchanged signature: both return
+            // com.apple.android.music.library2.LibraryViewModel, and F0 is the only zero-argument
+            // getter of that type in LibraryComposeContentFragment.
+            AppleMusicHookPoint.LIBRARY_COMPOSE_VIEW_MODEL_GETTER to listOf(
+                AppleMusicHookTarget(
+                    "com.apple.android.music.library3.LibraryComposeContentFragment",
+                    "F0",
+                    0,
+                ),
+            ),
+            // observeAsState moved from C1.w#e to Dg.c#l. 1586 declares the unique static
+            // (LiveData, Composer) -> State shape as C1.w.e(...)Lz0/p0;; 1599 declares it once as
+            // Dg.c.l(...)Lz0/n0;. z0.n0 is the same setValue-only State base that z0.p0 was on
+            // 1586, and the runtime state instance keeps the policy field b plus get/setValue.
+            AppleMusicHookPoint.COMPOSE_OBSERVE_AS_STATE to listOf(
+                AppleMusicHookTarget(
+                    className = "Dg.c",
+                    methodName = "l",
+                    parameterCount = 2,
+                    returnTypeName = "z0.n0",
+                    isStatic = true,
+                    runtimeMemberNames = mapOf(
+                        AppleMusicRuntimeMember.LIBRARY_COMPOSE_STATE_POLICY_FIELD to "b",
+                        AppleMusicRuntimeMember.LIBRARY_COMPOSE_STATE_GET_VALUE_METHOD to
+                            "getValue",
+                        AppleMusicRuntimeMember.LIBRARY_COMPOSE_STATE_SET_VALUE_METHOD to
+                            "setValue",
+                    ),
+                ),
+            ),
+            // Listen Now: the Epoxy controller, lambda name and parameter count are unchanged;
+            // the metadata/action context class moved common.F0 -> common.B0 (same six methods).
+            AppleMusicHookPoint.LISTEN_NOW_MODEL_BUILDER to listOf(
+                AppleMusicHookTarget(
+                    className =
+                        "com.apple.android.music.listennow.ListenNowEpoxyController",
+                    methodName = "buildStandardSwoosh\$lambda\$35",
+                    parameterCount = 5,
+                    parameterTypeNames = listOf(
+                        "com.apple.android.music.listennow.ListenNowEpoxyController",
+                        "com.apple.android.music.mediaapi.models.Recommendation",
+                        "com.apple.android.music.common.B0",
+                        "com.apple.android.music.mediaapi.models.MediaEntity",
+                        "java.util.List",
+                    ),
+                    returnTypeName = "com.airbnb.epoxy.l",
+                    isStatic = true,
+                ),
+            ),
+            // The artwork lookup resolver enum moved common.L -> common.I with an identical
+            // member set (including t(CollectionItemView): void); only its inner types moved.
+            AppleMusicHookPoint.LISTEN_NOW_ARTWORK_RESOLVER to listOf(
+                AppleMusicHookTarget(
+                    className = "com.apple.android.music.common.I",
+                    methodName = "t",
+                    parameterCount = 1,
+                    parameterTypeNames = listOf(
+                        "com.apple.android.music.model.CollectionItemView",
+                    ),
+                    returnTypeName = "void",
+                ),
+            ),
+            // The lyrics translation/pronunciation popup and the global metadata dispatcher keep
+            // their 6.5.2 owners and descriptors on 6.5.3.
+            AppleMusicHookPoint.LYRICS_SOURCE_MENU_CLICK_LISTENER to listOf(
+                AppleMusicHookTarget(
+                    className = "com.apple.android.music.player.fragment.d0",
+                    methodName = "onClick",
+                    parameterCount = 1,
+                    parameterTypeNames = listOf("android.view.View"),
+                    returnTypeName = "void",
+                    runtimeMemberNames = mapOf(
+                        AppleMusicRuntimeMember.LYRICS_SOURCE_MENU_FRAGMENT_FIELD to "a",
+                        AppleMusicRuntimeMember.LYRICS_SOURCE_MENU_FRAGMENT_CLASS to
+                            "com.apple.android.music.player.fragment.PlayerLyricsViewFragment",
+                    ),
+                ),
+            ),
+            AppleMusicHookPoint.IN_APP_GLOBAL_METADATA_DISPATCHER to listOf(
+                AppleMusicHookTarget(
+                    className = "com.apple.android.music.player.e",
+                    methodName = "onMediaMetadataChanged",
+                    parameterCount = 1,
+                    returnTypeName = "void",
+                ),
+            ),
+            // The in-app queue adapter moved Y8.a -> a9.a. The 1599 class keeps the RecyclerView
+            // adapter superclass, every declared member and every runtime member name of 1586's
+            // Y8.a, while 6.5.3's own Y8.a is an unrelated protobuf mode-mapping helper: name
+            // reuse is exactly why this hook point needs an exact entry instead of a fallback.
+            AppleMusicHookPoint.IN_APP_QUEUE_ADAPTER_SUBMIT to listOf(
+                AppleMusicHookTarget(
+                    "a9.a",
+                    "B",
+                    1,
+                    runtimeMemberNames = mapOf(
+                        AppleMusicRuntimeMember.QUEUE_ADAPTER_DISPLAYED_ENTRY_METHOD to "A",
+                        AppleMusicRuntimeMember.QUEUE_ADAPTER_SUBMITTED_ENTRIES_FIELD to "l",
+                        AppleMusicRuntimeMember.QUEUE_ENTRY_ITEM_FIELD to "b",
+                        AppleMusicRuntimeMember.QUEUE_ITEM_METADATA_FIELD to "d",
+                        AppleMusicRuntimeMember.QUEUE_ITEM_ID_FIELD to "a",
+                        AppleMusicRuntimeMember.MEDIA3_METADATA_BUNDLE_FIELD to "I",
+                        AppleMusicRuntimeMember.MEDIA3_METADATA_TITLE_FIELD to "a",
+                        AppleMusicRuntimeMember.MEDIA3_METADATA_ARTIST_FIELD to "b",
+                    ),
+                ),
+            ),
+            AppleMusicHookPoint.IN_APP_QUEUE_ADAPTER_BIND to listOf(
+                AppleMusicHookTarget("a9.a", "p", 2),
+            ),
+        ) + stableAtmosDiagnosticHookTargets(),
     )
 
     private val APPLE_MUSIC_6_5_2 = AppleMusicHookProfile(
@@ -803,6 +986,7 @@ internal object AppleMusicHookProfiles {
 
     /** 新版本档案必须放在前面，未知版本回退时优先尝试较新的目标。 */
     private val KNOWN_PROFILES = listOf(
+        APPLE_MUSIC_6_5_3,
         APPLE_MUSIC_6_5_2,
         APPLE_MUSIC_6_5_1,
         APPLE_MUSIC_6_5_0,
@@ -1291,20 +1475,25 @@ internal object AppleMusicHookProfiles {
         className = "u8.a",
         methodName = "a",
         parameterCount = 1,
-        runtimeMemberNames = mapOf(
-            AppleMusicRuntimeMember.CONTENT_HTTP_CHAIN_REQUEST_FIELD to "e",
-            AppleMusicRuntimeMember.CONTENT_HTTP_REQUEST_URL_FIELD to "a",
-            AppleMusicRuntimeMember.CONTENT_HTTP_REQUEST_HEADERS_FIELD to "c",
-            AppleMusicRuntimeMember.CONTENT_HTTP_RESPONSE_STATUS_FIELD to "d",
-            AppleMusicRuntimeMember.CONTENT_HTTP_REQUEST_NEW_BUILDER_METHOD to "b",
-            AppleMusicRuntimeMember.CONTENT_HTTP_REQUEST_BUILDER_URL_METHOD to "h",
-            AppleMusicRuntimeMember.CONTENT_HTTP_REQUEST_BUILDER_HEADER_METHOD to "d",
-            AppleMusicRuntimeMember.CONTENT_HTTP_REQUEST_BUILDER_BUILD_METHOD to "b",
-            AppleMusicRuntimeMember.CONTENT_HTTP_HEADERS_GET_METHOD to "e",
-            AppleMusicRuntimeMember.CONTENT_HTTP_RESPONSE_REQUEST_FIELD to "a",
-            AppleMusicRuntimeMember.CONTENT_HTTP_RESPONSE_HEADERS_FIELD to "f",
-            AppleMusicRuntimeMember.CONTENT_HTTP_HEADERS_VALUES_FIELD to "a",
-        ),
+        runtimeMemberNames = contentHttpRuntimeMemberNames,
+    )
+
+    /**
+     * 6.5.3 (1599) moved the whole content-API family from u8/a..u8/n to w8/a..w8/n: the two
+     * packages carry the same fourteen classes with the same shapes in the same order, so the
+     * request-localization interceptor is w8.a. Its method disassembles to the same nineteen
+     * instructions as 1586's u8.a#a, with only repackaged library owners differing
+     * (Hi/f->Li/f, Ci/C->Gi/A, Ci/F->Gi/D, Ci/v->Gi/t, Ci/y->Gi/w, E0/x->A0/h, ma/c->pa/c).
+     * 1599's own u8.a is an unrelated MediaApi model class and declares no one-parameter
+     * interceptor method, so the 1586 entry cannot shadow this one.
+     */
+    private fun contentHttpLocalizationTarget653() = AppleMusicHookTarget(
+        className = "w8.a",
+        methodName = "a",
+        parameterCount = 1,
+        parameterTypeNames = listOf("Li.f"),
+        returnTypeName = "Gi.D",
+        runtimeMemberNames = contentHttpRuntimeMemberNames,
     )
 
     private fun exoMediaPlayerTarget() = AppleMusicHookTarget(
@@ -1880,6 +2069,7 @@ internal class AppleMusicHookResolver(
         version: AppleMusicVersion,
         application: android.app.Application,
         nativeLibraryDir: String,
+        moduleApkPaths: List<String> = emptyList(),
     ) : this(
         version = version,
         classLookup = application.classLoader::loadClass,
@@ -1887,6 +2077,7 @@ internal class AppleMusicHookResolver(
             application = application,
             classLoader = application.classLoader,
             nativeLibraryDir = nativeLibraryDir,
+            moduleApkPaths = moduleApkPaths,
         ),
     )
 

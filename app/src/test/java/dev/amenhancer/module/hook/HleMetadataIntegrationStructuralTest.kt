@@ -10,12 +10,15 @@ class HleMetadataIntegrationStructuralTest {
     fun `nullable embedded module native directory does not abort HLE construction`() {
         val runtime = source("app/src/main/java/dev/amenhancer/module/hook/HleMetadataRuntime.kt")
             .replace("\r\n", "\n")
+        // The module application info is optional: a failed lookup must not throw while the
+        // runtime is being constructed, and the native library directory may stay empty because
+        // the package keeps its native libraries inside the APK (extractNativeLibs=false).
+        assertTrue(runtime.contains("runCatching { module.getModuleApplicationInfo() }.getOrNull()"))
         assertTrue(
-            runtime.contains(
-                "runCatching { module.getModuleApplicationInfo().nativeLibraryDir }\n" +
-                    "            .getOrNull().orEmpty()",
-            ),
+            runtime.contains("nativeLibraryDir = moduleApplicationInfo?.nativeLibraryDir.orEmpty()"),
         )
+        assertTrue(runtime.contains("moduleApkPaths = listOfNotNull("))
+        assertTrue(runtime.contains("moduleApplicationInfo?.splitSourceDirs.orEmpty()"))
     }
 
     private fun source(relative: String): String = sequenceOf(

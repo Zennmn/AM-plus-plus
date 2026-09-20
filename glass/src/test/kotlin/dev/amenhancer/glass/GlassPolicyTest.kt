@@ -6,10 +6,15 @@ import org.junit.Test
 class GlassPolicyTest {
     @Test fun onlyVerifiedHostAndHardwareAreEligible() {
         assertTrue(GlassPolicy.supports(33, 1586, "6.5.2", false))
+        assertTrue(GlassPolicy.supports(36, 1599, "6.5.3", false))
         assertFalse(GlassPolicy.supports(32, 1586, "6.5.2", false))
+        assertFalse(GlassPolicy.supports(32, 1599, "6.5.3", false))
         assertFalse(GlassPolicy.supports(36, 1583, "6.5.1", false))
         assertFalse(GlassPolicy.supports(36, 1586, "6.5.2", true))
+        assertFalse(GlassPolicy.supports(36, 1599, "6.5.3", true))
         assertFalse(GlassPolicy.supports(36, 1587, "6.5.2", false))
+        assertFalse(GlassPolicy.supports(36, 1600, "6.5.3", false))
+        assertFalse(GlassPolicy.supports(36, 1599, "6.5.4", false))
     }
     @Test fun menuReorderUsesIdentityAndMissingSelectionIsNotGuessed() {
         assertEquals(0, GlassPolicy.selectedIndex(listOf(30, 10, 20), 30))

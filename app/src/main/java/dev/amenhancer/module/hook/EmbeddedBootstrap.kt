@@ -55,6 +55,7 @@ internal class EmbeddedBootstrap {
         private val SUPPORTED_BUILDS = listOf(
             TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.1", 1583L),
             TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.2", 1586L),
+            TargetBuild(ModuleConstants.TARGET_PACKAGE, "6.5.3", 1599L),
         )
     }
 }

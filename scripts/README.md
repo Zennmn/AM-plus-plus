@@ -18,3 +18,23 @@ Example:
 $env:ANDROID_SERIAL = "your-device-serial"
 .\scripts\verify-device-dual-pane.ps1
 ```
+
+## Host profile verification (no device required)
+
+`verify-host-profile.py` is a read-only DEX check of the exact host profile. It takes the original
+XAPK (or a bare base APK) and verifies every class/method/field the AM++ version profile pins,
+including the phone liquid-glass seams with `--glass`:
+
+```powershell
+python scripts\verify-host-profile.py "apple-music-6-5-3.xapk" --version-name 6.5.3 --version-code 1599 --glass
+python scripts\verify-host-profile.py "Apple+Music_6.5.2_APKPure.xapk" --glass
+```
+
+The version tuple comes from `manifest.json` when the XAPK ships one; otherwise pass it explicitly.
+A PASS means the static evidence behind a profile still holds for that package; it does not prove
+runtime behaviour, resource IDs, container types or blur sampling.
+
+Besides the pinned classes, methods and fields, the script asserts the two seams whose names R8
+reuses between builds: the direct catalog query (only one method may satisfy the
+`(String, Map, Continuation)` shape, and it must be the verified name for that version) and the
+obfuscated `androidx.lifecycle.LiveData` alias that `COMPOSE_OBSERVE_AS_STATE` accepts.
