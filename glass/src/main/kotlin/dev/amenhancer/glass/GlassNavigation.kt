@@ -56,6 +56,7 @@ fun GlassNavigation(
             backdrop = backdrop,
             tabsCount = tabs.size,
             accentOverride = accent,
+            panelHeight = GlassPolicy.NAV_HEIGHT_DP.dp,
         ) {
             tabs.forEach { tab ->
                 LiquidBottomTab(
@@ -65,7 +66,7 @@ fun GlassNavigation(
                         contentDescription = tab.title
                     },
                 ) {
-                    Canvas(Modifier.size(28.dp)) {
+                    Canvas(Modifier.size(24.dp)) {
                         tab.icon?.let { icon ->
                             val save = drawContext.canvas.nativeCanvas.save()
                             try {
@@ -74,7 +75,7 @@ fun GlassNavigation(
                             } finally { drawContext.canvas.nativeCanvas.restoreToCount(save) }
                         }
                     }
-                    BasicText(tab.title, style = TextStyle(color = foreground, fontSize = 12.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    BasicText(tab.title, style = TextStyle(color = foreground, fontSize = 11.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }

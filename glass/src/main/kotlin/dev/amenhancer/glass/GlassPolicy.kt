@@ -4,8 +4,8 @@ package dev.amenhancer.glass
 object GlassPolicy {
     const val VERSION_CODE = 1586L
     const val VERSION_NAME = "6.5.2"
-    const val NAV_HEIGHT_DP = 64
-    const val MINI_HEIGHT_DP = 64
+    const val NAV_HEIGHT_DP = 56
+    const val MINI_HEIGHT_DP = 43
     const val HORIZONTAL_DP = 16
     const val GAP_DP = 8
     const val BOTTOM_DP = 8
