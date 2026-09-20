@@ -82,13 +82,23 @@
 - 保留宿主 LayoutParams 类型和约束；用通用参数复制会丢失 ConstraintLayout 底部锚点。
 - mini 玻璃观察输入，原生 View 保留播放、下一首、长按和上拉行为。纵向滑动超过 touch slop 后取消模块按压效果，不截断宿主手势。
 
+### 紧凑尺寸与设置入口
+
+- 当前底栏高 56dp，左右边距各 16dp，图标 24dp、文字 11sp；迷你播放器高 43dp，封面和播放/下一首按钮为 32dp。dp 随宿主密度换算，sp 还受字体缩放影响，横向宽度随父容器变化。
+- GlassPolicy 统一底栏和 mini 占位高度；底栏 panelHeight 同时控制玻璃面板与内部透镜/内容高度（面板减 8dp）。修改高度时同步检查宿主 FrameLayout、peek、滚动避让和展开起始高度，不能只缩放绘制层。
+- prepareMini 修改 mini root/content 的实际高度，并在 mini content 子树内定位 video_surface_container、mini_player_play_btn、mini_player_next_btn 修改宽高。新版必须核对这些 ID、约束、封面内部内容尺寸及按钮触摸行为；改动前保存原生状态，退出时恢复。
+- mini 折射范围和强度取 min(24dp, 实际最短边 × 0.375)，模糊仍为 8dp。43dp 面板若沿用 24dp 折射范围，会覆盖中央退化梯度，可能出现细白横线。应按实际尺寸限制折射，展开时也连续更新，不能仅隐藏一条线。
+- 设置入口已移除 WIP、开启二次确认和版本号文案，直接保存开关并提示重开应用。这只是展示调整，未放宽 bootstrap/Feature/GlassPolicy 的精确版本、系统及手机资格限制；维护文档仍保留适配版本证据。
+
 ### 迷你播放器展开
 
-当前玻璃挂在 `player_sheet_container` 后方，不跟随 mini root 的提前隐藏而消失。`onSlide` 将进度规范到 0..1；`updateTransition` 用 smoothstep 在 0..0.35 交接原生背景，在 0.35..0.6 淡出玻璃，同时高度从 64dp 向 sheet 高度变化，水平边距从 16dp 收到 0，顶部偏移归零，NativeLiquidButton 圆角随 expansion 变化。
+当前玻璃挂在 `player_sheet_container` 后方，不跟随 mini root 的提前隐藏而消失。`onSlide` 将进度规范到 0..1；`updateTransition` 用 smoothstep 在 0..0.35 交接原生背景，在 0.35..0.6 淡出玻璃，同时高度从 GlassPolicy.MINI_HEIGHT_DP（当前 43dp）向 sheet 高度变化，水平边距从 16dp 收到 0，顶部偏移归零，NativeLiquidButton 圆角随 expansion 变化。
 
 这些区间是当前视觉基准，不是新宿主的 API 契约。新版若进度范围、回调时序、sheet 坐标或原生层淡入时机变化，应先正确映射进度和层，再根据录屏调整交接。必须覆盖点击展开、慢拖、快速反向、取消、完全展开后收回；展开首帧不能先撤掉模糊。仅修改 mini alpha 或把玻璃挂回 mini root 会重现断层。
 
 动态封面 `motion_switcher` 单独在 0.6..0.85 渐入：其子树包含矩形渐变/模糊层，上拉初段可能仍是缩略图尺寸，不能随其他背景提前显示。该灰块修复已由用户真机确认。预绘制中的 outlineProvider 只在引用变化时设置，避免相同值触发持续失效；滚动 View 离开内容源树后恢复底部 padding/clipToPadding 并移除缓存，不因暂时隐藏而移除。
+
+原生层透明度还会随动态封面、普通封面和歌词状态改变。PhoneGlassRuntime 通过 View.setAlpha(float) 仅跟踪当前 session 管理的层，NativeLayerAlpha 保存最新宿主 alpha，并乘以模块过渡系数；模块写入有重入保护。关闭时恢复最新宿主值，不能每帧重新套用激活时的 alpha 快照，否则切换动态封面歌曲后会重新显示旧封面。
 
 ### 资源和恢复
 
@@ -128,6 +138,7 @@
 | 看得到但点不了 | elevation/Z、透明原生层遮挡、输入桥坐标、事件消费 |
 | 某些页面像没有模糊 | 采样透明度/窗口底色、source 视口、Compose 识别、隐藏列表误判 |
 | 长按上沿截断/横条阴影 | 录制余量、祖先裁剪、旧 outline/分割线，而非先改 shader |
+| 缩矮后 mini 中央细白线 | 折射范围是否超过半高、是否随实际尺寸限制；同时排查原生分割线 |
 | 手势条上方白带 | source margin/inset、根 padding、背景是否实际覆盖底部 |
 | 点 mini 瞬间失去模糊 | 玻璃是否随 mini 隐藏、sheet 父级是否回退、slide 回调和原生背景交接 |
 | 展开后残留玻璃/关闭后异常 | slide 终点、动画层映射、close 恢复记录及实例归属 |
