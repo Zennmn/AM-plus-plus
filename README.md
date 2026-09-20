@@ -81,7 +81,7 @@ AM++ 通过 libxposed API 102 注入 Apple Music（`com.apple.android.music`）�
 ### 手机液态玻璃底栏
 
 <p align="center">
-  <img src="docs/images/liquid-glass-demo.jpg" alt="手机液态玻璃底栏演示" width="420">
+  <img src="docs/images/liquid-glass-demo.jpg" alt="手机液态玻璃底栏与迷你播放器（主页与资料库）" width="720">
 </p>
 
 ## 兼容性与限制
