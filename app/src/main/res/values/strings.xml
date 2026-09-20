@@ -1,4 +1,4 @@
 <resources>
     <string name="app_name">AM++</string>
-    <string name="xposed_description">Apple Music 平板双栏（含 Editorial Video 抑制）、手机液态玻璃底栏（WIP）与双向歌词模糊</string>
+    <string name="xposed_description">Apple Music 增强模块：平板双栏（含 Editorial Video 抑制）、双向歌词模糊、自定义歌词与歌词字体、歌曲名修正、手机液态玻璃底栏</string>
 </resources>
