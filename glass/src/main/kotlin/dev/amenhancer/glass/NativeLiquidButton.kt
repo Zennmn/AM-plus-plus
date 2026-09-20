@@ -58,8 +58,14 @@ fun NativeLiquidButton(
     Box(
         Modifier.fillMaxSize().drawBackdrop(
             backdrop = backdrop,
-            shape = { if (expansion == 0f) Capsule() else RoundedCornerShape(lerp(32f, 24f, expansion).dp) },
-            effects = { vibrancy(); blur(8f.dp.toPx()); lens(24f.dp.toPx(), 24f.dp.toPx()) },
+            shape = { if (expansion == 0f) Capsule() else RoundedCornerShape(lerp(GlassPolicy.MINI_HEIGHT_DP / 2f, 24f, expansion).dp) },
+            effects = {
+                vibrancy()
+                blur(8f.dp.toPx())
+                // Keep the capsule center outside refraction, including compact layouts.
+                val refraction = minOf(24f.dp.toPx(), size.minDimension * 0.375f)
+                lens(refraction, refraction)
+            },
             onDrawSurface = { drawRect(containerColor) },
             layerBlock = {
                 val width = size.width

@@ -65,6 +65,7 @@ fun LiquidBottomTabs(
     modifier: Modifier = Modifier,
     accentOverride: Color = Color.Unspecified,
     onSelectedTabClick: ((Int) -> Unit)? = null,
+    panelHeight: androidx.compose.ui.unit.Dp = 64f.dp,
     content: @Composable RowScope.() -> Unit
 ) {
     // AM++: preserve Apple's reselect action without changing drag/animation behavior.
@@ -186,7 +187,7 @@ fun LiquidBottomTabs(
                     onDrawSurface = { drawRect(containerColor) }
                 )
                 .then(interactiveHighlight.modifier)
-                .height(64f.dp)
+                .height(panelHeight)
                 .fillMaxWidth()
                 .padding(4f.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -225,7 +226,7 @@ fun LiquidBottomTabs(
                         onDrawSurface = { drawRect(containerColor) }
                     )
                     .then(interactiveHighlight.modifier)
-                    .height(56f.dp)
+                    .height(panelHeight - 8f.dp)
                     .fillMaxWidth()
                     .padding(horizontal = 4f.dp)
                     .graphicsLayer(colorFilter = ColorFilter.tint(accentColor)),
@@ -287,7 +288,7 @@ fun LiquidBottomTabs(
                         drawRect(Color.Black.copy(alpha = 0.03f * progress))
                     }
                 )
-                .height(56f.dp)
+                .height(panelHeight - 8f.dp)
                 .fillMaxWidth(1f / tabsCount)
         )
     }
