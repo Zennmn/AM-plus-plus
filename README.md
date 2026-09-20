@@ -101,6 +101,8 @@ AM++ 通过 libxposed API 102 注入 Apple Music（`com.apple.android.music`）�
 
 ## 安装
 
+### Xposed 模块（推荐）
+
 前置条件：已安装 Apple Music，以及一个支持 libxposed API 102 的 Xposed 框架。判断框架兼容性以框架核心报告的 API 版本为准，不要只看 Manager 应用版本。
 
 1. 从 [Releases](https://github.com/Zennmn/AM-plus-plus/releases/latest) 下载并安装 AM++ APK。
@@ -108,6 +110,12 @@ AM++ 通过 libxposed API 102 注入 Apple Music（`com.apple.android.music`）�
 3. 作用域只勾选 Apple Music（`com.apple.android.music`）。
 4. 强制停止并重新打开 Apple Music。
 5. 打开 Apple Music → 设置 → “AM++ 模块设置”，确认页面显示已连接 libxposed API 102 后再修改设置。
+
+### npatch 嵌入版
+
+不想装 Xposed 框架时，可以改用把 AM++ 直接嵌进 Apple Music 的[嵌入版](https://github.com/Zennmn/AM-plus-plus/releases/tag/embedded-2026.08.10-r1)。该发布页按日期滚动更新，文件名开头的数字就是打包日期（例如 `920` 表示 9 月 20 日的版本），里面的 `.apks` 需要用 NPatch 或 SAI 这类分卷安装器安装。
+
+嵌入版与官方 Apple Music 签名不同，无法共存，安装前通常要先卸载官方版本，本地已下载的音乐会一并清除。它内置的模块按打包当天的提交构建，可能落后于最新 Release。
 
 ## 使用
 
