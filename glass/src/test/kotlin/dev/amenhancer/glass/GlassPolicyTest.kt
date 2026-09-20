@@ -18,8 +18,8 @@ class GlassPolicyTest {
         assertNull(GlassPolicy.selectedIndex(emptyList(), 30))
     }
     @Test fun absentMiniPlayerDoesNotLeavePhantomSpaceAndInsetsArePixels() {
-        assertEquals(152, GlassPolicy.occupiedHeight(2f, 24, false))
-        assertEquals(254, GlassPolicy.occupiedHeight(2f, 24, true))
-        assertEquals(64, GlassPolicy.occupiedHeight(1f, 0, false))
+        assertEquals(168, GlassPolicy.occupiedHeight(2f, 24, false))
+        assertEquals(270, GlassPolicy.occupiedHeight(2f, 24, true))
+        assertEquals(72, GlassPolicy.occupiedHeight(1f, 0, false))
     }
 }

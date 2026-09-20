@@ -8,7 +8,12 @@ object GlassPolicy {
     const val MINI_HEIGHT_DP = 43
     const val HORIZONTAL_DP = 16
     const val GAP_DP = 8
-    const val BOTTOM_DP = 8
+    const val BOTTOM_DP = 16
+    /** Bottom fade shared by the navigation strip: blur radius and wash-out strength. */
+    const val BOTTOM_SCRIM_BLUR_DP = 12f
+    const val BOTTOM_SCRIM_WASH_ALPHA = 0.75f
+    /** Gradient samples per fade; more stops approximate the smooth curve more closely. */
+    const val BOTTOM_SCRIM_STOPS = 9
 
     fun supports(sdk: Int, versionCode: Long, versionName: String, tablet: Boolean) =
         sdk >= 33 && versionCode == VERSION_CODE && versionName == VERSION_NAME && !tablet

@@ -28,10 +28,10 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /** Owns only module AndroidX objects. Never reads the host application's AndroidX owners. */
-class GlassHostView(context: Context) : FrameLayout(context) {
+class GlassHostView(context: Context, bleedDp: Int = 32) : FrameLayout(context) {
     // Keep layout/hit bounds unchanged while giving Compose's RenderNode room for
     // the reference lens expansion and its shadow on every side.
-    private val bleed get() = (32 * resources.displayMetrics.density).roundToInt()
+    private val bleed = (bleedDp * resources.displayMetrics.density).roundToInt()
     private var owner = Owner()
     private var compositionScope: CoroutineScope? = null
     private var recomposer: Recomposer? = null
