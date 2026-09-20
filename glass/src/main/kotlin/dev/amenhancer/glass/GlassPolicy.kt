@@ -14,6 +14,8 @@ object GlassPolicy {
     const val BOTTOM_SCRIM_WASH_ALPHA = 0.75f
     /** Gradient samples per fade; more stops approximate the smooth curve more closely. */
     const val BOTTOM_SCRIM_STOPS = 9
+    /** Backdrop blur shared by the navigation bar and the mini-player panel. */
+    const val PANEL_BLUR_DP = 4f
 
     fun supports(sdk: Int, versionCode: Long, versionName: String, tablet: Boolean) =
         sdk >= 33 && versionCode == VERSION_CODE && versionName == VERSION_NAME && !tablet

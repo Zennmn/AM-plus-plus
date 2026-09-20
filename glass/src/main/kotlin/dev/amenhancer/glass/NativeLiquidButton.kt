@@ -61,7 +61,7 @@ fun NativeLiquidButton(
             shape = { if (expansion == 0f) Capsule() else RoundedCornerShape(lerp(GlassPolicy.MINI_HEIGHT_DP / 2f, 24f, expansion).dp) },
             effects = {
                 vibrancy()
-                blur(8f.dp.toPx())
+                blur(GlassPolicy.PANEL_BLUR_DP.dp.toPx())
                 // Keep the capsule center outside refraction, including compact layouts.
                 val refraction = minOf(24f.dp.toPx(), size.minDimension * 0.375f)
                 lens(refraction, refraction)
