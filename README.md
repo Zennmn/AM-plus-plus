@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  不想用 Xposed 框架？可以直接安装<a href="https://github.com/Zennmn/AM-plus-plus/releases/tag/embedded-2026.08.10-r1">npatch 嵌入版</a>。
+  没有 Lsposed？可以直接安装<a href="https://github.com/Zennmn/AM-plus-plus/releases/tag/embedded-2026.08.10-r1">npatch 嵌入版</a>。
 </p>
 
 <details>
