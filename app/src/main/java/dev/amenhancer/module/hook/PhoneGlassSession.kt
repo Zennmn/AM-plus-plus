@@ -328,7 +328,8 @@ internal class PhoneGlassSession(
             if (params is ViewGroup.MarginLayoutParams) { params.leftMargin = dp(16); params.rightMargin = dp(16) }
             content.layoutParams = params
             listOf("video_surface_container", "mini_player_play_btn", "mini_player_next_btn").forEach { name ->
-                content.findViewById<View>(resourceId(name, "id"))?.let { child ->
+                val id = activity.resources.getIdentifier(name, "id", ModuleConstants.TARGET_PACKAGE)
+                content.findViewById<View>(id)?.let { child ->
                     save(child)
                     child.layoutParams = child.layoutParams.apply {
                         width = dp(32)
