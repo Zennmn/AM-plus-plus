@@ -113,7 +113,7 @@ AM++ 通过 libxposed API 102 注入 Apple Music（`com.apple.android.music`）�
 
 ### npatch 嵌入版
 
-不想装 Xposed 框架时，可以改用把 AM++ 直接嵌进 Apple Music 的[嵌入版](https://github.com/Zennmn/AM-plus-plus/releases/tag/embedded-2026.08.10-r1)。该发布页按日期滚动更新，文件名开头的数字就是打包日期（例如 `920` 表示 9 月 20 日的版本），里面的 `.apks` 需要用 NPatch 或 SAI 这类分卷安装器安装。
+不想装 Xposed 框架时，可以改用把 AM++ 直接嵌进 Apple Music 的[嵌入版](https://github.com/Zennmn/AM-plus-plus/releases/tag/embedded-2026.08.10-r1)。该发布页会累积多个版本，文件名开头的数字就是打包日期（例如 `920` 表示 9 月 20 日的版本），装数字最大的那个；里面的 `.apks` 需要用 NPatch 或 SAI 这类分卷安装器安装。
 
 嵌入版与官方 Apple Music 签名不同，无法共存，安装前通常要先卸载官方版本，本地已下载的音乐会一并清除。它内置的模块按打包当天的提交构建，可能落后于最新 Release。
 
