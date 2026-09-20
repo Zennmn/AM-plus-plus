@@ -55,6 +55,16 @@ class AppleCatalogQueryMethodTest {
     }
 
     @Test
+    fun `verified 653 rename uses v when the name B moved to another method`() {
+        val method = AppleCatalogQueryMethod.resolve(u8.E::class.java, "B")
+        assertEquals("v", method.name)
+        assertEquals(
+            "catalog-653",
+            method.invoke(u8.E(), "path", emptyMap<String, String>(), null),
+        )
+    }
+
+    @Test
     fun `unknown classes names invalid signatures and ambiguity fail closed`() {
         listOf(Unknown::class.java, WrongParameters::class.java, WrongReturn::class.java,
             WrongStatic::class.java, Ambiguous::class.java).forEach { clazz ->
@@ -64,6 +74,9 @@ class AppleCatalogQueryMethodTest {
         }
         assertThrows(NoSuchMethodException::class.java) {
             AppleCatalogQueryMethod.resolve(s8.F::class.java, "unknown")
+        }
+        assertThrows(NoSuchMethodException::class.java) {
+            AppleCatalogQueryMethod.resolve(u8.E::class.java, "unknown")
         }
     }
 }

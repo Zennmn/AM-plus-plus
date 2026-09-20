@@ -9,6 +9,7 @@ package io.github.proify.lyricon.amprovider.xposed
 import android.app.ActivityManager
 import android.app.Application
 import android.content.Context
+import android.os.Build
 import com.juren233.hyperlyricsenhanced.common.dexkit.DexResolutionSource
 import org.luckypray.dexkit.DexKitBridge
 import org.luckypray.dexkit.query.FindClass
@@ -18,6 +19,7 @@ import java.lang.reflect.Field
 import java.lang.reflect.Modifier
 import java.io.File
 import java.util.Base64
+import java.util.zip.ZipFile
 
 /**
  * Slow-path resolver for Apple Music methods whose verified version profile no longer loads.
@@ -30,6 +32,12 @@ internal class AppleMusicDexKitResolver(
     private val application: Application,
     private val classLoader: ClassLoader,
     private val nativeLibraryDir: String,
+    /**
+     * Module APKs, used when the platform did not extract the native libraries on install.
+     * Packages built with `extractNativeLibs=false` keep `libdexkit.so` inside the APK, so
+     * [nativeLibraryDir] stays empty and the library has to be loaded from the package itself.
+     */
+    private val moduleApkPaths: List<String> = emptyList(),
 ) {
     private val baselineRecorder = AppleMusicBaselineRecorder(::preferences)
 
@@ -744,11 +752,79 @@ internal class AppleMusicDexKitResolver(
         if (dexKitLoaded) return
         synchronized(dexKitLoadLock) {
             if (dexKitLoaded) return
-            val nativeLibrary = File(nativeLibraryDir, "libdexkit.so")
-            require(nativeLibrary.isFile) { "DexKit native library missing: ${nativeLibrary.absolutePath}" }
-            System.load(nativeLibrary.absolutePath)
-            dexKitLoaded = true
+            val failures = mutableListOf<String>()
+            if (loadExtractedDexKit(failures)) {
+                dexKitLoaded = true
+                return
+            }
+            if (loadPackagedDexKit(failures)) {
+                dexKitLoaded = true
+                return
+            }
+            error("DexKit native library unavailable: " + failures.joinToString("; "))
         }
+    }
+
+    /** The classic layout: the platform extracted the module's native libraries on install. */
+    private fun loadExtractedDexKit(failures: MutableList<String>): Boolean {
+        if (nativeLibraryDir.isEmpty()) {
+            failures += "no native library directory"
+            return false
+        }
+        val nativeLibrary = File(nativeLibraryDir, DEXKIT_LIBRARY_NAME)
+        if (!nativeLibrary.isFile) {
+            failures += "not extracted: ${nativeLibrary.absolutePath}"
+            return false
+        }
+        val loaded = runCatching { System.load(nativeLibrary.absolutePath) }
+        if (loaded.isSuccess) return true
+        failures += "extracted load failed: ${loaded.exceptionOrNull()?.message}"
+        return false
+    }
+
+    /**
+     * Modern packages keep the library inside the APK. `System.loadLibrary` resolves it through
+     * the module class loader's native library directories, which map the packaged lib directory;
+     * if that lookup is unavailable the library is extracted to the private cache and loaded.
+     */
+    private fun loadPackagedDexKit(failures: MutableList<String>): Boolean {
+        val looked = runCatching { System.loadLibrary(DEXKIT_LIBRARY_SONAME) }
+        if (looked.isSuccess) return true
+        failures += "loader lookup failed: ${looked.exceptionOrNull()?.message}"
+        val directory = File(application.codeCacheDir, DEXKIT_EXTRACT_DIRECTORY)
+        for (apkPath in moduleApkPaths) {
+            val apk = File(apkPath)
+            if (!apk.isFile) {
+                failures += "module apk missing: $apkPath"
+                continue
+            }
+            for (abi in Build.SUPPORTED_ABIS) {
+                val entry = "lib/$abi/$DEXKIT_LIBRARY_NAME"
+                val target = File(directory, "$abi-$DEXKIT_LIBRARY_NAME")
+                val extracted = runCatching {
+                    ZipFile(apk).use { zip ->
+                        val source = zip.getEntry(entry)
+                        if (source == null) {
+                            false
+                        } else {
+                            directory.mkdirs()
+                            zip.getInputStream(source).use { input ->
+                                target.outputStream().use { output -> input.copyTo(output) }
+                            }
+                            true
+                        }
+                    }
+                }.getOrElse { error ->
+                    failures += "extract $entry failed: ${error.message}"
+                    false
+                }
+                if (!extracted) continue
+                val loaded = runCatching { System.load(target.absolutePath) }
+                if (loaded.isSuccess) return true
+                failures += "packaged load failed ($abi): ${loaded.exceptionOrNull()?.message}"
+            }
+        }
+        return false
     }
 
     private data class MethodDescriptor(
@@ -786,6 +862,9 @@ internal class AppleMusicDexKitResolver(
         const val PREFERENCES = "hle_apple_music_dex_methods_v1"
         const val TWO_GIB_BYTES = 2L * 1024L * 1024L * 1024L
         const val COUNT_TOLERANCE = 4
+        const val DEXKIT_LIBRARY_NAME = "libdexkit.so"
+        const val DEXKIT_LIBRARY_SONAME = "dexkit"
+        const val DEXKIT_EXTRACT_DIRECTORY = "dexkit-native"
         val dexKitLoadLock = Any()
         val dexKitBridgeLock = Any()
 

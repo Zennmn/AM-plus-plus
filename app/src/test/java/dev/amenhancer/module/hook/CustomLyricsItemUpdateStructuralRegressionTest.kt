@@ -38,7 +38,8 @@ class CustomLyricsItemUpdateStructuralRegressionTest {
         assertTrue(symbols.contains("LyricsItemUpdateMethod"))
         assertTrue(symbols.contains("TargetSymbolId.LYRICS_ITEM_UPDATE_METHOD"))
         assertEquals(
-            3,
+            // One pin per exact host profile: 6.5.0, 6.5.1, 6.5.2 and 6.5.3.
+            4,
             Regex("TargetSymbolId\\.LYRICS_ITEM_UPDATE_METHOD to \"o2\"").findAll(symbols).count(),
         )
     }

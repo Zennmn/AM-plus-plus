@@ -4,14 +4,30 @@ import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 
 internal object AppleCatalogQueryMethod {
+    /**
+     * Verified renames of the direct catalog query, keyed by owner class and preferred name.
+     *
+     * R8 reuses short names between builds, so the same name can describe a different method on
+     * another host. Every entry below was established from bytecode rather than from the name,
+     * and is consulted only after the preferred name fails the signature check:
+     *
+     *  - The alternate 6.5.2 (1586) build keeps the query body under [x] while its own [B] takes
+     *    a different signature.
+     *  - 6.5.3 (1599) renames s8.F to u8.E and moves the query, with its exact 353-instruction
+     *    body, onto [v]; u8.E#B is now a method that takes the continuation implementation first.
+     */
+    private val VERIFIED_RENAMES: Map<String, Map<String, String>> = mapOf(
+        "s8.F" to mapOf("B" to "x"),
+        "u8.E" to mapOf("B" to "v"),
+    )
+
     fun resolve(clazz: Class<*>, preferredName: String): Method {
-        val preferred = find(clazz, preferredName)
-        // Another 6.5.2 (1586) R8 variant maps the same catalog query to x.
-        val method = preferred ?: if (clazz.name == "s8.F" && preferredName == "B") {
-            find(clazz, "x")
-        } else {
-            null
+        find(clazz, preferredName)?.let { method ->
+            return method.also { it.isAccessible = true }
         }
+        val method = VERIFIED_RENAMES[clazz.name]
+            ?.get(preferredName)
+            ?.let { name -> find(clazz, name) }
         return method?.also { it.isAccessible = true }
             ?: throw NoSuchMethodException(
                 "${clazz.name}#$preferredName(String,Map,Continuation)",

@@ -50,8 +50,12 @@ internal class StaticCollapsedInterceptGestureLatch {
  * behavior everywhere else.
  */
 internal object StaticCollapsedInterceptGuard {
-    private const val TARGET_VERSION_NAME = "6.5.2"
-    private const val TARGET_VERSION_CODE = 1586L
+    /**
+     * Verified hosts. `common.behavior.StaticCollapsedBottomSheetBehavior` keeps its name,
+     * superclass and the full CoordinatorLayout/View/MotionEvent signature on both builds
+     * (6.5.2 base and 6.5.3 base), so the structural resolver stays valid for each of them.
+     */
+    private val SUPPORTED_BUILDS = listOf("6.5.2" to 1586L, "6.5.3" to 1599L)
     private const val FLAT_ROOT = "bottom_navigation_root_flat"
     private const val TABS_FRAME = "bottom_navigation_tabs_frame"
     private const val PLAYER_CONTAINER = "player_container"
@@ -59,11 +63,11 @@ internal object StaticCollapsedInterceptGuard {
     private const val PLAYER_LYRICS = "player_lyrics"
     private const val PLAYER_QUEUE = "player_queue"
 
-    /** This obfuscated behavior contract was verified only on Apple Music 6.5.2 (1586). */
     fun isSupportedBuild(build: TargetBuild): Boolean =
         build.packageName == ModuleConstants.TARGET_PACKAGE &&
-            build.versionName == TARGET_VERSION_NAME &&
-            build.versionCode == TARGET_VERSION_CODE
+            SUPPORTED_BUILDS.any { (name, code) ->
+                build.versionName == name && build.versionCode == code
+            }
 
     fun install(intercept: Method?): Boolean {
         intercept ?: return false

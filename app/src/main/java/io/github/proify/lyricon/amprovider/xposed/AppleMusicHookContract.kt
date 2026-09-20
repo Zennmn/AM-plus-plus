@@ -157,7 +157,7 @@ internal class RequireNonBridgeMethod : AppleMusicHookContract {
  */
 internal class RequireParameterType(
     private val index: Int,
-    private val expectedTypeClassName: String,
+    private vararg val expectedTypeClassNames: String,
 ) : AppleMusicHookContract {
     override fun validate(context: HookContractContext): ContractResult {
         val method = context.method
@@ -169,15 +169,18 @@ internal class RequireParameterType(
             )
         }
         val actual = paramTypes[index]
-        val expected = runCatching { context.classLookup?.invoke(expectedTypeClassName) }.getOrNull()
-            ?: runCatching { context.classLoader?.loadClass(expectedTypeClassName) }.getOrNull()
-        val matches = actual.name == expectedTypeClassName ||
-            (expected != null && expected.isAssignableFrom(actual))
+        val expected = expectedTypeClassNames.mapNotNull { className ->
+            runCatching { context.classLookup?.invoke(className) }.getOrNull()
+                ?: runCatching { context.classLoader?.loadClass(className) }.getOrNull()
+        }
+        val matches = actual.name in expectedTypeClassNames ||
+            expected.any { type -> type.isAssignableFrom(actual) }
         return if (matches) {
             ContractResult.Passed
         } else {
             ContractResult.Rejected(
-                "Method ${method.name} param[$index] is ${actual.name}, expected $expectedTypeClassName"
+                "Method ${method.name} param[$index] is ${actual.name}, expected " +
+                    expectedTypeClassNames.joinToString(" or ")
             )
         }
     }
@@ -228,7 +231,15 @@ internal object AppleMusicHookContracts {
         AppleMusicHookPoint.COMPOSE_NEVER_EQUAL_POLICY to RequireStaticSelfTypedSingleton(),
         AppleMusicHookPoint.COMPOSE_OBSERVE_AS_STATE to AllOfContract(
             RequireNonBridgeMethod(),
-            RequireParameterType(0, "androidx.lifecycle.LiveData"),
+            // observeAsState reads a LiveData. Apple Music ships LiveData obfuscated: the class
+            // is androidx.lifecycle.G on 6.5.0-6.5.3 and keeps getValue, observe and
+            // observeForever while MutableLiveData keeps its own name, so both the library name
+            // and the verified host alias are accepted. Unknown hosts stay rejected.
+            RequireParameterType(
+                0,
+                "androidx.lifecycle.LiveData",
+                "androidx.lifecycle.G",
+            ),
         ),
         AppleMusicHookPoint.LIBRARY_EPOXY_BUILD to AllOfContract(
             RequireNonBridgeMethod(),

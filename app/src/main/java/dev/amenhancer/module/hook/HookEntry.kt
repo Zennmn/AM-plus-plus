@@ -163,7 +163,7 @@ class HookEntry : XposedModule() {
                         val build = targetBuild(application)
                         if (!bootstrap.supports(build)) {
                             ModernXposedRuntime.log(
-                                "embedded build ${build.displayName} is unsupported; expected 6.5.1 (1583) or 6.5.2 (1586)",
+                                "embedded build ${build.displayName} is unsupported; expected 6.5.1 (1583), 6.5.2 (1586) or 6.5.3 (1599)",
                             )
                             return
                         }
