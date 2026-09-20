@@ -61,7 +61,7 @@ AM++ 是一个通过 libxposed API 102 注入 Apple Music 的增强模块，目�
 | 歌词模糊半径调节 | `0px` | 可在设置中对模糊半径增加或减少 `-10..10px`。 |
 | 自定义歌词注入 | 关闭 | 按 Apple Music ID 替换 TTML，支持手动 TTML、AMLL、AM-Lyrics 和 Lunabeat 导入。 |
 | 歌词字体替换 | 关闭 | 导入 TTF/OTF 后应用到播放器歌词布局，可恢复原字体；示例使用 MiSans。 |
-| 手机液态玻璃 | 关闭 | Android 13+、Apple Music 6.5.2 (1586) / 6.5.3 (1599)：基于 AndroidLiquidGlass 的底栏透镜、拖拽胶囊和迷你播放器；真机视觉验收中。 |
+| 手机液态玻璃 | 关闭 | Android 13+、Apple Music 6.5.2 (1586) / 6.5.3 (1599)：基于 AndroidLiquidGlass 的底栏透镜、拖拽胶囊和迷你播放器；已正式支持。 |
 | 平板底栏补偿 | 关闭 | 平板底栏显示异常时使用的兼容性选项。 |
 
 双向歌词模糊的核心逻辑移植并适配自 [a23bc/amlyricblur](https://github.com/a23bc/amlyricblur)。
