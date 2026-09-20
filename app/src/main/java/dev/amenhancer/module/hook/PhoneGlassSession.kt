@@ -29,6 +29,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import com.kyant.backdrop.backdrops.ViewBackdrop
+import dev.amenhancer.glass.BottomScrim
 import dev.amenhancer.glass.GlassHostView
 import dev.amenhancer.glass.GlassNavigation
 import dev.amenhancer.glass.GlassPolicy
@@ -57,6 +58,7 @@ internal class PhoneGlassSession(
     private var source: ViewGroup? = null
     private var backdrop: ViewBackdrop? = null
     private var navGlass: GlassHostView? = null
+    private var navScrim: GlassHostView? = null
     private var miniGlass: GlassHostView? = null
     var miniRoot: FrameLayout? = null
         private set
@@ -149,6 +151,13 @@ internal class PhoneGlassSession(
             retryPending = false
             val bg = ViewBackdrop(content, ::scheduleFailure).also { backdrop = it; it.start() }
             refreshMenu()
+            // Bottom fade: blurred, washed-out strip under the tabs, matching the
+            // reference apps' gradient bar. Added first so the tabs stay on top.
+            val scrim = GlassHostView(moduleContext(), bleedDp = 0).also { navScrim = it }
+            scrim.alpha = 0f
+            scrim.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+            scrim.content { HostConfiguration { BottomScrim(bg) } }
+            frame.addView(scrim, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             val glass = GlassHostView(moduleContext()).also { navGlass = it }
             glass.alpha = 0f
             glass.content { HostConfiguration { GlassNavigation(tabs, selectedId, accent, foreground, bg, ::selectTab) } }
@@ -266,7 +275,9 @@ internal class PhoneGlassSession(
             }
             if (activated) {
                 val menuReady = tabs.size > 1 && tabs.any { it.id == selectedId }
-                navGlass?.alpha = if (menuReady) 1f else 0f
+                val navAlpha = if (menuReady) 1f else 0f
+                navGlass?.alpha = navAlpha
+                navScrim?.alpha = navAlpha
                 navigation?.alpha = if (menuReady) 0f else 1f
                 updateGeometry()
                 val sourceNeedsLayout = updateUnderlap()
@@ -308,6 +319,7 @@ internal class PhoneGlassSession(
         activated = true
         prepareMini()
         navGlass?.alpha = 1f
+        navScrim?.alpha = 1f
         updateGeometry()
         updateUnderlap()
         updateTransition()
@@ -505,7 +517,7 @@ internal class PhoneGlassSession(
         if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) observingPress = false
     }
 
-    fun foreground(active: Boolean) { navGlass?.foreground(active); miniGlass?.foreground(active) }
+    fun foreground(active: Boolean) { navGlass?.foreground(active); navScrim?.foreground(active); miniGlass?.foreground(active) }
 
     private fun findPlayerBehavior(): Any? = generateSequence(activity.javaClass as Class<*>?) { it.superclass }.flatMap { it.declaredFields.asSequence() }.firstNotNullOfOrNull {
         if (it.type.name.contains("BottomSheetBehavior")) runCatching { it.isAccessible = true; it.get(activity) }.getOrNull() else null
@@ -526,7 +538,7 @@ internal class PhoneGlassSession(
         observer?.takeIf { it.isAlive }?.removeOnPreDrawListener(this)
         observer?.takeIf { it.isAlive }?.removeOnGlobalLayoutListener(layoutListener)
         backdrop?.close()
-        listOfNotNull(navGlass, miniGlass).forEach { (it.parent as? ViewGroup)?.removeView(it) }
+        listOfNotNull(navGlass, navScrim, miniGlass).forEach { (it.parent as? ViewGroup)?.removeView(it) }
         states.forEach { (view, state) -> state.restore(view) }
         states.clear()
         layerAlphas.forEach { (view, state) -> view.alpha = state.native }
