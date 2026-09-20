@@ -167,7 +167,13 @@ internal class AppleMusicDexKitResolver(
     ): ResolvedAppleMusicHookMethod? {
         val packageInfo = application.packageManager.getPackageInfo(application.packageName, 0)
         val preferences = application.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
-        val cacheKey = "${packageInfo.longVersionCode}:${packageInfo.lastUpdateTime}:$hookPoint"
+        val versionCode = if (android.os.Build.VERSION.SDK_INT >= 28) {
+            packageInfo.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            packageInfo.versionCode.toLong()
+        }
+        val cacheKey = "$versionCode:${packageInfo.lastUpdateTime}:$hookPoint"
         decode(preferences.getString(cacheKey, null))?.let { cached ->
             val template = bestTemplate(templates, cached)
             val method = runCatching { cached.toMethod(classLoader) }.getOrNull()

@@ -345,6 +345,8 @@ Guard 的反射安装是独立能力。方法缺失、签名歧义或安装异�
 
 这些能力有独立设备资格和资源期约束。版本适配时只更新目标符号和资源定位，不要扩大 URL 抑制、窗口背景或手机/平板资格范围。
 
+手机液态玻璃的逐项依赖、升级步骤和故障排查见 [液态玻璃新版本适配](liquid-glass-adaptation.md)。当前玻璃桥是 6.5.2 (1586) 专用实现，尚未统一接入通用的版本 profile/resolver；只增加 bootstrap 支持或修改版本常量并不能完成适配。
+
 ### 10.4 媒体库刷新
 
 媒体库刷新通常同时依赖 MediaLibrary 类型、singleton、ready/update 方法、更新原因枚举，以及可选的 native catalog refresh/native pointer。适配时：

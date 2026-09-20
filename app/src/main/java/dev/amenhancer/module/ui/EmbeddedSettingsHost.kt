@@ -2189,13 +2189,8 @@ internal class EmbeddedSettingsHost private constructor(
             addView(embeddedSettingRow(
                 activity,
                 "手机液态玻璃底栏",
-                "仅手机启用 · 更改后需强制停止并重开 Apple Music",
+                "为手机底栏和迷你播放器启用液态玻璃效果，需重开应用",
                 settings.phoneLiquidGlassEnabled,
-                badge = "WIP",
-                badgeAtToggle = true,
-                onEnableConfirmation = { onConfirmed ->
-                    showEmbeddedLiquidGlassConfirmation(activity, onConfirmed)
-                },
                 iconTint = EmbeddedSettingsPalette.accent,
                 iconDrawable = EmbeddedGlyphDrawable(
                     EmbeddedGlyphKind.Glass,
@@ -2877,18 +2872,6 @@ internal class EmbeddedSettingsHost private constructor(
                     "修改设置后，请先强制停止，再重新打开 Apple Music。",
             )
             .setPositiveButton("知道了", null)
-            .show()
-    }
-
-    private fun showEmbeddedLiquidGlassConfirmation(
-        activity: Activity,
-        onConfirmed: () -> Unit,
-    ) {
-        AlertDialog.Builder(activity)
-            .setTitle("手机液态玻璃底栏")
-            .setMessage("这是半成品功能，不接受反馈。\n开启后需要强制停止并重新打开 Apple Music。")
-            .setNegativeButton("取消", null)
-            .setPositiveButton("继续开启") { _, _ -> onConfirmed() }
             .show()
     }
 
