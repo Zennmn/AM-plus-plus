@@ -62,4 +62,17 @@ class PhoneLiquidGlassStructuralRegressionTest {
         assertTrue(projectFile("backdrop/LICENSE").contains("Apache License"))
         assertTrue(projectFile("settings.gradle.kts").contains(":backdrop"))
     }
+
+    @Test
+    fun `keeps pager pages under the glass`() {
+        val session = source("dev/amenhancer/module/hook/PhoneGlassSession.kt")
+        // ViewPager2 lays its pages out inside an internal RecyclerView. Padding that
+        // RecyclerView shrinks every page, so the page stops above the glass and the bar
+        // samples empty background (Search results looked opaque). The pager host must stay
+        // out of the padding targets and previously padded targets must be released.
+        assertTrue(session.contains("androidx.viewpager2.widget.ViewPager2"))
+        assertTrue(session.contains("!isViewPagerPageHost(view)"))
+        assertTrue(session.contains("state.scrollPaddingActive && terminal.none"))
+        assertTrue(session.contains("restoreScroll(view)"))
+    }
 }

@@ -411,7 +411,7 @@ internal class PhoneGlassSession(
                 }
             }
             val candidates = descendants(root).filter { view ->
-            view.isShown && view.height >= root.height / 2 && view.height > 0 && generateSequence(view.javaClass as Class<*>?) { it.superclass }.any {
+            view.isShown && view.height >= root.height / 2 && view.height > 0 && !isViewPagerPageHost(view) && generateSequence(view.javaClass as Class<*>?) { it.superclass }.any {
                 it.name in setOf("androidx.recyclerview.widget.RecyclerView", "androidx.core.widget.NestedScrollView", "android.widget.ScrollView", "android.widget.ListView")
             }
             }.toList()
@@ -420,6 +420,14 @@ internal class PhoneGlassSession(
             }
         }
         val terminal = scrollTargets
+        // A view that stopped being a target (for example the pager RecyclerView we no
+        // longer pad) keeps its old padding until we release it here.
+        states.entries.forEach { (view, state) ->
+            if (state.scrollPaddingActive && terminal.none { it === view }) {
+                state.restoreScroll(view)
+                state.scrollPaddingActive = false
+            }
+        }
         // Library / New / parts of Search are Compose scenes in 1586. They do
         // not expose RecyclerView children. Padding their View viewport removes
         // the very pixels the backdrop needs; their own content owns scrolling.
@@ -436,7 +444,7 @@ internal class PhoneGlassSession(
         if (root.paddingBottom != 0) root.setPadding(root.paddingLeft, root.paddingTop, root.paddingRight, 0)
         root.clipToPadding = false
         terminal.forEach { view ->
-            val initial = save(view).also { it.scrollPadding = true }
+            val initial = save(view).also { it.scrollPadding = true; it.scrollPaddingActive = true }
             val desired = initial.bottomPadding + occupied
             if (view.paddingBottom != desired) view.setPadding(view.paddingLeft, view.paddingTop, view.paddingRight, desired)
             (view as? ViewGroup)?.clipToPadding = false
@@ -565,6 +573,12 @@ internal class PhoneGlassSession(
 
     private fun isDescendant(child: View, parent: View) = generateSequence(child.parent) { it.parent }.any { it === parent }
 
+    /** ViewPager2 hosts its pages in an internal RecyclerView. Padding that RecyclerView
+     * shrinks every page instead of adding scroll space, so the page content stops above
+     * the glass and the bar samples empty background. Pad the lists inside the pages. */
+    private fun isViewPagerPageHost(view: View): Boolean =
+        (view.parent as? View)?.javaClass?.name == "androidx.viewpager2.widget.ViewPager2"
+
     private class NativeViewState(view: View) {
         val background = view.background
         val alpha = view.alpha
@@ -577,6 +591,7 @@ internal class PhoneGlassSession(
         private val padding = intArrayOf(view.paddingLeft, view.paddingTop, view.paddingRight, view.paddingBottom)
         val bottomPadding get() = padding[3]
         var scrollPadding = false
+        var scrollPaddingActive = false
         private val clipChildren = (view as? ViewGroup)?.clipChildren
         private val clipPadding = (view as? ViewGroup)?.clipToPadding
         val outlineProvider = view.outlineProvider
