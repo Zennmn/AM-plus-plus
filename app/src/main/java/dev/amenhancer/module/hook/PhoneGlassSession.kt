@@ -269,8 +269,12 @@ internal class PhoneGlassSession(
                 navGlass?.alpha = if (menuReady) 1f else 0f
                 navigation?.alpha = if (menuReady) 0f else 1f
                 updateGeometry()
-                updateUnderlap()
+                val sourceNeedsLayout = updateUnderlap()
                 updateTransition()
+                // Insets can be reapplied when the native player finishes collapsing.
+                // setLayoutParams only schedules layout: do not expose the old, shorter
+                // content bounds (and window background beneath them) in this frame.
+                if (sourceNeedsLayout) return false
             }
         } catch (error: Throwable) { scheduleFailure(error) }
         return true
@@ -357,8 +361,9 @@ internal class PhoneGlassSession(
         playerBehavior?.let { PhoneGlassRuntime.method(it.javaClass, "F", Int::class.javaPrimitiveType!!, Boolean::class.javaPrimitiveType!!).invoke(it, height, false) }
     }
 
-    private fun updateUnderlap() {
-        val root = source ?: return
+    private fun updateUnderlap(): Boolean {
+        val root = source ?: return false
+        var sourceNeedsLayout = false
         // 1586 applies the navigation-bar inset as a margin on this source, even
         // in an edge-to-edge window. Extend the scene, not the controls, beneath
         // the gesture area. Leave larger margins (e.g. IME avoidance) untouched.
@@ -367,6 +372,7 @@ internal class PhoneGlassSession(
                 save(root)
                 params.bottomMargin = 0
                 root.layoutParams = params
+                sourceNeedsLayout = true
             }
         }
         if (scanNeeded) {
@@ -399,7 +405,7 @@ internal class PhoneGlassSession(
         if (terminal.isEmpty() && !composeScene) {
             underlap = false
             if (root.paddingBottom != occupied) root.setPadding(root.paddingLeft, root.paddingTop, root.paddingRight, occupied)
-            return
+            return sourceNeedsLayout
         }
         underlap = true
         if (root.paddingBottom != 0) root.setPadding(root.paddingLeft, root.paddingTop, root.paddingRight, 0)
@@ -410,6 +416,7 @@ internal class PhoneGlassSession(
             if (view.paddingBottom != desired) view.setPadding(view.paddingLeft, view.paddingTop, view.paddingRight, desired)
             (view as? ViewGroup)?.clipToPadding = false
         }
+        return sourceNeedsLayout
     }
 
     private fun updateTransition() {
