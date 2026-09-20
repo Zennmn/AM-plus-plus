@@ -135,7 +135,7 @@ internal class AppleMediaApiMetadataCoordinator(
         val attributes = knownAttributes ?: entityAttributes(entity)
         val playParams = attributes?.let {
             runCatching {
-                AppleReflection.call(
+                AppleReflection.callIfPresent(
                     it,
                     catalogMember(AppleMusicRuntimeMember.CATALOG_ATTRIBUTES_PLAY_PARAMS_METHOD),
                 )
@@ -143,7 +143,7 @@ internal class AppleMediaApiMetadataCoordinator(
         }
         addValue(playParams?.let {
             runCatching {
-                AppleReflection.call(
+                AppleReflection.callIfPresent(
                     it,
                     catalogMember(AppleMusicRuntimeMember.CATALOG_PLAY_PARAMS_CATALOG_ID_METHOD),
                 )
@@ -156,13 +156,13 @@ internal class AppleMediaApiMetadataCoordinator(
             AppleMusicRuntimeMember.CATALOG_ENTITY_REPORTING_ADAM_ID_METHOD,
         ).forEach { runtimeMember ->
             addValue(
-                runCatching { AppleReflection.call(entity, catalogMember(runtimeMember)) }
+                runCatching { AppleReflection.callIfPresent(entity, catalogMember(runtimeMember)) }
                     .getOrNull()
             )
         }
         addValue(
             runCatching {
-                AppleReflection.call(
+                AppleReflection.callIfPresent(
                     entity,
                     catalogMember(AppleMusicRuntimeMember.CATALOG_ENTITY_FORMER_IDS_METHOD),
                 )
@@ -172,7 +172,7 @@ internal class AppleMediaApiMetadataCoordinator(
 
     fun entityAttributes(entity: Any): Any? =
         runCatching {
-            AppleReflection.call(
+            AppleReflection.callIfPresent(
                 entity,
                 catalogMember(AppleMusicRuntimeMember.CATALOG_ENTITY_ATTRIBUTES_METHOD),
             )
@@ -187,22 +187,22 @@ internal class AppleMediaApiMetadataCoordinator(
             AppleMusicRuntimeMember.CATALOG_ENTITY_RELATIONSHIPS_METHOD,
         ).mapNotNull { member ->
             runCatching {
-                AppleReflection.call(entity, catalogMember(member)) as? Map<*, *>
+                AppleReflection.callIfPresent(entity, catalogMember(member)) as? Map<*, *>
             }.getOrNull()
         }.firstOrNull()
-            ?: runCatching { AppleReflection.call(entity, "getViews") as? Map<*, *> }.getOrNull()
+            ?: runCatching { AppleReflection.callIfPresent(entity, "getViews") as? Map<*, *> }.getOrNull()
             ?: runCatching { AppleReflection.field(entity, "views") as? Map<*, *> }.getOrNull()
             ?: return emptyList()
         val relationship = relationships[relationshipKey]
             ?: relationships.entries.firstOrNull { it.key?.toString() == relationshipKey }?.value
             ?: return emptyList()
         val raw = runCatching {
-            AppleReflection.call(
+            AppleReflection.callIfPresent(
                 relationship,
                 catalogMember(AppleMusicRuntimeMember.CATALOG_RELATIONSHIP_ENTITIES_METHOD),
             )
         }.getOrNull() ?: runCatching {
-            AppleReflection.call(
+            AppleReflection.callIfPresent(
                 relationship,
                 catalogMember(AppleMusicRuntimeMember.CATALOG_RELATIONSHIP_DATA_METHOD),
             )
@@ -217,7 +217,7 @@ internal class AppleMediaApiMetadataCoordinator(
 
     fun attribute(attributes: Any, attribute: AppleMediaApiTextAttribute): String? =
         runCatching {
-            AppleReflection.call(
+            AppleReflection.callIfPresent(
                 attributes,
                 catalogMember(attribute.getterRuntimeMember),
             ) as? String
@@ -511,7 +511,7 @@ internal class AppleMediaApiMetadataCoordinator(
 
     private fun artistAssociationKeys(entity: Any): Set<String> = buildSet {
         val relationships = runCatching {
-            AppleReflection.call(
+            AppleReflection.callIfPresent(
                 entity,
                 catalogMember(AppleMusicRuntimeMember.CATALOG_ENTITY_RELATIONSHIPS_METHOD),
             ) as? Map<*, *>
@@ -519,10 +519,10 @@ internal class AppleMediaApiMetadataCoordinator(
         val relationship = relationships["artists"] ?: relationships["artist"]
             ?: return@buildSet
         val rawArtists = runCatching {
-            AppleReflection.call(
+            AppleReflection.callIfPresent(
                 relationship,
                 catalogMember(AppleMusicRuntimeMember.CATALOG_RELATIONSHIP_ENTITIES_METHOD),
-            ) ?: AppleReflection.call(
+            ) ?: AppleReflection.callIfPresent(
                 relationship,
                 catalogMember(AppleMusicRuntimeMember.CATALOG_RELATIONSHIP_DATA_METHOD),
             )
@@ -549,7 +549,7 @@ internal class AppleMediaApiMetadataCoordinator(
 
     private fun genreNames(attributes: Any): List<String> {
         val values = runCatching {
-            AppleReflection.call(
+            AppleReflection.callIfPresent(
                 attributes,
                 catalogMember(AppleMusicRuntimeMember.CATALOG_ATTRIBUTES_GENRE_NAMES_METHOD),
             )
@@ -565,7 +565,7 @@ internal class AppleMediaApiMetadataCoordinator(
         if (genres.isNotEmpty()) return genres
         return listOfNotNull(
             runCatching {
-                AppleReflection.call(
+                AppleReflection.callIfPresent(
                     attributes,
                     catalogMember(AppleMusicRuntimeMember.CATALOG_ATTRIBUTES_GENRE_NAME_METHOD),
                 ) as? String

@@ -31,6 +31,8 @@ internal class AppleMusicDexKitResolver(
     private val classLoader: ClassLoader,
     private val nativeLibraryDir: String,
 ) {
+    private val baselineRecorder = AppleMusicBaselineRecorder(::preferences)
+
     /**
      * Record the identifiers that were actually resolved by the exact profile.
      * This is deliberately persisted independently of the APK version.  When a
@@ -43,39 +45,34 @@ internal class AppleMusicDexKitResolver(
         clazz: Class<*>,
         baselineClassName: String = target.className,
     ) {
-        val preferences = preferences()
-        preferences.edit()
-            .putString(classBaselineKey(hookPoint, baselineClassName), encodeClassShape(ClassShape.from(clazz)))
-            .apply()
-        target.runtimeMemberNames.forEach { (member, name) ->
-            when (member.kind()) {
-                MemberKind.CLASS_REFERENCE -> runCatching { classLoader.loadClass(name) }
-                    .getOrNull()
-                    ?.let { referenced ->
-                        preferences.edit()
-                            .putString(
-                                classReferenceBaselineKey(hookPoint, baselineClassName, member),
-                                encodeClassShape(ClassShape.from(referenced)),
+        baselineRecorder.record(hookPoint, target, clazz, baselineClassName) {
+            buildMap {
+                put(classBaselineKey(hookPoint, baselineClassName), encodeClassShape(ClassShape.from(clazz)))
+                target.runtimeMemberNames.forEach { (member, name) ->
+                    when (member.kind()) {
+                        MemberKind.CLASS_REFERENCE -> runCatching { classLoader.loadClass(name) }
+                            .getOrNull()
+                            ?.let { referenced ->
+                                put(
+                                    classReferenceBaselineKey(hookPoint, baselineClassName, member),
+                                    encodeClassShape(ClassShape.from(referenced)),
+                                )
+                            }
+
+                        MemberKind.FIELD -> findField(clazz, name)?.let { field ->
+                            put(
+                                memberBaselineKey(hookPoint, baselineClassName, member),
+                                encodeMemberDescriptor(MemberDescriptor.from(field, clazz)),
                             )
-                            .apply()
+                        }
+
+                        MemberKind.METHOD -> findMethods(clazz, name).firstOrNull()?.let { method ->
+                            put(
+                                memberBaselineKey(hookPoint, baselineClassName, member),
+                                encodeMemberDescriptor(MemberDescriptor.from(method, clazz)),
+                            )
+                        }
                     }
-
-                MemberKind.FIELD -> findField(clazz, name)?.let { field ->
-                    preferences.edit()
-                        .putString(
-                            memberBaselineKey(hookPoint, baselineClassName, member),
-                            encodeMemberDescriptor(MemberDescriptor.from(field, clazz)),
-                        )
-                        .apply()
-                }
-
-                MemberKind.METHOD -> findMethods(clazz, name).firstOrNull()?.let { method ->
-                    preferences.edit()
-                        .putString(
-                            memberBaselineKey(hookPoint, baselineClassName, member),
-                            encodeMemberDescriptor(MemberDescriptor.from(method, clazz)),
-                        )
-                        .apply()
                 }
             }
         }

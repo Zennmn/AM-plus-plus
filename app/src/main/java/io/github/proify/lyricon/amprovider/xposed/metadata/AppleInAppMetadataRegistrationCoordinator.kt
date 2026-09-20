@@ -197,7 +197,7 @@ internal class AppleInAppMetadataRegistrationCoordinator(
         val value = if (access.readViaMethod) {
             runCatching {
                 contentItemMetadataHooks.withOriginalGetters {
-                    AppleReflection.call(
+                    AppleReflection.callIfPresent(
                         playbackItem,
                         contentItemTarget.target.runtimeMemberName(access.readMember),
                     )
@@ -222,7 +222,7 @@ internal class AppleInAppMetadataRegistrationCoordinator(
         ).forEach { runtimeMember ->
             addString(
                 runCatching {
-                    AppleReflection.call(
+                    AppleReflection.callIfPresent(
                         contentItem,
                         contentItemTarget.target.runtimeMemberName(runtimeMember),
                     )
@@ -234,7 +234,7 @@ internal class AppleInAppMetadataRegistrationCoordinator(
             AppleMusicRuntimeMember.CONTENT_ITEM_REPORTING_ADAM_ID_GETTER,
         ).forEach { runtimeMember ->
             val value = runCatching {
-                AppleReflection.call(
+                AppleReflection.callIfPresent(
                     contentItem,
                     contentItemTarget.target.runtimeMemberName(runtimeMember),
                 ) as? Long
@@ -243,7 +243,7 @@ internal class AppleInAppMetadataRegistrationCoordinator(
             value?.takeIf { it > 0L }?.let(::addString)
         }
         val formerIds = runCatching {
-            AppleReflection.call(
+            AppleReflection.callIfPresent(
                 contentItem,
                 contentItemTarget.target.runtimeMemberName(
                     AppleMusicRuntimeMember.CONTENT_ITEM_FORMER_IDS_GETTER,
@@ -264,7 +264,7 @@ internal class AppleInAppMetadataRegistrationCoordinator(
             AppleMusicRuntimeMember.CONTENT_ITEM_ARTIST_SUBSCRIPTION_STORE_ID_GETTER,
         ).forEach { runtimeMember ->
             val value = runCatching {
-                AppleReflection.call(
+                AppleReflection.callIfPresent(
                     contentItem,
                     contentItemTarget.target.runtimeMemberName(runtimeMember),
                 )

@@ -369,6 +369,29 @@ Guard 的反射安装是独立能力。方法缺失、签名歧义或安装异�
 - miss 回填应有 bounded queue、去重、后台执行和可重试结果，不能在主线程做目录查询；
 - title correction 开关关闭时，不应创建 catalog lookup、scheduler 或额外的宿主 Hook。
 
+主页 Epoxy 最终绑定会经过歌手页模型分发。不要在每次绑定时重新执行
+`resolveClasses`、结构反射和 DexKit 基线编码。解析缓存归属于当前 resolver（宿主版本及类加载器）；
+精确档案完整命中，或无精确档案时全部继承候选完整命中，才缓存类组。空结果和不完整类组保留重试。
+歌手页另外缓存完整角色表，让普通主页卡片直接完成类型判断。
+`AppleMusicBaselineRecorder` 按 Hook 点、基线类名、运行类和成员映射记录成功状态，
+同一实例内重复调用不再生成描述；新实例重新校验，与磁盘已有值相同则不写入，变化条目合并一次提交。
+编码或提交抛出异常时不能标记成功。优化后应对照主页 `RV OnBindView` 耗时和主线程采样，
+并确认歌手页、专辑和歌单的修正仍有效。
+
+主页切换时，Media API、ContentItem、封面身份和歌手关联中的可选 getter 使用
+`AppleReflection.callIfPresent` / `findMethodOrNull`，复用按 Class 索引的方法表，
+缺失时直接返回 null，避免逐项创建 `NoSuchMethodException` 堆栈。
+实际调用异常仍由调用方处理；不缓存 getter 返回值，严格成员解析与 setter 保持原行为。
+`AppleOptionalReflectionTest` 覆盖缺失、继承、重载、可变值与异常恢复。
+
+多人合作署名判断是纯文本策略，使用 `AppleCollaborationArtistCache` 缓存最近 256 个
+归一化署名的布尔结果，避免标题 getter 反复执行同一组正则。超过 512 字符的署名不保留，
+不缓存歌曲 alias、媒体 ID 或宿主对象；原有多人合作判断规则保持不变。
+
+玻璃底栏的 `PhoneGlassSession` 在当前 Activity 会话内缓存成功解析的资源 ID，
+避免 `onPreDraw` 每帧重复执行 `Resources.getIdentifier`。
+View、颜色和尺寸值仍实时读取，以支持页面树替换和配置变化；资源缺失保留重试。
+
 ### 10.6 目录语言
 
 目录语言不是一个单独的字符串 Hook，而是一组请求契约适配。新版可能把语言分散在 storefront、Accept-Language、iCloud helper、Store API/iTunes header map、Media API 参数和 store lookup 参数中。适配时：

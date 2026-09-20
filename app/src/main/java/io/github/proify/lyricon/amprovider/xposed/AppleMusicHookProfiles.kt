@@ -8,6 +8,7 @@ package io.github.proify.lyricon.amprovider.xposed
 
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
+import java.util.concurrent.ConcurrentHashMap
 
 /** Apple Music 安装包版本，用于选择对应的混淆 Hook 档案。 */
 internal data class AppleMusicVersion(
@@ -1891,6 +1892,12 @@ internal class AppleMusicHookResolver(
 
     val profile: AppleMusicHookProfile? = AppleMusicHookProfiles.profileFor(version)
 
+    // Each resolver belongs to one host version/class loader. Only complete profile groups
+    // are retained; some stable groups are inherited from older profiles (including on 6.5.2).
+    // A transient missing class must remain retryable.
+    private val resolvedClassGroups =
+        ConcurrentHashMap<AppleMusicHookPoint, List<ResolvedAppleMusicHookClass>>()
+
     fun configuredClassNames(hookPoint: AppleMusicHookPoint): Set<String> {
         val exact = AppleMusicHookProfiles.exactTargets(version, hookPoint)
         val targets = if (exact.isNotEmpty()) {
@@ -1906,6 +1913,26 @@ internal class AppleMusicHookResolver(
      * 避免在已知版本里同时 Hook 旧版本碰巧仍存在、但语义已经变化的类。
      */
     fun resolveClasses(hookPoint: AppleMusicHookPoint): List<ResolvedAppleMusicHookClass> {
+        resolvedClassGroups[hookPoint]?.let { return it }
+        return synchronized(resolvedClassGroups) {
+            resolvedClassGroups[hookPoint]?.let { return@synchronized it }
+            val classes = resolveClassesUncached(hookPoint)
+            val exact = AppleMusicHookProfiles.exactTargets(version, hookPoint)
+            val expected = exact.ifEmpty { AppleMusicHookProfiles.candidates(version, hookPoint) }
+            if (expected.isNotEmpty() && expected.all { target ->
+                    classes.any {
+                        it.target.className == target.className &&
+                            (exact.isEmpty() || !it.compatibilityFallback)
+                    }
+                }
+            ) {
+                resolvedClassGroups[hookPoint] = classes
+            }
+            classes
+        }
+    }
+
+    private fun resolveClassesUncached(hookPoint: AppleMusicHookPoint): List<ResolvedAppleMusicHookClass> {
         val exactTargets = AppleMusicHookProfiles.exactTargets(version, hookPoint)
         val exactClasses = exactTargets.mapNotNull { target ->
             loadClass(hookPoint, target, compatibilityFallback = false)

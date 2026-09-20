@@ -475,7 +475,7 @@ internal class AppleLibrarySurfaceHooks(
         AppleMediaApiTextAttribute.entries.forEach { attribute ->
             val getter = catalogMember(attribute.getterRuntimeMember)
             val method = runCatching {
-                AppleReflection.findMethod(attributes.javaClass, getter, parameterCount = 0)
+                AppleReflection.findMethodOrNull(attributes.javaClass, getter, parameterCount = 0)
             }.getOrNull() ?: return@forEach
             if (
                 method.returnType != String::class.java ||
@@ -517,7 +517,7 @@ internal class AppleLibrarySurfaceHooks(
         attributes: Any,
         attribute: AppleMediaApiTextAttribute,
     ): String? = runCatching {
-        AppleReflection.call(
+        AppleReflection.callIfPresent(
             attributes,
             catalogMember(attribute.getterRuntimeMember),
         )?.toString()
