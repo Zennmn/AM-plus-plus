@@ -2,8 +2,9 @@
  * Derived from AndroidLiquidGlass / Backdrop 2.0.1
  * (https://github.com/Kyant0/AndroidLiquidGlass), commit
  * 65ab177e90e5c1d8c62e70cf7755841982da65f6, Apache License 2.0.
- * Changed by AM++: optional host accent, tap-only native reselection and a panel highlight
- * pinned to the thumb's centre (the reference draws the same light a row inset to the left).
+ * Changed by AM++: optional host accent, tap-only native reselection, free thumb dragging with
+ * multi-finger hand-over and a panel highlight pinned to the thumb's centre (the reference draws
+ * the same light a row inset to the left).
  * See backdrop/UPSTREAM.md and THIRD_PARTY_NOTICES.md.
  */
 
@@ -40,6 +41,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -289,7 +291,6 @@ fun LiquidBottomTabs(
                         if (isLtr) dampedDragAnimation.value * tabWidth + panelOffset
                         else size.width - (dampedDragAnimation.value + 1f) * tabWidth + panelOffset
                 }
-                .then(dampedDragAnimation.modifier)
                 .drawBackdrop(
                     backdrop = rememberCombinedBackdrop(backdrop, tabsBackdrop),
                     shape = { Capsule() },
@@ -362,9 +363,10 @@ private class PillCentre {
 }
 
 /**
- * AM++: lets a pointer that starts on another tab take over the thumb gesture immediately. The
- * thumb then follows the pointer freely across the whole bar; only a system-level cancellation
- * returns it to its original value.
+ * AM++: owns every touch on the bar. A pointer that starts on another tab takes the thumb over
+ * immediately and drags it freely across the whole bar, while one that starts on the thumb's own
+ * tab holds it in place. A second finger landing mid-drag is ignored outright and only inherits
+ * the drag when it is still held as the finger in charge lifts.
  */
 private class FreeDragBridge {
     var animation: DampedDragAnimation? = null
@@ -393,35 +395,84 @@ private class FreeDragBridge {
                 damped != null &&
                 targetIndex != null &&
                 originalIndex != null &&
-                targetIndex != originalIndex &&
                 isTabEnabled(targetIndex)
             ) {
+                // A press on the tab the thumb already occupies is a plain hold, so the thumb stays
+                // where it is and only follows the finger's motion. A press on any other tab is
+                // taken over, and the thumb rides across to that finger instead.
+                val grabsInPlace = targetIndex == originalIndex
                 // Take ownership at the initial pass so the tab's ordinary clickable cannot
-                // finish this sequence before the free thumb gesture does.
+                // finish this sequence before the thumb's own gesture does.
                 down.consume()
                 damped.onDragStarted.invoke(damped, down.position)
                 damped.press()
-                damped.updateValue(valueAt(down.position.x))
+                if (!grabsInPlace) {
+                    damped.updateValue(valueAt(down.position.x))
+                }
 
-                var previousPosition = down.position
+                var ownerId = down.id
+                var ownerPosition = down.position
+                var traveled = 0f
+                // Handing the drag over moves the thumb, so only a hold that never changed hands
+                // may still count as a plain tap on it.
+                var tapEligible = grabsInPlace
+                // Other fingers that land during this drag, oldest first. They are swallowed while
+                // the owner holds, and the newest one still held inherits the drag when it lifts.
+                val held = mutableListOf<Pair<PointerId, Offset>>()
                 var canceled = false
                 while (true) {
                     val event = awaitPointerEvent(PointerEventPass.Initial)
-                    val change = event.changes.fastFirstOrNull { it.id == down.id }
+
+                    for (change in event.changes) {
+                        if (change.id == ownerId) continue
+                        if (!change.pressed && !change.previousPressed) continue
+                        change.consume()
+                        when {
+                            !change.previousPressed -> {
+                                // A press that lands mid-drag is only a hand-over candidate, and
+                                // only when it targets a tab that may be selected.
+                                if (tabIndexAt(change.position.x)?.let { isTabEnabled(it) } == true) {
+                                    held.removeAll { it.first == change.id }
+                                    held.add(change.id to change.position)
+                                }
+                            }
+
+                            change.pressed -> {
+                                val index = held.indexOfFirst { it.first == change.id }
+                                if (index >= 0) {
+                                    held[index] = change.id to change.position
+                                }
+                            }
+
+                            else -> held.removeAll { it.first == change.id }
+                        }
+                    }
+
+                    val change = event.changes.fastFirstOrNull { it.id == ownerId }
                     if (change == null) {
                         canceled = true
                         break
                     }
-                    if (change.changedToUpIgnoreConsumed()) {
-                        change.consume()
-                        break
-                    }
                     change.consume()
-                    val dragAmount = change.position - previousPosition
+                    if (change.changedToUpIgnoreConsumed()) {
+                        // Hand the drag over to the newest finger still down. One that already
+                        // lifted leaves nothing behind, so the drag simply ends where it is.
+                        val next = held.lastOrNull() ?: break
+                        held.removeAt(held.lastIndex)
+                        ownerId = next.first
+                        ownerPosition = next.second
+                        tapEligible = false
+                        damped.updateValue(valueAt(ownerPosition.x))
+                        continue
+                    }
+                    val dragAmount = change.position - ownerPosition
                     if (dragAmount != Offset.Zero) {
+                        if (tapEligible) {
+                            traveled += dragAmount.getDistance()
+                        }
                         damped.onDrag.invoke(damped, IntSize.Zero, dragAmount)
                     }
-                    previousPosition = change.position
+                    ownerPosition = change.position
                 }
 
                 if (canceled) {
@@ -429,6 +480,11 @@ private class FreeDragBridge {
                     damped.animateToValue(originalIndex.toFloat())
                 } else {
                     damped.onDragStopped.invoke(damped)
+                    // The thumb's own gesture reports a tap the same way: a hold that never moved
+                    // beyond the touch slop is the finger pressing and lifting in place.
+                    if (tapEligible && traveled <= viewConfiguration.touchSlop) {
+                        damped.onTap?.invoke()
+                    }
                     damped.release()
                 }
             }
@@ -436,7 +492,7 @@ private class FreeDragBridge {
     }
 
     private fun tabIndexAt(x: Float): Int? {
-        if (tabsCount < 2 || tabWidth <= 0f) return null
+        if (tabWidth <= 0f) return null
         val contentX = logicalX(x)
         if (contentX < 0f || contentX >= tabWidth * tabsCount) return null
         val visualIndex = (contentX / tabWidth).toInt().fastCoerceIn(0, tabsCount - 1)
