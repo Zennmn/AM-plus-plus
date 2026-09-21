@@ -53,6 +53,7 @@ fun GlassNavigation(
             selectedTabIndex = selection,
             onTabSelected = { i -> tabs.getOrNull(i)?.let { if (it.id != confirmedId.value) request(it) } },
             onSelectedTabClick = { i -> tabs.getOrNull(i)?.let(::request) },
+            isTabEnabled = { i -> tabs.getOrNull(i)?.enabled == true },
             backdrop = backdrop,
             tabsCount = tabs.size,
             accentOverride = accent,
