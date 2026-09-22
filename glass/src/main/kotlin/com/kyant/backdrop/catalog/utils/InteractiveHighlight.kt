@@ -2,7 +2,7 @@
  * Derived from AndroidLiquidGlass / Backdrop 2.0.1
  * (https://github.com/Kyant0/AndroidLiquidGlass), commit
  * 65ab177e90e5c1d8c62e70cf7755841982da65f6, Apache License 2.0.
- * Changed by AM++: native touch entry points.
+ * Changed by AM++: native touch entry points for the host's own gesture stream.
  * See backdrop/UPSTREAM.md and THIRD_PARTY_NOTICES.md.
  */
 
@@ -99,7 +99,12 @@ half4 main(float2 coord) {
                         val position = position(size, positionAnimation.value)
                         setFloatUniform("size", size.width, size.height)
                         setColorUniform("color", Color.White.copy(0.15f * progress))
-                        setFloatUniform("radius", size.minDimension * 1.5f)
+                        // The reference falloff, shared by every panel that draws a highlight:
+                        // the light dies out 1.5 panel heights from the finger. Lifting the
+                        // coefficient toward size.width washes the whole strip instead of
+                        // lighting the spot under the finger.
+                        val falloff = size.minDimension * 1.5f
+                        setFloatUniform("radius", falloff)
                         setFloatUniform(
                             "position",
                             position.x.fastCoerceIn(0f, size.width),
