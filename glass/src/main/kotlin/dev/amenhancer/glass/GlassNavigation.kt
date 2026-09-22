@@ -19,6 +19,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.Backdrop
@@ -35,6 +36,8 @@ fun GlassNavigation(
     foreground: Color,
     backdrop: Backdrop,
     onSelect: (Int) -> Int,
+    panelHeight: Dp = GlassPolicy.NAV_HEIGHT_DP.dp,
+    panelBlur: Dp = GlassPolicy.PANEL_BLUR_DP.dp,
 ) {
     // The reference drag animation normalizes by tabsCount - 1. Keep a one-tab host native.
     if (tabs.size < 2) return
@@ -57,7 +60,8 @@ fun GlassNavigation(
             backdrop = backdrop,
             tabsCount = tabs.size,
             accentOverride = accent,
-            panelHeight = GlassPolicy.NAV_HEIGHT_DP.dp,
+            panelHeight = panelHeight,
+            panelBlur = panelBlur,
         ) {
             tabs.forEach { tab ->
                 LiquidBottomTab(

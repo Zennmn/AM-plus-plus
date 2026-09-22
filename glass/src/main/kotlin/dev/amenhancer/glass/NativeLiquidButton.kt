@@ -21,6 +21,7 @@ import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
 import com.kyant.shapes.Capsule
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -39,6 +40,7 @@ fun NativeLiquidButton(
     backdrop: Backdrop,
     input: NativeButtonInput,
     expansion: Float = 0f,
+    panelBlur: Dp = GlassPolicy.PANEL_BLUR_DP.dp,
     transformContent: (Float, Float, Float, Float) -> Unit,
 ) {
     val containerColor = if (isSystemInDarkTheme()) Color(0xFF121212).copy(alpha = 0.4f)
@@ -61,7 +63,7 @@ fun NativeLiquidButton(
             shape = { if (expansion == 0f) Capsule() else RoundedCornerShape(lerp(GlassPolicy.MINI_HEIGHT_DP / 2f, 24f, expansion).dp) },
             effects = {
                 vibrancy()
-                blur(GlassPolicy.PANEL_BLUR_DP.dp.toPx())
+                blur(panelBlur.toPx())
                 // Keep the capsule center outside refraction, including compact layouts.
                 val refraction = minOf(24f.dp.toPx(), size.minDimension * 0.375f)
                 lens(refraction, refraction)

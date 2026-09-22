@@ -1,5 +1,6 @@
 package dev.amenhancer.module.model
 
+import dev.amenhancer.glass.GlassPolicy
 import dev.amenhancer.module.ModuleConstants
 import dev.amenhancer.module.config.TitleCorrectionMode
 
@@ -8,6 +9,10 @@ data class ModuleSettings(
     /** Legacy storage key; Editorial Video suppression now follows dualPaneEnabled. */
     val disableEditorialVideoOnTablet: Boolean = true,
     val phoneLiquidGlassEnabled: Boolean = false,
+    /** Distance in dp between the bottom-bar capsule and the screen bottom; glass-gated. */
+    val phoneLiquidGlassBottomGapDp: Int = GlassPolicy.BOTTOM_DP,
+    /** Backdrop blur radius in dp shared by the nav panel and the mini-player. */
+    val phoneLiquidGlassPanelBlurDp: Int = GlassPolicy.PANEL_BLUR_DP.toInt(),
     val futureBlurEnabled: Boolean = true,
     /** Enables the native rush-gradient adaptation for CJK karaoke lyrics. */
     val cjkKaraokeAnimationEnabled: Boolean = true,
@@ -31,12 +36,22 @@ data class ModuleSettings(
         const val FOLLOW_SYSTEM_APPLE_MUSIC_DPI = 0
         const val MIN_APPLE_MUSIC_DPI = 160
         const val MAX_APPLE_MUSIC_DPI = 640
+        const val MIN_PHONE_LIQUID_GLASS_BOTTOM_GAP_DP = 0
+        const val MAX_PHONE_LIQUID_GLASS_BOTTOM_GAP_DP = 48
+        const val MIN_PHONE_LIQUID_GLASS_PANEL_BLUR_DP = 0
+        const val MAX_PHONE_LIQUID_GLASS_PANEL_BLUR_DP = 24
 
         fun isValidAppleMusicDpi(value: Int): Boolean =
             value == FOLLOW_SYSTEM_APPLE_MUSIC_DPI || value in MIN_APPLE_MUSIC_DPI..MAX_APPLE_MUSIC_DPI
 
         fun normalizeAppleMusicDpi(value: Int): Int =
             value.takeIf(::isValidAppleMusicDpi) ?: FOLLOW_SYSTEM_APPLE_MUSIC_DPI
+
+        fun normalizePhoneLiquidGlassBottomGapDp(value: Int): Int =
+            value.coerceIn(MIN_PHONE_LIQUID_GLASS_BOTTOM_GAP_DP, MAX_PHONE_LIQUID_GLASS_BOTTOM_GAP_DP)
+
+        fun normalizePhoneLiquidGlassPanelBlurDp(value: Int): Int =
+            value.coerceIn(MIN_PHONE_LIQUID_GLASS_PANEL_BLUR_DP, MAX_PHONE_LIQUID_GLASS_PANEL_BLUR_DP)
     }
 }
 

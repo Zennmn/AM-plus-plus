@@ -36,6 +36,12 @@ object GlassPolicy {
 
     fun selectedIndex(ids: List<Int>, selectedId: Int): Int? = ids.indexOf(selectedId).takeIf { it >= 0 }
 
-    fun occupiedHeight(density: Float, bottomInset: Int, miniVisible: Boolean): Int =
-        ((NAV_HEIGHT_DP + BOTTOM_DP + if (miniVisible) MINI_HEIGHT_DP + GAP_DP else 0) * density).toInt() + bottomInset
+    /** [bottomGapDp] is the lift under the capsule: how far the bar sits above the screen edge. */
+    fun occupiedHeight(
+        density: Float,
+        bottomInset: Int,
+        miniVisible: Boolean,
+        bottomGapDp: Int = BOTTOM_DP,
+    ): Int =
+        ((NAV_HEIGHT_DP + bottomGapDp + if (miniVisible) MINI_HEIGHT_DP + GAP_DP else 0) * density).toInt() + bottomInset
 }

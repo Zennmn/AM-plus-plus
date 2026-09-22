@@ -45,6 +45,7 @@ import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import dev.amenhancer.glass.GlassPolicy
 import dev.amenhancer.module.ModuleConstants
 import dev.amenhancer.module.config.EmbeddedConfigurationSession
 import dev.amenhancer.module.config.TitleCorrectionMode
@@ -2196,7 +2197,29 @@ internal class EmbeddedSettingsHost private constructor(
                     EmbeddedGlyphKind.Glass,
                     EmbeddedSettingsPalette.accent,
                 ),
-            ) { onSettingsChanged(settings.copy(phoneLiquidGlassEnabled = it)) })
+            ) { onSettingsChanged(settings.copy(phoneLiquidGlassEnabled = it)); pageRefresh?.invoke() })
+            if (settings.phoneLiquidGlassEnabled) {
+                addView(embeddedDivider(activity))
+                addView(embeddedGlassRangeRow(
+                    activity = activity,
+                    title = "底栏高度",
+                    value = settings.phoneLiquidGlassBottomGapDp,
+                    defaultValue = GlassPolicy.BOTTOM_DP,
+                    rangeMin = ModuleSettings.MIN_PHONE_LIQUID_GLASS_BOTTOM_GAP_DP,
+                    rangeMax = ModuleSettings.MAX_PHONE_LIQUID_GLASS_BOTTOM_GAP_DP,
+                    suffix = "底栏距屏幕底部的距离",
+                ) { onSettingsChanged(settings.copy(phoneLiquidGlassBottomGapDp = it)) })
+                addView(embeddedDivider(activity))
+                addView(embeddedGlassRangeRow(
+                    activity = activity,
+                    title = "底栏背景模糊强度",
+                    value = settings.phoneLiquidGlassPanelBlurDp,
+                    defaultValue = GlassPolicy.PANEL_BLUR_DP.toInt(),
+                    rangeMin = ModuleSettings.MIN_PHONE_LIQUID_GLASS_PANEL_BLUR_DP,
+                    rangeMax = ModuleSettings.MAX_PHONE_LIQUID_GLASS_PANEL_BLUR_DP,
+                    suffix = "作用于底栏与迷你播放器",
+                ) { onSettingsChanged(settings.copy(phoneLiquidGlassPanelBlurDp = it)) })
+            }
             addView(embeddedDivider(activity))
             addView(embeddedSettingRow(
                 activity,
@@ -3084,6 +3107,83 @@ internal class EmbeddedSettingsHost private constructor(
                 }
             })
         }, matchWidthWrapContent())
+    }
+
+    /** SeekBar row for the gated liquid-glass extras, with a per-row one-tap default restore. */
+    private fun embeddedGlassRangeRow(
+        activity: Activity,
+        title: String,
+        value: Int,
+        defaultValue: Int,
+        rangeMin: Int,
+        rangeMax: Int,
+        suffix: String,
+        onChanged: (Int) -> Unit,
+    ): View = LinearLayout(activity).apply {
+        orientation = LinearLayout.VERTICAL
+        val horizontalPadding = dp(activity, if (isEmbeddedPhone(activity)) 12 else 16)
+        setPadding(
+            horizontalPadding,
+            dp(activity, if (isEmbeddedPhone(activity)) 8 else 10),
+            horizontalPadding,
+            dp(activity, if (isEmbeddedPhone(activity)) 6 else 8),
+        )
+        val label = TextView(activity).apply {
+            text = "$title：${value}dp"
+            textSize = embeddedTextSize(activity, 14f, 15f)
+            setTextColor(EmbeddedSettingsPalette.onSurface)
+        }
+        // Small one-tap restore at the row's top-right corner.
+        val reset = ImageView(activity).apply {
+            setImageDrawable(
+                embeddedSvgDrawable(EmbeddedSvgIcon.RestoreDefault) ?: EmbeddedGlyphDrawable(
+                    EmbeddedGlyphKind.Refresh,
+                    EmbeddedSettingsPalette.accent,
+                ),
+            )
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            contentDescription = "恢复默认"
+            isClickable = true
+            isFocusable = true
+            setPadding(dp(activity, 6), dp(activity, 4), 0, dp(activity, 4))
+        }
+        addView(LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(label, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(reset, LinearLayout.LayoutParams(dp(activity, 28), dp(activity, 28)))
+        }, matchWidthWrapContent())
+        addView(TextView(activity).apply {
+            text = suffix
+            textSize = embeddedTextSize(activity, 13f, 12f)
+            setTextColor(EmbeddedSettingsPalette.onSurfaceVariant)
+            setSingleLine(false)
+            maxLines = 2
+            setPadding(0, dp(activity, 2), 0, 0)
+        }, matchWidthWrapContent())
+        val seekBar = SeekBar(activity).apply {
+            max = rangeMax - rangeMin
+            progress = value - rangeMin
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    label.text = "$title：${(progress + rangeMin).coerceIn(rangeMin, rangeMax)}dp"
+                }
+
+                override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                    if (seekBar != null) {
+                        onChanged((seekBar.progress + rangeMin).coerceIn(rangeMin, rangeMax))
+                    }
+                }
+            })
+        }
+        addView(seekBar, matchWidthWrapContent())
+        reset.setOnClickListener {
+            label.text = "$title：${defaultValue}dp"
+            seekBar.progress = defaultValue - rangeMin
+            onChanged(defaultValue)
+        }
     }
 
     private fun embeddedDpiOverrideRow(

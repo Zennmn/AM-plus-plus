@@ -86,6 +86,7 @@ fun LiquidBottomTabs(
     onSelectedTabClick: ((Int) -> Unit)? = null,
     isTabEnabled: (Int) -> Boolean = { true },
     panelHeight: androidx.compose.ui.unit.Dp = 64f.dp,
+    panelBlur: androidx.compose.ui.unit.Dp = GlassPolicy.PANEL_BLUR_DP.dp,
     content: @Composable RowScope.() -> Unit
 ) {
     // AM++: preserve Apple's reselect action without changing drag/animation behavior.
@@ -223,7 +224,7 @@ fun LiquidBottomTabs(
                     shape = { Capsule() },
                     effects = {
                         vibrancy()
-                        blur(GlassPolicy.PANEL_BLUR_DP.dp.toPx())
+                        blur(panelBlur.toPx())
                         lens(24f.dp.toPx(), 24f.dp.toPx())
                     },
                     layerBlock = {
@@ -261,7 +262,7 @@ fun LiquidBottomTabs(
                         effects = {
                             val progress = dampedDragAnimation.pressProgress
                             vibrancy()
-                            blur(GlassPolicy.PANEL_BLUR_DP.dp.toPx())
+                            blur(panelBlur.toPx())
                             lens(
                                 24f.dp.toPx() * progress,
                                 24f.dp.toPx() * progress

@@ -45,6 +45,8 @@ class ModuleSettingsSchemaTest {
                 "dual_pane_enabled" to false,
                 "disable_editorial_video_on_tablet" to false,
                 "phone_liquid_glass_enabled" to true,
+                "phone_liquid_glass_bottom_gap_dp" to 16,
+                "phone_liquid_glass_panel_blur_dp" to 4,
                 "future_blur_enabled" to false,
                 "cjk_karaoke_animation_enabled" to true,
                 "navigation_compensation_enabled" to false,
@@ -81,6 +83,8 @@ class ModuleSettingsSchemaTest {
                 "dual_pane_enabled" to false,
                 "disable_editorial_video_on_tablet" to true,
                 "phone_liquid_glass_enabled" to true,
+                "phone_liquid_glass_bottom_gap_dp" to 16,
+                "phone_liquid_glass_panel_blur_dp" to 4,
                 "future_blur_enabled" to true,
                 "cjk_karaoke_animation_enabled" to true,
                 "navigation_compensation_enabled" to false,
@@ -181,6 +185,56 @@ class ModuleSettingsSchemaTest {
             ModuleSettingsSchema.decode(
                 mapOf("lyric_blur_radius_offset_px" to -99),
             ).lyricBlurRadiusOffsetPx,
+        )
+    }
+
+    @Test
+    fun `liquid glass extras default to the shipped geometry and round trip`() {
+        val defaults = ModuleSettingsSchema.decode(emptyMap<String, Any?>())
+        assertEquals(16, defaults.phoneLiquidGlassBottomGapDp)
+        assertEquals(4, defaults.phoneLiquidGlassPanelBlurDp)
+
+        val encoded = ModuleSettingsSchema.encodeOrdinarySettings(
+            ModuleSettings(phoneLiquidGlassBottomGapDp = 32, phoneLiquidGlassPanelBlurDp = 12),
+        )
+        assertEquals(32, encoded["phone_liquid_glass_bottom_gap_dp"])
+        assertEquals(12, encoded["phone_liquid_glass_panel_blur_dp"])
+        val decoded = ModuleSettingsSchema.decode(encoded)
+        assertEquals(32, decoded.phoneLiquidGlassBottomGapDp)
+        assertEquals(12, decoded.phoneLiquidGlassPanelBlurDp)
+    }
+
+    @Test
+    fun `liquid glass extras clamp out-of-range values and reject malformed values`() {
+        assertEquals(
+            ModuleSettings.MAX_PHONE_LIQUID_GLASS_BOTTOM_GAP_DP,
+            ModuleSettingsSchema.decode(
+                mapOf("phone_liquid_glass_bottom_gap_dp" to 99),
+            ).phoneLiquidGlassBottomGapDp,
+        )
+        assertEquals(
+            ModuleSettings.MIN_PHONE_LIQUID_GLASS_BOTTOM_GAP_DP,
+            ModuleSettingsSchema.decode(
+                mapOf("phone_liquid_glass_bottom_gap_dp" to -1),
+            ).phoneLiquidGlassBottomGapDp,
+        )
+        assertEquals(
+            ModuleSettings.MAX_PHONE_LIQUID_GLASS_PANEL_BLUR_DP,
+            ModuleSettingsSchema.decode(
+                mapOf("phone_liquid_glass_panel_blur_dp" to 99),
+            ).phoneLiquidGlassPanelBlurDp,
+        )
+        assertEquals(
+            ModuleSettings.MIN_PHONE_LIQUID_GLASS_PANEL_BLUR_DP,
+            ModuleSettingsSchema.decode(
+                mapOf("phone_liquid_glass_panel_blur_dp" to -5),
+            ).phoneLiquidGlassPanelBlurDp,
+        )
+        assertEquals(
+            16,
+            ModuleSettingsSchema.decode(
+                mapOf("phone_liquid_glass_bottom_gap_dp" to "high"),
+            ).phoneLiquidGlassBottomGapDp,
         )
     }
 

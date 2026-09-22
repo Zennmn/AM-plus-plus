@@ -27,4 +27,15 @@ class GlassPolicyTest {
         assertEquals(270, GlassPolicy.occupiedHeight(2f, 24, true))
         assertEquals(72, GlassPolicy.occupiedHeight(1f, 0, false))
     }
+    @Test fun bottomGapOverrideKeepsTheDefaultContract() {
+        // The parameter defaults to BOTTOM_DP, so existing callers are unchanged.
+        assertEquals(
+            GlassPolicy.occupiedHeight(2f, 24, false),
+            GlassPolicy.occupiedHeight(2f, 24, false, GlassPolicy.BOTTOM_DP),
+        )
+        // A larger lift grows the occupied area: the capsule sits higher above the edge.
+        assertEquals(184, GlassPolicy.occupiedHeight(2f, 24, false, bottomGapDp = 24))
+        assertEquals(286, GlassPolicy.occupiedHeight(2f, 24, true, bottomGapDp = 24))
+        assertEquals(56, GlassPolicy.occupiedHeight(1f, 0, false, bottomGapDp = 0))
+    }
 }
