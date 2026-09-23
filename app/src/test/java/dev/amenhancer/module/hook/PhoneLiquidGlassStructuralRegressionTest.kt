@@ -5,7 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Guards the phone-only liquid-glass resource and configuration contract. */
+/** Guards the liquid-glass resource and configuration contract across host forms. */
 class PhoneLiquidGlassStructuralRegressionTest {
     private fun source(relativePath: String): String = sequenceOf(
         File("src/main/java/$relativePath"),
@@ -58,6 +58,23 @@ class PhoneLiquidGlassStructuralRegressionTest {
         assertTrue(settings.contains("defaultValue = GlassPolicy.PANEL_BLUR_DP.toInt()"))
         // The restore button uses the AM++-authored SVG glyph, not the legacy drawable.
         assertTrue(settings.contains("EmbeddedSvgIcon.RestoreDefault"))
+    }
+
+    @Test
+    fun `keeps the phone form semantics and routes the tablet dual-pane form`() {
+        val policy = projectFile("glass/src/main/kotlin/dev/amenhancer/glass/GlassPolicy.kt")
+        val runtime = source("dev/amenhancer/module/hook/PhoneGlassRuntime.kt")
+
+        // The pre-form supports() overload survives with its phone-only meaning.
+        assertTrue(policy.contains("fun supports(sdk: Int, versionCode: Long, versionName: String, tablet: Boolean)"))
+        // The phone path keeps excluding official tablets and keeps its own session.
+        assertTrue(runtime.contains("isOfficialTablet"))
+        assertTrue(runtime.contains("PhoneGlassSession("))
+        // Eligible tablets are routed to the dedicated tablet session.
+        assertTrue(runtime.contains("TabletDualPaneGlassSession"))
+        // The form and geometry seams live in the Android-free policy.
+        assertTrue(policy.contains("GlassHostForm"))
+        assertTrue(policy.contains("GlassGeometry"))
     }
 
     @Test

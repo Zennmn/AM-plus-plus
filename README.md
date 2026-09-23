@@ -7,7 +7,7 @@
 <h1 align="center">AM++</h1>
 
 <p align="center">
-  Apple Music 的 Android 增强模块：平板双栏、歌词模糊与字体、自定义歌词、歌曲名修正、手机液态玻璃底栏。
+  Apple Music 的 Android 增强模块：平板双栏、歌词模糊与字体、自定义歌词、歌曲名修正、液态玻璃底栏。
 </p>
 
 <p align="center">
@@ -57,9 +57,9 @@ AM++ 通过 libxposed API 102 注入 Apple Music（`com.apple.android.music`）�
 | 自定义歌词 | 关闭 | 按 Apple Music ID 注入 TTML，支持手动 TTML、AMLL、AM-Lyrics、Lunabeat 导入与 ZIP 备份恢复。 |
 | 自动实时补全 | 开启 | 自定义歌词开启后，为缺词、非逐字或缺翻译的歌曲自动查找歌词服务。 |
 | 歌词字体 | 关闭 | 导入 TTF/OTF 应用到播放器歌词，可一键恢复原字体。 |
-| 手机液态玻璃底栏 | 关闭 | Android 13 及以上且 Apple Music 6.5.2/6.5.3 手机布局时，底栏与迷你播放器改用液态玻璃。 |
-| 底栏高度 | `16dp` | 液态玻璃附加项：底栏距屏幕底部的距离 `0..48dp`。仅在“手机液态玻璃底栏”开启时显示和生效，需重开 Apple Music。 |
-| 底栏背景模糊强度 | `4dp` | 液态玻璃附加项：底栏与迷你播放器的背景模糊半径 `0..24dp`。仅在“手机液态玻璃底栏”开启时显示和生效，需重开 Apple Music。 |
+| 液态玻璃底栏 | 关闭 | Android 13 及以上且 Apple Music 6.5.2/6.5.3 时，把手机与“开启平板双栏播放器的平板横屏”的底栏与迷你播放器改用液态玻璃；平板竖屏或双栏关闭时保持原生界面。 |
+| 底栏高度 | `16dp` | 液态玻璃附加项：底栏距屏幕底部的距离 `0..48dp`。仅在“液态玻璃底栏”开启时显示和生效，需重开 Apple Music。 |
+| 底栏背景模糊强度 | `4dp` | 液态玻璃附加项：底栏与迷你播放器的背景模糊半径 `0..24dp`。仅在“液态玻璃底栏”开启时显示和生效，需重开 Apple Music。 |
 | 平板底栏补偿 | 关闭 | 平板底栏显示异常时使用的兼容选项。 |
 | Apple Music 内部 DPI | 跟随系统 | 只改 Apple Music 进程的资源密度，`160..640`，`0` 表示跟随系统。需完全重开 Apple Music。 |
 
@@ -84,17 +84,17 @@ AM++ 通过 libxposed API 102 注入 Apple Music（`com.apple.android.music`）�
   <img src="docs/images/tablet-dual-pane-player-open-source-blur.png" alt="平板横屏双栏播放器与歌词模糊" width="900">
 </p>
 
-### 手机液态玻璃底栏
+### 液态玻璃底栏
 
 <p align="center">
-  <img src="docs/images/liquid-glass-demo.jpg" alt="手机液态玻璃底栏与迷你播放器（主页与资料库）" width="720">
+  <img src="docs/images/liquid-glass-demo.jpg" alt="液态玻璃底栏与迷你播放器（主页与资料库）" width="720">
 </p>
 
 ## 兼容性与限制
 
 | 项目 | 支持范围 |
 | --- | --- |
-| Android | 8.0（API 26）及以上；双向歌词模糊需 12（API 31）及以上；手机液态玻璃需 13（API 33）及以上 |
+| Android | 8.0（API 26）及以上；双向歌词模糊需 12（API 31）及以上；液态玻璃底栏需 13（API 33）及以上 |
 | Xposed 框架 | 实现 libxposed API 102、remote preferences 和 remote file 的框架 |
 | Apple Music | `6.5.1 (1583)`、`6.5.2 (1586)`、`6.5.3 (1599)` |
 
@@ -103,7 +103,7 @@ AM++ 通过 libxposed API 102 注入 Apple Music（`com.apple.android.music`）�
 - 6.5.3 (1599) 仍有两处降级，各自只影响一个子面：播放菜单／操作表的元数据改写、主页 Listen Now 封面连续性。
 - 功能开关不会热卸载已安装的 Hook，改动后必须强制停止并重新打开 Apple Music。
 - 自定义 TTML 上限 512 KiB。
-- 手机液态玻璃只作用于手机布局；平板和其他版本继续使用原生底栏。
+- 液态玻璃底栏作用于手机布局，以及开启“平板双栏播放器”的平板横屏；平板竖屏、关闭双栏的平板和其他版本继续使用原生底栏。平板形态的真机验收仍待进行。
 
 ## 安装
 
@@ -149,9 +149,9 @@ Lunabeat 会缓存 manifest 和歌曲索引，只在远端 revision 变化时重
 
 字体只覆盖播放器歌词，不修改系统字体或设置页字体。
 
-### 手机液态玻璃
+### 液态玻璃底栏
 
-打开“手机液态玻璃底栏”，强制停止并重新打开 Apple Music。底栏使用 AndroidLiquidGlass 的 LiquidBottomTabs，迷你播放器使用 LiquidButton 材质和按压形变，播放控件仍是原生实现；页面背景通过共享硬件 RenderNode 采样。逐项依赖与维护流程见 [液态玻璃新版本适配](docs/liquid-glass-adaptation.md)。
+打开“液态玻璃底栏”，强制停止并重新打开 Apple Music。生效范围是手机布局与开启“平板双栏播放器”的平板横屏（平板竖屏或双栏关闭时保持原生界面）。底栏使用 AndroidLiquidGlass 的 LiquidBottomTabs，迷你播放器使用 LiquidButton 材质和按压形变，播放控件仍是原生实现；页面背景通过共享硬件 RenderNode 采样。逐项依赖与维护流程见 [液态玻璃新版本适配](docs/liquid-glass-adaptation.md)。
 
 开启后可微调两个附加项（关闭液态玻璃时不显示、也不生效）：“底栏高度”（`0..48dp`，即底栏距屏幕底部的距离，同时调整内容底部留白与播放器 peek 高度）与“底栏背景模糊强度”（`0..24dp`，同时作用于底栏面板和迷你播放器）；两者均为重开 Apple Music 后生效。每项右上角有小恢复按钮，可单独一键回到默认值（`16dp` / `4dp`）。
 
@@ -208,7 +208,7 @@ scripts/                  可选的真机回归、录屏分析与 host profile �
 - [x] 双向歌词模糊
 - [x] 自定义歌词注入与备份恢复
 - [x] 歌词字体导入与恢复
-- [x] 手机液态玻璃底栏与迷你播放器
+- [x] 液态玻璃底栏与迷你播放器（手机；开启双栏的平板横屏生效范围待真机验收）
 - [x] 歌曲名显示修正
 - [ ] 补齐 Apple Music 6.5.3 的两处降级
 - [ ] 持续适配后续 Apple Music 版本

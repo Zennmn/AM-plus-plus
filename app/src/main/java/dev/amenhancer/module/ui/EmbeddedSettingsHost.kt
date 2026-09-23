@@ -2189,8 +2189,8 @@ internal class EmbeddedSettingsHost private constructor(
             addView(embeddedDivider(activity))
             addView(embeddedSettingRow(
                 activity,
-                "手机液态玻璃底栏",
-                "为手机底栏和迷你播放器启用液态玻璃效果，需重开应用",
+                "液态玻璃底栏",
+                "为手机与开启平板双栏播放器的平板横屏的底栏和迷你播放器启用液态玻璃效果，需重开应用",
                 settings.phoneLiquidGlassEnabled,
                 iconTint = EmbeddedSettingsPalette.accent,
                 iconDrawable = EmbeddedGlyphDrawable(
