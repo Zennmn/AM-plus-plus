@@ -9,6 +9,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import androidx.annotation.RequiresApi
+import dev.amenhancer.glass.GlassHostForm
 import dev.amenhancer.glass.GlassPolicy
 import dev.amenhancer.module.ModuleConstants
 import dev.amenhancer.module.config.TargetConfigClient
@@ -19,7 +20,7 @@ import java.util.WeakHashMap
 
 @RequiresApi(33)
 internal object PhoneGlassRuntime {
-    private val sessions = WeakHashMap<Activity, PhoneGlassSession>()
+    private val sessions = WeakHashMap<Activity, GlassSession>()
     private val failed = java.util.Collections.newSetFromMap(WeakHashMap<Activity, Boolean>())
     private var applicationRegistered = false
     private var hooksInstalled = false
@@ -36,7 +37,8 @@ internal object PhoneGlassRuntime {
         val activity = activity(view.context) ?: return
         if (activity in failed || activity.isFinishing || activity.isDestroyed) return
         val build = targetBuild(activity)
-        if (!GlassPolicy.supports(android.os.Build.VERSION.SDK_INT, build.versionCode, build.versionName, TabletModeQualifier.isOfficialTablet(activity))) return
+        // Both host forms share one seam whitelist; the form itself is routed below.
+        if (GlassHostForm.values().none { GlassPolicy.supports(android.os.Build.VERSION.SDK_INT, build.versionCode, build.versionName, it) }) return
         if (!config.settings().phoneLiquidGlassEnabled) return
         registerLifecycle(activity.application)
         view.post {
@@ -44,10 +46,31 @@ internal object PhoneGlassRuntime {
             try {
                 installHooks(activity.classLoader)
                 sessions[activity]?.takeUnless { it.ownsCurrentHierarchy() }?.let { it.close(); sessions.remove(activity) }
-                val session = sessions[activity] ?: PhoneGlassSession(activity, config) { error -> fail(activity, config, error) }.also { sessions[activity] = it }
+                val desired = createSession(activity, config) { error -> fail(activity, config, error) }
+                if (desired == null) { sessions.remove(activity)?.close(); return@post }
+                val session = sessions[activity]?.takeIf { it.javaClass == desired.javaClass }
+                    ?: desired.also { sessions.remove(activity)?.close(); sessions[activity] = it }
                 session.attachAvailableViews()
             } catch (error: Throwable) { fail(activity, config, error) }
         }
+    }
+
+    /** Routes the host form; null means no session may exist for this activity right now. */
+    private fun createSession(activity: Activity, config: TargetConfigClient, onFail: (Throwable) -> Unit): GlassSession? {
+        val build = targetBuild(activity)
+        if (config.settings().phoneLiquidGlassEnabled &&
+            !TabletModeQualifier.isOfficialTablet(activity) &&
+            GlassPolicy.supports(android.os.Build.VERSION.SDK_INT, build.versionCode, build.versionName, GlassHostForm.PhoneStacked)
+        ) {
+            return PhoneGlassSession(activity, config, onFail)
+        }
+        if (config.settings().phoneLiquidGlassEnabled &&
+            TabletModeQualifier.isEligible(activity) &&
+            GlassPolicy.supports(android.os.Build.VERSION.SDK_INT, build.versionCode, build.versionName, GlassHostForm.TabletDualPane)
+        ) {
+            return TabletDualPaneGlassSession(activity, config, onFail)
+        }
+        return null
     }
 
     private fun fail(activity: Activity, config: TargetConfigClient, error: Throwable) {
@@ -62,13 +85,17 @@ internal object PhoneGlassRuntime {
         if (hooksInstalled) return
         check(!hooksAttempted) { "Glass hook installation previously failed; restart the host to retry" }
         hooksAttempted = true
-        val holder = loader.loadClass("com.apple.android.music.common.activity.PlayerActivity\$StackedBottomNavigationHolder")
-        ModernXposedRuntime.hookMethod(holder.getDeclaredMethod("c", Float::class.javaPrimitiveType), object : ModernMethodHook() {
-            override fun afterHookedMethod(param: MethodHookParam) {
-                val owner = param.thisObject?.let(::outerActivity) ?: return
-                sessions[owner]?.onSlide((param.args[0] as Number).toFloat())
-            }
-        })
+        // The stacked and flat holders each drive their own slide contract; the outer
+        // activity reflection resolves both holder shapes.
+        for (holderName in listOf("StackedBottomNavigationHolder", "FlatBottomNavigationHolder")) {
+            val holder = loader.loadClass("com.apple.android.music.common.activity.PlayerActivity\$$holderName")
+            ModernXposedRuntime.hookMethod(holder.getDeclaredMethod("c", Float::class.javaPrimitiveType), object : ModernMethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    val owner = param.thisObject?.let(::outerActivity) ?: return
+                    sessions[owner]?.onSlide((param.args[0] as Number).toFloat())
+                }
+            })
+        }
         ModernXposedRuntime.hookMethod(ViewGroup::class.java.getDeclaredMethod("dispatchTouchEvent", MotionEvent::class.java), object : ModernMethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 val root = param.thisObject as? View ?: return

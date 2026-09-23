@@ -1,5 +1,26 @@
 package dev.amenhancer.glass
 
+/** Host layout form carrying the verified liquid-glass seams. Both forms share one build whitelist. */
+enum class GlassHostForm { PhoneStacked, TabletDualPane }
+
+/**
+ * Capsule geometry per host form. Defaults match the accepted phone capsule.
+ * Fork reference for a future tablet variant: sw640dp ships native
+ * miniplayer_height=59dp / mini_player_thumbnail_height=41dp (phone 67/64, 48).
+ */
+data class GlassGeometry(
+    val navHeightDp: Int = 56,
+    val miniHeightDp: Int = 43,
+    val horizontalDp: Int = 16,
+    val gapDp: Int = 8,
+) {
+    companion object {
+        val Phone = GlassGeometry()
+        /** Starts identical to [Phone]; diverge here when tablet geometry is verified. */
+        val Tablet = GlassGeometry()
+    }
+}
+
 /** Android-free invariants used by both the host bridge and regression tests. */
 object GlassPolicy {
     /** Host builds whose phone layout carries the verified liquid-glass seams. */
@@ -27,7 +48,11 @@ object GlassPolicy {
     const val PANEL_BLUR_DP = 4f
 
     fun supports(sdk: Int, versionCode: Long, versionName: String, tablet: Boolean) =
-        sdk >= 33 && !tablet && isSupportedBuild(versionCode, versionName)
+        !tablet && supports(sdk, versionCode, versionName, GlassHostForm.PhoneStacked)
+
+    /** Both host forms share the same verified seam whitelist per build. */
+    fun supports(sdk: Int, versionCode: Long, versionName: String, form: GlassHostForm): Boolean =
+        sdk >= 33 && isSupportedBuild(versionCode, versionName)
 
     fun isSupportedBuild(versionCode: Long, versionName: String): Boolean =
         SUPPORTED_BUILDS.any { supported ->
@@ -42,6 +67,7 @@ object GlassPolicy {
         bottomInset: Int,
         miniVisible: Boolean,
         bottomGapDp: Int = BOTTOM_DP,
+        geometry: GlassGeometry = GlassGeometry.Phone,
     ): Int =
-        ((NAV_HEIGHT_DP + bottomGapDp + if (miniVisible) MINI_HEIGHT_DP + GAP_DP else 0) * density).toInt() + bottomInset
+        ((geometry.navHeightDp + bottomGapDp + if (miniVisible) geometry.miniHeightDp + geometry.gapDp else 0) * density).toInt() + bottomInset
 }

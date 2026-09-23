@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.backdrops.ViewBackdrop
 import dev.amenhancer.glass.BottomScrim
+import dev.amenhancer.glass.GlassGeometry
 import dev.amenhancer.glass.GlassHostView
 import dev.amenhancer.glass.GlassNavigation
 import dev.amenhancer.glass.GlassPolicy
@@ -47,30 +48,31 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 @RequiresApi(33)
-internal class PhoneGlassSession(
-    private val activity: Activity,
-    private val config: TargetConfigClient,
+internal open class PhoneGlassSession(
+    protected val activity: Activity,
+    protected val config: TargetConfigClient,
     private val failure: (Throwable) -> Unit,
-) : AutoCloseable, ViewTreeObserver.OnPreDrawListener {
+) : GlassSession, ViewTreeObserver.OnPreDrawListener {
     private val states = IdentityHashMap<View, NativeViewState>()
     private val layerAlphas = IdentityHashMap<View, NativeLayerAlpha>()
     private var writingLayerAlpha = false
-    private var navFrame: FrameLayout? = null
+    protected var navFrame: FrameLayout? = null
     private var navigation: View? = null
     private var source: ViewGroup? = null
     private var backdrop: ViewBackdrop? = null
     private var navGlass: GlassHostView? = null
     private var navScrim: GlassHostView? = null
     private var miniGlass: GlassHostView? = null
-    var miniRoot: FrameLayout? = null
+    final override var miniRoot: FrameLayout? = null
         private set
     private var miniContent: View? = null
-    var playerBehavior: Any? = null
+    final override var playerBehavior: Any? = null
         private set
     private var observer: ViewTreeObserver? = null
     private var closed = false
     private var failureScheduled = false
-    var activated = false
+    private var hostRoot: View? = null
+    final override var activated = false
         private set
     private var tabs by mutableStateOf(emptyList<GlassTab>())
     private var selectedId by mutableIntStateOf(View.NO_ID)
@@ -101,14 +103,17 @@ internal class PhoneGlassSession(
     private var scrollTargets: List<View> = emptyList()
     private val layoutListener = ViewTreeObserver.OnGlobalLayoutListener { scanNeeded = true }
     private var nextSettingsCheck = 0L
-    private val density get() = activity.resources.displayMetrics.density
+    protected val density get() = activity.resources.displayMetrics.density
     private fun dp(value: Int) = (value * density).roundToInt()
-    private val bottomInset get() = activity.window.decorView.rootWindowInsets?.getInsets(WindowInsets.Type.navigationBars())?.bottom ?: 0
-    private val miniVisible get() = miniRoot?.isShown == true
+    protected val bottomInset get() = activity.window.decorView.rootWindowInsets?.getInsets(WindowInsets.Type.navigationBars())?.bottom ?: 0
+    protected val miniVisible get() = miniRoot?.isShown == true
     // AM++: user-adjustable glass lift/material, captured with the session so every
     // height consumer (frame, content padding, peek) agrees within a frame.
-    private var bottomGapDp = GlassPolicy.BOTTOM_DP
+    protected var bottomGapDp = GlassPolicy.BOTTOM_DP
     private var navBlurDp = GlassPolicy.PANEL_BLUR_DP.toInt()
+
+    /** Capsule geometry shared by every occupied-height consumer; a diverging form overrides this. */
+    protected open val geometry: GlassGeometry get() = GlassGeometry.Phone
 
     // Resource IDs are stable for this Activity's host APK. Keep values and Views live so
     // configuration changes and replaced page/player hierarchies still take effect.
@@ -122,10 +127,10 @@ internal class PhoneGlassSession(
         return id
     }
 
-    private fun find(name: String): View? = resourceId(name, "id")
+    protected fun find(name: String): View? = resourceId(name, "id")
         .takeIf { it != 0 }?.let { activity.findViewById(it) }
 
-    private fun dimen(name: String): Int = resourceId(name, "dimen")
+    protected fun dimen(name: String): Int = resourceId(name, "dimen")
         .takeIf { it != 0 }?.let { activity.resources.getDimensionPixelSize(it) } ?: 0
 
     private fun save(view: View): NativeViewState = states.getOrPut(view) { NativeViewState(view) }
@@ -140,9 +145,29 @@ internal class PhoneGlassSession(
         }
     }
 
-    fun attachAvailableViews() {
+    // Form seams overridden by the dual-pane session; the phone behavior below stays
+    // exactly what shipped on the stacked host.
+    protected open fun sessionEligible(): Boolean =
+        config.settings().phoneLiquidGlassEnabled && !TabletModeQualifier.isOfficialTablet(activity)
+
+    protected open fun resolveBottomNavigationRoot(): View? = find("bottom_navigation_root_stacked")
+
+    // The stacked native holder reserves miniplayer_height even when mini is hidden,
+    // on top of the tabs height and the bottom inset.
+    protected open fun nativePeekBaseline(): Int =
+        bottomInset + dimen("navigation_tabs_height") + dimen("miniplayer_height")
+
+    /** Capsule exit driver; the phone host translates the frame from its own holder. */
+    protected open fun driveNavFrameExit(progress: Float) = Unit
+
+    /** Chrome ownership hand-off; only the dual-pane session arbitrates ownership. */
+    protected open fun onGlassOwnership(root: View?) = Unit
+
+    protected open fun releaseGlassOwnership(root: View?) = Unit
+
+    override fun attachAvailableViews() {
         if (closed || failureScheduled) return
-        if (!config.settings().phoneLiquidGlassEnabled || TabletModeQualifier.isOfficialTablet(activity)) {
+        if (!sessionEligible()) {
             close()
             return
         }
@@ -150,7 +175,7 @@ internal class PhoneGlassSession(
             val glassSettings = config.settings()
             bottomGapDp = ModuleSettings.normalizePhoneLiquidGlassBottomGapDp(glassSettings.phoneLiquidGlassBottomGapDp)
             navBlurDp = ModuleSettings.normalizePhoneLiquidGlassPanelBlurDp(glassSettings.phoneLiquidGlassPanelBlurDp)
-            if (find("bottom_navigation_root_stacked") == null) return
+            hostRoot = resolveBottomNavigationRoot() ?: return
             val frame = find("bottom_navigation_tabs_frame") as? FrameLayout ?: return
             val nav = find("bottom_navigation") ?: return
             val content = find("navigation_host_group") as? ViewGroup ?: return
@@ -215,7 +240,7 @@ internal class PhoneGlassSession(
         }
     }
 
-    fun ownsCurrentHierarchy(): Boolean = !closed && (navFrame == null || find("bottom_navigation_tabs_frame") === navFrame)
+    override fun ownsCurrentHierarchy(): Boolean = !closed && (navFrame == null || find("bottom_navigation_tabs_frame") === navFrame)
 
     @androidx.compose.runtime.Composable
     private fun HostConfiguration(content: @androidx.compose.runtime.Composable () -> Unit) {
@@ -284,7 +309,7 @@ internal class PhoneGlassSession(
             val now = android.os.SystemClock.uptimeMillis()
             if (now >= nextSettingsCheck) {
                 nextSettingsCheck = now + 500
-                if (!config.settings().phoneLiquidGlassEnabled || TabletModeQualifier.isOfficialTablet(activity)) {
+                if (!sessionEligible()) {
                     activity.window.decorView.post { close() }
                     return true
                 }
@@ -335,8 +360,7 @@ internal class PhoneGlassSession(
         allowGlassOverflow(frame)
         find("navigation_tabs_divider")?.let { save(it); it.visibility = View.GONE }
         source?.let { save(it) }
-        // The stacked native holder reserves miniplayer_height even when mini is hidden.
-        nativePeek.initialize(bottomInset + dimen("navigation_tabs_height") + dimen("miniplayer_height"))
+        nativePeek.initialize(nativePeekBaseline())
         activated = true
         prepareMini()
         navGlass?.alpha = 1f
@@ -344,6 +368,8 @@ internal class PhoneGlassSession(
         updateGeometry()
         updateUnderlap()
         updateTransition()
+        // The dual-pane boundary sync yields geometry ownership once activation completes.
+        onGlassOwnership(hostRoot)
         config.reportHealth(FeatureHealth(ModuleConstants.FEATURE_PHONE_LIQUID_GLASS, FeatureState.ACTIVE,
             "AndroidLiquidGlass 已挂载：实时背景、底栏透镜及迷你播放器；真机视觉验收另行记录", targetBuild(activity).displayName))
     }
@@ -387,9 +413,9 @@ internal class PhoneGlassSession(
         }
     }
 
-    fun peekHeight(): Int = GlassPolicy.occupiedHeight(density, bottomInset, miniVisible, bottomGapDp) + if (miniVisible) dimen("shadow_height") else 0
+    override fun peekHeight(): Int = GlassPolicy.occupiedHeight(density, bottomInset, miniVisible, bottomGapDp, geometry) + if (miniVisible) dimen("shadow_height") else 0
 
-    fun observeNativePeek(height: Int) = nativePeek.observe(height)
+    override fun observeNativePeek(height: Int) = nativePeek.observe(height)
 
     private fun writePeek(height: Int) = nativePeek.writeByModule {
         playerBehavior?.let { PhoneGlassRuntime.method(it.javaClass, "F", Int::class.javaPrimitiveType!!, Boolean::class.javaPrimitiveType!!).invoke(it, height, false) }
@@ -443,7 +469,7 @@ internal class PhoneGlassSession(
         val composeScene = descendants(root).any { view ->
             view.isShown && view.height > 0 && view.javaClass.name == "androidx.compose.ui.platform.ComposeView"
         }
-        val occupied = if (navFrame?.isShown == true) GlassPolicy.occupiedHeight(density, bottomInset, miniVisible, bottomGapDp) else 0
+        val occupied = if (navFrame?.isShown == true) GlassPolicy.occupiedHeight(density, bottomInset, miniVisible, bottomGapDp, geometry) else 0
         if (terminal.isEmpty() && !composeScene) {
             underlap = false
             if (root.paddingBottom != occupied) root.setPadding(root.paddingLeft, root.paddingTop, root.paddingRight, occupied)
@@ -468,6 +494,7 @@ internal class PhoneGlassSession(
         navFrame?.let { if (it.outlineProvider != null) it.outlineProvider = null }
         miniRoot?.background = null
         val progress = slide.coerceIn(0f, 1f)
+        driveNavFrameExit(progress)
         fun blend(start: Float, end: Float): Float {
             val t = ((progress - start) / (end - start)).coerceIn(0f, 1f)
             return t * t * (3f - 2f * t)
@@ -512,9 +539,9 @@ internal class PhoneGlassSession(
         find("player_root")?.background = if (materialProgress < 1f) null else states[find("player_root")]?.background
     }
 
-    fun onSlide(progress: Float) { slide = progress.coerceIn(0f, 1f) }
+    override fun onSlide(progress: Float) { slide = progress.coerceIn(0f, 1f) }
 
-    fun redirectedLayerAlpha(view: Any?, alpha: Float): Float? {
+    override fun redirectedLayerAlpha(view: Any?, alpha: Float): Float? {
         if (closed || writingLayerAlpha) return null
         return layerAlphas[view]?.hostWrite(alpha)
     }
@@ -529,8 +556,8 @@ internal class PhoneGlassSession(
         }
     }
 
-    fun redirectedPadding(view: Any?): Int? = if (activated && view === source) {
-        if (underlap) 0 else if (navFrame?.isShown == true) GlassPolicy.occupiedHeight(density, bottomInset, miniVisible, bottomGapDp) else 0
+    override fun redirectedPadding(view: Any?): Int? = if (activated && view === source) {
+        if (underlap) 0 else if (navFrame?.isShown == true) GlassPolicy.occupiedHeight(density, bottomInset, miniVisible, bottomGapDp, geometry) else 0
     } else null
 
     private fun miniGlassPosition(event: MotionEvent): Pair<Float, Float>? {
@@ -544,7 +571,7 @@ internal class PhoneGlassSession(
             )
     }
 
-    fun observeTouch(event: MotionEvent) {
+    override fun observeTouch(event: MotionEvent) {
         if (!activated) return
         val position = miniGlassPosition(event) ?: return
         when (event.actionMasked) {
@@ -558,15 +585,16 @@ internal class PhoneGlassSession(
         if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) observingPress = false
     }
 
-    fun foreground(active: Boolean) { navGlass?.foreground(active); navScrim?.foreground(active); miniGlass?.foreground(active) }
+    override fun foreground(active: Boolean) { navGlass?.foreground(active); navScrim?.foreground(active); miniGlass?.foreground(active) }
 
-    private fun findPlayerBehavior(): Any? = generateSequence(activity.javaClass as Class<*>?) { it.superclass }.flatMap { it.declaredFields.asSequence() }.firstNotNullOfOrNull {
+    protected open fun findPlayerBehavior(): Any? = generateSequence(activity.javaClass as Class<*>?) { it.superclass }.flatMap { it.declaredFields.asSequence() }.firstNotNullOfOrNull {
         if (it.type.name.contains("BottomSheetBehavior")) runCatching { it.isAccessible = true; it.get(activity) }.getOrNull() else null
     }
 
     private fun scheduleFailure(error: Throwable) {
         if (failureScheduled || closed) return
         failureScheduled = true
+        releaseGlassOwnership(hostRoot)
         activity.window.decorView.post { failure(error) }
     }
 
@@ -585,6 +613,7 @@ internal class PhoneGlassSession(
         layerAlphas.forEach { (view, state) -> view.alpha = state.native }
         layerAlphas.clear()
         nativePeek.latest?.let { runCatching { writePeek(it) } }
+        releaseGlassOwnership(hostRoot)
         activity.window.decorView.requestLayout()
     }
 
