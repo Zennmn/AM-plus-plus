@@ -65,6 +65,18 @@ class TabletLiquidGlassStructuralRegressionTest {
     }
 
     @Test
+    fun `suppresses the flat chrome seams under the tablet capsule`() {
+        val session = source("dev/amenhancer/module/hook/TabletDualPaneGlassSession.kt")
+        val base = source("dev/amenhancer/module/hook/PhoneGlassSession.kt")
+        // The flat top-shadow strip and the stock column divider must be held
+        // gone for the whole session, not only at activation: the host may
+        // recolor/recreate them behind the floating capsule.
+        assertTrue(session.contains("nav_tabs_top_shadow"))
+        assertTrue(session.contains("suppressNativeChromeSeams"))
+        assertTrue(base.contains("suppressNativeChromeSeams"))
+    }
+
+    @Test
     fun `keeps the glass configuration keys and schema version unchanged`() {
         val schema = source("dev/amenhancer/module/config/ModuleSettingsSchema.kt")
         val constants = source("dev/amenhancer/module/ModuleConstants.kt")

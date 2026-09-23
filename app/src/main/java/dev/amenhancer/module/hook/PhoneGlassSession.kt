@@ -71,7 +71,7 @@ internal open class PhoneGlassSession(
     private var observer: ViewTreeObserver? = null
     private var closed = false
     private var failureScheduled = false
-    private var hostRoot: View? = null
+    protected var hostRoot: View? = null
     final override var activated = false
         private set
     private var tabs by mutableStateOf(emptyList<GlassTab>())
@@ -119,7 +119,7 @@ internal open class PhoneGlassSession(
     // configuration changes and replaced page/player hierarchies still take effect.
     private val resourceIds = HashMap<String, Int>()
 
-    private fun resourceId(name: String, type: String): Int {
+    protected fun resourceId(name: String, type: String): Int {
         val key = "$type/$name"
         resourceIds[key]?.let { return it }
         val id = activity.resources.getIdentifier(name, type, ModuleConstants.TARGET_PACKAGE)
@@ -134,6 +134,23 @@ internal open class PhoneGlassSession(
         .takeIf { it != 0 }?.let { activity.resources.getDimensionPixelSize(it) } ?: 0
 
     private fun save(view: View): NativeViewState = states.getOrPut(view) { NativeViewState(view) }
+
+    /**
+     * Native chrome seams must stay gone under the floating capsule. The phone
+     * host carries only the tabs divider; the flat host adds more (see the
+     * tablet session). Idempotent compare-then-write, run at activation and on
+     * every transition frame, so a late (re)creation by host or installer code
+     * cannot resurrect a seam; close() restores the saved states.
+     */
+    protected open fun suppressNativeChromeSeams() {
+        hideSeam(find("navigation_tabs_divider"))
+    }
+
+    protected fun hideSeam(view: View?) {
+        view ?: return
+        save(view)
+        if (view.visibility != View.GONE) view.visibility = View.GONE
+    }
 
     private fun allowGlassOverflow(view: View) {
         generateSequence(view as View?) { it.parent as? View }.takeWhile { it.layoutParams != null }.forEach {
@@ -358,7 +375,7 @@ internal open class PhoneGlassSession(
         frame.clipChildren = false
         frame.clipToPadding = false
         allowGlassOverflow(frame)
-        find("navigation_tabs_divider")?.let { save(it); it.visibility = View.GONE }
+        suppressNativeChromeSeams()
         source?.let { save(it) }
         nativePeek.initialize(nativePeekBaseline())
         activated = true
@@ -488,6 +505,7 @@ internal open class PhoneGlassSession(
     }
 
     private fun updateTransition() {
+        suppressNativeChromeSeams()
         navFrame?.background = null
         // Keep Z ordering (also used for touch dispatch); remove only the old
         // rectangular shadow outline, not the navigation view's elevation.

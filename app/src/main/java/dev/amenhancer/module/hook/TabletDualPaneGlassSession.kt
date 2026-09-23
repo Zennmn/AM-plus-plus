@@ -53,6 +53,21 @@ internal class TabletDualPaneGlassSession(
         root?.let(TabletGlassChrome::clearGlassActive)
     }
 
+    // Flat-only chrome survives the dual-pane full-width transform as hairlines
+    // across/over the floating capsule: nav_tabs_top_shadow is a dp gradient
+    // strip riding the tabs frame top edge, and the stock column divider (1dp
+    // separator_color, drawn above the tabs frame in z) keeps anchors to both
+    // pre-transform columns and resolves to a stray vertical line mid-screen.
+    // The glass capsule replaces both; the shared seam hook keeps them gone.
+    override fun suppressNativeChromeSeams() {
+        super.suppressNativeChromeSeams()
+        val root = hostRoot ?: return
+        for (name in listOf("nav_tabs_top_shadow", "divider")) {
+            val id = resourceId(name, "id").takeIf { it != 0 } ?: continue
+            hideSeam(root.findViewById(id))
+        }
+    }
+
     // The host field declares BottomSheetBehavior<FrameLayout> but runs
     // PlayerBottomSheetBehavior (and is the activity's only Behavior field). Prefer a
     // value whose runtime class names it; fall back to the phone declared-type scan.
