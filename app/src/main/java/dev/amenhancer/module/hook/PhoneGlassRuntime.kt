@@ -103,6 +103,15 @@ internal object PhoneGlassRuntime {
             }
         })
         val behavior = loader.loadClass("com.apple.android.music.player.PlayerBottomSheetBehavior")
+        // The tablet row keeps the sheet drag inside the capsule handles. The flat host captures
+        // a band gesture inside this Behavior, so the gate hooks the same touch entries the host
+        // uses; the static-collapsed wrapper delegates to it and is gated as well.
+        runCatching { TabletRowGestureGate.install(behavior) }
+        runCatching {
+            TabletRowGestureGate.install(
+                loader.loadClass("com.apple.android.music.common.behavior.StaticCollapsedBottomSheetBehavior"),
+            )
+        }
         val peek = method(behavior, "F", Int::class.javaPrimitiveType!!, Boolean::class.javaPrimitiveType!!)
         ModernXposedRuntime.hookMethod(peek, object : ModernMethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {

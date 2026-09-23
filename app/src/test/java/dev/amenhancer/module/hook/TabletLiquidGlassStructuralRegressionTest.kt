@@ -2,6 +2,7 @@ package dev.amenhancer.module.hook
 
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -83,15 +84,25 @@ class TabletLiquidGlassStructuralRegressionTest {
     }
 
     @Test
-    fun `keeps the sheet drag inside the mini slot`() {
+    fun `keeps the sheet drag inside the capsule handles`() {
         val session = source("dev/amenhancer/module/hook/TabletDualPaneGlassSession.kt")
         val base = source("dev/amenhancer/module/hook/PhoneGlassSession.kt")
-        // Sliding in the empty side areas must not drag-expand the player: passthrough
-        // shields cover everything outside the mini slot and hide while sliding.
-        assertTrue(session.contains("updateRowShields"))
-        assertTrue(session.contains("shield.x ="))
-        assertTrue(session.contains("runCatching"))
-        assertTrue(base.contains("updateRowShields(frame.width, slide == 0f)"))
+        val gate = source("dev/amenhancer/module/hook/TabletRowGestureGate.kt")
+        // Sliding the empty band must not drag-expand the player. The flat host decides
+        // that inside the sheet Behavior (it captures the sheet as the top child of
+        // player_container), so the row publishes its band and the gate suppresses the
+        // Behavior's own touch entries; no sibling view can block that capture.
+        assertTrue(session.contains("updateRowGestureOwnership"))
+        assertTrue(session.contains("TabletRowGestureGate.publish"))
+        assertTrue(session.contains("TabletRowBand(frameWidth, navSlot, miniSlot, dp(ROW_HANDLE_SLOP_DP))"))
+        assertTrue(session.contains("listOfNotNull(sheet, container, find(\"bottom_navigation_root_flat\"))"))
+        assertTrue(base.contains("updateRowGestureOwnership(frame.width, slide == 0f)"))
+        assertTrue(gate.contains("param.result = false"))
+        assertTrue(gate.contains("isTouchEntry"))
+        // The previous transparent shields are gone: a view under the band is invisible
+        // to the helper's layout-bounds pick, so they could never own the gesture.
+        assertFalse(session.contains("shield"))
+        assertFalse(base.contains("updateRowShields"))
     }
 
     @Test
@@ -99,7 +110,7 @@ class TabletLiquidGlassStructuralRegressionTest {
         val session = source("dev/amenhancer/module/hook/TabletDualPaneGlassSession.kt")
         val base = source("dev/amenhancer/module/hook/PhoneGlassSession.kt")
         // The invisible native tab strip must never eat row-band taps, and the
-        // side-by-side mini content arms its own tap-to-expand fallback.
+        // native mini-content click drives the verified G(3) expansion fallback.
         assertTrue(base.contains("hideSeam(navigation)"))
         assertTrue(session.contains("setOnClickListener { expandPlayer() }"))
         assertTrue(base.contains("method(base, \"G\", Int::class.javaPrimitiveType!!)"))

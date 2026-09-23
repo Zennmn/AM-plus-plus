@@ -131,13 +131,13 @@ internal open class PhoneGlassSession(
     protected open fun armMiniTap(content: View) = Unit
 
     /**
-     * Side-by-side rows keep the sheet's drag capture inside the mini slot: the
-     * collapsed band spans the full width, so the native behavior would treat the
-     * empty side areas as part of the drag handle. Transparent passthrough shields
-     * (plain views: taps cross, drag capture does not) cover the rest of the band
-     * while at rest. No-op on the phone form.
+     * Side-by-side rows keep the sheet's drag capture inside the mini capsule: the
+     * collapsed band spans the full width, so the native sheet Behavior treats the
+     * empty side areas as part of the drag handle. The tablet form publishes that band
+     * and its capsule slots to the row gesture gate; the phone form keeps the native
+     * touch chain untouched, so this is a no-op there.
      */
-    protected open fun updateRowShields(frameWidth: Int, atRest: Boolean) = Unit
+    protected open fun updateRowGestureOwnership(frameWidth: Int, atRest: Boolean) = Unit
 
     /**
      * Expand driver for the armed mini tap. The host's R8 renames material's
@@ -492,7 +492,7 @@ internal open class PhoneGlassSession(
                 applySlot(miniGlass, miniSlot)
                 applySlot(miniContent, miniSlot)
             }
-            updateRowShields(frame.width, slide == 0f)
+            updateRowGestureOwnership(frame.width, slide == 0f)
         }
         val peek = peekHeight()
         if (lastPeek != peek) {

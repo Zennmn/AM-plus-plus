@@ -1,6 +1,7 @@
 package dev.amenhancer.module.hook
 
 import android.app.Activity
+import android.graphics.Rect
 import android.view.View
 import android.view.ViewGroup
 import androidx.annotation.RequiresApi
@@ -33,51 +34,46 @@ internal class TabletDualPaneGlassSession(
         if (mini) intArrayOf(frameWidth * 19 / 30, frameWidth / 6)
         else intArrayOf(frameWidth / 6, frameWidth * 2 / 5)
 
-    // The native mini tap listener is unreliable in the side-by-side row (taps
-    // fell through to the invisible native tab strip and switched its tabs), so
-    // the mini content — exactly the mini slot bounds — owns tap-to-expand.
+    // Keep the tablet fallback tap on the native mini content. The user confirmed
+    // it expands correctly; the earlier apparent failure was device lag.
     override fun armMiniTap(content: View) {
         content.setOnClickListener { expandPlayer() }
     }
 
-    private val rowShields = mutableListOf<View>()
+    // The collapsed sheet band spans the full width, so the native sheet Behavior treats
+    // the empty side areas as its drag handle and sliding there expands the player. The
+    // row gesture gate suppresses exactly those gestures at the Behavior touch entries
+    // while the row rests collapsed. Every value derives from the same capsule math that
+    // lays the capsules out, and a failure here only leaves the native chain in place.
+    private var publishedBandKey: String? = null
 
-    // The collapsed sheet band spans the full width, so sliding in the empty
-    // side areas would drag-expand the player. Two transparent passthrough
-    // shields cover everything outside the mini slot (left whitespace + nav
-    // pill area + gap on the left, right whitespace on the right): plain views
-    // let taps cross to the nav capsule but stop the behavior's drag capture,
-    // which only engages when the top child under the touch is the sheet. Gone
-    // while sliding so the expanded sheet keeps its full gesture surface.
-    // Positioning deliberately avoids gravity/LayoutParams casts (the host
-    // CoordinatorLayout owns its own params class) and the whole body is
-    // fail-soft: a shield problem must never fail-close the glass session.
-    override fun updateRowShields(frameWidth: Int, atRest: Boolean) {
-        runCatching {
-            val container = find("player_container") as? ViewGroup ?: return
-            if (frameWidth <= 0) return
-            if (rowShields.size != 2) {
-                rowShields.forEach { (it.parent as? ViewGroup)?.removeView(it) }
-                rowShields.clear()
-                repeat(2) {
-                    rowShields += View(activity).also { shield -> container.addView(shield, ViewGroup.LayoutParams(0, 0)) }
-                }
+    override fun updateRowGestureOwnership(frameWidth: Int, atRest: Boolean) {
+        val published = runCatching {
+            val container = find("player_container") as? ViewGroup ?: return@runCatching false
+            if (!atRest || frameWidth <= 0 || container.height <= 0) return@runCatching false
+            val sheet = find("player_sheet_container") ?: return@runCatching false
+            val visible = Rect().also { sheet.getGlobalVisibleRect(it) }
+            if (visible.isEmpty) return@runCatching false
+            val band = RowBandRect(visible.left, visible.top, visible.right, visible.bottom)
+            val navSlot = capsuleMarginsPx(frameWidth, mini = false)
+            val miniSlot = capsuleMarginsPx(frameWidth, mini = true)
+            val key = listOf(
+                container.height, band.left, band.top, band.right, band.bottom,
+                navSlot[0], navSlot[1], miniSlot[0], miniSlot[1],
+            ).joinToString("/")
+            if (key != publishedBandKey) {
+                publishedBandKey = key
+                TabletRowGestureGate.publish(
+                    TabletRowBand(frameWidth, navSlot, miniSlot, dp(ROW_HANDLE_SLOP_DP)),
+                    band,
+                    listOfNotNull(sheet, container, find("bottom_navigation_root_flat")),
+                )
             }
-            val height = dp(geometry.navHeightDp + bottomGapDp) + bottomInset
-            val slot = capsuleMarginsPx(frameWidth, mini = true)
-            val visibility = if (atRest) View.VISIBLE else View.GONE
-            rowShields.forEachIndexed { index, shield ->
-                val width = if (index == 0) slot[0] else slot[1]
-                val params = shield.layoutParams
-                if (params.width != width || params.height != height) {
-                    params.width = width
-                    params.height = height
-                    shield.layoutParams = params
-                }
-                shield.x = if (index == 0) 0f else (frameWidth - slot[1]).toFloat()
-                shield.y = (container.height - height).toFloat()
-                shield.visibility = visibility
-            }
+            true
+        }.getOrDefault(false)
+        if (!published) {
+            publishedBandKey = null
+            TabletRowGestureGate.clear()
         }
     }
 
@@ -108,6 +104,8 @@ internal class TabletDualPaneGlassSession(
     }
 
     override fun releaseGlassOwnership(root: View?) {
+        publishedBandKey = null
+        TabletRowGestureGate.clear()
         root?.let(TabletGlassChrome::clearGlassActive)
     }
 
