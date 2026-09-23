@@ -4,13 +4,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GlassGeometryTest {
-    @Test fun phoneAndTabletPresetsStartIdentical() {
-        // sw640dp native miniplayer_height=59dp / mini_player_thumbnail_height=41dp are the
-        // documented fork reference; both presets deliberately share the phone capsule today.
-        assertEquals(GlassGeometry.Phone, GlassGeometry.Tablet)
+    @Test fun phoneAndTabletPresetsDivergeOnTheTabletRow() {
+        // The phone keeps the accepted stacked capsule; the tablet dual-pane row
+        // puts both capsules in one 56dp row (2026-09-22 sketch).
         assertEquals(
             GlassGeometry(navHeightDp = 56, miniHeightDp = 43, horizontalDp = 16, gapDp = 8),
             GlassGeometry.Phone,
+        )
+        assertEquals(
+            GlassGeometry(navHeightDp = 56, miniHeightDp = 56, horizontalDp = 16, gapDp = 8, sideBySide = true),
+            GlassGeometry.Tablet,
         )
         assertEquals(GlassPolicy.NAV_HEIGHT_DP, GlassGeometry.Phone.navHeightDp)
         assertEquals(GlassPolicy.MINI_HEIGHT_DP, GlassGeometry.Phone.miniHeightDp)
@@ -37,6 +40,14 @@ class GlassGeometryTest {
         assertEquals(184, GlassPolicy.occupiedHeight(2f, 24, false, geometry = forked))
         // geometry composes with a custom bottom lift: (64 + 24 + 51 + 10) * 1 + 8 = 157
         assertEquals(157, GlassPolicy.occupiedHeight(1f, 8, true, bottomGapDp = 24, geometry = forked))
+    }
+
+    @Test fun sideBySideGeometryFoldsTheMiniIntoTheRow() {
+        val row = GlassGeometry(navHeightDp = 56, miniHeightDp = 56, sideBySide = true)
+        // The mini sits beside the nav capsule: it adds no extra occupied height.
+        // (56 + 16) * 2 + 24 = 168
+        assertEquals(168, GlassPolicy.occupiedHeight(2f, 24, true, geometry = row))
+        assertEquals(168, GlassPolicy.occupiedHeight(2f, 24, false, geometry = row))
     }
 
     @Test fun hostFormsShareOneSeamWhitelist() {

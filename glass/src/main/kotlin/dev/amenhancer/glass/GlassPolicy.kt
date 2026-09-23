@@ -13,11 +13,13 @@ data class GlassGeometry(
     val miniHeightDp: Int = 43,
     val horizontalDp: Int = 16,
     val gapDp: Int = 8,
+    /** Side-by-side forms put the mini capsule beside the nav capsule in one row. */
+    val sideBySide: Boolean = false,
 ) {
     companion object {
         val Phone = GlassGeometry()
-        /** Starts identical to [Phone]; diverge here when tablet geometry is verified. */
-        val Tablet = GlassGeometry()
+        /** Tablet dual-pane row: both capsules share one 56dp row (2026-09-22 sketch). */
+        val Tablet = GlassGeometry(miniHeightDp = 56, sideBySide = true)
     }
 }
 
@@ -69,5 +71,5 @@ object GlassPolicy {
         bottomGapDp: Int = BOTTOM_DP,
         geometry: GlassGeometry = GlassGeometry.Phone,
     ): Int =
-        ((geometry.navHeightDp + bottomGapDp + if (miniVisible) geometry.miniHeightDp + geometry.gapDp else 0) * density).toInt() + bottomInset
+        ((geometry.navHeightDp + bottomGapDp + if (miniVisible && !geometry.sideBySide) geometry.miniHeightDp + geometry.gapDp else 0) * density).toInt() + bottomInset
 }

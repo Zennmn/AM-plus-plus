@@ -84,7 +84,8 @@ internal open class PhoneGlassSession(
     private var slide = 0f
     private var glassExpansion by androidx.compose.runtime.mutableFloatStateOf(0f)
     private var miniOffsetInSheet = 0
-    private var capsuleMarginPx = 0
+    private var navMarginPx = intArrayOf(0, 0)
+    private var miniMarginPx = intArrayOf(0, 0)
     private var lastPeek = -1
     private val nativePeek = NativePeekHeight()
     private val attachHandler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -116,8 +117,15 @@ internal open class PhoneGlassSession(
     /** Capsule geometry shared by every occupied-height consumer; a diverging form overrides this. */
     protected open val geometry: GlassGeometry get() = GlassGeometry.Phone
 
-    /** Side margin of both floating capsules; wide hosts may shorten the pills. */
-    protected open fun capsuleSideMarginPx(frameWidth: Int): Int = dp(geometry.horizontalDp)
+    /**
+     * Horizontal slot of a floating capsule as [left, right] margins. The phone
+     * keeps the tuned symmetric margins; the tablet row carves asymmetric slots
+     * (nav pill left, mini pill right) inside one centered row.
+     */
+    protected open fun capsuleMarginsPx(frameWidth: Int, mini: Boolean): IntArray {
+        val side = dp(geometry.horizontalDp)
+        return intArrayOf(side, side)
+    }
 
     // Resource IDs are stable for this Activity's host APK. Keep values and Views live so
     // configuration changes and replaced page/player hierarchies still take effect.
@@ -228,9 +236,9 @@ internal open class PhoneGlassSession(
             val glass = GlassHostView(moduleContext()).also { navGlass = it }
             glass.alpha = 0f
             glass.content { HostConfiguration { GlassNavigation(tabs, selectedId, accent, foreground, bg, ::selectTab, panelBlur = navBlurDp.dp) } }
-            capsuleMarginPx = capsuleSideMarginPx(frame.width)
+            val navSlot = capsuleMarginsPx(frame.width, mini = false)
             frame.addView(glass, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(GlassPolicy.NAV_HEIGHT_DP), Gravity.TOP).apply {
-                leftMargin = capsuleMarginPx; rightMargin = capsuleMarginPx
+                leftMargin = navSlot[0]; rightMargin = navSlot[1]
             })
             observer = activity.window.decorView.viewTreeObserver.also { it.addOnPreDrawListener(this); it.addOnGlobalLayoutListener(layoutListener) }
         }
@@ -255,8 +263,9 @@ internal open class PhoneGlassSession(
             // The native mini container disappears early in the opening animation.
             // Keep the material behind the whole sheet, independent of that container.
             val surfaceParent = find("player_sheet_container") as? FrameLayout ?: root
-            surfaceParent.addView(glass, 0, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(GlassPolicy.MINI_HEIGHT_DP), Gravity.TOP).apply {
-                leftMargin = capsuleMarginPx; rightMargin = capsuleMarginPx
+            surfaceParent.addView(glass, 0, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(geometry.miniHeightDp), Gravity.TOP).apply {
+                val slot = capsuleMarginsPx(0, mini = true)
+                leftMargin = slot[0]; rightMargin = slot[1]
             })
             if (activated) prepareMini()
         }
@@ -400,13 +409,19 @@ internal open class PhoneGlassSession(
         miniRoot?.let(::allowGlassOverflow)
         miniRoot?.let { save(it); it.background = null; it.clipChildren = false; it.clipToPadding = false }
         miniRoot?.let { root ->
-            root.layoutParams = root.layoutParams.apply { height = dp(GlassPolicy.MINI_HEIGHT_DP) }
+            root.layoutParams = root.layoutParams.apply { height = dp(geometry.miniHeightDp) }
         }
         miniContent?.let { content ->
             save(content)
             val params = content.layoutParams
-            params.height = dp(GlassPolicy.MINI_HEIGHT_DP)
-            if (params is ViewGroup.MarginLayoutParams) { params.leftMargin = capsuleMarginPx; params.rightMargin = capsuleMarginPx }
+            val contentHeight = dp(minOf(GlassPolicy.MINI_HEIGHT_DP, geometry.miniHeightDp))
+            params.height = contentHeight
+            if (params is ViewGroup.MarginLayoutParams) {
+                val slot = capsuleMarginsPx(0, mini = true)
+                params.leftMargin = slot[0]; params.rightMargin = slot[1]
+                val topOffset = (dp(geometry.miniHeightDp) - contentHeight) / 2
+                if (topOffset != 0) params.topMargin = topOffset
+            }
             content.layoutParams = params
             listOf("video_surface_container", "mini_player_play_btn", "mini_player_next_btn").forEach { name ->
                 val id = activity.resources.getIdentifier(name, "id", ModuleConstants.TARGET_PACKAGE)
@@ -427,18 +442,24 @@ internal open class PhoneGlassSession(
         navFrame?.let { frame ->
             // A generic copy constructor drops the host ConstraintLayout's bottom anchor.
             if (frame.layoutParams.height != height) frame.layoutParams = frame.layoutParams.apply { this.height = height }
-            // The capsule width may follow the host width (see the tablet form);
-            // resync both surfaces whenever the resolved side margin changes.
-            val margin = capsuleSideMarginPx(frame.width)
-            if (margin != capsuleMarginPx) {
-                capsuleMarginPx = margin
-                listOfNotNull(navGlass, miniGlass, miniContent).forEach { surface ->
-                    val params = surface.layoutParams as? ViewGroup.MarginLayoutParams ?: return@forEach
-                    if (params.leftMargin != margin || params.rightMargin != margin) {
-                        params.leftMargin = margin; params.rightMargin = margin
+            // The capsule slots may follow the host width (see the tablet row);
+            // resync every surface whenever a resolved slot edge changes.
+            val navSlot = capsuleMarginsPx(frame.width, mini = false)
+            val miniSlot = capsuleMarginsPx(frame.width, mini = true)
+            if (!navSlot.contentEquals(navMarginPx) || !miniSlot.contentEquals(miniMarginPx)) {
+                navMarginPx = navSlot
+                miniMarginPx = miniSlot
+                fun applySlot(view: View?, slot: IntArray) {
+                    val surface = view ?: return
+                    val params = surface.layoutParams as? ViewGroup.MarginLayoutParams ?: return
+                    if (params.leftMargin != slot[0] || params.rightMargin != slot[1]) {
+                        params.leftMargin = slot[0]; params.rightMargin = slot[1]
                         surface.layoutParams = params
                     }
                 }
+                applySlot(navGlass, navSlot)
+                applySlot(miniGlass, miniSlot)
+                applySlot(miniContent, miniSlot)
             }
         }
         val peek = peekHeight()
@@ -545,14 +566,18 @@ internal open class PhoneGlassSession(
                     val sheetPosition = IntArray(2).also(sheet::getLocationInWindow)
                     miniOffsetInSheet = miniPosition[1] - sheetPosition[1]
                 }
-                val margin = (capsuleMarginPx * (1f - materialProgress)).roundToInt()
+                // Per-edge morph (tablet row): each side interpolates from its own
+                // slot edge to zero, so the pill unfolds from its bottom-right
+                // anchor into the full sheet while the sheet slides up.
+                val left = (miniMarginPx[0] * (1f - materialProgress)).roundToInt()
+                val right = (miniMarginPx[1] * (1f - materialProgress)).roundToInt()
                 val top = (miniOffsetInSheet * (1f - materialProgress)).roundToInt()
-                val collapsedHeight = dp(GlassPolicy.MINI_HEIGHT_DP)
+                val collapsedHeight = dp(geometry.miniHeightDp)
                 val height = (collapsedHeight + (sheet.height - collapsedHeight) * progress).roundToInt().coerceAtLeast(collapsedHeight)
                 val params = glass.layoutParams as FrameLayout.LayoutParams
-                if (params.height != height || params.topMargin != top || params.leftMargin != margin) {
+                if (params.height != height || params.topMargin != top || params.leftMargin != left || params.rightMargin != right) {
                     params.height = height; params.topMargin = top
-                    params.leftMargin = margin; params.rightMargin = margin
+                    params.leftMargin = left; params.rightMargin = right
                     glass.layoutParams = params
                 }
             }

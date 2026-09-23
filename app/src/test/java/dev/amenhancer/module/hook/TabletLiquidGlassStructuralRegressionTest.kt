@@ -68,17 +68,18 @@ class TabletLiquidGlassStructuralRegressionTest {
     }
 
     @Test
-    fun `shortens the tablet capsules to half of the host width`() {
+    fun `lays the tablet capsules side by side in one centered row`() {
         val session = source("dev/amenhancer/module/hook/TabletDualPaneGlassSession.kt")
         val base = source("dev/amenhancer/module/hook/PhoneGlassSession.kt")
-        // The phone keeps its tuned 16dp margins (capsuleSideMarginPx default);
-        // only the tablet form shortens both floating capsules by taking
-        // frameWidth/4 side margins, resynced whenever the frame width settles.
-        assertTrue(session.contains("frameWidth / 4"))
-        assertTrue(base.contains("capsuleSideMarginPx"))
-        // The native mini content must follow the same margins, or its artwork,
-        // title and playback buttons drift outside the shortened capsule.
-        assertTrue(base.contains("navGlass, miniGlass, miniContent"))
+        // Nav pill left of one centered row, mini pill in the right slot, equal
+        // outer whitespace of frameWidth/6 ("留白长度一致"): the tablet override
+        // carves [W/6, 2W/5] for the nav and [19W/30, W/6] for the mini.
+        assertTrue(session.contains("frameWidth * 19 / 30"))
+        assertTrue(session.contains("frameWidth * 2 / 5"))
+        // The native mini content and the morphing glass share the mini slot, and
+        // the expand morph interpolates each edge from its own slot edge to zero.
+        assertTrue(base.contains("capsuleMarginsPx"))
+        assertTrue(base.contains("applySlot(miniContent, miniSlot)"))
     }
 
     @Test

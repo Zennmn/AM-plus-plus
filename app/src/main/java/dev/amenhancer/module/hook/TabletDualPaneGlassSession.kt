@@ -23,10 +23,14 @@ internal class TabletDualPaneGlassSession(
 
     override val geometry: GlassGeometry get() = GlassGeometry.Tablet
 
-    // User-tuned tablet proportion (2026-09-22, second pass): full-width
-    // capsules looked stretched on a tablet; both floating pills now take half
-    // of the host width and center — one quarter of the width as side margin.
-    override fun capsuleSideMarginPx(frameWidth: Int): Int = frameWidth / 4
+    // User sketch (2026-09-22): both capsules share one bottom row — the nav
+    // pill on the left (65% of a two-thirds-wide row), the mini pill in the
+    // right slot (30%), a small gap between them, and equal outer whitespace
+    // ("留白长度一致"): row = 2W/3 centered, outer = W/6 per side.
+    // nav slot = [W/6, 2W/5]; mini slot = [19W/30, W/6].
+    override fun capsuleMarginsPx(frameWidth: Int, mini: Boolean): IntArray =
+        if (mini) intArrayOf(frameWidth * 19 / 30, frameWidth / 6)
+        else intArrayOf(frameWidth / 6, frameWidth * 2 / 5)
 
     // The session lives only while the official tablet runs the dual-pane player;
     // portrait or dual-pane-off restores the native chrome through close().
