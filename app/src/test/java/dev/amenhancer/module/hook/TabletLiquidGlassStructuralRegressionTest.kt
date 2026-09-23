@@ -90,7 +90,7 @@ class TabletLiquidGlassStructuralRegressionTest {
         // side-by-side mini content arms its own tap-to-expand fallback.
         assertTrue(base.contains("hideSeam(navigation)"))
         assertTrue(session.contains("setOnClickListener { expandPlayer() }"))
-        assertTrue(base.contains("getMethod(\"setState\""))
+        assertTrue(base.contains("method(base, \"G\", Int::class.javaPrimitiveType!!)"))
     }
 
     @Test

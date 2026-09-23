@@ -130,11 +130,17 @@ internal open class PhoneGlassSession(
     /** Tablet-only fallback: the side-by-side mini drives its own tap-to-expand. */
     protected open fun armMiniTap(content: View) = Unit
 
-    /** Expand driver for the armed mini tap; behavior state 3 = expanded. */
+    /**
+     * Expand driver for the armed mini tap. The host's R8 renames material's
+     * BottomSheetBehavior API (state field G, state setter G(int) — verified in
+     * the decompiled PlayerBottomSheetBehavior), so drive the renamed setter
+     * with 3 = STATE_EXPANDED exactly like the native expand path.
+     */
     protected fun expandPlayer() {
         val behavior = playerBehavior ?: return
         runCatching {
-            behavior.javaClass.getMethod("setState", Int::class.javaPrimitiveType!!).invoke(behavior, 3)
+            val base = activity.classLoader.loadClass("com.google.android.material.bottomsheet.BottomSheetBehavior")
+            PhoneGlassRuntime.method(base, "G", Int::class.javaPrimitiveType!!).invoke(behavior, 3)
         }
     }
 
