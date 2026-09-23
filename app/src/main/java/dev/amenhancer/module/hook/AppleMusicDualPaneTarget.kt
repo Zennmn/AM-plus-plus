@@ -1640,7 +1640,15 @@ private object ConstraintLayoutPane {
             // latch semantics are preserved; once glass clears (switch off,
             // predicate false, fail-closed recovery) the compare-then-write
             // mechanism below re-asserts the settled values byte-identically.
-            if (TabletGlassChrome.isGlassActive(root)) return
+            if (TabletGlassChrome.isGlassActive(root)) {
+                // Hand-over release: settle the compensation's own writes once
+                // so glass starts from clean geometry. A stuck lift would keep
+                // the mini capsule too high; a stuck INVISIBLE tabs frame would
+                // hide the glass surfaces entirely.
+                if (playerContainer.translationY != 0f) playerContainer.translationY = 0f
+                if (tabsFrame.visibility != View.VISIBLE) tabsFrame.visibility = View.VISIBLE
+                return
+            }
             val rootHeight = root.height
             if (rootHeight <= 0) return
             root.getLocationInWindow(rootLocation)

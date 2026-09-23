@@ -62,6 +62,9 @@ class TabletLiquidGlassStructuralRegressionTest {
         // Both sync() writes must sit behind the arbitration guard.
         assertTrue(translationWrite > guard)
         assertTrue(visibilityWrite > guard)
+        // The hand-over releases a settled compensation lift/visibility so the
+        // glass geometry starts from a clean state instead of inheriting it.
+        assertTrue(dualPane.contains("playerContainer.translationY = 0f"))
     }
 
     @Test
