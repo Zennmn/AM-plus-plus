@@ -68,17 +68,26 @@ class TabletLiquidGlassStructuralRegressionTest {
     }
 
     @Test
-    fun `shortens the tablet capsules to two thirds of the host width`() {
+    fun `shortens the tablet capsules to half of the host width`() {
         val session = source("dev/amenhancer/module/hook/TabletDualPaneGlassSession.kt")
         val base = source("dev/amenhancer/module/hook/PhoneGlassSession.kt")
         // The phone keeps its tuned 16dp margins (capsuleSideMarginPx default);
         // only the tablet form shortens both floating capsules by taking
-        // frameWidth/6 side margins, resynced whenever the frame width settles.
-        assertTrue(session.contains("frameWidth / 6"))
+        // frameWidth/4 side margins, resynced whenever the frame width settles.
+        assertTrue(session.contains("frameWidth / 4"))
         assertTrue(base.contains("capsuleSideMarginPx"))
         // The native mini content must follow the same margins, or its artwork,
         // title and playback buttons drift outside the shortened capsule.
         assertTrue(base.contains("navGlass, miniGlass, miniContent"))
+    }
+
+    @Test
+    fun `hides the compensation row while the glass toggle is on`() {
+        val settings = source("dev/amenhancer/module/ui/EmbeddedSettingsHost.kt")
+        // The compensation toggle is native-bar-only; showing it while glass
+        // owns the geometry would read as a live switch that does nothing.
+        assertTrue(settings.contains("if (!settings.phoneLiquidGlassEnabled)"))
+        assertTrue(settings.contains("平板底栏补偿"))
     }
 
     @Test
