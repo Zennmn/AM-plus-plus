@@ -89,7 +89,8 @@ class TabletLiquidGlassStructuralRegressionTest {
         // Sliding in the empty side areas must not drag-expand the player: passthrough
         // shields cover everything outside the mini slot and hide while sliding.
         assertTrue(session.contains("updateRowShields"))
-        assertTrue(session.contains("Gravity.BOTTOM or Gravity.START"))
+        assertTrue(session.contains("shield.x ="))
+        assertTrue(session.contains("runCatching"))
         assertTrue(base.contains("updateRowShields(frame.width, slide == 0f)"))
     }
 

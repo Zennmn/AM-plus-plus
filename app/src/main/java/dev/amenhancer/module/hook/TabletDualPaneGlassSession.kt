@@ -1,10 +1,8 @@
 package dev.amenhancer.module.hook
 
 import android.app.Activity
-import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.FrameLayout
 import androidx.annotation.RequiresApi
 import dev.amenhancer.glass.GlassGeometry
 import dev.amenhancer.glass.GlassPolicy
@@ -51,28 +49,33 @@ internal class TabletDualPaneGlassSession(
     // let taps cross to the nav capsule but stop the behavior's drag capture,
     // which only engages when the top child under the touch is the sheet. Gone
     // while sliding so the expanded sheet keeps its full gesture surface.
+    // Positioning deliberately avoids gravity/LayoutParams casts (the host
+    // CoordinatorLayout owns its own params class) and the whole body is
+    // fail-soft: a shield problem must never fail-close the glass session.
     override fun updateRowShields(frameWidth: Int, atRest: Boolean) {
-        val container = find("player_container") as? ViewGroup ?: return
-        if (frameWidth <= 0) return
-        if (rowShields.size != 2) {
-            rowShields.forEach { (it.parent as? ViewGroup)?.removeView(it) }
-            rowShields.clear()
-            repeat(2) {
-                rowShields += View(activity).also { container.addView(it, ViewGroup.LayoutParams(0, 0)) }
+        runCatching {
+            val container = find("player_container") as? ViewGroup ?: return
+            if (frameWidth <= 0) return
+            if (rowShields.size != 2) {
+                rowShields.forEach { (it.parent as? ViewGroup)?.removeView(it) }
+                rowShields.clear()
+                repeat(2) {
+                    rowShields += View(activity).also { shield -> container.addView(shield, ViewGroup.LayoutParams(0, 0)) }
+                }
             }
-        }
-        val height = dp(geometry.navHeightDp + bottomGapDp) + bottomInset
-        val slot = capsuleMarginsPx(frameWidth, mini = true)
-        val visibility = if (atRest) View.VISIBLE else View.GONE
-        val slots = listOf(Gravity.BOTTOM or Gravity.START to slot[0], Gravity.BOTTOM or Gravity.END to slot[1])
-        slots.forEachIndexed { index, (gravity, width) ->
-            val shield = rowShields[index]
-            val params = shield.layoutParams as FrameLayout.LayoutParams
-            if (params.width != width || params.height != height || params.gravity != gravity || shield.visibility != visibility) {
-                params.width = width
-                params.height = height
-                params.gravity = gravity
-                shield.layoutParams = params
+            val height = dp(geometry.navHeightDp + bottomGapDp) + bottomInset
+            val slot = capsuleMarginsPx(frameWidth, mini = true)
+            val visibility = if (atRest) View.VISIBLE else View.GONE
+            rowShields.forEachIndexed { index, shield ->
+                val width = if (index == 0) slot[0] else slot[1]
+                val params = shield.layoutParams
+                if (params.width != width || params.height != height) {
+                    params.width = width
+                    params.height = height
+                    shield.layoutParams = params
+                }
+                shield.x = if (index == 0) 0f else (frameWidth - slot[1]).toFloat()
+                shield.y = (container.height - height).toFloat()
                 shield.visibility = visibility
             }
         }
