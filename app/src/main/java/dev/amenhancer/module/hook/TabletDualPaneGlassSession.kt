@@ -32,6 +32,13 @@ internal class TabletDualPaneGlassSession(
         if (mini) intArrayOf(frameWidth * 19 / 30, frameWidth / 6)
         else intArrayOf(frameWidth / 6, frameWidth * 2 / 5)
 
+    // The native mini tap listener is unreliable in the side-by-side row (taps
+    // fell through to the invisible native tab strip and switched its tabs), so
+    // the mini content — exactly the mini slot bounds — owns tap-to-expand.
+    override fun armMiniTap(content: View) {
+        content.setOnClickListener { expandPlayer() }
+    }
+
     // The session lives only while the official tablet runs the dual-pane player;
     // portrait or dual-pane-off restores the native chrome through close().
     override fun sessionEligible(): Boolean =

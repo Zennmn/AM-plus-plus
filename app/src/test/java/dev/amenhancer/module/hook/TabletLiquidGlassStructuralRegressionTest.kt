@@ -83,6 +83,17 @@ class TabletLiquidGlassStructuralRegressionTest {
     }
 
     @Test
+    fun `owns the row band touch chain`() {
+        val session = source("dev/amenhancer/module/hook/TabletDualPaneGlassSession.kt")
+        val base = source("dev/amenhancer/module/hook/PhoneGlassSession.kt")
+        // The invisible native tab strip must never eat row-band taps, and the
+        // side-by-side mini content arms its own tap-to-expand fallback.
+        assertTrue(base.contains("hideSeam(navigation)"))
+        assertTrue(session.contains("setOnClickListener { expandPlayer() }"))
+        assertTrue(base.contains("getMethod(\"setState\""))
+    }
+
+    @Test
     fun `hides the compensation row while the glass toggle is on`() {
         val settings = source("dev/amenhancer/module/ui/EmbeddedSettingsHost.kt")
         // The compensation toggle is native-bar-only; showing it while glass

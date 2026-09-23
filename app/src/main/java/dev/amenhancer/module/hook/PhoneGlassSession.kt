@@ -127,6 +127,17 @@ internal open class PhoneGlassSession(
         return intArrayOf(side, side)
     }
 
+    /** Tablet-only fallback: the side-by-side mini drives its own tap-to-expand. */
+    protected open fun armMiniTap(content: View) = Unit
+
+    /** Expand driver for the armed mini tap; behavior state 3 = expanded. */
+    protected fun expandPlayer() {
+        val behavior = playerBehavior ?: return
+        runCatching {
+            behavior.javaClass.getMethod("setState", Int::class.javaPrimitiveType!!).invoke(behavior, 3)
+        }
+    }
+
     // Resource IDs are stable for this Activity's host APK. Keep values and Views live so
     // configuration changes and replaced page/player hierarchies still take effect.
     private val resourceIds = HashMap<String, Int>()
@@ -156,6 +167,10 @@ internal open class PhoneGlassSession(
      */
     protected open fun suppressNativeChromeSeams() {
         hideSeam(find("navigation_tabs_divider"))
+        // The native tab strip stays alpha-hidden but touchable across its full
+        // width; invisible taps must never select a native menu item, so seam
+        // suppression owns its visibility too (restored on close like any seam).
+        hideSeam(navigation)
     }
 
     protected fun hideSeam(view: View?) {
@@ -434,6 +449,7 @@ internal open class PhoneGlassSession(
                 }
             }
         }
+        miniContent?.let(::armMiniTap)
         listOf("player_root", "player_top_shadow", "background_layers", "motion_switcher", "player_fragments_host").mapNotNull(::find).forEach(::save)
     }
 
