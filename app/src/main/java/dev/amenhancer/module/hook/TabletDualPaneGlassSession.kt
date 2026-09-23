@@ -1,7 +1,10 @@
 package dev.amenhancer.module.hook
 
 import android.app.Activity
+import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
+import android.widget.FrameLayout
 import androidx.annotation.RequiresApi
 import dev.amenhancer.glass.GlassGeometry
 import dev.amenhancer.glass.GlassPolicy
@@ -37,6 +40,42 @@ internal class TabletDualPaneGlassSession(
     // the mini content — exactly the mini slot bounds — owns tap-to-expand.
     override fun armMiniTap(content: View) {
         content.setOnClickListener { expandPlayer() }
+    }
+
+    private val rowShields = mutableListOf<View>()
+
+    // The collapsed sheet band spans the full width, so sliding in the empty
+    // side areas would drag-expand the player. Two transparent passthrough
+    // shields cover everything outside the mini slot (left whitespace + nav
+    // pill area + gap on the left, right whitespace on the right): plain views
+    // let taps cross to the nav capsule but stop the behavior's drag capture,
+    // which only engages when the top child under the touch is the sheet. Gone
+    // while sliding so the expanded sheet keeps its full gesture surface.
+    override fun updateRowShields(frameWidth: Int, atRest: Boolean) {
+        val container = find("player_container") as? ViewGroup ?: return
+        if (frameWidth <= 0) return
+        if (rowShields.size != 2) {
+            rowShields.forEach { (it.parent as? ViewGroup)?.removeView(it) }
+            rowShields.clear()
+            repeat(2) {
+                rowShields += View(activity).also { container.addView(it, ViewGroup.LayoutParams(0, 0)) }
+            }
+        }
+        val height = dp(geometry.navHeightDp + bottomGapDp) + bottomInset
+        val slot = capsuleMarginsPx(frameWidth, mini = true)
+        val visibility = if (atRest) View.VISIBLE else View.GONE
+        val slots = listOf(Gravity.BOTTOM or Gravity.START to slot[0], Gravity.BOTTOM or Gravity.END to slot[1])
+        slots.forEachIndexed { index, (gravity, width) ->
+            val shield = rowShields[index]
+            val params = shield.layoutParams as FrameLayout.LayoutParams
+            if (params.width != width || params.height != height || params.gravity != gravity || shield.visibility != visibility) {
+                params.width = width
+                params.height = height
+                params.gravity = gravity
+                shield.layoutParams = params
+                shield.visibility = visibility
+            }
+        }
     }
 
     // The session lives only while the official tablet runs the dual-pane player;

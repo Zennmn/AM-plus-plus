@@ -106,7 +106,7 @@ internal open class PhoneGlassSession(
     private val layoutListener = ViewTreeObserver.OnGlobalLayoutListener { scanNeeded = true }
     private var nextSettingsCheck = 0L
     protected val density get() = activity.resources.displayMetrics.density
-    private fun dp(value: Int) = (value * density).roundToInt()
+    protected fun dp(value: Int) = (value * density).roundToInt()
     protected val bottomInset get() = activity.window.decorView.rootWindowInsets?.getInsets(WindowInsets.Type.navigationBars())?.bottom ?: 0
     protected val miniVisible get() = miniRoot?.isShown == true
     // AM++: user-adjustable glass lift/material, captured with the session so every
@@ -129,6 +129,15 @@ internal open class PhoneGlassSession(
 
     /** Tablet-only fallback: the side-by-side mini drives its own tap-to-expand. */
     protected open fun armMiniTap(content: View) = Unit
+
+    /**
+     * Side-by-side rows keep the sheet's drag capture inside the mini slot: the
+     * collapsed band spans the full width, so the native behavior would treat the
+     * empty side areas as part of the drag handle. Transparent passthrough shields
+     * (plain views: taps cross, drag capture does not) cover the rest of the band
+     * while at rest. No-op on the phone form.
+     */
+    protected open fun updateRowShields(frameWidth: Int, atRest: Boolean) = Unit
 
     /**
      * Expand driver for the armed mini tap. The host's R8 renames material's
@@ -483,6 +492,7 @@ internal open class PhoneGlassSession(
                 applySlot(miniGlass, miniSlot)
                 applySlot(miniContent, miniSlot)
             }
+            updateRowShields(frame.width, slide == 0f)
         }
         val peek = peekHeight()
         if (lastPeek != peek) {

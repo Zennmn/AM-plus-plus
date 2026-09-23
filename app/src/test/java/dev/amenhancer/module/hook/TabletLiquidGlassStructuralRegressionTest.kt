@@ -83,6 +83,17 @@ class TabletLiquidGlassStructuralRegressionTest {
     }
 
     @Test
+    fun `keeps the sheet drag inside the mini slot`() {
+        val session = source("dev/amenhancer/module/hook/TabletDualPaneGlassSession.kt")
+        val base = source("dev/amenhancer/module/hook/PhoneGlassSession.kt")
+        // Sliding in the empty side areas must not drag-expand the player: passthrough
+        // shields cover everything outside the mini slot and hide while sliding.
+        assertTrue(session.contains("updateRowShields"))
+        assertTrue(session.contains("Gravity.BOTTOM or Gravity.START"))
+        assertTrue(base.contains("updateRowShields(frame.width, slide == 0f)"))
+    }
+
+    @Test
     fun `owns the row band touch chain`() {
         val session = source("dev/amenhancer/module/hook/TabletDualPaneGlassSession.kt")
         val base = source("dev/amenhancer/module/hook/PhoneGlassSession.kt")
