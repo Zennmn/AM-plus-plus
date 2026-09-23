@@ -1631,6 +1631,16 @@ private object ConstraintLayoutPane {
         val sheetLocation = IntArray(2)
         val tabsLocation = IntArray(2)
         fun sync() {
+            // Geometry arbitration: while the liquid-glass session is active
+            // its rewritten peek height is the single source of collapsed
+            // geometry, so this controller must stay silent — writing
+            // translationY/tabs visibility on top of the glass peek would
+            // double-lift the mini player out of the capsule position and
+            // expose a black strip. The listener and the reserveNavigationSpace
+            // latch semantics are preserved; once glass clears (switch off,
+            // predicate false, fail-closed recovery) the compare-then-write
+            // mechanism below re-asserts the settled values byte-identically.
+            if (TabletGlassChrome.isGlassActive(root)) return
             val rootHeight = root.height
             if (rootHeight <= 0) return
             root.getLocationInWindow(rootLocation)

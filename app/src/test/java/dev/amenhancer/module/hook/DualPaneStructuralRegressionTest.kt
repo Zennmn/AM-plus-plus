@@ -272,6 +272,24 @@ class DualPaneStructuralRegressionTest {
     }
 
     @Test
+    fun `silences flat boundary sync writes while the tablet glass session is active`() {
+        // Geometry arbitration: the liquid-glass peek rewrite is the single
+        // source of collapsed geometry while glass is active, so sync() must
+        // bail out before touching playerContainer.translationY or
+        // tabsFrame.visibility (a peek+translation double lift would push the
+        // mini player out of its capsule and expose a black strip).
+        assertTrue(source.contains("TabletGlassChrome.isGlassActive(root)"))
+        val syncIndex = source.indexOf("fun sync() {")
+        assertTrue(syncIndex >= 0)
+        val guardIndex = source.indexOf("TabletGlassChrome.isGlassActive(root)", syncIndex)
+        assertTrue(guardIndex > syncIndex)
+        val translationWriteIndex = source.indexOf("playerContainer.translationY = desiredTranslation", syncIndex)
+        val tabsVisibilityWriteIndex = source.indexOf("tabsFrame.visibility = desiredTabsVisibility", syncIndex)
+        assertTrue(translationWriteIndex > guardIndex)
+        assertTrue(tabsVisibilityWriteIndex > guardIndex)
+    }
+
+    @Test
     fun `creates the right lyrics pane through the target controller factory`() {
         assertFalse(source.contains("lyricsClass.getDeclaredConstructor()"))
         assertTrue(source.contains("getChildFragmentManager"))
