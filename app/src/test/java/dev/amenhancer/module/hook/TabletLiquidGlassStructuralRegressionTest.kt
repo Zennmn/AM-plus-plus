@@ -73,6 +73,9 @@ class TabletLiquidGlassStructuralRegressionTest {
         // frameWidth/6 side margins, resynced whenever the frame width settles.
         assertTrue(session.contains("frameWidth / 6"))
         assertTrue(base.contains("capsuleSideMarginPx"))
+        // The native mini content must follow the same margins, or its artwork,
+        // title and playback buttons drift outside the shortened capsule.
+        assertTrue(base.contains("navGlass, miniGlass, miniContent"))
     }
 
     @Test

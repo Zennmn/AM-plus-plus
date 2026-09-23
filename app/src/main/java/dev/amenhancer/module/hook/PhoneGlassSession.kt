@@ -406,7 +406,7 @@ internal open class PhoneGlassSession(
             save(content)
             val params = content.layoutParams
             params.height = dp(GlassPolicy.MINI_HEIGHT_DP)
-            if (params is ViewGroup.MarginLayoutParams) { params.leftMargin = dp(16); params.rightMargin = dp(16) }
+            if (params is ViewGroup.MarginLayoutParams) { params.leftMargin = capsuleMarginPx; params.rightMargin = capsuleMarginPx }
             content.layoutParams = params
             listOf("video_surface_container", "mini_player_play_btn", "mini_player_next_btn").forEach { name ->
                 val id = activity.resources.getIdentifier(name, "id", ModuleConstants.TARGET_PACKAGE)
@@ -432,11 +432,11 @@ internal open class PhoneGlassSession(
             val margin = capsuleSideMarginPx(frame.width)
             if (margin != capsuleMarginPx) {
                 capsuleMarginPx = margin
-                listOfNotNull(navGlass, miniGlass).forEach { glass ->
-                    val params = glass.layoutParams as? FrameLayout.LayoutParams ?: return@forEach
+                listOfNotNull(navGlass, miniGlass, miniContent).forEach { surface ->
+                    val params = surface.layoutParams as? ViewGroup.MarginLayoutParams ?: return@forEach
                     if (params.leftMargin != margin || params.rightMargin != margin) {
                         params.leftMargin = margin; params.rightMargin = margin
-                        glass.layoutParams = params
+                        surface.layoutParams = params
                     }
                 }
             }
