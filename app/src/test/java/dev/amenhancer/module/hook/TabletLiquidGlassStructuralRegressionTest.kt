@@ -65,6 +65,17 @@ class TabletLiquidGlassStructuralRegressionTest {
     }
 
     @Test
+    fun `shortens the tablet capsules to two thirds of the host width`() {
+        val session = source("dev/amenhancer/module/hook/TabletDualPaneGlassSession.kt")
+        val base = source("dev/amenhancer/module/hook/PhoneGlassSession.kt")
+        // The phone keeps its tuned 16dp margins (capsuleSideMarginPx default);
+        // only the tablet form shortens both floating capsules by taking
+        // frameWidth/6 side margins, resynced whenever the frame width settles.
+        assertTrue(session.contains("frameWidth / 6"))
+        assertTrue(base.contains("capsuleSideMarginPx"))
+    }
+
+    @Test
     fun `suppresses the flat chrome seams under the tablet capsule`() {
         val session = source("dev/amenhancer/module/hook/TabletDualPaneGlassSession.kt")
         val base = source("dev/amenhancer/module/hook/PhoneGlassSession.kt")

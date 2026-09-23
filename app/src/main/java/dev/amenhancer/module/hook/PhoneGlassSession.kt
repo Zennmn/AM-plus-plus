@@ -84,6 +84,7 @@ internal open class PhoneGlassSession(
     private var slide = 0f
     private var glassExpansion by androidx.compose.runtime.mutableFloatStateOf(0f)
     private var miniOffsetInSheet = 0
+    private var capsuleMarginPx = 0
     private var lastPeek = -1
     private val nativePeek = NativePeekHeight()
     private val attachHandler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -114,6 +115,9 @@ internal open class PhoneGlassSession(
 
     /** Capsule geometry shared by every occupied-height consumer; a diverging form overrides this. */
     protected open val geometry: GlassGeometry get() = GlassGeometry.Phone
+
+    /** Side margin of both floating capsules; wide hosts may shorten the pills. */
+    protected open fun capsuleSideMarginPx(frameWidth: Int): Int = dp(geometry.horizontalDp)
 
     // Resource IDs are stable for this Activity's host APK. Keep values and Views live so
     // configuration changes and replaced page/player hierarchies still take effect.
@@ -224,8 +228,9 @@ internal open class PhoneGlassSession(
             val glass = GlassHostView(moduleContext()).also { navGlass = it }
             glass.alpha = 0f
             glass.content { HostConfiguration { GlassNavigation(tabs, selectedId, accent, foreground, bg, ::selectTab, panelBlur = navBlurDp.dp) } }
+            capsuleMarginPx = capsuleSideMarginPx(frame.width)
             frame.addView(glass, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(GlassPolicy.NAV_HEIGHT_DP), Gravity.TOP).apply {
-                leftMargin = dp(16); rightMargin = dp(16)
+                leftMargin = capsuleMarginPx; rightMargin = capsuleMarginPx
             })
             observer = activity.window.decorView.viewTreeObserver.also { it.addOnPreDrawListener(this); it.addOnGlobalLayoutListener(layoutListener) }
         }
@@ -251,7 +256,7 @@ internal open class PhoneGlassSession(
             // Keep the material behind the whole sheet, independent of that container.
             val surfaceParent = find("player_sheet_container") as? FrameLayout ?: root
             surfaceParent.addView(glass, 0, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(GlassPolicy.MINI_HEIGHT_DP), Gravity.TOP).apply {
-                leftMargin = dp(16); rightMargin = dp(16)
+                leftMargin = capsuleMarginPx; rightMargin = capsuleMarginPx
             })
             if (activated) prepareMini()
         }
@@ -422,6 +427,19 @@ internal open class PhoneGlassSession(
         navFrame?.let { frame ->
             // A generic copy constructor drops the host ConstraintLayout's bottom anchor.
             if (frame.layoutParams.height != height) frame.layoutParams = frame.layoutParams.apply { this.height = height }
+            // The capsule width may follow the host width (see the tablet form);
+            // resync both surfaces whenever the resolved side margin changes.
+            val margin = capsuleSideMarginPx(frame.width)
+            if (margin != capsuleMarginPx) {
+                capsuleMarginPx = margin
+                listOfNotNull(navGlass, miniGlass).forEach { glass ->
+                    val params = glass.layoutParams as? FrameLayout.LayoutParams ?: return@forEach
+                    if (params.leftMargin != margin || params.rightMargin != margin) {
+                        params.leftMargin = margin; params.rightMargin = margin
+                        glass.layoutParams = params
+                    }
+                }
+            }
         }
         val peek = peekHeight()
         if (lastPeek != peek) {
@@ -527,7 +545,7 @@ internal open class PhoneGlassSession(
                     val sheetPosition = IntArray(2).also(sheet::getLocationInWindow)
                     miniOffsetInSheet = miniPosition[1] - sheetPosition[1]
                 }
-                val margin = (dp(16) * (1f - materialProgress)).roundToInt()
+                val margin = (capsuleMarginPx * (1f - materialProgress)).roundToInt()
                 val top = (miniOffsetInSheet * (1f - materialProgress)).roundToInt()
                 val collapsedHeight = dp(GlassPolicy.MINI_HEIGHT_DP)
                 val height = (collapsedHeight + (sheet.height - collapsedHeight) * progress).roundToInt().coerceAtLeast(collapsedHeight)
