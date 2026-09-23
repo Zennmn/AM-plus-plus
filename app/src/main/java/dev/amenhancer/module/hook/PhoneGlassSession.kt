@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.backdrops.ViewBackdrop
 import dev.amenhancer.glass.BottomScrim
 import dev.amenhancer.glass.GlassHostView
@@ -40,6 +41,7 @@ import dev.amenhancer.module.ModuleConstants
 import dev.amenhancer.module.config.TargetConfigClient
 import dev.amenhancer.module.model.FeatureHealth
 import dev.amenhancer.module.model.FeatureState
+import dev.amenhancer.module.model.ModuleSettings
 import java.util.IdentityHashMap
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -103,6 +105,10 @@ internal class PhoneGlassSession(
     private fun dp(value: Int) = (value * density).roundToInt()
     private val bottomInset get() = activity.window.decorView.rootWindowInsets?.getInsets(WindowInsets.Type.navigationBars())?.bottom ?: 0
     private val miniVisible get() = miniRoot?.isShown == true
+    // AM++: user-adjustable glass lift/material, captured with the session so every
+    // height consumer (frame, content padding, peek) agrees within a frame.
+    private var bottomGapDp = GlassPolicy.BOTTOM_DP
+    private var navBlurDp = GlassPolicy.PANEL_BLUR_DP.toInt()
 
     // Resource IDs are stable for this Activity's host APK. Keep values and Views live so
     // configuration changes and replaced page/player hierarchies still take effect.
@@ -141,6 +147,9 @@ internal class PhoneGlassSession(
             return
         }
         if (navGlass == null) {
+            val glassSettings = config.settings()
+            bottomGapDp = ModuleSettings.normalizePhoneLiquidGlassBottomGapDp(glassSettings.phoneLiquidGlassBottomGapDp)
+            navBlurDp = ModuleSettings.normalizePhoneLiquidGlassPanelBlurDp(glassSettings.phoneLiquidGlassPanelBlurDp)
             if (find("bottom_navigation_root_stacked") == null) return
             val frame = find("bottom_navigation_tabs_frame") as? FrameLayout ?: return
             val nav = find("bottom_navigation") ?: return
@@ -172,7 +181,7 @@ internal class PhoneGlassSession(
             frame.addView(scrim, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             val glass = GlassHostView(moduleContext()).also { navGlass = it }
             glass.alpha = 0f
-            glass.content { HostConfiguration { GlassNavigation(tabs, selectedId, accent, foreground, bg, ::selectTab) } }
+            glass.content { HostConfiguration { GlassNavigation(tabs, selectedId, accent, foreground, bg, ::selectTab, panelBlur = navBlurDp.dp) } }
             frame.addView(glass, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(GlassPolicy.NAV_HEIGHT_DP), Gravity.TOP).apply {
                 leftMargin = dp(16); rightMargin = dp(16)
             })
@@ -191,7 +200,7 @@ internal class PhoneGlassSession(
             glass.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
             glass.content {
                 HostConfiguration {
-                    NativeLiquidButton(bg, input, glassExpansion) { sx, sy, x, y ->
+                    NativeLiquidButton(bg, input, glassExpansion, panelBlur = navBlurDp.dp) { sx, sy, x, y ->
                         miniContent?.let { v -> v.scaleX = sx; v.scaleY = sy; v.translationX = x; v.translationY = y }
                     }
                 }
@@ -366,7 +375,7 @@ internal class PhoneGlassSession(
     }
 
     private fun updateGeometry() {
-        val height = dp(GlassPolicy.NAV_HEIGHT_DP + GlassPolicy.BOTTOM_DP) + bottomInset
+        val height = dp(GlassPolicy.NAV_HEIGHT_DP + bottomGapDp) + bottomInset
         navFrame?.let { frame ->
             // A generic copy constructor drops the host ConstraintLayout's bottom anchor.
             if (frame.layoutParams.height != height) frame.layoutParams = frame.layoutParams.apply { this.height = height }
@@ -378,7 +387,7 @@ internal class PhoneGlassSession(
         }
     }
 
-    fun peekHeight(): Int = GlassPolicy.occupiedHeight(density, bottomInset, miniVisible) + if (miniVisible) dimen("shadow_height") else 0
+    fun peekHeight(): Int = GlassPolicy.occupiedHeight(density, bottomInset, miniVisible, bottomGapDp) + if (miniVisible) dimen("shadow_height") else 0
 
     fun observeNativePeek(height: Int) = nativePeek.observe(height)
 
@@ -434,7 +443,7 @@ internal class PhoneGlassSession(
         val composeScene = descendants(root).any { view ->
             view.isShown && view.height > 0 && view.javaClass.name == "androidx.compose.ui.platform.ComposeView"
         }
-        val occupied = if (navFrame?.isShown == true) GlassPolicy.occupiedHeight(density, bottomInset, miniVisible) else 0
+        val occupied = if (navFrame?.isShown == true) GlassPolicy.occupiedHeight(density, bottomInset, miniVisible, bottomGapDp) else 0
         if (terminal.isEmpty() && !composeScene) {
             underlap = false
             if (root.paddingBottom != occupied) root.setPadding(root.paddingLeft, root.paddingTop, root.paddingRight, occupied)
@@ -521,19 +530,31 @@ internal class PhoneGlassSession(
     }
 
     fun redirectedPadding(view: Any?): Int? = if (activated && view === source) {
-        if (underlap) 0 else if (navFrame?.isShown == true) GlassPolicy.occupiedHeight(density, bottomInset, miniVisible) else 0
+        if (underlap) 0 else if (navFrame?.isShown == true) GlassPolicy.occupiedHeight(density, bottomInset, miniVisible, bottomGapDp) else 0
     } else null
+
+    private fun miniGlassPosition(event: MotionEvent): Pair<Float, Float>? {
+        val glass = miniGlass ?: return null
+        if (glass.width <= 0 || glass.height <= 0) return null
+        val location = IntArray(2)
+        glass.getLocationOnScreen(location)
+        return (
+            (event.rawX - location[0]).coerceIn(0f, glass.width.toFloat()) to
+                (event.rawY - location[1]).coerceIn(0f, glass.height.toFloat())
+            )
+    }
 
     fun observeTouch(event: MotionEvent) {
         if (!activated) return
+        val position = miniGlassPosition(event) ?: return
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> { contentDownX = event.x; contentDownY = event.y; observingPress = true }
             MotionEvent.ACTION_MOVE -> if (abs(event.y - contentDownY) > ViewConfiguration.get(activity).scaledTouchSlop && abs(event.y - contentDownY) > abs(event.x - contentDownX)) {
-                if (observingPress) input.event(MotionEvent.ACTION_CANCEL, 0f, 0f)
+                if (observingPress) input.event(MotionEvent.ACTION_CANCEL, position.first, position.second)
                 observingPress = false
             }
         }
-        if (observingPress) input.event(event.actionMasked, event.x - dp(16), event.y)
+        if (observingPress) input.event(event.actionMasked, position.first, position.second)
         if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) observingPress = false
     }
 

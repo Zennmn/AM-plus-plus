@@ -1,5 +1,6 @@
 package dev.amenhancer.module.config
 
+import dev.amenhancer.glass.GlassPolicy
 import dev.amenhancer.module.ModuleConstants
 import dev.amenhancer.module.model.CustomLyricsManifest
 import dev.amenhancer.module.model.LyricsFontManifest
@@ -19,6 +20,16 @@ internal object ModuleSettingsSchema {
             KEY_PHONE_LIQUID_GLASS,
             default = false,
         ),
+        phoneLiquidGlassBottomGapDp = values.number(KEY_PHONE_LIQUID_GLASS_BOTTOM_GAP_DP)
+            ?.coerceIn(
+                ModuleSettings.MIN_PHONE_LIQUID_GLASS_BOTTOM_GAP_DP,
+                ModuleSettings.MAX_PHONE_LIQUID_GLASS_BOTTOM_GAP_DP,
+            ) ?: GlassPolicy.BOTTOM_DP,
+        phoneLiquidGlassPanelBlurDp = values.number(KEY_PHONE_LIQUID_GLASS_PANEL_BLUR_DP)
+            ?.coerceIn(
+                ModuleSettings.MIN_PHONE_LIQUID_GLASS_PANEL_BLUR_DP,
+                ModuleSettings.MAX_PHONE_LIQUID_GLASS_PANEL_BLUR_DP,
+            ) ?: GlassPolicy.PANEL_BLUR_DP.toInt(),
         futureBlurEnabled = values.boolean(KEY_FUTURE_BLUR, default = true),
         cjkKaraokeAnimationEnabled = values.boolean(
             KEY_CJK_KARAOKE_ANIMATION_ENABLED,
@@ -68,6 +79,14 @@ internal object ModuleSettingsSchema {
             KEY_DUAL_PANE to settings.dualPaneEnabled,
             KEY_DISABLE_EDITORIAL_VIDEO_ON_TABLET to settings.disableEditorialVideoOnTablet,
             KEY_PHONE_LIQUID_GLASS to settings.phoneLiquidGlassEnabled,
+            KEY_PHONE_LIQUID_GLASS_BOTTOM_GAP_DP to
+                ModuleSettings.normalizePhoneLiquidGlassBottomGapDp(
+                    settings.phoneLiquidGlassBottomGapDp,
+                ),
+            KEY_PHONE_LIQUID_GLASS_PANEL_BLUR_DP to
+                ModuleSettings.normalizePhoneLiquidGlassPanelBlurDp(
+                    settings.phoneLiquidGlassPanelBlurDp,
+                ),
             KEY_FUTURE_BLUR to settings.futureBlurEnabled,
             KEY_CJK_KARAOKE_ANIMATION_ENABLED to settings.cjkKaraokeAnimationEnabled,
             KEY_NAVIGATION_COMPENSATION to settings.navigationCompensationEnabled,
@@ -224,6 +243,8 @@ internal object ModuleSettingsSchema {
         KEY_DUAL_PANE,
         KEY_DISABLE_EDITORIAL_VIDEO_ON_TABLET,
         KEY_PHONE_LIQUID_GLASS,
+        KEY_PHONE_LIQUID_GLASS_BOTTOM_GAP_DP,
+        KEY_PHONE_LIQUID_GLASS_PANEL_BLUR_DP,
         KEY_FUTURE_BLUR,
         KEY_CJK_KARAOKE_ANIMATION_ENABLED,
         KEY_NAVIGATION_COMPENSATION,
@@ -254,6 +275,8 @@ internal object ModuleSettingsSchema {
     private const val KEY_DISABLE_EDITORIAL_VIDEO_ON_TABLET =
         "disable_editorial_video_on_tablet"
     private const val KEY_PHONE_LIQUID_GLASS = "phone_liquid_glass_enabled"
+    private const val KEY_PHONE_LIQUID_GLASS_BOTTOM_GAP_DP = "phone_liquid_glass_bottom_gap_dp"
+    private const val KEY_PHONE_LIQUID_GLASS_PANEL_BLUR_DP = "phone_liquid_glass_panel_blur_dp"
     private const val KEY_FUTURE_BLUR = "future_blur_enabled"
     private const val KEY_CJK_KARAOKE_ANIMATION_ENABLED = "cjk_karaoke_animation_enabled"
     private const val KEY_NAVIGATION_COMPENSATION = "navigation_compensation_enabled"

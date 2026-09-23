@@ -15,6 +15,7 @@ internal enum class EmbeddedSvgIcon {
     GitHubSync,
     BackupRestore,
     Back,
+    RestoreDefault,
 }
 
 /** Marks drawables that already contain their original SVG fill colour. */
@@ -141,12 +142,30 @@ internal object EmbeddedSettingsSvgAssets {
         "L 893 637 L 895 630 L 895 620 L 892 612 L 884 603 L 877 599 L 869 598 L 868 597 L 462 597 L 461 596 L 463 593 L 654 401 " +
         "L 658 391 L 658 379 L 653 368 L 647 362 L 638 357 Z"
 
+    /**
+     * AM++-authored glyph: an open circular arrow returning to its start — "restore the
+     * slider's default". Filled outline in the 1254 viewport (arc band 500/390 radii with a
+     * flared arrowhead at the top-right), matching the flat-fill pipeline of the icons above.
+     */
+    private const val RESTORE_DEFAULT_PATH =
+        "M416 174 L377 194 L340 217 L306 244 L273 273 L244 306 L217 340 L194 377 L174 416 L157 456 L144 498 L135 540 L129 583 " +
+        "L127 627 L129 671 L135 714 L144 756 L157 798 L174 838 L194 877 L217 914 L244 948 L273 981 L306 1010 L340 1037 L377 1060 " +
+        "L416 1080 L456 1097 L498 1110 L540 1119 L583 1125 L627 1127 L671 1125 L714 1119 L756 1110 L798 1097 L838 1080 L877 1060 " +
+        "L914 1037 L948 1010 L981 981 L1010 948 L1037 914 L1060 877 L1080 838 L1097 798 L1110 756 L1119 714 L1125 671 L1127 627 " +
+        "L1125 583 L1119 540 L1110 498 L1097 456 L1080 416 L1060 377 L1082 309 L897 237 L901 435 L965 432 L980 462 L993 494 " +
+        "L1004 526 L1011 559 L1016 593 L1017 627 L1016 661 L1011 695 L1004 728 L993 760 L980 792 L965 822 L946 851 L926 878 " +
+        "L903 903 L878 926 L851 946 L822 965 L792 980 L760 993 L728 1004 L695 1011 L661 1016 L627 1017 L593 1016 L559 1011 " +
+        "L526 1004 L494 993 L462 980 L432 965 L403 946 L376 926 L351 903 L328 878 L308 851 L289 822 L274 792 L261 760 L250 728 " +
+        "L243 695 L238 661 L237 627 L238 593 L243 559 L250 526 L261 494 L274 462 L289 432 L308 403 L328 376 L351 351 L376 328 " +
+        "L403 308 L432 289 Z"
+
     private val specs = mapOf(
         EmbeddedSvgIcon.AddLyrics to EmbeddedSvgSpec(ADD_LYRICS_PATH, Color.parseColor("#A94B76")),
         EmbeddedSvgIcon.ImportTtml to EmbeddedSvgSpec(IMPORT_TTML_PATH, Color.parseColor("#A94B73")),
         EmbeddedSvgIcon.GitHubSync to EmbeddedSvgSpec(GIT_HUB_SYNC_PATH, Color.parseColor("#A34E74")),
         EmbeddedSvgIcon.BackupRestore to EmbeddedSvgSpec(BACKUP_RESTORE_PATH, Color.parseColor("#A84C76")),
         EmbeddedSvgIcon.Back to EmbeddedSvgSpec(BACK_PATH, Color.parseColor("#F33343")),
+        EmbeddedSvgIcon.RestoreDefault to EmbeddedSvgSpec(RESTORE_DEFAULT_PATH, Color.parseColor("#FA233B")),
     )
 
     fun drawable(icon: EmbeddedSvgIcon): Drawable? = runCatching {

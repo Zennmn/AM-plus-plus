@@ -39,10 +39,25 @@ class PhoneLiquidGlassStructuralRegressionTest {
             "lyrics_font_sha256",
         ).forEach { key -> assertTrue(schema.contains("\"$key\"")) }
         assertTrue(schema.contains("\"phone_liquid_glass_enabled\""))
+        assertTrue(schema.contains("\"phone_liquid_glass_bottom_gap_dp\""))
+        assertTrue(schema.contains("\"phone_liquid_glass_panel_blur_dp\""))
         assertTrue(storage.contains("ampp-embedded-settings"))
         assertTrue(client.contains("valuesProvider"))
         assertFalse(settings.contains("手机 Liquid Glass"))
         assertTrue(settings.contains("phoneLiquidGlassEnabled = it"))
+        // The height/blur extras are add-ons of the liquid-glass toggle: their rows must
+        // stay gated behind it and their values must live in the settings model.
+        assertTrue(models.contains("val phoneLiquidGlassBottomGapDp: Int"))
+        assertTrue(models.contains("val phoneLiquidGlassPanelBlurDp: Int"))
+        assertTrue(settings.contains("if (settings.phoneLiquidGlassEnabled)"))
+        assertTrue(settings.contains("底栏高度"))
+        assertTrue(settings.contains("底栏背景模糊强度"))
+        // Each gated row carries a small one-tap restore button for its own default.
+        assertTrue(settings.contains("\"恢复默认\""))
+        assertTrue(settings.contains("defaultValue = GlassPolicy.BOTTOM_DP"))
+        assertTrue(settings.contains("defaultValue = GlassPolicy.PANEL_BLUR_DP.toInt()"))
+        // The restore button uses the AM++-authored SVG glyph, not the legacy drawable.
+        assertTrue(settings.contains("EmbeddedSvgIcon.RestoreDefault"))
     }
 
     @Test
