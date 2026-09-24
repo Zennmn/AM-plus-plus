@@ -2,6 +2,7 @@ package dev.amenhancer.module.hook
 
 import android.app.Activity
 import android.graphics.Rect
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import androidx.annotation.RequiresApi
@@ -42,39 +43,91 @@ internal class TabletDualPaneGlassSession(
 
     // The collapsed sheet band spans the full width, so the native sheet Behavior treats
     // the empty side areas as its drag handle and sliding there expands the player. The
-    // row gesture gate suppresses exactly those gestures at the Behavior touch entries
-    // while the row rests collapsed. Every value derives from the same capsule math that
-    // lays the capsules out, and a failure here only leaves the native chain in place.
+    // row gesture gate suppresses exactly those gestures at the Behavior touch entries, and
+    // the same geometry tells the runtime which down events belong to the page below: the bar
+    // root and the sheet are full-screen even where no capsule is drawn. Every value derives
+    // from the very views that carry the glass surfaces, and a failure here only leaves the
+    // native chain in place.
     private var publishedBandKey: String? = null
+    private var rowAtRest = false
+    private var rowBarRoot: View? = null
+    private var rowSheetRoot: View? = null
 
     override fun updateRowGestureOwnership(frameWidth: Int, atRest: Boolean) {
+        rowAtRest = atRest
         val published = runCatching {
             val container = find("player_container") as? ViewGroup ?: return@runCatching false
             if (!atRest || frameWidth <= 0 || container.height <= 0) return@runCatching false
             val sheet = find("player_sheet_container") ?: return@runCatching false
+            val frame = navFrame ?: return@runCatching false
+            if (!frame.isShown) return@runCatching false
             val visible = Rect().also { sheet.getGlobalVisibleRect(it) }
-            if (visible.isEmpty) return@runCatching false
+            val frameRect = Rect().also { frame.getGlobalVisibleRect(it) }
+            val sheetRect = Rect().also { sheet.getGlobalVisibleRect(it) }
+            if (visible.isEmpty || frameRect.isEmpty || sheetRect.isEmpty) return@runCatching false
             val band = RowBandRect(visible.left, visible.top, visible.right, visible.bottom)
             val navSlot = capsuleMarginsPx(frameWidth, mini = false)
             val miniSlot = capsuleMarginsPx(frameWidth, mini = true)
-            val key = listOf(
-                container.height, band.left, band.top, band.right, band.bottom,
-                navSlot[0], navSlot[1], miniSlot[0], miniSlot[1],
-            ).joinToString("/")
+            // Each glass surface is laid out top-aligned inside its host with these slot
+            // margins (nav in the tabs frame, mini in the sheet strip), so the handle is
+            // exactly that surface's own rectangle; the drawn shape is a stadium inside it.
+            val handles = buildList {
+                add(
+                    RowCapsuleRect(
+                        frameRect.left + navSlot[0],
+                        frameRect.top,
+                        frameRect.left + frameRect.width() - navSlot[1],
+                        frameRect.top + dp(GlassPolicy.NAV_HEIGHT_DP),
+                    ),
+                )
+                if (miniVisible) {
+                    add(
+                        RowCapsuleRect(
+                            sheetRect.left + miniSlot[0],
+                            sheetRect.top,
+                            sheetRect.left + sheetRect.width() - miniSlot[1],
+                            sheetRect.top + dp(geometry.miniHeightDp),
+                        ),
+                    )
+                }
+            }
+            val key = buildString {
+                append(container.height)
+                append('/').append(band.left).append('-').append(band.top)
+                append('-').append(band.right).append('-').append(band.bottom)
+                handles.forEach {
+                    append('/').append(it.left).append('-').append(it.top)
+                    append('-').append(it.right).append('-').append(it.bottom)
+                }
+            }
             if (key != publishedBandKey) {
                 publishedBandKey = key
+                rowBarRoot = find("bottom_navigation_root_flat")
+                rowSheetRoot = sheet
                 TabletRowGestureGate.publish(
-                    TabletRowBand(frameWidth, navSlot, miniSlot, dp(ROW_HANDLE_SLOP_DP)),
+                    TabletRowBand(handles, dp(ROW_HANDLE_SLOP_DP)),
                     band,
-                    listOfNotNull(sheet, container, find("bottom_navigation_root_flat")),
+                    listOfNotNull(rowSheetRoot, container, rowBarRoot),
                 )
             }
             true
         }.getOrDefault(false)
         if (!published) {
             publishedBandKey = null
+            rowBarRoot = null
+            rowSheetRoot = null
             TabletRowGestureGate.clear()
         }
+    }
+
+    // Only the capsule handles may keep a collapsed-row gesture in the bar. Every other down
+    // event is handed to the page below, which then owns the whole stream natively (scroll,
+    // momentum, taps) while the gate keeps the sheet Behavior out of that gesture.
+    override fun managesTouchRoot(view: View): Boolean = view === rowBarRoot || view === rowSheetRoot
+
+    override fun shouldDispatch(view: View, event: MotionEvent): Boolean {
+        if (!activated || !rowAtRest || event.actionMasked != MotionEvent.ACTION_DOWN) return true
+        return !TabletRowGestureGate.isRowWhitespace(event.rawX, event.rawY)
     }
 
     // The session lives only while the official tablet runs the dual-pane player;
@@ -95,7 +148,20 @@ internal class TabletDualPaneGlassSession(
     override fun driveNavFrameExit(progress: Float) {
         val frame = navFrame ?: return
         val extent = GlassPolicy.occupiedHeight(density, bottomInset, miniVisible, bottomGapDp, geometry)
-        frame.translationY = (1f - exp(-20f * progress)) * extent
+        val target = (1f - exp(-20f * progress)) * extent
+        // At the tail of this exponential curve, subpixel updates are visually inert but
+        // still invalidate every backdrop consumer. Stop once the remaining error is < 0.5px.
+        if (kotlin.math.abs(frame.translationY - target) >= 0.5f) {
+            frame.translationY = target
+            invalidateBackdropTargetPosition()
+        }
+    }
+
+    override fun onSlide(progress: Float) {
+        super.onSlide(progress)
+        // The host has already moved the sheet at this callback. Move the glass
+        // row now as well, before pre-draw captures the source and paints it.
+        if (activated) driveNavFrameExit(progress.coerceIn(0f, 1f))
     }
 
     // The dual-pane boundary sync mutes its own writes while the glass owns the geometry.
@@ -105,6 +171,9 @@ internal class TabletDualPaneGlassSession(
 
     override fun releaseGlassOwnership(root: View?) {
         publishedBandKey = null
+        rowAtRest = false
+        rowBarRoot = null
+        rowSheetRoot = null
         TabletRowGestureGate.clear()
         root?.let(TabletGlassChrome::clearGlassActive)
     }

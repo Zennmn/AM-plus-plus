@@ -5,13 +5,21 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.ColorMatrixColorFilter
 import com.kyant.backdrop.BackdropEffectScope
+import com.kyant.backdrop.rememberRenderEffect
 import com.kyant.backdrop.internal.ColorFilterEffect
 import com.kyant.backdrop.isRenderEffectSupported
 
 fun BackdropEffectScope.colorFilter(colorFilter: ColorFilter) {
     if (!isRenderEffectSupported()) return
 
-    renderEffect = ColorFilterEffect(renderEffect, colorFilter)
+    val parent = renderEffect
+    renderEffect = rememberRenderEffect(
+        kind = "color-filter",
+        parent = parent,
+        input = colorFilter,
+    ) {
+        ColorFilterEffect(parent, colorFilter)
+    }
 }
 
 fun BackdropEffectScope.opacity(@FloatRange(from = 0.0, to = 1.0) alpha: Float) {

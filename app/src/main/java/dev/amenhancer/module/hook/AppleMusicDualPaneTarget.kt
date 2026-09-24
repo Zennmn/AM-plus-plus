@@ -1288,6 +1288,8 @@ private object ConstraintLayoutPane {
             }
             configureTabsTopShadow(topShadow)
             configurePlayerContainer(playerContainer, root.context)
+            runCatching { TabletMiniTouchRouter.install(root) }
+                .onFailure { debug("mini touch routing unavailable: $it") }
             // Keep the accepted Phase-109 navigation inset on every target
             // build. The full tabs frame is owned by the native holder; using
             // it as a container translation pulls the mini-player behind the

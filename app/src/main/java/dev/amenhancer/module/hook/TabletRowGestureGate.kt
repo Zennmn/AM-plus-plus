@@ -6,6 +6,7 @@ import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 import java.util.Collections
 import java.util.IdentityHashMap
+import kotlin.math.min
 
 /** Touch tolerance in dp that still counts as part of a capsule handle. */
 internal const val ROW_HANDLE_SLOP_DP = 8
@@ -19,27 +20,45 @@ internal data class RowBandRect(val left: Int, val top: Int, val right: Int, val
 }
 
 /**
- * Geometry of the tablet row band: the collapsed sheet strip minus the two capsule
- * slots. A gesture that starts here must not become a sheet drag, otherwise the
- * empty left/right areas expand the player exactly like the mini capsule.
+ * One capsule handle of the tablet row, in screen coordinates. The glass capsules are
+ * stadium shapes — a rounded rectangle whose left and right ends are rounded by half the
+ * height — so the bounding box corners are *not* part of the handle: a touch there belongs
+ * to the empty row and must pass through like any other whitespace point.
  *
- * `navSlot`/`miniSlot` are the `[leftMargin, rightMargin]` pairs the session already
- * uses to lay the capsules out, so the handle geometry has a single source.
+ * [slop] grows the whole shape outwards (bbox by `slop`, end radius by the same amount), so
+ * the tolerance keeps the pill's own curvature instead of turning into a rectangle.
  */
-internal class TabletRowBand(
-    private val frameWidth: Int,
-    private val navSlot: IntArray,
-    private val miniSlot: IntArray,
-    private val slop: Int,
-) {
-    /** True when the point starts in the band but outside both capsule handles. */
+internal data class RowCapsuleRect(val left: Int, val top: Int, val right: Int, val bottom: Int) {
+    val isEmpty: Boolean get() = right <= left || bottom <= top
+
+    fun contains(x: Float, y: Float, slop: Int = 0): Boolean {
+        if (isEmpty) return false
+        val pad = slop.coerceAtLeast(0)
+        val l = (left - pad).toFloat()
+        val t = (top - pad).toFloat()
+        val r = (right + pad).toFloat()
+        val b = (bottom + pad).toFloat()
+        if (x < l || x >= r || y < t || y >= b) return false
+        val radius = min(b - t, r - l) / 2f
+        val centerX = x.coerceIn(l + radius, r - radius)
+        val centerY = (t + b) / 2f
+        val dx = x - centerX
+        val dy = y - centerY
+        return dx * dx + dy * dy <= radius * radius
+    }
+}
+
+/**
+ * Geometry of the tablet row: the collapsed band plus the capsule handles that own a down
+ * event. Every other point of the band is empty row — neither a sheet drag handle nor a
+ * place the bar may swallow a touch, so the session passes those gestures to the page below.
+ */
+internal class TabletRowBand(private val handles: List<RowCapsuleRect>, private val slop: Int) {
+    /** True when the point starts in the band but outside every capsule handle. */
     fun blocksDrag(x: Float, y: Float, band: RowBandRect): Boolean {
         if (!band.contains(x, y)) return false
-        return outsideCapsule(x, navSlot) && outsideCapsule(x, miniSlot)
+        return handles.none { it.contains(x, y, slop) }
     }
-
-    private fun outsideCapsule(x: Float, slot: IntArray): Boolean =
-        x < slot[0] - slop || x > frameWidth - slot[1] + slop
 }
 
 /**
@@ -50,7 +69,9 @@ internal class TabletRowBand(
  * by *layout* bounds and the Behavior then intercepts), so a transparent sibling laid out
  * under the band is invisible to that pick — and a translated one cannot be picked at all.
  * The gate therefore suppresses the Behavior's own touch entries for gestures that start
- * in the empty band while the tablet glass session owns the collapsed geometry.
+ * in the empty band while the tablet glass session owns the collapsed geometry. The same
+ * band also decides which down events the session lets through to the page below; a gesture
+ * that passed through keeps its native owner because this gate still suppresses the sheet.
  *
  * Fail-open by construction: without a published band, a published rect or a guarded host
  * view, every entry returns the host's own result.
@@ -79,6 +100,14 @@ internal object TabletRowGestureGate {
         band = null
         bandRect = null
         latched.clear()
+    }
+
+    /** True when the point is empty row: inside the collapsed band, outside both capsules. */
+    @Synchronized
+    fun isRowWhitespace(x: Float, y: Float): Boolean {
+        val row = band ?: return false
+        val rect = bandRect ?: return false
+        return row.blocksDrag(x, y, rect)
     }
 
     /**

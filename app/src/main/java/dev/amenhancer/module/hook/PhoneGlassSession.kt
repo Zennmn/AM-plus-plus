@@ -84,6 +84,7 @@ internal open class PhoneGlassSession(
     private var slide = 0f
     private var glassExpansion by androidx.compose.runtime.mutableFloatStateOf(0f)
     private var miniOffsetInSheet = 0
+    private val backdropConsumerRect = android.graphics.Rect()
     private var navMarginPx = intArrayOf(0, 0)
     private var miniMarginPx = intArrayOf(0, 0)
     private var lastPeek = -1
@@ -218,6 +219,10 @@ internal open class PhoneGlassSession(
 
     /** Capsule exit driver; the phone host translates the frame from its own holder. */
     protected open fun driveNavFrameExit(progress: Float) = Unit
+
+    protected fun invalidateBackdropTargetPosition() {
+        backdrop?.invalidateTargetPosition()
+    }
 
     /** Chrome ownership hand-off; only the dual-pane session arbitrates ownership. */
     protected open fun onGlassOwnership(root: View?) = Unit
@@ -591,29 +596,40 @@ internal open class PhoneGlassSession(
         val materialProgress = blend(0f, 0.35f)
         glassExpansion = materialProgress
         miniGlass?.let { glass ->
-            val sheet = glass.parent as? FrameLayout
-            if (sheet != null && sheet !== miniRoot) {
-                if (miniVisible && progress == 0f) {
-                    val miniPosition = IntArray(2).also { miniRoot?.getLocationInWindow(it) }
-                    val sheetPosition = IntArray(2).also(sheet::getLocationInWindow)
-                    miniOffsetInSheet = miniPosition[1] - sheetPosition[1]
+            val glassAlpha = if (!miniVisible && progress == 0f) 0f else 1f - blend(0.35f, 0.6f)
+            if (glassAlpha <= 0f) {
+                // The morph layer otherwise keeps resizing and rendering its full-screen
+                // backdrop after it has completely faded out, through the rest of the sheet
+                // transition. It has no hit target, so remove it from measure/draw until the
+                // reverse transition makes it visible again.
+                glass.alpha = 0f
+                if (glass.visibility != View.GONE) glass.visibility = View.GONE
+            } else {
+                if (glass.visibility != View.VISIBLE) glass.visibility = View.VISIBLE
+                val sheet = glass.parent as? FrameLayout
+                if (sheet != null && sheet !== miniRoot) {
+                    if (miniVisible && progress == 0f) {
+                        val miniPosition = IntArray(2).also { miniRoot?.getLocationInWindow(it) }
+                        val sheetPosition = IntArray(2).also(sheet::getLocationInWindow)
+                        miniOffsetInSheet = miniPosition[1] - sheetPosition[1]
+                    }
+                    // Per-edge morph (tablet row): each side interpolates from its own
+                    // slot edge to zero, so the pill unfolds from its bottom-right
+                    // anchor into the full sheet while the sheet slides up.
+                    val left = (miniMarginPx[0] * (1f - materialProgress)).roundToInt()
+                    val right = (miniMarginPx[1] * (1f - materialProgress)).roundToInt()
+                    val top = (miniOffsetInSheet * (1f - materialProgress)).roundToInt()
+                    val collapsedHeight = dp(geometry.miniHeightDp)
+                    val height = (collapsedHeight + (sheet.height - collapsedHeight) * progress).roundToInt().coerceAtLeast(collapsedHeight)
+                    val params = glass.layoutParams as FrameLayout.LayoutParams
+                    if (params.height != height || params.topMargin != top || params.leftMargin != left || params.rightMargin != right) {
+                        params.height = height; params.topMargin = top
+                        params.leftMargin = left; params.rightMargin = right
+                        glass.layoutParams = params
+                    }
                 }
-                // Per-edge morph (tablet row): each side interpolates from its own
-                // slot edge to zero, so the pill unfolds from its bottom-right
-                // anchor into the full sheet while the sheet slides up.
-                val left = (miniMarginPx[0] * (1f - materialProgress)).roundToInt()
-                val right = (miniMarginPx[1] * (1f - materialProgress)).roundToInt()
-                val top = (miniOffsetInSheet * (1f - materialProgress)).roundToInt()
-                val collapsedHeight = dp(geometry.miniHeightDp)
-                val height = (collapsedHeight + (sheet.height - collapsedHeight) * progress).roundToInt().coerceAtLeast(collapsedHeight)
-                val params = glass.layoutParams as FrameLayout.LayoutParams
-                if (params.height != height || params.topMargin != top || params.leftMargin != left || params.rightMargin != right) {
-                    params.height = height; params.topMargin = top
-                    params.leftMargin = left; params.rightMargin = right
-                    glass.layoutParams = params
-                }
+                glass.alpha = glassAlpha
             }
-            glass.alpha = if (!miniVisible && progress == 0f) 0f else 1f - blend(0.35f, 0.6f)
         }
         find("player_sheet_container")?.let { v ->
             val original = save(v)
@@ -630,6 +646,17 @@ internal open class PhoneGlassSession(
             applyLayerAlpha(v, blend(0.6f, 0.85f))
         }
         find("player_root")?.background = if (materialProgress < 1f) null else states[find("player_root")]?.background
+        backdrop?.setCaptureEnabled(
+            hasVisibleBackdropConsumer(navGlass) ||
+                hasVisibleBackdropConsumer(navScrim) ||
+                hasVisibleBackdropConsumer(miniGlass),
+        )
+    }
+
+    private fun hasVisibleBackdropConsumer(view: View?): Boolean {
+        if (view == null || !view.isShown || view.alpha <= 0f) return false
+        backdropConsumerRect.setEmpty()
+        return view.getGlobalVisibleRect(backdropConsumerRect) && !backdropConsumerRect.isEmpty
     }
 
     override fun onSlide(progress: Float) { slide = progress.coerceIn(0f, 1f) }

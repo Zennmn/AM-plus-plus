@@ -84,21 +84,40 @@ class TabletLiquidGlassStructuralRegressionTest {
     }
 
     @Test
-    fun `keeps the sheet drag inside the capsule handles`() {
+    fun `keeps the sheet drag inside the capsule handles and hands the empty row down`() {
         val session = source("dev/amenhancer/module/hook/TabletDualPaneGlassSession.kt")
         val base = source("dev/amenhancer/module/hook/PhoneGlassSession.kt")
         val gate = source("dev/amenhancer/module/hook/TabletRowGestureGate.kt")
+        val runtime = source("dev/amenhancer/module/hook/PhoneGlassRuntime.kt")
+        val api = source("dev/amenhancer/module/hook/GlassSession.kt")
         // Sliding the empty band must not drag-expand the player. The flat host decides
         // that inside the sheet Behavior (it captures the sheet as the top child of
         // player_container), so the row publishes its band and the gate suppresses the
         // Behavior's own touch entries; no sibling view can block that capture.
         assertTrue(session.contains("updateRowGestureOwnership"))
         assertTrue(session.contains("TabletRowGestureGate.publish"))
-        assertTrue(session.contains("TabletRowBand(frameWidth, navSlot, miniSlot, dp(ROW_HANDLE_SLOP_DP))"))
-        assertTrue(session.contains("listOfNotNull(sheet, container, find(\"bottom_navigation_root_flat\"))"))
+        assertTrue(session.contains("TabletRowBand(handles, dp(ROW_HANDLE_SLOP_DP))"))
         assertTrue(base.contains("updateRowGestureOwnership(frame.width, slide == 0f)"))
         assertTrue(gate.contains("param.result = false"))
         assertTrue(gate.contains("isTouchEntry"))
+        // The handles are the glass capsules' own rectangles, and the shape inside them is
+        // the drawn stadium: its rounded corners stay part of the empty row.
+        assertTrue(session.contains("RowCapsuleRect("))
+        assertTrue(session.contains("frame.getGlobalVisibleRect"))
+        assertTrue(session.contains("sheetRect.left + miniSlot[0]"))
+        assertTrue(gate.contains("data class RowCapsuleRect"))
+        assertTrue(gate.contains("val radius = min(b - t, r - l) / 2f"))
+        // A down event on the empty row belongs to the page below: the runtime skips the
+        // native dispatch of the full-screen bar root and sheet, while the session allows
+        // that only with the tablet glass activated and the row at rest.
+        assertTrue(api.contains("fun managesTouchRoot(view: View): Boolean = false"))
+        assertTrue(api.contains("fun shouldDispatch(view: View, event: MotionEvent): Boolean = true"))
+        assertTrue(runtime.contains("managesTouchRoot(root)"))
+        assertTrue(runtime.contains("shouldDispatch(root, event)"))
+        assertTrue(session.contains("override fun managesTouchRoot"))
+        assertTrue(session.contains("override fun shouldDispatch"))
+        assertTrue(session.contains("!activated || !rowAtRest"))
+        assertTrue(session.contains("TabletRowGestureGate.isRowWhitespace"))
         // The previous transparent shields are gone: a view under the band is invisible
         // to the helper's layout-bounds pick, so they could never own the gesture.
         assertFalse(session.contains("shield"))

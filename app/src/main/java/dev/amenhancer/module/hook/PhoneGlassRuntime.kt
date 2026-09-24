@@ -99,7 +99,17 @@ internal object PhoneGlassRuntime {
         ModernXposedRuntime.hookMethod(ViewGroup::class.java.getDeclaredMethod("dispatchTouchEvent", MotionEvent::class.java), object : ModernMethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 val root = param.thisObject as? View ?: return
-                sessions.values.firstOrNull { it.miniRoot === root }?.observeTouch(param.args[0] as MotionEvent)
+                val event = param.args[0] as MotionEvent
+                // The tablet bar root and player sheet are full-screen even where no capsule
+                // is drawn. A down event in that empty row belongs to the page below, so the
+                // native dispatch is skipped instead of swallowing the gesture in the bar.
+                sessions.values.firstOrNull { it.managesTouchRoot(root) }?.let { session ->
+                    if (!session.shouldDispatch(root, event)) {
+                        param.result = false
+                        return
+                    }
+                }
+                sessions.values.firstOrNull { it.miniRoot === root }?.observeTouch(event)
             }
         })
         val behavior = loader.loadClass("com.apple.android.music.player.PlayerBottomSheetBehavior")

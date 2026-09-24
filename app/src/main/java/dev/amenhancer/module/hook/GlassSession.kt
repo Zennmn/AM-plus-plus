@@ -1,6 +1,7 @@
 package dev.amenhancer.module.hook
 
 import android.view.MotionEvent
+import android.view.View
 import android.widget.FrameLayout
 
 /**
@@ -15,6 +16,15 @@ internal interface GlassSession : AutoCloseable {
 
     fun attachAvailableViews()
     fun ownsCurrentHierarchy(): Boolean
+
+    /**
+     * The full-width layers whose own dispatch decides whether a collapsed-row gesture
+     * reaches the page below. Only the tablet dual-pane session owns such a root.
+     */
+    fun managesTouchRoot(view: View): Boolean = false
+
+    /** False lets the page below own this down event: the row is empty at that point. */
+    fun shouldDispatch(view: View, event: MotionEvent): Boolean = true
     fun onSlide(progress: Float)
     fun observeNativePeek(height: Int)
     fun peekHeight(): Int

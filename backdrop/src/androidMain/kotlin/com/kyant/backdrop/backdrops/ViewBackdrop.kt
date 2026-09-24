@@ -44,12 +44,26 @@ class ViewBackdrop(
     private var observer: ViewTreeObserver? = null
     private var recording = false
     private var closed = false
+    private var captureEnabled = true
+    private var recaptureOnNextDraw = false
     var ready: Boolean = false
         private set
     var recordings: Long = 0
         private set
 
     override val isCoordinatesDependent = true
+
+    /** Repaint consumers after their host view moves, even when the source is static. */
+    fun invalidateTargetPosition() {
+        if (ready && captureEnabled && !closed) generation++
+    }
+
+    /** Avoid snapshotting the source while every glass consumer is hidden or off-screen. */
+    fun setCaptureEnabled(enabled: Boolean) {
+        if (captureEnabled == enabled) return
+        captureEnabled = enabled
+        if (enabled) recaptureOnNextDraw = true
+    }
 
     fun start() {
         check(!closed)
@@ -58,13 +72,13 @@ class ViewBackdrop(
     }
 
     override fun onPreDraw(): Boolean {
-        if (closed || recording || !source.isAttachedToWindow || source.width == 0 || source.height == 0) return true
+        if (closed || !captureEnabled || recording || !source.isAttachedToWindow || source.width == 0 || source.height == 0) return true
         try {
             check(source.isHardwareAccelerated) { "Hardware accelerated window required" }
             updateSourceMatrix()
             sourceToWindow.getValues(matrixValues)
             val moved = !matrixValues.contentEquals(previousMatrix)
-            if (!ready || source.isDirty || moved || node.width != source.width || node.height != source.height) {
+            if (!ready || recaptureOnNextDraw || source.isDirty || moved || node.width != source.width || node.height != source.height) {
                 recording = true
                 node.setPosition(0, 0, source.width, source.height)
                 val canvas = node.beginRecording()
@@ -74,6 +88,7 @@ class ViewBackdrop(
                 } finally { node.endRecording(); recording = false }
                 matrixValues.copyInto(previousMatrix)
                 ready = true
+                recaptureOnNextDraw = false
                 recordings++
                 generation++
             }
