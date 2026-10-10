@@ -2,29 +2,28 @@ package dev.amenhancer.module.hook.tabletmedia
 
 import kotlin.math.roundToInt
 
-/** Arrange actual touch rectangles inside the existing 25% controls, never grow that container. */
+/** Fit additions into the native footer, leaving the 25% controls' own layout untouched. */
 internal object TabletComponentGeometry {
-    data class Rows(val transportTop: Int, val transportHeight: Int, val volumeTop: Int?,
-        val volumeHeight: Int, val footerTop: Int, val footerHeight: Int)
-
-    fun rows(height: Int, progressHeight: Int, density: Float): Rows? {
-        if (height <= 0 || progressHeight < 0 || !density.isFinite() || density <= 0f) return null
+    data class Slot(val left: Int, val top: Int, val width: Int, val height: Int)
+    fun bottomVolume(left: Int, right: Int, center: Int, contentBottom: Int,
+        blockers: List<IntRange>, density: Float): Slot? {
+        if (right <= left || !density.isFinite() || density <= 0f) return null
         fun dp(value: Int) = (value * density).roundToInt()
-        val footer = dp(44); val bottom = dp(12); val volume = dp(44)
-        val footerTop = height - bottom - footer
-        // Prefer the reference's compact row. Retain a full touch target on shorter windows.
-        for (transport in listOf(dp(52), dp(44))) {
-            val gap = dp(4)
-            val spare = footerTop - progressHeight - transport - volume - gap * 3
-            if (spare >= 0) {
-                val top = progressHeight + gap + spare / 3
-                return Rows(top, transport, top + transport + gap + spare / 3, volume, footerTop, footer)
+        val height = dp(44); val top = center - height / 2
+        if (top < 0 || top < contentBottom + dp(4)) return null
+        var spaces = listOf(left until right)
+        blockers.filterNot { it.isEmpty() }.forEach { block ->
+            val start = block.first - dp(8); val end = block.last + 1 + dp(8)
+            spaces = spaces.flatMap { span ->
+                if (end <= span.first || start > span.last) listOf(span)
+                else listOf(span.first until minOf(start, span.last + 1),
+                    maxOf(end, span.first) until span.last + 1).filterNot { it.isEmpty() }
             }
         }
-        val gap = dp(4); val transport = dp(44)
-        if (footerTop - progressHeight < transport + gap * 2) return null
-        val top = progressHeight + (footerTop - progressHeight - transport) / 2
-        return Rows(top, transport, null, volume, footerTop, footer)
+        // Icons consume 80dp; leave at least a 48dp track for a usable volume gesture.
+        val span = spaces.maxByOrNull { it.last + 1 - it.first } ?: return null
+        val width = span.last + 1 - span.first
+        return if (width >= dp(128)) Slot(span.first, top, width, height) else null
     }
 
     fun centeredOffset(parentWidth: Int, left: Int, width: Int): Float? {
@@ -32,6 +31,4 @@ internal object TabletComponentGeometry {
         return (parentWidth - width) / 2f - left
     }
 
-    fun deviceLabelWidth(left: Int, columnRight: Int, blockers: List<Int>, gap: Int, maximum: Int): Int =
-        (minOf(columnRight, blockers.minOrNull()?.minus(gap) ?: columnRight) - left).coerceIn(0, maximum.coerceAtLeast(0))
 }
