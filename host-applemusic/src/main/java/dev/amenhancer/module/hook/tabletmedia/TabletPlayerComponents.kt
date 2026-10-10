@@ -140,8 +140,39 @@ internal class TabletPlayerComponents(
         retained.forEach(::hideSource)
     }
     private fun percentTarget(group: ViewGroup): View? = (group.parent as? View)?.takeIf { it.id == id("controls") }
-    private fun prepareGroup(group: ViewGroup): Boolean =
-        percentTarget(group)?.let { rows.percentage(it, .25f) } ?: false
+    private fun startViews(group: ViewGroup): List<View> {
+        val parent = group.parent as? View ?: group
+        return listOfNotNull(group, find(parent, "metadata_guideline_start"))
+    }
+    private fun prepareGroup(group: ViewGroup): Boolean {
+        var changed = percentTarget(group)?.let { rows.percentage(it, .25f) } ?: false
+        val parent = group.parent as? View ?: group
+        find(parent, "metadata_guideline_start")?.let { if (rows.startInset(it, guideline = true)) changed = true }
+        if (rows.startInset(group)) changed = true
+        alignTransport(group)
+        return changed
+    }
+    private fun progress(group: ViewGroup): View? = listOf("seek_bar_controls", "live_radio_container")
+        .mapNotNull { find(group, it) }.firstOrNull { it.isShown && it.height > 0 }
+    private fun progressTrack(progress: View): View = find(progress, "progress")?.takeIf { it.isShown && it.width > 0 } ?: progress
+    private fun alignTransport(group: ViewGroup) {
+        if (root.height <= 0 || group.height <= 0 || group.isLayoutRequested) return
+        val buttons = transportButtons(group)
+        val play = find(group, "play_pause") ?: return
+        val progress = progress(group) ?: return
+        val track = progressTrack(progress)
+        root.getLocationInWindow(origin)
+        val at = location(track)
+        val centerX = (at.first + track.paddingLeft + at.first + track.width - track.paddingRight) / 2
+        val halfHeight = (buttons.maxOfOrNull { it.height } ?: return) / 2
+        val preferred = at.second + track.height / 2 + (root.height * .062f).roundToInt()
+        // Keep native touch targets below the complete progress/time/badge row.
+        val centerY = maxOf(preferred, location(progress).second + progress.height + halfHeight)
+        val deltaX = centerX - (location(play).first + play.width / 2)
+        buttons.forEach {
+            move(it, location(it).first + deltaX, centerY - it.height / 2)
+        }
+    }
     private fun hideSource(view: View) {
         val current = hidden[view]
         if (current == null) hidden[view] = Hidden(view.alpha, view.isClickable, view.importantForAccessibility)
@@ -183,7 +214,7 @@ internal class TabletPlayerComponents(
         // Both retained fragments can draw during a queue crossfade. Hide their
         // native actions before the transition fast path or any relayout return.
         suppressNativeActions()
-        if (!transitioning) prepare()
+        prepare()
         val visible = root.isShown && expansion > .001f
         if (transitioning && placed) {
             overlay.alpha = expansion
@@ -200,8 +231,7 @@ internal class TabletPlayerComponents(
         val nativeLyrics = find(group, "player_lyrics") ?: return
         val nativeQueue = find(group, "player_queue") ?: return
         if (group.isLayoutRequested) { overlay.visibility = View.INVISIBLE; return }
-        val progress = listOf("seek_bar_controls", "live_radio_container").mapNotNull { find(group, it) }
-            .firstOrNull { it.isShown && it.height > 0 } ?: return
+        val progress = progress(group) ?: return
         root.getLocationInWindow(origin)
         val column = location(group)
         // Keep the right actions at their current 44dp / 12dp-from-bottom positions.
@@ -231,16 +261,12 @@ internal class TabletPlayerComponents(
             val a = location(nativeLyrics); val b = location(nativeQueue)
             place(lyrics, a.first, footerTop, size, size); place(queue, b.first, footerTop, size, size)
         }
-        val nativeProgress = find(progress, "progress")?.takeIf { it.isShown && it.width > 0 } ?: progress
+        val nativeProgress = progressTrack(progress)
         val progressAt = location(nativeProgress)
         val progressLeft = progressAt.first + nativeProgress.paddingLeft
         val progressRight = progressAt.first + nativeProgress.width - nativeProgress.paddingRight
-        // The invisible native actions retain their dimensions and constraints:
-        // Align output to the existing raised row, then lift volume another 2dp.
-        val nativeFooterAt = location(nativeLyrics)
-        val center = nativeFooterAt.second + nativeLyrics.height / 2
-        val outputCenter = center - dp(4)
-        val volumeCenter = outputCenter - dp(2)
+        // Keep the recent reference spacing, with output centered on the fitted volume row.
+        val volumeCenter = location(play).second + play.height / 2 + (root.height * .061f).roundToInt()
         val contentBottom = (listOf(play, previous, next, progress)).maxOf { location(it).second + it.height }
         // Volume owns the replaced footer. Fit it first, keeping the visible glyph sizes.
         val slot = if (nativeLyrics.height > 0) TabletComponentGeometry.bottomVolume(progressLeft,
@@ -249,13 +275,10 @@ internal class TabletPlayerComponents(
         if (slot != null) place(volume, slot.left, slot.top, slot.width, slot.height)
         else volume.visibility = View.INVISIBLE
         volume.setPageVisible(visible && expansion >= .999f && volume.visibility == View.VISIBLE)
-        // Follow any necessary volume displacement, retaining the requested 2dp center separation.
-        val outputTop = slot?.let { it.top + it.height / 2 + dp(2) - size / 2 }
-            ?: if (nativeLyrics.height > 0) outputCenter - size / 2 else footerTop - dp(4)
         // Keep the corner action outside the progress edge, even when the song column centers.
-        val corner = TabletComponentGeometry.cornerOutput(systemInsets?.left ?: 0,
-            progressLeft - horizontalOffset().roundToInt(), outputTop,
-            root.resources.displayMetrics.density)
+        val corner = slot?.let { TabletComponentGeometry.cornerOutput(systemInsets?.left ?: 0,
+            progressLeft - horizontalOffset().roundToInt(), it.top + it.height / 2 - size / 2,
+            root.resources.displayMetrics.density) }
         if (corner != null) place(output, corner.left, corner.top, corner.width, corner.height)
         else output.visibility = View.INVISIBLE
 
@@ -281,10 +304,11 @@ internal class TabletPlayerComponents(
             rows.lyricViewport(gradients, if (vocal != null) (top + dp(8) - parentTop).coerceAtLeast(0) else 0,
                 0)
         }
-        translations.keys.toList().filter { it !== vocal && it !== limits }.forEach(::restoreTranslation)
+        val retainedButtons = groups(songHost).flatMap(::transportButtons)
+        translations.keys.toList().filter { it !== vocal && it !== limits && it !in retainedButtons }.forEach(::restoreTranslation)
         // Keep every retained pane prepared, including the collapsed sheet and outgoing queue.
         val retained = groups(songHost).mapNotNull(::percentTarget)
-        rows.retain(retained + listOfNotNull(gradients))
+        rows.retain(retained + listOfNotNull(gradients) + groups(songHost).flatMap(::startViews))
         transportRipple.retain(groups(songHost).flatMap(::transportButtons))
         overlay.visibility = if (visible) View.VISIBLE else View.INVISIBLE; placed = true
         if (visible && !running) { running = true; main.postDelayed(poll, 500) }
