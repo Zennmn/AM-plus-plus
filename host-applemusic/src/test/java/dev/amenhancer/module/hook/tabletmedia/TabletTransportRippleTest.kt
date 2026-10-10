@@ -13,11 +13,14 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.util.ReflectionHelpers
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33], manifest = Config.NONE)
 class TabletTransportRippleTest {
+    private fun color(drawable: RippleDrawable): ColorStateList =
+        ReflectionHelpers.getField(ReflectionHelpers.getField<Any>(drawable, "mState"), "mColor")
     private fun button(activity: Activity) = ImageView(activity).apply {
         layoutParams = FrameLayout.LayoutParams(66, 68)
         setPadding(11, 11, 11, 11)
@@ -39,6 +42,7 @@ class TabletTransportRippleTest {
             layout(view, 66, 68); style.apply(view)
             val background = view.background as RippleDrawable
             assertEquals(31, background.radius)
+            assertEquals(51, Color.alpha(color(background).defaultColor))
             assertEquals(66, view.width); assertEquals(68, view.height)
             assertSame(icon, view.drawable); assertSame(params, view.layoutParams)
             assertEquals(11, view.paddingTop); assertEquals(11, view.paddingBottom)
@@ -58,18 +62,45 @@ class TabletTransportRippleTest {
         val background = view.background as RippleDrawable
         val other = background.constantState!!.newDrawable() as RippleDrawable
         val originalRadius = background.radius
+        val originalColor = color(background)
         try {
             style.apply(view)
-            assertNotEquals(originalRadius, background.radius)
+            val applied = view.background as RippleDrawable
+            assertNotSame(background, applied)
+            assertNotEquals(originalRadius, applied.radius)
+            assertEquals(51, Color.alpha(color(applied).defaultColor))
+            assertEquals(originalColor.defaultColor, color(other).defaultColor)
             assertEquals(originalRadius, other.radius)
-            assertSame(view, background.callback)
+            assertSame(view, applied.callback)
             style.retain(emptyList())
             assertEquals(originalRadius, background.radius)
+            assertSame(background, view.background)
+            assertSame(originalColor, color(background))
             style.apply(view); style.close()
             assertEquals(originalRadius, background.radius)
+            assertSame(background, view.background)
+            assertSame(originalColor, color(background))
             val replacement = RippleDrawable(ColorStateList.valueOf(Color.RED), null, null).apply { radius = 40 }
             style.apply(view); view.background = replacement; style.close()
             assertSame(replacement, view.background); assertEquals(40, replacement.radius)
+            assertEquals(Color.RED, color(replacement).defaultColor)
+        } finally { style.close(); activity.finish() }
+    }
+    @Test fun softerRipplePreservesTheOriginalSelectorAndReusesItsAppliedDrawable() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        val style = TabletTransportRipple(); val view = button(activity)
+        val pressed = intArrayOf(android.R.attr.state_pressed)
+        val colors = ColorStateList(arrayOf(pressed, intArrayOf()), intArrayOf(Color.CYAN, Color.WHITE))
+        val background = view.background as RippleDrawable
+        background.setColor(colors)
+        try {
+            style.apply(view)
+            assertSame(colors, color(background))
+            val applied = view.background as RippleDrawable
+            assertEquals(Color.argb(51, 255, 255, 255), color(applied).defaultColor)
+            style.apply(view); assertSame(applied, view.background)
+            style.close(); assertSame(background, view.background)
+            assertSame(colors, color(background))
         } finally { style.close(); activity.finish() }
     }
 }
