@@ -216,9 +216,16 @@ internal class TabletPlayerComponents(
         overlay.z = maxOf(songHost.z, rightHost.z) + dp(2)
         overlay.alpha = alpha(group)
         val size = dp(44)
-        val systemInsets = if (Build.VERSION.SDK_INT >= 30)
-            root.rootWindowInsets?.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.systemBars()) else null
-        val rightInset = systemInsets?.right ?: 0
+        val leftInset: Int
+        val rightInset: Int
+        if (Build.VERSION.SDK_INT >= 30) {
+            val systemInsets = root.rootWindowInsets?.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.systemBars())
+            leftInset = systemInsets?.left ?: 0
+            rightInset = systemInsets?.right ?: 0
+        } else {
+            leftInset = 0
+            rightInset = 0
+        }
         val queueLeft = root.width - rightInset - dp(44) - size
         val lyricsLeft = queueLeft - dp(8) - size
         val pairFits = lyricsLeft >= column.first + group.width + dp(16)
@@ -256,7 +263,7 @@ internal class TabletPlayerComponents(
         val outputTop = slot?.let { it.top + it.height / 2 + dp(2) - size / 2 }
             ?: if (nativeLyrics.height > 0) outputCenter - size / 2 else footerTop - dp(4)
         // Keep the corner action outside the progress edge, even when the song column centers.
-        val corner = TabletComponentGeometry.cornerOutput(systemInsets?.left ?: 0,
+        val corner = TabletComponentGeometry.cornerOutput(leftInset,
             progressLeft - horizontalOffset().roundToInt(), outputTop,
             root.resources.displayMetrics.density)
         if (corner != null) place(output, corner.left, corner.top, corner.width, corner.height)
