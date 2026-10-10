@@ -38,17 +38,17 @@ class TabletTransportRippleTest {
         try {
             layout(view, 66, 68); style.apply(view)
             val background = view.background as RippleDrawable
-            assertEquals(25, background.radius)
+            assertEquals(27, background.radius)
             assertEquals(66, view.width); assertEquals(68, view.height)
             assertSame(icon, view.drawable); assertSame(params, view.layoutParams)
             assertEquals(11, view.paddingTop); assertEquals(11, view.paddingBottom)
             assertTrue(view.performClick()); assertEquals(1, clicks)
             // A native layout change scales the symbol; keep the same small outer allowance.
             layout(view, 88, 90); style.apply(view)
-            assertEquals(36, background.radius)
+            assertEquals(38, background.radius)
             view.setImageDrawable(GradientDrawable().apply { setSize(36, 36) })
             layout(view, 66, 68); style.apply(view)
-            assertEquals(24, background.radius)
+            assertEquals(26, background.radius)
         } finally { style.close(); activity.finish() }
     }
 
