@@ -2,10 +2,7 @@ package dev.amenhancer.module.hook.tabletmedia
 
 import android.content.res.ColorStateList
 import android.graphics.Color
-import android.media.AudioManager
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -19,7 +16,6 @@ internal class TabletPlayerComponents(
     private val root: ViewGroup, private val songHost: ViewGroup,
     private val rightHost: ViewGroup, private val songVisible: () -> Boolean,
     private val lyricsExpanded: () -> Boolean, private val lyricsClick: () -> Unit,
-    private val horizontalOffset: () -> Float = { 0f },
     private val currentLyricsAvailability: (() -> Boolean?)? = null,
 ) : AutoCloseable {
     private val overlay = FrameLayout(root.context).apply { clipChildren = false; clipToPadding = false }
@@ -33,17 +29,10 @@ internal class TabletPlayerComponents(
     private data class Hidden(val alpha: Float, val clickable: Boolean, val accessibility: Int)
     private val hidden = IdentityHashMap<View, Hidden>()
     private val translations = IdentityHashMap<View, Pair<Float, Float>>()
-    private val main = Handler(Looper.getMainLooper())
-    private var running = false
     private var closed = false
     private var placed = false
     private val actionStyle = TabletNativeActionStyle()
     private val transportRipple = TabletTransportRipple()
-    private val outputIcon = IosDeviceOutputDrawable.Factory(TabletMediaAssets, root.resources).create()
-    private val output = button().apply {
-        setImageDrawable(outputIcon); contentDescription = "音频输出"
-        setOnClickListener { PlatformAudioOutputSwitcher.open(context) }
-    }
     private var lyricsSource: View? = null
     private var queueSource: View? = null
     private val lyrics = nativeButton("selector_nowplaying_lyrics").apply {
@@ -55,22 +44,11 @@ internal class TabletPlayerComponents(
         setOnLongClickListener { queueSource?.takeIf { it.isEnabled }?.performLongClick() == true }
     }
     private val volume = IosVolumeSliderView(root.context)
-    private val views get() = listOf(output, lyrics, queue, volume)
-    private val audio = SystemAudioOutput(root.context, root.context.getSystemService(AudioManager::class.java)) {
-        root.postInvalidateOnAnimation()
-    }
-    private val poll = object : Runnable {
-        override fun run() {
-            if (!running || closed) return
-            refreshOutput(); root.postInvalidateOnAnimation()
-            main.postDelayed(this, 500)
-        }
-    }
+    private val views get() = listOf(lyrics, queue, volume)
     init {
         views.forEach { view -> view.visibility = View.INVISIBLE; overlay.addView(view, FrameLayout.LayoutParams(1, 1)) }
         overlay.visibility = View.INVISIBLE
         root.addView(overlay, ViewGroup.LayoutParams(-1, -1))
-        refreshOutput()
     }
     private fun button() = ImageButton(root.context).apply {
         background = null; scaleType = ImageView.ScaleType.FIT_CENTER
@@ -82,11 +60,6 @@ internal class TabletPlayerComponents(
         scaleType = ImageView.ScaleType.CENTER; setPadding(0, 0, 0, 0)
         root.resources.getIdentifier(drawable, "drawable", root.context.packageName)
             .takeIf { it != 0 }?.let(::setImageResource)
-    }
-    private fun refreshOutput() {
-        val state = audio.current()
-        outputIcon.kind = state.icon
-        output.contentDescription = state.name?.let { "音频输出 · $it" } ?: "音频输出"
     }
     private fun location(view: View): Pair<Int, Int> {
         view.getLocationInWindow(point)
@@ -192,9 +165,8 @@ internal class TabletPlayerComponents(
         if (transitioning && placed) {
             overlay.alpha = expansion
             overlay.visibility = if (visible) View.VISIBLE else View.INVISIBLE
-            listOf(lyrics, queue, output).forEach { it.isEnabled = false }
+            listOf(lyrics, queue).forEach { it.isEnabled = false }
             volume.setPageVisible(false)
-            if (!visible) stopPolling()
             return
         }
         val group = controls() ?: run { overlay.visibility = View.INVISIBLE; return }
@@ -216,21 +188,18 @@ internal class TabletPlayerComponents(
         overlay.z = maxOf(songHost.z, rightHost.z) + dp(2)
         overlay.alpha = alpha(group)
         val size = dp(44)
-        val leftInset: Int
         val rightInset: Int
         if (Build.VERSION.SDK_INT >= 30) {
             val systemInsets = root.rootWindowInsets?.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.systemBars())
-            leftInset = systemInsets?.left ?: 0
             rightInset = systemInsets?.right ?: 0
         } else {
-            leftInset = 0
             rightInset = 0
         }
         val queueLeft = root.width - rightInset - dp(44) - size
         val lyricsLeft = queueLeft - dp(8) - size
         val pairFits = lyricsLeft >= column.first + group.width + dp(16)
         lyricsSource = nativeLyrics; queueSource = nativeQueue
-        lyrics.isEnabled = lyricsAvailable() == true; queue.isEnabled = nativeQueue.isEnabled; output.isEnabled = true
+        lyrics.isEnabled = lyricsAvailable() == true; queue.isEnabled = nativeQueue.isEnabled
         lyrics.contentDescription = nativeLyrics.contentDescription; queue.contentDescription = nativeQueue.contentDescription
         actionStyle.bind(lyrics, nativeLyrics as? ImageView)
         actionStyle.bind(queue, nativeQueue as? ImageView)
@@ -246,11 +215,10 @@ internal class TabletPlayerComponents(
         val progressLeft = progressAt.first + nativeProgress.paddingLeft
         val progressRight = progressAt.first + nativeProgress.width - nativeProgress.paddingRight
         // The invisible native actions retain their dimensions and constraints:
-        // Align output to the existing raised row, then lift volume another 2dp.
+        // Preserve the volume row's existing 4dp + 2dp lift.
         val nativeFooterAt = location(nativeLyrics)
         val center = nativeFooterAt.second + nativeLyrics.height / 2
-        val outputCenter = center - dp(4)
-        val volumeCenter = outputCenter - dp(2)
+        val volumeCenter = center - dp(4) - dp(2)
         val contentBottom = (listOf(play, previous, next, progress)).maxOf { location(it).second + it.height }
         // Volume owns the replaced footer. Fit it first, keeping the visible glyph sizes.
         val slot = if (nativeLyrics.height > 0) TabletComponentGeometry.bottomVolume(progressLeft,
@@ -259,16 +227,6 @@ internal class TabletPlayerComponents(
         if (slot != null) place(volume, slot.left, slot.top, slot.width, slot.height)
         else volume.visibility = View.INVISIBLE
         volume.setPageVisible(visible && expansion >= .999f && volume.visibility == View.VISIBLE)
-        // Follow any necessary volume displacement, retaining the requested 2dp center separation.
-        val outputTop = slot?.let { it.top + it.height / 2 + dp(2) - size / 2 }
-            ?: if (nativeLyrics.height > 0) outputCenter - size / 2 else footerTop - dp(4)
-        // Keep the corner action outside the progress edge, even when the song column centers.
-        val corner = TabletComponentGeometry.cornerOutput(leftInset,
-            progressLeft - horizontalOffset().roundToInt(), outputTop,
-            root.resources.displayMetrics.density)
-        if (corner != null) place(output, corner.left, corner.top, corner.width, corner.height)
-        else output.visibility = View.INVISIBLE
-
         val vocal = find(rightHost, "vocal_ctrl")?.takeIf { it.isShown && it.width > 0 }
         val limits = vocal?.let { find(rightHost, "vocal_ctrl_drag_limits") }
         val topInset = if (Build.VERSION.SDK_INT >= 30)
@@ -297,12 +255,9 @@ internal class TabletPlayerComponents(
         rows.retain(retained + listOfNotNull(gradients))
         transportRipple.retain(groups(songHost).flatMap(::transportButtons))
         overlay.visibility = if (visible) View.VISIBLE else View.INVISIBLE; placed = true
-        if (visible && !running) { running = true; main.postDelayed(poll, 500) }
-        else if (!visible) stopPolling()
     }
-    private fun stopPolling() { running = false; main.removeCallbacks(poll) }
     private fun restore() {
-        overlay.visibility = View.INVISIBLE; placed = false; volume.setPageVisible(false); stopPolling()
+        overlay.visibility = View.INVISIBLE; placed = false; volume.setPageVisible(false)
         hidden.keys.toList().forEach(::restoreSource); translations.keys.toList().forEach(::restoreTranslation)
         rows.close()
         transportRipple.close()
@@ -311,6 +266,6 @@ internal class TabletPlayerComponents(
     }
     override fun close() {
         if (closed) return
-        closed = true; restore(); volume.close(); audio.close(); root.removeView(overlay)
+        closed = true; restore(); volume.close(); root.removeView(overlay)
     }
 }

@@ -127,7 +127,7 @@ class TabletComponentStartupTest {
             assertEquals(.345f, percent.matchConstraintPercentHeight, 0f)
         } finally { components.close(); activity.finish() }
     }
-    @Test fun outputStaysInTheCornerAndVolumeFollowsProgressBoundsWhileTheRightButtonsKeepTheirPositions() {
+    @Test fun volumeFollowsProgressBoundsWithoutOutputWhileTheRightButtonsKeepTheirPositions() {
         val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
         val density = activity.resources.displayMetrics.density
         fun dp(value: Int) = kotlin.math.round(value * density).toInt()
@@ -135,11 +135,10 @@ class TabletComponentStartupTest {
         activity.setContentView(root)
         root.addView(song, FrameLayout.LayoutParams(dp(504), dp(800)).apply { leftMargin = dp(48) })
         root.addView(right, FrameLayout.LayoutParams(dp(568), dp(800)).apply { leftMargin = dp(616) })
-        var offset = 0f
         var lyricClicks = 0
         var songVisible = true
         var lyricsExpanded = true
-        val components = TabletPlayerComponents(root, song, right, { songVisible }, { lyricsExpanded }, { lyricClicks++ }, { offset })
+        val components = TabletPlayerComponents(root, song, right, { songVisible }, { lyricsExpanded }, { lyricClicks++ })
         val names = listOf("player_controls", "play_pause", "previous_rewind", "next_fast_forward",
             "player_lyrics", "player_queue", "media_route_button", "seek_bar_controls", "progress")
         val ids = resourceIds(components, names)
@@ -162,16 +161,15 @@ class TabletComponentStartupTest {
             root.layout(0, 0, dp(1200), dp(800))
             components.update(1f, false)
             val overlay = root.getChildAt(2) as FrameLayout
-            val output = overlay.getChildAt(0); val lyrics = overlay.getChildAt(1)
-            val queue = overlay.getChildAt(2); val volume = overlay.getChildAt(3)
+            assertEquals(3, overlay.childCount)
+            val lyrics = overlay.getChildAt(0); val queue = overlay.getChildAt(1)
+            val volume = overlay.getChildAt(2)
+            val nativeOutput = group.findViewById<View>(ids.getValue("media_route_button"))
+            assertEquals(0f, nativeOutput.alpha, 0f); assertFalse(nativeOutput.isClickable)
             assertEquals(View.VISIBLE, volume.visibility)
             assertEquals(group.top + nativeFooter.top + nativeFooter.height / 2 - dp(4) - dp(2), volume.top + volume.height / 2)
-            assertEquals(volume.top + dp(2), output.top)
-            assertEquals(dp(12), output.left)
-            assertTrue(volume.left >= output.right + dp(8))
             assertEquals(song.left + track.left + track.paddingLeft, volume.left)
             assertEquals(song.left + track.right - track.paddingRight, volume.right)
-            assertEquals(dp(26), root.height - output.bottom)
             assertEquals(dp(28), root.height - volume.bottom)
             assertEquals(true, components.lyricsAvailable())
             lyrics.performClick(); assertEquals(1, lyricClicks)
@@ -188,7 +186,7 @@ class TabletComponentStartupTest {
             assertEquals(true, components.lyricsAvailable()); assertTrue(lyrics.isEnabled)
             lyrics.performClick(); assertEquals(2, lyricClicks)
             right.visibility = View.VISIBLE
-            offset = 0f; song.translationX = 0f
+            song.translationX = 0f
             listOf(180, 160, 220).forEach { height ->
                 group.layoutParams = (group.layoutParams as FrameLayout.LayoutParams).apply { this.height = dp(height) }
                 root.measure(View.MeasureSpec.makeMeasureSpec(dp(1200), View.MeasureSpec.EXACTLY),
@@ -201,14 +199,7 @@ class TabletComponentStartupTest {
                 assertTrue(volume.top >= group.top + dp(50) + dp(66) + dp(4))
                 assertTrue(volume.bottom <= root.height)
                 assertTrue(volume.height >= dp(24))
-                if (height == 160) {
-                    assertEquals(View.INVISIBLE, output.visibility)
-                    assertEquals(dp(40), volume.height)
-                } else {
-                    assertEquals(View.VISIBLE, output.visibility)
-                    assertEquals(volume.top + volume.height / 2 + dp(2), output.top + output.height / 2)
-                    assertEquals(dp(44), volume.height)
-                }
+                assertEquals(dp(if (height == 160) 40 else 44), volume.height)
                 val shortRightTop = group.top + group.height - dp(12) - dp(44)
                 assertEquals(shortRightTop, lyrics.top); assertEquals(shortRightTop, queue.top)
                 names.subList(1, 4).forEach { name -> assertEquals(dp(66), group.findViewById<View>(ids.getValue(name)).height) }
@@ -219,24 +210,21 @@ class TabletComponentStartupTest {
             assertEquals(root.width - dp(44) - dp(44), queue.left)
             assertEquals(queue.left - dp(8) - dp(44), lyrics.left)
             assertEquals(dp(60), nativeFooter.height)
-            offset = dp(300).toFloat(); song.translationX = offset
+            song.translationX = dp(300).toFloat()
             components.update(1f, false)
-            assertEquals(dp(12), output.left)
             assertEquals(song.left + dp(300) + track.left + track.paddingLeft, volume.left)
             assertEquals(song.left + dp(300) + track.right - track.paddingRight, volume.right)
             assertEquals(rightTop, lyrics.top); assertEquals(rightTop, queue.top)
-            assertEquals(dp(26), root.height - output.bottom)
             assertEquals(dp(28), root.height - volume.bottom)
             songVisible = false; lyricsExpanded = false; right.visibility = View.INVISIBLE
             // Native queue crossfade keeps the centered host and its already placed footer.
             components.update(1f, true)
-            assertEquals(dp(12), output.left)
+            assertEquals(0f, nativeOutput.alpha, 0f); assertFalse(nativeOutput.isClickable)
             assertEquals(song.left + dp(300) + track.left + track.paddingLeft, volume.left)
             assertEquals(View.INVISIBLE, right.visibility)
             components.update(1f, false)
             assertTrue(queue.isSelected); assertFalse(lyrics.isSelected)
             assertTrue(queue.isEnabled); assertTrue(lyrics.isEnabled)
-            assertEquals(dp(12), output.left)
             assertEquals(song.left + dp(300) + track.right - track.paddingRight, volume.right)
             assertEquals(rightTop, lyrics.top); assertEquals(rightTop, queue.top)
             assertEquals(View.INVISIBLE, right.visibility)
@@ -245,11 +233,9 @@ class TabletComponentStartupTest {
             try {
                 for (slide in listOf(.25f, .5f, .94f, .95f, 1f, .95f, .5f, .25f)) {
                     motion.apply(true, "QUEUE", slide, slide)
-                    offset = motion.horizontalOffset
                     components.update(slide, false)
                     assertEquals(song.left + dp(300) + track.left + track.paddingLeft, volume.left)
                     assertEquals(song.left + dp(300) + track.right - track.paddingRight, volume.right)
-                    assertEquals(dp(12), output.left)
                     assertEquals(rightTop, lyrics.top); assertEquals(rightTop, queue.top)
                     assertEquals(View.INVISIBLE, right.visibility)
                 }
@@ -314,7 +300,7 @@ class TabletComponentStartupTest {
                 View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY))
             root.layout(0, 0, 1200, 800)
             components.update(1f, false)
-            val proxy = (root.getChildAt(2) as FrameLayout).getChildAt(1)
+            val proxy = (root.getChildAt(2) as FrameLayout).getChildAt(0)
             val native = group.findViewById<View>(ids.getValue("player_lyrics"))
             assertTrue(proxy.isEnabled)
             proxy.performClick(); assertEquals(1, clicks)

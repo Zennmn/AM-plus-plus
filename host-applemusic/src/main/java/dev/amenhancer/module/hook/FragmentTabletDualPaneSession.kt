@@ -276,7 +276,7 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
         if (components == null) components = TabletPlayerComponents(root, songHost, right,
             { (paneField.get(controller) as? Enum<*>)?.name == "SONG" },
             { lyricsExpanded && components?.lyricsAvailable() != false }, ::toggleLyrics,
-            { paneMotion.horizontalOffset }, { nativeLyricsAvailability.available() })
+            currentLyricsAvailability = { nativeLyricsAvailability.available() })
     }
 
     fun prepareComponents(pane: View) {
