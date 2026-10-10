@@ -230,12 +230,13 @@ internal class TabletPlayerComponents(
         val progressLeft = progressAt.first + nativeProgress.paddingLeft
         val progressRight = progressAt.first + nativeProgress.width - nativeProgress.paddingRight
         // The invisible native actions retain their dimensions and constraints:
-        // offset volume up 4dp and output down 4dp without moving native playback controls.
+        // Align output to the existing raised row, then lift volume another 2dp.
         val nativeFooterAt = location(nativeLyrics)
         val center = nativeFooterAt.second + nativeLyrics.height / 2
-        val volumeCenter = center - dp(4)
+        val outputCenter = center - dp(4)
+        val volumeCenter = outputCenter - dp(2)
         val volumeTop = volumeCenter - size / 2
-        val outputTop = (if (nativeLyrics.height > 0) center - size / 2 else footerTop) + dp(4)
+        val outputTop = if (nativeLyrics.height > 0) outputCenter - size / 2 else footerTop - dp(4)
         // Keep the corner action outside the progress edge, even when the song column centers.
         val corner = TabletComponentGeometry.cornerOutput(systemInsets?.left ?: 0,
             progressLeft - horizontalOffset().roundToInt(), outputTop,
