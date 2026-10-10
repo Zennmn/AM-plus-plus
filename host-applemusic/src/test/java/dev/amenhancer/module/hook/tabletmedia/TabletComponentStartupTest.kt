@@ -46,12 +46,14 @@ class TabletComponentStartupTest {
         val song = FrameLayout(activity); val right = FrameLayout(activity)
         root.addView(song); root.addView(right)
         val components = TabletPlayerComponents(root, song, right, { true }, { true }, {})
-        val names = listOf("player_controls", "play_pause", "player_lyrics", "player_queue", "media_route_button")
+        val names = listOf("player_controls", "play_pause", "player_lyrics", "player_queue", "media_route_button",
+            "badge_platter", "shuffle_repeat_badge", "shareplay_badge", "router_name_textview")
         val ids = resourceIds(components, names)
         fun pane(): Pair<FrameLayout, List<View>> {
             val group = FrameLayout(activity).apply { id = ids.getValue("player_controls") }
             group.addView(View(activity).apply { id = ids.getValue("play_pause") })
-            val actions = names.drop(2).map { name -> View(activity).apply {
+            val actions = names.drop(2).map { name ->
+                (if (name == "badge_platter") FrameLayout(activity) else View(activity)).apply {
                 id = ids.getValue(name); alpha = .8f; isClickable = true
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
                 group.addView(this, FrameLayout.LayoutParams(44, 44))
@@ -73,7 +75,8 @@ class TabletComponentStartupTest {
             components.update(.5f, true)
             actions.forEach {
                 assertEquals(0f, it.alpha, 0f); assertFalse(it.isClickable)
-                assertEquals(View.IMPORTANT_FOR_ACCESSIBILITY_NO, it.importantForAccessibility)
+                assertEquals(if (it is android.view.ViewGroup) View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                    else View.IMPORTANT_FOR_ACCESSIBILITY_NO, it.importantForAccessibility)
             }
             components.close()
             actions.forEach {
@@ -124,7 +127,7 @@ class TabletComponentStartupTest {
             assertEquals(.345f, percent.matchConstraintPercentHeight, 0f)
         } finally { components.close(); activity.finish() }
     }
-    @Test fun volumeAndCornerOutputHaveSeparateRowsWhileTheRightButtonsKeepTheirPositions() {
+    @Test fun insufficientExtraSpaceHidesOnlyOutputAndKeepsVolumeInTheNativeFooter() {
         val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
         val density = activity.resources.displayMetrics.density
         fun dp(value: Int) = kotlin.math.round(value * density).toInt()
@@ -147,26 +150,41 @@ class TabletComponentStartupTest {
         }
         group.addView(View(activity).apply { id = ids.getValue("seek_bar_controls") }, FrameLayout.LayoutParams(dp(504), dp(41)))
         try {
-            root.measure(View.MeasureSpec.makeMeasureSpec(dp(1200), View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(dp(800), View.MeasureSpec.EXACTLY))
-            root.layout(0, 0, dp(1200), dp(800))
-            components.update(1f, false)
-            val overlay = root.getChildAt(2) as FrameLayout
-            val output = overlay.getChildAt(0); val lyrics = overlay.getChildAt(1)
-            val queue = overlay.getChildAt(2); val volume = overlay.getChildAt(3)
-            assertEquals(View.VISIBLE, volume.visibility)
-            assertEquals(dp(44), volume.height)
-            assertEquals(volume.bottom + dp(8), output.top)
-            assertEquals(song.left, volume.left)
-            assertEquals(song.left + dp(10), output.left)
-            assertEquals(song.left + group.width, volume.right)
-            val rightTop = group.top + group.height - dp(12) - dp(44)
-            assertEquals(rightTop, lyrics.top); assertEquals(rightTop, queue.top)
-            assertEquals(rightTop, output.top)
-            assertEquals(dp(44), lyrics.height); assertEquals(dp(44), queue.height)
-            assertEquals(root.width - dp(44) - dp(44), queue.left)
-            assertEquals(queue.left - dp(8) - dp(44), lyrics.left)
-            assertEquals(dp(60), nativeFooter.height)
+            // Exercise both fit states and a return to the shorter layout.
+            listOf(200, 256, 200).forEach { height ->
+                group.layoutParams = (group.layoutParams as FrameLayout.LayoutParams).apply { this.height = dp(height) }
+                root.measure(View.MeasureSpec.makeMeasureSpec(dp(1200), View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(dp(800), View.MeasureSpec.EXACTLY))
+                root.layout(0, 0, dp(1200), dp(800))
+                components.update(1f, false)
+                val overlay = root.getChildAt(2) as FrameLayout
+                val output = overlay.getChildAt(0); val lyrics = overlay.getChildAt(1)
+                val queue = overlay.getChildAt(2); val volume = overlay.getChildAt(3)
+                assertEquals(View.VISIBLE, volume.visibility)
+                assertEquals(dp(44), volume.height)
+                assertEquals(song.left, volume.left)
+                assertEquals(song.left + group.width, volume.right)
+                if (height == 200) {
+                    assertEquals(View.INVISIBLE, output.visibility)
+                    assertEquals(group.top + nativeFooter.top + nativeFooter.height / 2 - volume.height / 2, volume.top)
+                } else {
+                    assertEquals(View.VISIBLE, output.visibility)
+                    assertEquals(volume.bottom + dp(8), output.top)
+                    assertEquals(song.left + dp(10), output.left)
+                    assertEquals(group.top + group.height - dp(12) - dp(44), output.top)
+                }
+                val rightTop = group.top + group.height - dp(12) - dp(44)
+                assertEquals(rightTop, lyrics.top); assertEquals(rightTop, queue.top)
+                assertEquals(dp(44), lyrics.height); assertEquals(dp(44), queue.height)
+                assertEquals(root.width - dp(44) - dp(44), queue.left)
+                assertEquals(queue.left - dp(8) - dp(44), lyrics.left)
+                assertEquals(dp(60), nativeFooter.height)
+                names.subList(1, 4).forEach { name ->
+                    val transport = group.findViewById<View>(ids.getValue(name))
+                    assertEquals(dp(66), transport.height); assertEquals(dp(50), transport.top)
+                    assertTrue(volume.top >= group.top + transport.bottom)
+                }
+            }
         } finally { components.close(); activity.finish() }
     }
 }
