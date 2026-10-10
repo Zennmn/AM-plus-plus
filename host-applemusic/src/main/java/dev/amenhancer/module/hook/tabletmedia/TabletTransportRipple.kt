@@ -18,7 +18,7 @@ internal class TabletTransportRipple : AutoCloseable {
         if (bounds.isEmpty) bounds.set(0f, 0f, icon.intrinsicWidth.toFloat(), icon.intrinsicHeight.toFloat())
         if (bounds.isEmpty) return
         view.imageMatrix.mapRect(bounds)
-        val radius = (maxOf(bounds.width(), bounds.height()) / 2f + 4 * view.resources.displayMetrics.density).roundToInt()
+        val radius = (maxOf(bounds.width(), bounds.height()) / 2f + 8 * view.resources.displayMetrics.density).roundToInt()
         originals[view]?.takeIf { it.drawable !== background }?.let { originals.remove(view) }
         // Radius lives in constant state; isolate this host view from other native buttons.
         val own = background.mutate() as RippleDrawable
