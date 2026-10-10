@@ -166,8 +166,9 @@ internal object ConstraintLayoutPane {
         val params = constraintMarginParams(controls, "player_controls")
         val heightPercent = checkNotNull(constraintField(params.javaClass, "matchConstraintPercentHeight"))
         val nativeHeightPercent = heightPercent.getFloat(params)
+        // The native player excludes its top margin; 25% here is about 23% of the screen.
         // Keep the original params: the host's generic constructor drops native constraints.
-        heightPercent.setFloat(params, dev.amenhancer.module.hook.tabletmedia.TabletComponentGeometry.CONTROLS_HEIGHT_PERCENT)
+        heightPercent.setFloat(params, 0.25f)
         controls.layoutParams = params
         return {
             heightPercent.setFloat(params, nativeHeightPercent)

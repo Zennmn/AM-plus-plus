@@ -2,27 +2,28 @@ package dev.amenhancer.module.hook.tabletmedia
 
 import kotlin.math.roundToInt
 
-/** Volume owns the native footer; output is added only when a second row fits. */
+/** Fit additions into the native footer, leaving the 25% controls' own layout untouched. */
 internal object TabletComponentGeometry {
-    const val CONTROLS_HEIGHT_PERCENT = .25f
     data class Slot(val left: Int, val top: Int, val width: Int, val height: Int)
-    fun volumeAtNativeFooter(left: Int, right: Int, center: Int, density: Float): Slot? {
-        if (!density.isFinite() || density <= 0f) return null
-        return volumeSlot(left, right, center - (44 * density).roundToInt() / 2, density)
-    }
-    fun volumeAboveOutput(left: Int, right: Int, outputTop: Int, contentBottom: Int,
-        density: Float): Slot? {
-        if (!density.isFinite() || density <= 0f) return null
+    fun bottomVolume(left: Int, right: Int, center: Int, contentBottom: Int,
+        blockers: List<IntRange>, density: Float): Slot? {
+        if (right <= left || !density.isFinite() || density <= 0f) return null
         fun dp(value: Int) = (value * density).roundToInt()
-        val height = dp(44); val top = outputTop - dp(8) - height
+        val height = dp(44); val top = center - height / 2
         if (top < 0 || top < contentBottom + dp(4)) return null
-        return volumeSlot(left, right, top, density)
-    }
-    private fun volumeSlot(left: Int, right: Int, top: Int, density: Float): Slot? {
+        var spaces = listOf(left until right)
+        blockers.filterNot { it.isEmpty() }.forEach { block ->
+            val start = block.first - dp(8); val end = block.last + 1 + dp(8)
+            spaces = spaces.flatMap { span ->
+                if (end <= span.first || start > span.last) listOf(span)
+                else listOf(span.first until minOf(start, span.last + 1),
+                    maxOf(end, span.first) until span.last + 1).filterNot { it.isEmpty() }
+            }
+        }
         // Icons consume 80dp; leave at least a 48dp track for a usable volume gesture.
-        val width = right - left
-        return if (top >= 0 && width >= (128 * density).roundToInt())
-            Slot(left, top, width, (44 * density).roundToInt()) else null
+        val span = spaces.maxByOrNull { it.last + 1 - it.first } ?: return null
+        val width = span.last + 1 - span.first
+        return if (width >= dp(128)) Slot(span.first, top, width, height) else null
     }
 
     fun centeredOffset(parentWidth: Int, left: Int, width: Int): Float? {

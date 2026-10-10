@@ -128,8 +128,7 @@ internal class TabletPlayerComponents(
         return changed
     }
     private fun nativeActions(group: ViewGroup) =
-        listOf("player_lyrics", "player_queue", "media_route_button", "badge_platter", "shuffle_repeat_badge",
-            "shareplay_badge", "router_name_textview").mapNotNull { find(group, it) }
+        listOf("player_lyrics", "player_queue", "media_route_button").mapNotNull { find(group, it) }
     private fun suppressNativeActions() {
         val retained = groups(songHost).flatMap(::nativeActions)
         hidden.keys.toList().filter { it !in retained }.forEach(::restoreSource)
@@ -137,14 +136,13 @@ internal class TabletPlayerComponents(
     }
     private fun percentTarget(group: ViewGroup): View? = (group.parent as? View)?.takeIf { it.id == id("controls") }
     private fun prepareGroup(group: ViewGroup): Boolean =
-        percentTarget(group)?.let { rows.percentage(it, TabletComponentGeometry.CONTROLS_HEIGHT_PERCENT) } ?: false
+        percentTarget(group)?.let { rows.percentage(it, .25f) } ?: false
     private fun hideSource(view: View) {
         val current = hidden[view]
         if (current == null) hidden[view] = Hidden(view.alpha, view.isClickable, view.importantForAccessibility)
         else if (view.alpha != 0f) hidden[view] = current.copy(alpha = view.alpha)
         view.alpha = 0f; view.isClickable = false
-        view.importantForAccessibility = if (view is ViewGroup) View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-            else View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        view.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
     private fun restoreSource(view: View) {
         val saved = hidden.remove(view) ?: return
@@ -227,21 +225,23 @@ internal class TabletPlayerComponents(
             place(lyrics, a.first, footerTop, size, size); place(queue, b.first, footerTop, size, size)
         }
         val outputLeft = column.first - horizontalOffset().roundToInt() + dp(10)
-        // Replacing the old footer guarantees volume first. Only add corner output
-        // when both rows fit below the unchanged native playback controls.
+        // The invisible native actions retain their dimensions and constraints:
+        // use that original row for volume without moving any native playback control.
         val nativeFooterAt = location(nativeLyrics)
-        val nativeCenter = if (nativeLyrics.height > 0) nativeFooterAt.second + nativeLyrics.height / 2
-            else footerTop + size / 2
-        val baseVolume = TabletComponentGeometry.volumeAtNativeFooter(column.first,
-            column.first + group.width, nativeCenter, root.resources.displayMetrics.density)
+        val center = nativeFooterAt.second + nativeLyrics.height / 2
+        val volumeTop = center - size / 2
+        place(output, outputLeft, if (nativeLyrics.height > 0) volumeTop else footerTop, size, size)
+        val blockers = mutableListOf(outputLeft until outputLeft + size)
+        find(group, "shareplay_badge")?.takeIf { it.isShown && alpha(it) > .01f }?.let {
+            val at = location(it)
+            if (at.second < volumeTop + size && at.second + it.height > volumeTop)
+                blockers += at.first until at.first + it.width
+        }
         val contentBottom = (listOf(play, previous, next, progress)).maxOf { location(it).second + it.height }
-        val extraVolume = TabletComponentGeometry.volumeAboveOutput(column.first,
-            column.first + group.width, footerTop, contentBottom, root.resources.displayMetrics.density)
-        val slot = extraVolume ?: baseVolume
+        val slot = if (nativeLyrics.height > 0) TabletComponentGeometry.bottomVolume(column.first,
+            column.first + group.width, center, contentBottom, blockers, root.resources.displayMetrics.density) else null
         if (slot != null) place(volume, slot.left, slot.top, slot.width, slot.height)
         else volume.visibility = View.INVISIBLE
-        if (extraVolume != null && volume.visibility == View.VISIBLE) place(output, outputLeft, footerTop, size, size)
-        else output.visibility = View.INVISIBLE
         volume.setPageVisible(visible && expansion >= .999f && volume.visibility == View.VISIBLE)
 
         val vocal = find(rightHost, "vocal_ctrl")?.takeIf { it.isShown && it.width > 0 }
