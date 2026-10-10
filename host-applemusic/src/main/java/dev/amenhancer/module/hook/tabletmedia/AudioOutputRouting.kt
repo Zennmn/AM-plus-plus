@@ -30,7 +30,7 @@ internal object AudioOutputRouting {
 
     fun presentation(route: AudioOutputRoute?, bluetooth: BluetoothOutputState? = null): AudioOutputState = when (route?.kind) {
         AudioOutputKind.PHONE_SPEAKER -> AudioOutputState(null, OutputDeviceIcon.SYSTEM)
-        AudioOutputKind.HEADPHONES -> AudioOutputState(BluetoothOutputName.clean(route.name), OutputDeviceIcon.HEADPHONES)
+        AudioOutputKind.HEADPHONES -> AudioOutputState(null, OutputDeviceIcon.HEADPHONES)
         AudioOutputKind.EXTERNAL_SPEAKER -> AudioOutputState(BluetoothOutputName.clean(route.name), OutputDeviceIcon.SPEAKER)
         AudioOutputKind.BLUETOOTH, AudioOutputKind.BLUETOOTH_SPEAKER -> AudioOutputState(
             bluetooth?.name ?: BluetoothOutputName.clean(route.name),
