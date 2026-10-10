@@ -2,14 +2,15 @@ package dev.amenhancer.module.hook.tabletmedia
 
 import kotlin.math.roundToInt
 
-/** Fit additions into the native footer, leaving the 25% controls' own layout untouched. */
+/** Fit separate volume/output rows while preserving the native control dimensions. */
 internal object TabletComponentGeometry {
+    const val CONTROLS_HEIGHT_PERCENT = .32f
     data class Slot(val left: Int, val top: Int, val width: Int, val height: Int)
-    fun bottomVolume(left: Int, right: Int, center: Int, contentBottom: Int,
+    fun volumeAboveOutput(left: Int, right: Int, outputTop: Int, contentBottom: Int,
         blockers: List<IntRange>, density: Float): Slot? {
         if (right <= left || !density.isFinite() || density <= 0f) return null
         fun dp(value: Int) = (value * density).roundToInt()
-        val height = dp(44); val top = center - height / 2
+        val height = dp(44); val top = outputTop - dp(8) - height
         if (top < 0 || top < contentBottom + dp(4)) return null
         var spaces = listOf(left until right)
         blockers.filterNot { it.isEmpty() }.forEach { block ->

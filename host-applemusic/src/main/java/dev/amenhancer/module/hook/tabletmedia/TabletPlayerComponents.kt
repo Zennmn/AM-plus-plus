@@ -136,7 +136,7 @@ internal class TabletPlayerComponents(
     }
     private fun percentTarget(group: ViewGroup): View? = (group.parent as? View)?.takeIf { it.id == id("controls") }
     private fun prepareGroup(group: ViewGroup): Boolean =
-        percentTarget(group)?.let { rows.percentage(it, .25f) } ?: false
+        percentTarget(group)?.let { rows.percentage(it, TabletComponentGeometry.CONTROLS_HEIGHT_PERCENT) } ?: false
     private fun hideSource(view: View) {
         val current = hidden[view]
         if (current == null) hidden[view] = Hidden(view.alpha, view.isClickable, view.importantForAccessibility)
@@ -225,21 +225,18 @@ internal class TabletPlayerComponents(
             place(lyrics, a.first, footerTop, size, size); place(queue, b.first, footerTop, size, size)
         }
         val outputLeft = column.first - horizontalOffset().roundToInt() + dp(10)
-        // The invisible native actions retain their dimensions and constraints:
-        // use that original row for volume without moving any native playback control.
-        val nativeFooterAt = location(nativeLyrics)
-        val center = nativeFooterAt.second + nativeLyrics.height / 2
-        val volumeTop = center - size / 2
-        place(output, outputLeft, if (nativeLyrics.height > 0) volumeTop else footerTop, size, size)
-        val blockers = mutableListOf(outputLeft until outputLeft + size)
+        // Output occupies the corner again; volume has its own row immediately above it.
+        place(output, outputLeft, footerTop, size, size)
+        val volumeTop = footerTop - dp(8) - size
+        val blockers = mutableListOf<IntRange>()
         find(group, "shareplay_badge")?.takeIf { it.isShown && alpha(it) > .01f }?.let {
             val at = location(it)
             if (at.second < volumeTop + size && at.second + it.height > volumeTop)
                 blockers += at.first until at.first + it.width
         }
         val contentBottom = (listOf(play, previous, next, progress)).maxOf { location(it).second + it.height }
-        val slot = if (nativeLyrics.height > 0) TabletComponentGeometry.bottomVolume(column.first,
-            column.first + group.width, center, contentBottom, blockers, root.resources.displayMetrics.density) else null
+        val slot = TabletComponentGeometry.volumeAboveOutput(column.first,
+            column.first + group.width, footerTop, contentBottom, blockers, root.resources.displayMetrics.density)
         if (slot != null) place(volume, slot.left, slot.top, slot.width, slot.height)
         else volume.visibility = View.INVISIBLE
         volume.setPageVisible(visible && expansion >= .999f && volume.visibility == View.VISIBLE)

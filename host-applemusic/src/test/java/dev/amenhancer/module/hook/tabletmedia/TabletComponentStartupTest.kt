@@ -107,7 +107,7 @@ class TabletComponentStartupTest {
         val sizes = texts.map { it.textSize }; val params = (nativeImages + texts).map { it.layoutParams }
         try {
             assertTrue(components.prepare(wrapper))
-            assertEquals(.25f, percent.matchConstraintPercentHeight, 0f)
+            assertEquals(.32f, percent.matchConstraintPercentHeight, 0f)
             assertFalse(components.prepare(wrapper))
             (nativeImages + texts).forEachIndexed { i, view ->
                 assertSame(params[i], view.layoutParams); assertEquals(66, view.layoutParams.height)
@@ -124,7 +124,7 @@ class TabletComponentStartupTest {
             assertEquals(.345f, percent.matchConstraintPercentHeight, 0f)
         } finally { components.close(); activity.finish() }
     }
-    @Test fun bottomVolumeUsesTheOriginalActionRowWhileTheRightButtonsKeepTheirPositions() {
+    @Test fun volumeAndCornerOutputHaveSeparateRowsWhileTheRightButtonsKeepTheirPositions() {
         val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
         val density = activity.resources.displayMetrics.density
         fun dp(value: Int) = kotlin.math.round(value * density).toInt()
@@ -137,7 +137,7 @@ class TabletComponentStartupTest {
             "player_lyrics", "player_queue", "media_route_button", "seek_bar_controls")
         val ids = resourceIds(components, names)
         val group = FrameLayout(activity).apply { id = ids.getValue("player_controls") }
-        song.addView(group, FrameLayout.LayoutParams(dp(504), dp(220), Gravity.BOTTOM))
+        song.addView(group, FrameLayout.LayoutParams(dp(504), dp(256), Gravity.BOTTOM))
         names.subList(1, 4).forEach { name -> group.addView(ImageView(activity).apply { id = ids.getValue(name) },
             FrameLayout.LayoutParams(dp(66), dp(66)).apply { topMargin = dp(50) }) }
         val nativeFooter = ImageView(activity).apply { id = ids.getValue("player_lyrics") }
@@ -155,12 +155,14 @@ class TabletComponentStartupTest {
             val output = overlay.getChildAt(0); val lyrics = overlay.getChildAt(1)
             val queue = overlay.getChildAt(2); val volume = overlay.getChildAt(3)
             assertEquals(View.VISIBLE, volume.visibility)
-            assertEquals(group.top + nativeFooter.top + nativeFooter.height / 2, volume.top + volume.height / 2)
-            assertEquals(volume.top, output.top)
-            assertTrue(volume.left >= output.right + dp(8))
+            assertEquals(dp(44), volume.height)
+            assertEquals(volume.bottom + dp(8), output.top)
+            assertEquals(song.left, volume.left)
+            assertEquals(song.left + dp(10), output.left)
             assertEquals(song.left + group.width, volume.right)
             val rightTop = group.top + group.height - dp(12) - dp(44)
             assertEquals(rightTop, lyrics.top); assertEquals(rightTop, queue.top)
+            assertEquals(rightTop, output.top)
             assertEquals(dp(44), lyrics.height); assertEquals(dp(44), queue.height)
             assertEquals(root.width - dp(44) - dp(44), queue.left)
             assertEquals(queue.left - dp(8) - dp(44), lyrics.left)
