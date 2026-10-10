@@ -5,7 +5,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.animation.AccelerateDecelerateInterpolator
 
-/** Lyrics toggles and native availability changes animate; sheet/page transitions keep their endpoints. */
+/** Song/queue pages share their lyric presentation; sheet dragging restores native endpoints. */
 internal class TabletLyricsPaneMotion(
     private val parent: ViewGroup, private val left: View, private val right: View,
     private val invalidate: () -> Unit,
@@ -19,15 +19,15 @@ internal class TabletLyricsPaneMotion(
     private var available = true
     val horizontalOffset: Float get() = left.translationX - leftX
 
-    fun apply(collapsed: Boolean, safe: Boolean, expansion: Float, animate: Boolean = false,
+    fun apply(collapsed: Boolean, pane: String?, expanded: Boolean, expansion: Float, animate: Boolean = false,
         available: Boolean = true) {
         val availabilityChanged = this.available != available
         this.available = available
         this.expansion = expansion
-        if (!safe) {
+        if (!expanded || (pane != "SONG" && pane != "QUEUE")) {
             animation?.cancel(); animation = null; target = 0f; fraction = 0f
             render()
-            if (!available) {
+            if (collapsed || !available) {
                 right.alpha = 0f; right.visibility = View.INVISIBLE
                 right.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
             }

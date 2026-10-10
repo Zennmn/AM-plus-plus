@@ -137,7 +137,9 @@ class TabletComponentStartupTest {
         root.addView(right, FrameLayout.LayoutParams(dp(568), dp(800)).apply { leftMargin = dp(616) })
         var offset = 0f
         var lyricClicks = 0
-        val components = TabletPlayerComponents(root, song, right, { true }, { true }, { lyricClicks++ }, { offset })
+        var songVisible = true
+        var lyricsExpanded = true
+        val components = TabletPlayerComponents(root, song, right, { songVisible }, { lyricsExpanded }, { lyricClicks++ }, { offset })
         val names = listOf("player_controls", "play_pause", "previous_rewind", "next_fast_forward",
             "player_lyrics", "player_queue", "media_route_button", "seek_bar_controls", "progress")
         val ids = resourceIds(components, names)
@@ -225,6 +227,19 @@ class TabletComponentStartupTest {
             assertEquals(rightTop, lyrics.top); assertEquals(rightTop, queue.top)
             assertEquals(dp(26), root.height - output.bottom)
             assertEquals(dp(28), root.height - volume.bottom)
+            songVisible = false; lyricsExpanded = false; right.visibility = View.INVISIBLE
+            // Native queue crossfade keeps the centered host and its already placed footer.
+            components.update(1f, true)
+            assertEquals(dp(12), output.left)
+            assertEquals(song.left + dp(300) + track.left + track.paddingLeft, volume.left)
+            assertEquals(View.INVISIBLE, right.visibility)
+            components.update(1f, false)
+            assertTrue(queue.isSelected); assertFalse(lyrics.isSelected)
+            assertTrue(queue.isEnabled); assertTrue(lyrics.isEnabled)
+            assertEquals(dp(12), output.left)
+            assertEquals(song.left + dp(300) + track.right - track.paddingRight, volume.right)
+            assertEquals(rightTop, lyrics.top); assertEquals(rightTop, queue.top)
+            assertEquals(View.INVISIBLE, right.visibility)
         } finally { components.close(); activity.finish() }
     }
     @Test fun lyricsAvailabilityFollowsTheVisibleRetainedNativeControlGroup() {

@@ -260,10 +260,11 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
     }
 
     private fun applyPanePresentation(animate: Boolean = false) {
-        val song = (paneField.get(controller) as? Enum<*>)?.name == "SONG"
-        val safe = song && slide >= .95f &&
-            !switchingField.getBoolean(controller) && !transitionField.getBoolean(controller)
-        paneMotion.apply(!lyricsExpanded, safe, FragmentPlayerSurfaceMotion.tabletFrame(slide).expansion, animate,
+        val pane = (paneField.get(controller) as? Enum<*>)?.name
+        // SONG and QUEUE share this host, including their native shared-element transition.
+        // Keep its presentation offset; the native artwork/child geometry stays native.
+        paneMotion.apply(!lyricsExpanded, pane, slide >= .95f,
+            FragmentPlayerSurfaceMotion.tabletFrame(slide).expansion, animate,
             available = components?.lyricsAvailable() != false)
     }
 
@@ -281,8 +282,6 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
             ModernXposedRuntime.log("Tablet component preparation failed", it)
         }
     }
-
-    fun prepareNativeTransition() { paneMotion.close() }
 
     private fun styleArtwork() {
         if (!canTransformSong()) return
