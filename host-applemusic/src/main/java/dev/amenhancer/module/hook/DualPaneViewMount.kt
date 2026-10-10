@@ -89,6 +89,7 @@ internal object ConstraintLayoutPane {
      */
     private const val TARGET_650_LAYOUT_PARAMS = "androidx.constraintlayout.widget.ConstraintLayout\$b"
     private val TARGET_650_FIELD_NAMES = mapOf(
+        "guideBegin" to "a",
         "guidePercent" to "c",
         "leftToLeft" to "h",
         "leftToRight" to "g",
@@ -107,6 +108,7 @@ internal object ConstraintLayoutPane {
         "matchConstraintDefaultWidth" to "L",
         "matchConstraintMinWidth" to "N",
         "matchConstraintMaxWidth" to "P",
+        "matchConstraintPercentHeight" to "S",
         "constrainedWidth" to "W",
     )
 
@@ -164,17 +166,30 @@ internal object ConstraintLayoutPane {
         val views = names.map { name ->
             host.findViewById<View>(targetId(host.resources, name)) ?: return null
         }
-        val nativeParams = views.mapIndexed { index, view -> constraintMarginParams(view, names[index]) }
-        val tabletParams = nativeParams.map { newLayoutParams(it, it.width, it.height) }
+        val params = views.mapIndexed { index, view -> constraintMarginParams(view, names[index]) }
+        val heightPercent = checkNotNull(constraintField(params[0].javaClass, "matchConstraintPercentHeight"))
+        val guideBegin = checkNotNull(constraintField(params[1].javaClass, "guideBegin"))
+        val nativeHeightPercent = heightPercent.getFloat(params[0])
+        val nativeGuideBegin = guideBegin.getInt(params[1])
+        val nativeMargins = params.drop(2).map { it.marginStart to it.leftMargin }
         // The native player excludes its top margin; 25% here is about 23% of the screen.
-        tabletParams[0].setFloat("matchConstraintPercentHeight", 0.25f)
-        tabletParams[1].setInt("guideBegin", 0)
+        // Mutate only these values: the host's generic constructor drops native constraints.
+        heightPercent.setFloat(params[0], 0.25f)
+        guideBegin.setInt(params[1], 0)
         for (index in 2..3) {
-            tabletParams[index].marginStart = 0
-            tabletParams[index].leftMargin = 0
+            params[index].marginStart = 0
+            params[index].leftMargin = 0
         }
-        views.forEachIndexed { index, view -> view.layoutParams = tabletParams[index] }
-        return { views.forEachIndexed { index, view -> view.layoutParams = nativeParams[index] } }
+        views.forEachIndexed { index, view -> view.layoutParams = params[index] }
+        return {
+            heightPercent.setFloat(params[0], nativeHeightPercent)
+            guideBegin.setInt(params[1], nativeGuideBegin)
+            for (index in 2..3) {
+                params[index].marginStart = nativeMargins[index - 2].first
+                params[index].leftMargin = nativeMargins[index - 2].second
+            }
+            views.forEachIndexed { index, view -> view.layoutParams = params[index] }
+        }
     }
 
     /**
