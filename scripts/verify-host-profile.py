@@ -221,7 +221,11 @@ def main():
                 owner = descriptor(contract['owner'])
                 signature = contract['name'] + '(' + ''.join(map(descriptor, contract['parameters'])) + ')' + descriptor(contract['returns'])
                 flags = classes.get(owner, {}).get('method_access', {}).get(signature)
-                if flags is None or bool(flags & 8) != contract['static'] or flags & (0x400 | 0x40 | 0x1000):
+                # Invocation-only descriptors may name an abstract interface method;
+                # reflection dispatches it to the concrete backend. Hook targets still
+                # require a non-abstract, non-bridge implementation.
+                forbidden = 0x40 | 0x1000 | (0 if contract.get('invocationOnly', False) else 0x400)
+                if flags is None or bool(flags & 8) != contract['static'] or flags & forbidden:
                     failures.append(f'invalid exact method contract {symbol}: {owner} {signature}')
             for symbol, contract in document['indexed'].get('fieldContracts', {}).items():
                 checks += 1

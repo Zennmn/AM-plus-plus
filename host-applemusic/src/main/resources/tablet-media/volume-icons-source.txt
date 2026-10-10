@@ -1,0 +1,4 @@
+The unchanged 24dp volume vectors are copied from Flamingo's native resources:
+- flamingo-volume-low.xml: res/drawable/ic_nowplaying_volume.xml
+- flamingo-volume-high.xml: res/drawable/ic_nowplaying_volume_full.xml
+The plugin parses their pathData and applies the player's white tint at runtime.

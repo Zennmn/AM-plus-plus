@@ -71,6 +71,7 @@ internal object FragmentTabletDualPaneCoordinator {
                 val owner = param.thisObject ?: return
                 val session = sessions[owner]?.takeIf { it.installed && eligible(it.root.context) } ?: return
                 val requested = (param.args[0] as? Enum<*>)?.name ?: return
+                if (requested == "SONG" || requested == "QUEUE") session.prepareNativeTransition()
                 // Match the established dual-pane player: only lyrics are fixed on the right.
                 // SONG/QUEUE retain Apple's state, shared-element transitions and left controls.
                 if (!FragmentTabletArtworkPolicy.keepsDedicatedLyrics(requested)) return
