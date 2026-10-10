@@ -128,7 +128,8 @@ internal class TabletPlayerComponents(
         return changed
     }
     private fun nativeActions(group: ViewGroup) =
-        listOf("player_lyrics", "player_queue", "media_route_button").mapNotNull { find(group, it) }
+        listOf("player_lyrics", "player_queue", "media_route_button", "badge_platter", "shuffle_repeat_badge",
+            "shareplay_badge", "router_name_textview").mapNotNull { find(group, it) }
     private fun suppressNativeActions() {
         val retained = groups(songHost).flatMap(::nativeActions)
         hidden.keys.toList().filter { it !in retained }.forEach(::restoreSource)
@@ -142,7 +143,8 @@ internal class TabletPlayerComponents(
         if (current == null) hidden[view] = Hidden(view.alpha, view.isClickable, view.importantForAccessibility)
         else if (view.alpha != 0f) hidden[view] = current.copy(alpha = view.alpha)
         view.alpha = 0f; view.isClickable = false
-        view.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        view.importantForAccessibility = if (view is ViewGroup) View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+            else View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
     private fun restoreSource(view: View) {
         val saved = hidden.remove(view) ?: return
@@ -235,28 +237,23 @@ internal class TabletPlayerComponents(
         val center = nativeFooterAt.second + nativeLyrics.height / 2
         val outputCenter = center - dp(4)
         val volumeCenter = outputCenter - dp(2)
-        val volumeTop = volumeCenter - size / 2
-        val outputTop = if (nativeLyrics.height > 0) outputCenter - size / 2 else footerTop - dp(4)
+        val contentBottom = (listOf(play, previous, next, progress)).maxOf { location(it).second + it.height }
+        // Volume owns the replaced footer. Fit it first, keeping the visible glyph sizes.
+        val slot = if (nativeLyrics.height > 0) TabletComponentGeometry.bottomVolume(progressLeft,
+            progressRight, volumeCenter, contentBottom, minOf(root.height, column.second + group.height),
+            root.resources.displayMetrics.density) else null
+        if (slot != null) place(volume, slot.left, slot.top, slot.width, slot.height)
+        else volume.visibility = View.INVISIBLE
+        volume.setPageVisible(visible && expansion >= .999f && volume.visibility == View.VISIBLE)
+        // Follow any necessary volume displacement, retaining the requested 2dp center separation.
+        val outputTop = slot?.let { it.top + it.height / 2 + dp(2) - size / 2 }
+            ?: if (nativeLyrics.height > 0) outputCenter - size / 2 else footerTop - dp(4)
         // Keep the corner action outside the progress edge, even when the song column centers.
         val corner = TabletComponentGeometry.cornerOutput(systemInsets?.left ?: 0,
             progressLeft - horizontalOffset().roundToInt(), outputTop,
             root.resources.displayMetrics.density)
         if (corner != null) place(output, corner.left, corner.top, corner.width, corner.height)
         else output.visibility = View.INVISIBLE
-        val blockers = mutableListOf<IntRange>()
-        if (output.visibility == View.VISIBLE) blockers += output.left until output.right
-        find(group, "shareplay_badge")?.takeIf { it.isShown && alpha(it) > .01f }?.let {
-            val at = location(it)
-            if (at.second < volumeTop + size && at.second + it.height > volumeTop)
-                blockers += at.first until at.first + it.width
-        }
-        val contentBottom = (listOf(play, previous, next, progress)).maxOf { location(it).second + it.height }
-        // The entire volume view, including both speaker icons, stays within the playback track.
-        val slot = if (nativeLyrics.height > 0) TabletComponentGeometry.bottomVolume(progressLeft,
-            progressRight, volumeCenter, contentBottom, blockers, root.resources.displayMetrics.density) else null
-        if (slot != null) place(volume, slot.left, slot.top, slot.width, slot.height)
-        else volume.visibility = View.INVISIBLE
-        volume.setPageVisible(visible && expansion >= .999f && volume.visibility == View.VISIBLE)
 
         val vocal = find(rightHost, "vocal_ctrl")?.takeIf { it.isShown && it.width > 0 }
         val limits = vocal?.let { find(rightHost, "vocal_ctrl_drag_limits") }

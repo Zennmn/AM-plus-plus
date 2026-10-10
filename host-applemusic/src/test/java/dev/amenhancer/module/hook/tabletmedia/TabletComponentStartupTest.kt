@@ -46,12 +46,14 @@ class TabletComponentStartupTest {
         val song = FrameLayout(activity); val right = FrameLayout(activity)
         root.addView(song); root.addView(right)
         val components = TabletPlayerComponents(root, song, right, { true }, { true }, {})
-        val names = listOf("player_controls", "play_pause", "player_lyrics", "player_queue", "media_route_button")
+        val names = listOf("player_controls", "play_pause", "player_lyrics", "player_queue", "media_route_button",
+            "badge_platter", "shuffle_repeat_badge", "shareplay_badge", "router_name_textview")
         val ids = resourceIds(components, names)
         fun pane(): Pair<FrameLayout, List<View>> {
             val group = FrameLayout(activity).apply { id = ids.getValue("player_controls") }
             group.addView(View(activity).apply { id = ids.getValue("play_pause") })
-            val actions = names.drop(2).map { name -> View(activity).apply {
+            val actions = names.drop(2).map { name ->
+                (if (name == "shareplay_badge") FrameLayout(activity) else View(activity)).apply {
                 id = ids.getValue(name); alpha = .8f; isClickable = true
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
                 group.addView(this, FrameLayout.LayoutParams(44, 44))
@@ -73,7 +75,8 @@ class TabletComponentStartupTest {
             components.update(.5f, true)
             actions.forEach {
                 assertEquals(0f, it.alpha, 0f); assertFalse(it.isClickable)
-                assertEquals(View.IMPORTANT_FOR_ACCESSIBILITY_NO, it.importantForAccessibility)
+                assertEquals(if (it is android.view.ViewGroup) View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                    else View.IMPORTANT_FOR_ACCESSIBILITY_NO, it.importantForAccessibility)
             }
             components.close()
             actions.forEach {
@@ -167,6 +170,31 @@ class TabletComponentStartupTest {
             assertEquals(song.left + track.right - track.paddingRight, volume.right)
             assertEquals(dp(26), root.height - output.bottom)
             assertEquals(dp(28), root.height - volume.bottom)
+            offset = 0f; song.translationX = 0f
+            listOf(180, 160, 220).forEach { height ->
+                group.layoutParams = (group.layoutParams as FrameLayout.LayoutParams).apply { this.height = dp(height) }
+                root.measure(View.MeasureSpec.makeMeasureSpec(dp(1200), View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(dp(800), View.MeasureSpec.EXACTLY))
+                root.layout(0, 0, dp(1200), dp(800))
+                components.update(1f, false)
+                assertEquals(View.VISIBLE, volume.visibility)
+                assertEquals(song.left + track.left + track.paddingLeft, volume.left)
+                assertEquals(song.left + track.right - track.paddingRight, volume.right)
+                assertTrue(volume.top >= group.top + dp(50) + dp(66) + dp(4))
+                assertTrue(volume.bottom <= root.height)
+                assertTrue(volume.height >= dp(24))
+                if (height == 160) {
+                    assertEquals(View.INVISIBLE, output.visibility)
+                    assertEquals(dp(40), volume.height)
+                } else {
+                    assertEquals(View.VISIBLE, output.visibility)
+                    assertEquals(volume.top + volume.height / 2 + dp(2), output.top + output.height / 2)
+                    assertEquals(dp(44), volume.height)
+                }
+                val shortRightTop = group.top + group.height - dp(12) - dp(44)
+                assertEquals(shortRightTop, lyrics.top); assertEquals(shortRightTop, queue.top)
+                names.subList(1, 4).forEach { name -> assertEquals(dp(66), group.findViewById<View>(ids.getValue(name)).height) }
+            }
             val rightTop = group.top + group.height - dp(12) - dp(44)
             assertEquals(rightTop, lyrics.top); assertEquals(rightTop, queue.top)
             assertEquals(dp(44), lyrics.height); assertEquals(dp(44), queue.height)

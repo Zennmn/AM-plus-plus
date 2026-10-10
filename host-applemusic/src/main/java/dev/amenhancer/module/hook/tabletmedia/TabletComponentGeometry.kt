@@ -13,24 +13,18 @@ internal object TabletComponentGeometry {
         return if (left >= leftInset) Slot(left, top, size, size) else null
     }
     fun bottomVolume(left: Int, right: Int, center: Int, contentBottom: Int,
-        blockers: List<IntRange>, density: Float): Slot? {
+        bottom: Int, density: Float): Slot? {
         if (right <= left || !density.isFinite() || density <= 0f) return null
         fun dp(value: Int) = (value * density).roundToInt()
-        val height = dp(44); val top = center - height / 2
-        if (top < 0 || top < contentBottom + dp(4)) return null
-        var spaces = listOf(left until right)
-        blockers.filterNot { it.isEmpty() }.forEach { block ->
-            val start = block.first - dp(8); val end = block.last + 1 + dp(8)
-            spaces = spaces.flatMap { span ->
-                if (end <= span.first || start > span.last) listOf(span)
-                else listOf(span.first until minOf(start, span.last + 1),
-                    maxOf(end, span.first) until span.last + 1).filterNot { it.isEmpty() }
-            }
-        }
-        // Icons consume 80dp; leave at least a 48dp track for a usable volume gesture.
-        val span = spaces.maxByOrNull { it.last + 1 - it.first } ?: return null
-        val width = span.last + 1 - span.first
-        return if (width >= dp(128)) Slot(span.first, top, width, height) else null
+        // Keep the whole progress width; both speaker icons occupy 80dp with their spacing.
+        val width = right - left
+        if (width <= dp(80)) return null
+        val minTop = (contentBottom + dp(4)).coerceAtLeast(0)
+        val height = minOf(dp(44), bottom - minTop)
+        // Shrink only empty touch padding, keeping the 24dp glyphs at their normal size.
+        if (height < dp(24)) return null
+        val top = (center - height / 2).coerceIn(minTop, bottom - height)
+        return Slot(left, top, width, height)
     }
 
     fun centeredOffset(parentWidth: Int, left: Int, width: Int): Float? {
