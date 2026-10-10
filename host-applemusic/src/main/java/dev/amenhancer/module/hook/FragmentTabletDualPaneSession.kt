@@ -263,7 +263,7 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
         val pane = (paneField.get(controller) as? Enum<*>)?.name
         // SONG and QUEUE share this host, including their native shared-element transition.
         // Keep its presentation offset; the native artwork/child geometry stays native.
-        paneMotion.apply(!lyricsExpanded, pane, slide >= .95f,
+        paneMotion.apply(!lyricsExpanded, pane, slide,
             FragmentPlayerSurfaceMotion.tabletFrame(slide).expansion, animate,
             available = components?.lyricsAvailable() != false)
     }
