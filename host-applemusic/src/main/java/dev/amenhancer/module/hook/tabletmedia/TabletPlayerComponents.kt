@@ -39,7 +39,7 @@ internal class TabletPlayerComponents(
     private var running = false
     private var closed = false
     private var placed = false
-    private val transportStyle = TabletTransportStyle()
+    private val actionStyle = TabletNativeActionStyle()
     private val outputIcon = IosDeviceOutputDrawable.Factory(TabletMediaAssets, root.resources).create()
     private val output = button().apply {
         setImageDrawable(outputIcon); contentDescription = "音频输出"
@@ -52,15 +52,11 @@ internal class TabletPlayerComponents(
     }
     private var lyricsSource: View? = null
     private var queueSource: View? = null
-    private val lyricsIcon = TabletFooterDrawable(TabletFooterDrawable.Kind.LYRICS)
-    private val queueIcon = TabletFooterDrawable(TabletFooterDrawable.Kind.QUEUE)
-    private val lyrics = button().apply {
-        imageTintList = null; setPadding(0, 0, 0, 0); setImageDrawable(lyricsIcon)
+    private val lyrics = nativeButton("selector_nowplaying_lyrics").apply {
         setOnClickListener { lyricsClick() }
         setOnLongClickListener { lyricsSource?.takeIf { it.isEnabled }?.performLongClick() == true }
     }
-    private val queue = button().apply {
-        imageTintList = null; setPadding(0, 0, 0, 0); setImageDrawable(queueIcon)
+    private val queue = nativeButton("selector_nowplaying_queue").apply {
         setOnClickListener { queueSource?.takeIf { it.isEnabled }?.performClick() }
         setOnLongClickListener { queueSource?.takeIf { it.isEnabled }?.performLongClick() == true }
     }
@@ -86,6 +82,12 @@ internal class TabletPlayerComponents(
         background = null; scaleType = ImageView.ScaleType.FIT_CENTER
         setPadding(dp(12), dp(12), dp(12), dp(12))
         imageTintList = ColorStateList.valueOf(Color.WHITE)
+    }
+    private fun nativeButton(drawable: String) = button().apply {
+        // Keep Apple's intrinsic symbol size inside the existing 44dp touch target.
+        scaleType = ImageView.ScaleType.CENTER; setPadding(0, 0, 0, 0)
+        root.resources.getIdentifier(drawable, "drawable", root.context.packageName)
+            .takeIf { it != 0 }?.let(::setImageResource)
     }
     private fun refreshOutput() {
         val state = audio.current()
@@ -122,7 +124,12 @@ internal class TabletPlayerComponents(
     /** Prepare retained panes before sheet opening or native shared-element capture. */
     fun prepare(start: View = songHost): Boolean {
         var changed = false
-        groups(start).forEach {
+        val nativeGroups = groups(start)
+        nativeGroups.maxByOrNull(::alpha)?.let {
+            actionStyle.bind(lyrics, find(it, "player_lyrics") as? ImageView)
+            actionStyle.bind(queue, find(it, "player_queue") as? ImageView)
+        }
+        nativeGroups.forEach {
             nativeActions(it).forEach(::hideSource)
             if (prepareGroup(it)) changed = true
         }
@@ -251,8 +258,9 @@ internal class TabletPlayerComponents(
         // Pane visibility is independent of a song's native lyric availability.
         lyrics.isEnabled = true; queue.isEnabled = nativeQueue.isEnabled; output.isEnabled = true
         lyrics.contentDescription = nativeLyrics.contentDescription; queue.contentDescription = nativeQueue.contentDescription
+        actionStyle.bind(lyrics, nativeLyrics as? ImageView)
+        actionStyle.bind(queue, nativeQueue as? ImageView)
         lyrics.isSelected = lyricsExpanded(); queue.isSelected = !songVisible()
-        lyricsIcon.active = lyrics.isSelected; queueIcon.active = queue.isSelected
         if (pairFits) {
             place(lyrics, lyricsLeft, footerTop, size, size); place(queue, queueLeft, footerTop, size, size)
         } else {
@@ -300,7 +308,7 @@ internal class TabletPlayerComponents(
         if (gradients != null && rightHost.isShown) {
             val parentTop = location(gradients.parent as View).second
             rows.lyricViewport(gradients, if (vocal != null) (top + dp(8) - parentTop).coerceAtLeast(0) else 0,
-                (root.height - footerTop + dp(8)).coerceAtLeast(0))
+                0)
         }
         translations.keys.toList().filter { it !== vocal && it !== limits }.forEach(::restoreTranslation)
         // Keep every retained pane prepared, including the collapsed sheet and outgoing queue.
@@ -310,7 +318,6 @@ internal class TabletPlayerComponents(
                 metadata(retainedGroup) + listOfNotNull(percentTarget(retainedGroup))
         }
         rows.retain(retained + listOfNotNull(gradients))
-        transportStyle.apply(previous as? ImageView, play as? ImageView, next as? ImageView)
         overlay.visibility = if (visible) View.VISIBLE else View.INVISIBLE; placed = true
         if (visible && !running) { running = true; main.postDelayed(poll, 500) }
         else if (!visible) stopPolling()
@@ -320,7 +327,7 @@ internal class TabletPlayerComponents(
         overlay.visibility = View.INVISIBLE; placed = false; volume.setPageVisible(false); stopPolling()
         hidden.keys.toList().forEach(::restoreSource); translations.keys.toList().forEach(::restoreTranslation)
         rows.close()
-        transportStyle.restore()
+        actionStyle.clear()
         lyricsSource = null; queueSource = null
     }
     override fun close() {

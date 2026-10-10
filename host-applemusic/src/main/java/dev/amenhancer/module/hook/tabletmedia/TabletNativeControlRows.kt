@@ -6,13 +6,14 @@ import dev.amenhancer.module.hook.dualPaneField
 import java.lang.reflect.Field
 import java.util.IdentityHashMap
 import android.widget.TextView
+import android.widget.ImageView
 import android.util.TypedValue
 
 /** Mutate the existing host params; generic LayoutParams copies lose native constraints. */
 internal class TabletNativeControlRows : AutoCloseable {
     private data class Original(val params: ViewGroup.LayoutParams, val height: Int,
         val paddingTop: Int, val paddingBottom: Int, val top: Int, val bottom: Int,
-        val constraints: Map<Field, Int>)
+        val constraints: Map<Field, Int>, val scale: ImageView.ScaleType?)
     private val originals = IdentityHashMap<View, Original>()
     private data class Percent(val params: ViewGroup.LayoutParams, val field: Field, val value: Float)
     private val percentages = IdentityHashMap<View, Percent>()
@@ -31,7 +32,8 @@ internal class TabletNativeControlRows : AutoCloseable {
         return originals.getOrPut(view) {
             val margin = params as? ViewGroup.MarginLayoutParams
             Original(params, params.height, view.paddingTop, view.paddingBottom, margin?.topMargin ?: 0,
-                margin?.bottomMargin ?: 0, if (withAnchors) anchors(params).associateWith { it.getInt(params) } else emptyMap())
+                margin?.bottomMargin ?: 0, if (withAnchors) anchors(params).associateWith { it.getInt(params) } else emptyMap(),
+                (view as? ImageView)?.scaleType)
         }
     }
     fun prepareTimes(views: List<View>, margin: Int): Boolean {
@@ -81,6 +83,11 @@ internal class TabletNativeControlRows : AutoCloseable {
             if (field.getInt(p) != value) { field.setInt(p, value); changed = true }
         }
         p.height = height; p.topMargin = top; p.bottomMargin = 0
+        // Draw the native symbol at its intrinsic size, even in the compact row.
+        // FIT_CENTER would shrink it again to fit the row's reduced content height.
+        (view as? ImageView)?.let {
+            if (it.scaleType != ImageView.ScaleType.CENTER) { it.scaleType = ImageView.ScaleType.CENTER; changed = true }
+        }
         val padTop = minOf(saved.paddingTop, padding); val padBottom = minOf(saved.paddingBottom, padding)
         if (view.paddingTop != padTop || view.paddingBottom != padBottom) {
             view.setPadding(view.paddingLeft, padTop, view.paddingRight, padBottom); changed = true
@@ -119,6 +126,7 @@ internal class TabletNativeControlRows : AutoCloseable {
         p.height = saved.height
         (p as? ViewGroup.MarginLayoutParams)?.let { it.topMargin = saved.top; it.bottomMargin = saved.bottom }
         saved.constraints.forEach { (field, value) -> field.setInt(p, value) }
+        saved.scale?.let { (view as? ImageView)?.scaleType = it }
         view.setPadding(view.paddingLeft, saved.paddingTop, view.paddingRight, saved.paddingBottom)
         view.layoutParams = p
     }

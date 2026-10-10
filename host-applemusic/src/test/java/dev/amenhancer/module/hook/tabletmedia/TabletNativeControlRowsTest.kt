@@ -40,6 +40,20 @@ class TabletNativeControlRowsTest {
         assertEquals(3, original.topMargin); assertEquals(14, original.bottomMargin)
         assertEquals(11, view.paddingTop)
     }
+    @Test fun compactTransportUsesNativeIntrinsicSymbolsAndRestoresTheHostScaleType() {
+        val image = android.widget.ImageView(activity).apply {
+            layoutParams = view().layoutParams
+            scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+            setImageDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.WHITE))
+        }
+        val nativeDrawable = image.drawable
+        rows.transport(image, 51, 52, 7)
+        assertSame(nativeDrawable, image.drawable)
+        assertEquals(android.widget.ImageView.ScaleType.CENTER, image.scaleType)
+        rows.close()
+        assertSame(nativeDrawable, image.drawable)
+        assertEquals(android.widget.ImageView.ScaleType.FIT_CENTER, image.scaleType)
+    }
     @Test fun restoredRowsKeepLaterHostPercentageAndHorizontalChanges() {
         val view = view(); val p = view.layoutParams as b
         rows.transport(view, 51, 52, 7)
@@ -55,11 +69,11 @@ class TabletNativeControlRowsTest {
         rows.close()
         assertSame(replacement, view.layoutParams); assertEquals(99, replacement.j); assertEquals(80, replacement.height)
     }
-    @Test fun lyricViewportReservesTopAndBottomButtonsAndRestoresOriginalAnchors() {
+    @Test fun lyricViewportKeepsBottomFadeAtTheFullPaneEdgeAndRestoresOriginalAnchors() {
         val view = view(); val p = view.layoutParams as b
-        rows.lyricViewport(view, 92, 60)
+        rows.lyricViewport(view, 92, 0)
         assertEquals(0, p.i); assertEquals(-1, p.j); assertEquals(-1, p.k); assertEquals(0, p.l)
-        assertEquals(92, p.topMargin); assertEquals(60, p.bottomMargin)
+        assertEquals(92, p.topMargin); assertEquals(0, p.bottomMargin)
         rows.close()
         assertEquals(11, p.j); assertEquals(12, p.k); assertEquals(-1, p.l)
         assertEquals(3, p.topMargin); assertEquals(14, p.bottomMargin)
