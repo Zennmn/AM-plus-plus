@@ -5,10 +5,11 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.animation.AccelerateDecelerateInterpolator
 
-/** Song/queue pages share lyric presentation, composed with the native sheet's continuous progress. */
+/** Song/queue controls keep their resting X; only the cover follows native sheet progress. */
 internal class TabletLyricsPaneMotion(
     private val parent: ViewGroup, private val left: View, private val right: View,
     private val invalidate: () -> Unit,
+    private val artwork: (() -> View?)? = null,
 ) : AutoCloseable {
     private val leftX = left.translationX
     private val rightX = right.translationX
@@ -18,6 +19,9 @@ internal class TabletLyricsPaneMotion(
     private var progress = 0f
     private var expansion = 0f
     private var available = true
+    private var artworkView: View? = null
+    private var nativeArtworkX = 0f
+    private var lastArtworkX: Float? = null
     val horizontalOffset: Float get() = left.translationX - leftX
 
     fun apply(collapsed: Boolean, pane: String?, progress: Float, expansion: Float, animate: Boolean = false,
@@ -51,17 +55,39 @@ internal class TabletLyricsPaneMotion(
     }
     private fun render() {
         val offset = TabletComponentGeometry.centeredOffset(parent.width, left.left, left.width) ?: 0f
-        // Native child animation uses layout coordinates. Add only the center displacement,
-        // from zero at the mini cover to the centered resting cover, without changing its scale.
-        val displacement = fraction * progress
-        left.translationX = leftX + offset * displacement
-        right.translationX = rightX + right.width * .12f * displacement
+        val centered = offset * fraction
+        left.translationX = leftX + centered
+        right.translationX = rightX + right.width * .12f * fraction
+        compensateCover(centered)
         right.alpha = expansion * (1f - fraction)
         right.visibility = if (fraction >= .999f) View.INVISIBLE else View.VISIBLE
         right.importantForAccessibility = if (fraction <= .001f && expansion >= .6f)
             View.IMPORTANT_FOR_ACCESSIBILITY_AUTO else View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
     }
+
+    /** Restore the native X before its next callback reads/writes a fresh cover frame. */
+    fun prepareNativeCoverFrame() {
+        artworkView?.let { if (it.translationX == lastArtworkX) it.translationX = nativeArtworkX }
+        lastArtworkX = null
+    }
+
+    private fun compensateCover(centered: Float) {
+        val view = artwork?.invoke()
+        if (view !== artworkView) {
+            prepareNativeCoverFrame()
+            artworkView = view
+        }
+        view ?: return
+        if (lastArtworkX == null || view.translationX != lastArtworkX) nativeArtworkX = view.translationX
+        // Parent stays centered for controls. Cancel the unused portion on the cover only,
+        // giving it the same continuous mini-to-center path without touching scale or Y.
+        val desired = nativeArtworkX - centered * (1f - progress)
+        if (view.translationX != desired) view.translationX = desired
+        lastArtworkX = desired
+    }
+
     override fun close() {
+        prepareNativeCoverFrame(); artworkView = null
         animation?.cancel(); animation = null; target = 0f; fraction = 0f; available = true
         left.translationX = leftX; right.translationX = rightX; right.visibility = View.VISIBLE
     }

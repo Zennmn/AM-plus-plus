@@ -240,6 +240,20 @@ class TabletComponentStartupTest {
             assertEquals(song.left + dp(300) + track.right - track.paddingRight, volume.right)
             assertEquals(rightTop, lyrics.top); assertEquals(rightTop, queue.top)
             assertEquals(View.INVISIBLE, right.visibility)
+            song.translationX = 0f
+            val motion = TabletLyricsPaneMotion(root, song, right, {})
+            try {
+                for (slide in listOf(.25f, .5f, .94f, .95f, 1f, .95f, .5f, .25f)) {
+                    motion.apply(true, "QUEUE", slide, slide)
+                    offset = motion.horizontalOffset
+                    components.update(slide, false)
+                    assertEquals(song.left + dp(300) + track.left + track.paddingLeft, volume.left)
+                    assertEquals(song.left + dp(300) + track.right - track.paddingRight, volume.right)
+                    assertEquals(dp(12), output.left)
+                    assertEquals(rightTop, lyrics.top); assertEquals(rightTop, queue.top)
+                    assertEquals(View.INVISIBLE, right.visibility)
+                }
+            } finally { motion.close() }
         } finally { components.close(); activity.finish() }
     }
     @Test fun lyricsAvailabilityFollowsTheVisibleRetainedNativeControlGroup() {

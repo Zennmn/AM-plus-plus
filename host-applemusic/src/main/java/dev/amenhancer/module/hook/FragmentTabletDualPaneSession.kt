@@ -11,7 +11,7 @@ import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import java.util.IdentityHashMap
 
-/** Native fragments and media callbacks remain native; only their containers change. */
+/** Native fragments and media callbacks remain native; presentation composes around their layout. */
 internal class FragmentTabletDualPaneSession(val controller: Any, val root: ViewGroup) : ViewTreeObserver.OnPreDrawListener {
     private val ids = HashMap<String, Int>()
     val player = find(root, "player_root") as ViewGroup
@@ -63,7 +63,9 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
     private var components: TabletPlayerComponents? = null
     private var componentsFailed = false
     private var lyricsExpanded = true
-    private val paneMotion = TabletLyricsPaneMotion(wrapper, songHost, right) { root.postInvalidateOnAnimation() }
+    private val paneMotion = TabletLyricsPaneMotion(wrapper, songHost, right,
+        invalidate = { root.postInvalidateOnAnimation() },
+        artwork = { nativeCoverGetter.invoke(null, controller) as? View })
     private var nativeArtworkSize = 0
     private var artworkDirty = true
     private val artworkLayoutBounds = Rect()
@@ -220,6 +222,8 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
         applyTransition()
         applyPanePresentation()
     }
+
+    fun prepareNativeCoverFrame() { paneMotion.prepareNativeCoverFrame() }
 
     /** Same current SONG/QUEUE cover that the native animator selects; measurement only. */
     fun nativeCoverReady(): Boolean {

@@ -46,7 +46,7 @@ class TabletLyricsPaneMotionTest {
             assertTrue(left.translationX > 0f && left.translationX < 300f)
             val openingPosition = left.translationX
             motion.apply(false, "SONG", .5f, .5f)
-            assertEquals(openingPosition * .5f, left.translationX, .1f)
+            assertEquals(openingPosition, left.translationX, .1f)
             assertEquals(View.VISIBLE, right.visibility)
             frame(1f)
             motion.apply(false, "SONG", 1f, 1f)
@@ -83,9 +83,9 @@ class TabletLyricsPaneMotionTest {
             motion.apply(true, "SONG", 1f, 1f, available = false)
             motion.apply(true, "SONG", 1f, 1f, available = true)
             assertEquals(View.INVISIBLE, right.visibility)
-            // Sheet dragging continuously approaches the mini endpoint without showing old lyrics.
+            // Controls stay centered while the cover approaches the mini endpoint.
             motion.apply(false, "QUEUE", .5f, .5f, available = false)
-            assertEquals(150f, left.translationX, 0f); assertEquals(View.INVISIBLE, right.visibility)
+            assertEquals(300f, left.translationX, 0f); assertEquals(View.INVISIBLE, right.visibility)
             assertEquals(0f, right.alpha, 0f)
             motion.apply(false, "QUEUE", 1f, 1f, available = false)
             assertEquals(View.INVISIBLE, right.visibility)
@@ -127,7 +127,7 @@ class TabletLyricsPaneMotionTest {
             motion.apply(true, "QUEUE", 1f, 1f, available = true)
             assertEquals(300f, left.translationX, .1f); assertEquals(View.INVISIBLE, right.visibility)
             motion.apply(true, "QUEUE", .5f, .5f)
-            assertEquals(150f, left.translationX, 0f); assertEquals(View.INVISIBLE, right.visibility)
+            assertEquals(300f, left.translationX, 0f); assertEquals(View.INVISIBLE, right.visibility)
             motion.apply(true, "QUEUE", 1f, 1f)
             assertEquals(300f, left.translationX, .1f); assertEquals(View.INVISIBLE, right.visibility)
             // An explicit lyric reopen can restore dual-pane presentation on a queue page.
@@ -146,7 +146,10 @@ class TabletLyricsPaneMotionTest {
         parent.layout(0, 0, 1200, 800); left.layout(48, 0, 552, 800); right.layout(616, 0, 1184, 800)
         val cover = View(activity).apply { pivotX = 0f; pivotY = 0f }
         left.addView(cover); cover.layout(100, 100, 300, 300)
-        val motion = TabletLyricsPaneMotion(parent, left, right, {})
+        val lower = listOf(600, 650, 710).map { top -> View(activity).also {
+            left.addView(it); it.layout(16, top, 216, top + 44)
+        } }
+        val motion = TabletLyricsPaneMotion(parent, left, right, {}, artwork = { cover })
         val opening = listOf(0f, .1f, .25f, .5f, .9f, .94f, .949f, .95f, .951f, .99f, 1f)
         val progress = opening + opening.reversed() + listOf(.2f, .8f, .4f, .94f, .96f, 1f, 0f)
         try {
@@ -154,6 +157,7 @@ class TabletLyricsPaneMotionTest {
                 motion.close()
                 for (slide in progress) {
                     // The native callback runs first: interpolate mini/full layout bounds and size.
+                    motion.prepareNativeCoverFrame()
                     val nativeX = 20f + (148f - 20f) * slide
                     cover.translationX = nativeX - 148f
                     cover.translationY = 17f * (1f - slide)
@@ -165,12 +169,53 @@ class TabletLyricsPaneMotionTest {
                     val expectedX = 20f + (448f - 20f) * slide
                     assertEquals("$pane automatic=$automatic slide=$slide", expectedX,
                         (position[0] - origin[0]).toFloat(), 1f)
+                    lower.forEach { control ->
+                        val controlPosition = IntArray(2).also(control::getLocationInWindow)
+                        assertEquals("Lower content must already be centered at slide=$slide", 364,
+                            controlPosition[0] - origin[0])
+                    }
                     assertEquals(nativeScale, cover.scaleX, 0f); assertEquals(nativeScale, cover.scaleY, 0f)
                     assertEquals(17f * (1f - slide), cover.translationY, 0f)
                     assertEquals(200, cover.width); assertEquals(200, cover.height)
                     assertEquals(View.INVISIBLE, right.visibility)
                 }
             }
+        } finally { motion.close(); activity.finish() }
+    }
+
+    @Test fun coverCompensationDoesNotAccumulateAndReleasesTheOutgoingNativeCover() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        val parent = FrameLayout(activity); val left = FrameLayout(activity); val right = View(activity)
+        parent.addView(left); parent.addView(right)
+        parent.layout(0, 0, 1200, 800); left.layout(48, 0, 552, 800); right.layout(616, 0, 1184, 800)
+        val songCover = View(activity).apply { translationX = 130f; scaleX = .85f; translationY = 17f }
+        val queueCover = View(activity).apply { translationX = 90f; scaleX = .3f; translationY = 23f }
+        left.addView(songCover); left.addView(queueCover)
+        var current: View? = songCover
+        val motion = TabletLyricsPaneMotion(parent, left, right, {}, artwork = { current })
+        try {
+            motion.apply(true, "SONG", .5f, 1f)
+            assertEquals(-20f, songCover.translationX, 0f)
+            motion.apply(true, "SONG", .5f, 1f)
+            assertEquals(-20f, songCover.translationX, 0f)
+            motion.prepareNativeCoverFrame()
+            assertEquals(130f, songCover.translationX, 0f)
+            // A fresh native frame can legitimately equal the previous compensated value.
+            songCover.translationX = -20f
+            motion.apply(true, "SONG", .5f, 1f)
+            assertEquals(-170f, songCover.translationX, 0f)
+            assertEquals(.85f, songCover.scaleX, 0f); assertEquals(17f, songCover.translationY, 0f)
+            current = queueCover
+            motion.apply(true, "QUEUE", .25f, 1f)
+            assertEquals(-20f, songCover.translationX, 0f)
+            assertEquals(-135f, queueCover.translationX, 0f)
+            assertEquals(.3f, queueCover.scaleX, 0f); assertEquals(23f, queueCover.translationY, 0f)
+            motion.close()
+            assertEquals(90f, queueCover.translationX, 0f); assertEquals(0f, left.translationX, 0f)
+            motion.apply(true, "QUEUE", .25f, 1f)
+            queueCover.translationX = 777f
+            motion.close()
+            assertEquals(777f, queueCover.translationX, 0f)
         } finally { motion.close(); activity.finish() }
     }
 }
