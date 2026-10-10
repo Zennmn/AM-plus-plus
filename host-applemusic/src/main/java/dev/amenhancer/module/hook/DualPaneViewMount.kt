@@ -160,35 +160,19 @@ internal object ConstraintLayoutPane {
         return true
     }
 
-    /** 1606 tablet song pane: a shorter control section and metadata aligned to its host. */
+    /** 1606 tablet song pane: a shorter control section with native metadata insets. */
     fun configureTabletSongLayout(host: View): (() -> Unit)? {
-        val names = listOf("player_controls", "metadata_guideline_start", "title", "subtitle")
-        val views = names.map { name ->
-            host.findViewById<View>(targetId(host.resources, name)) ?: return null
-        }
-        val params = views.mapIndexed { index, view -> constraintMarginParams(view, names[index]) }
-        val heightPercent = checkNotNull(constraintField(params[0].javaClass, "matchConstraintPercentHeight"))
-        val guideBegin = checkNotNull(constraintField(params[1].javaClass, "guideBegin"))
-        val nativeHeightPercent = heightPercent.getFloat(params[0])
-        val nativeGuideBegin = guideBegin.getInt(params[1])
-        val nativeMargins = params.drop(2).map { it.marginStart to it.leftMargin }
+        val controls = host.findViewById<View>(targetId(host.resources, "player_controls")) ?: return null
+        val params = constraintMarginParams(controls, "player_controls")
+        val heightPercent = checkNotNull(constraintField(params.javaClass, "matchConstraintPercentHeight"))
+        val nativeHeightPercent = heightPercent.getFloat(params)
         // The native player excludes its top margin; 25% here is about 23% of the screen.
-        // Mutate only these values: the host's generic constructor drops native constraints.
-        heightPercent.setFloat(params[0], 0.25f)
-        guideBegin.setInt(params[1], 0)
-        for (index in 2..3) {
-            params[index].marginStart = 0
-            params[index].leftMargin = 0
-        }
-        views.forEachIndexed { index, view -> view.layoutParams = params[index] }
+        // Keep the original params: the host's generic constructor drops native constraints.
+        heightPercent.setFloat(params, 0.25f)
+        controls.layoutParams = params
         return {
-            heightPercent.setFloat(params[0], nativeHeightPercent)
-            guideBegin.setInt(params[1], nativeGuideBegin)
-            for (index in 2..3) {
-                params[index].marginStart = nativeMargins[index - 2].first
-                params[index].leftMargin = nativeMargins[index - 2].second
-            }
-            views.forEachIndexed { index, view -> view.layoutParams = params[index] }
+            heightPercent.setFloat(params, nativeHeightPercent)
+            controls.layoutParams = params
         }
     }
 

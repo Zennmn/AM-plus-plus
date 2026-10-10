@@ -42,7 +42,7 @@ class TabletSongLayoutTest {
     @Test fun usesObfuscatedFieldsWithoutDroppingNativeConstraints() {
         assertNotNull(ConstraintLayoutPane.configureTabletSongLayout(host))
         assertEquals(.25f, params[0].S, 0f)
-        assertEquals(0, params[1].a)
+        assertEquals(16, params[1].a)
         views.forEachIndexed { index, view ->
             assertSame(params[index], view.layoutParams)
             assertEquals(0, params[index].t)
@@ -50,8 +50,8 @@ class TabletSongLayoutTest {
             assertEquals(2, params[index].M)
         }
         for (index in 2..3) {
-            assertEquals(0, params[index].marginStart)
-            assertEquals(0, params[index].leftMargin)
+            assertEquals(16, params[index].marginStart)
+            assertEquals(16, params[index].leftMargin)
             assertEquals(8, params[index].marginEnd)
         }
     }
@@ -72,8 +72,8 @@ class TabletSongLayoutTest {
         assertEquals(77, params[2].l)
     }
 
-    @Test fun incompleteSongViewDoesNotChangeExistingConstraints() {
-        host.removeView(views[1])
+    @Test fun missingControlsDoesNotChangeExistingConstraints() {
+        host.removeView(views[0])
         assertNull(ConstraintLayoutPane.configureTabletSongLayout(host))
         assertEquals(.345f, params[0].S, 0f)
         assertEquals(16, params[2].marginStart)
