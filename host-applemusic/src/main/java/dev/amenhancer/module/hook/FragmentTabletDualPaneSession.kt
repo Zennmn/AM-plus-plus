@@ -56,6 +56,7 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
     private var artworkContainer: View? = null
     private var metadataBarrier: View? = null
     private var artworkParams: ViewGroup.LayoutParams? = null
+    private var songLayoutRestore: (() -> Unit)? = null
     private var nativeArtworkSize = 0
     private var artworkDirty = true
     private val artworkLayoutBounds = Rect()
@@ -210,6 +211,7 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
         val artwork = nativeCoverGetter.invoke(null, controller) as? View ?: return null
         if (cover !== artwork) {
             if (artworkContainer !== artwork.parent) {
+                songLayoutRestore?.invoke(); songLayoutRestore = null
                 artworkContainer?.removeOnLayoutChangeListener(artworkListener)
                 (artworkContainer?.parent as? View)?.removeOnLayoutChangeListener(artworkListener)
                 metadataBarrier?.removeOnLayoutChangeListener(artworkListener)
@@ -240,6 +242,11 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
         } ?: return
         if (artwork.width <= 0 || songHost.height <= 0) return
         if (nativeArtworkSize == 0) nativeArtworkSize = artwork.width
+        if (songLayoutRestore == null) {
+            songLayoutRestore = ConstraintLayoutPane.configureTabletSongLayout(songHost)
+            // Let the metadata barrier settle before calculating the cover's new center.
+            return
+        }
         val artworkParent = artwork.parent as? View ?: return
         val sheet = root.parent as? ViewGroup ?: return
         val coordinator = sheet.parent as? View ?: return
@@ -312,6 +319,7 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
     }
 
     private fun restoreDecorations() {
+        songLayoutRestore?.invoke(); songLayoutRestore = null
         hidden.forEach { (view, visibility) -> view.visibility = visibility }; hidden.clear()
         margins.forEach { (view, top) -> (view.layoutParams as? ViewGroup.MarginLayoutParams)?.let { it.topMargin = top; view.layoutParams = it } }; margins.clear()
         artworkContainer?.let { view -> artworkParams?.let { view.layoutParams = it } }
@@ -326,7 +334,11 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
         (artworkContainer?.parent as? View)?.removeOnLayoutChangeListener(artworkListener)
         metadataBarrier?.removeOnLayoutChangeListener(artworkListener)
     }
-    fun destroy() { destroyed = true; stopObserver(); hidden.clear(); margins.clear(); cover = null }
+    fun destroy() {
+        destroyed = true; stopObserver()
+        songLayoutRestore?.invoke(); songLayoutRestore = null
+        hidden.clear(); margins.clear(); cover = null
+    }
     private fun find(parent: View, name: String): View? = ids.getOrPut(name) { parent.resources.getIdentifier(name, "id", dev.amenhancer.module.ModuleConstants.TARGET_PACKAGE) }
         .takeIf { it != 0 }?.let { parent.findViewById(it) }
 }

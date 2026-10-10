@@ -158,6 +158,25 @@ internal object ConstraintLayoutPane {
         return true
     }
 
+    /** 1606 tablet song pane: a shorter control section and metadata aligned to its host. */
+    fun configureTabletSongLayout(host: View): (() -> Unit)? {
+        val names = listOf("player_controls", "metadata_guideline_start", "title", "subtitle")
+        val views = names.map { name ->
+            host.findViewById<View>(targetId(host.resources, name)) ?: return null
+        }
+        val nativeParams = views.mapIndexed { index, view -> constraintMarginParams(view, names[index]) }
+        val tabletParams = nativeParams.map { newLayoutParams(it, it.width, it.height) }
+        // The native player excludes its top margin; 25% here is about 23% of the screen.
+        tabletParams[0].setFloat("matchConstraintPercentHeight", 0.25f)
+        tabletParams[1].setInt("guideBegin", 0)
+        for (index in 2..3) {
+            tabletParams[index].marginStart = 0
+            tabletParams[index].leftMargin = 0
+        }
+        views.forEachIndexed { index, view -> view.layoutParams = tabletParams[index] }
+        return { views.forEachIndexed { index, view -> view.layoutParams = nativeParams[index] } }
+    }
+
     /**
      * Mirrors the modified layout-land/bottom_navigation.xml by converting the
      * stock flat resource tree into full-width tablet chrome. Apple Music's
