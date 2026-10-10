@@ -37,6 +37,7 @@ internal class TabletPlayerComponents(
     private var closed = false
     private var placed = false
     private val actionStyle = TabletNativeActionStyle()
+    private val transportRipple = TabletTransportRipple()
     private val outputIcon = IosDeviceOutputDrawable.Factory(TabletMediaAssets, root.resources).create()
     private val output = button().apply {
         setImageDrawable(outputIcon); contentDescription = "音频输出"
@@ -123,6 +124,7 @@ internal class TabletPlayerComponents(
         }
         nativeGroups.forEach {
             nativeActions(it).forEach(::hideSource)
+            transportButtons(it).forEach(transportRipple::apply)
             if (prepareGroup(it)) changed = true
         }
         return changed
@@ -130,6 +132,8 @@ internal class TabletPlayerComponents(
     private fun nativeActions(group: ViewGroup) =
         listOf("player_lyrics", "player_queue", "media_route_button", "badge_platter", "shuffle_repeat_badge",
             "shareplay_badge", "router_name_textview").mapNotNull { find(group, it) }
+    private fun transportButtons(group: ViewGroup) =
+        listOf("play_pause", "previous_rewind", "next_fast_forward").mapNotNull { find(group, it) as? ImageView }
     private fun suppressNativeActions() {
         val retained = groups(songHost).flatMap(::nativeActions)
         hidden.keys.toList().filter { it !in retained }.forEach(::restoreSource)
@@ -281,6 +285,7 @@ internal class TabletPlayerComponents(
         // Keep every retained pane prepared, including the collapsed sheet and outgoing queue.
         val retained = groups(songHost).mapNotNull(::percentTarget)
         rows.retain(retained + listOfNotNull(gradients))
+        transportRipple.retain(groups(songHost).flatMap(::transportButtons))
         overlay.visibility = if (visible) View.VISIBLE else View.INVISIBLE; placed = true
         if (visible && !running) { running = true; main.postDelayed(poll, 500) }
         else if (!visible) stopPolling()
@@ -290,6 +295,7 @@ internal class TabletPlayerComponents(
         overlay.visibility = View.INVISIBLE; placed = false; volume.setPageVisible(false); stopPolling()
         hidden.keys.toList().forEach(::restoreSource); translations.keys.toList().forEach(::restoreTranslation)
         rows.close()
+        transportRipple.close()
         actionStyle.clear()
         lyricsSource = null; queueSource = null
     }
