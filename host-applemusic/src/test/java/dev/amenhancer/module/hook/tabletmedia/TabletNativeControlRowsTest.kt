@@ -61,4 +61,22 @@ class TabletNativeControlRowsTest {
         rows.close()
         assertEquals(.345f, p.S, 0f); assertEquals(41, p.marginStart); assertEquals(77, p.k)
     }
+    @Test fun smallerStartInsetKeepsNativeMarginsAndEndPaddingAndRestoresOnlyOwnedValues() {
+        val view = view(); val p = view.layoutParams as b
+        val density = activity.resources.displayMetrics.density
+        val padding = (32 * density).toInt()
+        view.setPadding(padding, 5, padding, 6)
+        assertTrue(rows.startInset(view))
+        assertEquals(padding - (16 * density).toInt(), view.paddingLeft)
+        assertEquals(padding, view.paddingRight); assertEquals(32, p.marginStart)
+        assertFalse(rows.startInset(view))
+        val guide = view(); val gp = guide.layoutParams as b
+        assertTrue(rows.startInset(guide, guideline = true)); assertEquals(0, gp.a)
+        p.topMargin = 40; view.setPadding(view.paddingLeft, 7, 50, 8)
+        rows.close()
+        assertEquals(padding, view.paddingLeft); assertEquals(7, view.paddingTop)
+        assertEquals(50, view.paddingRight); assertEquals(8, view.paddingBottom)
+        assertEquals(40, p.topMargin); assertEquals(32, p.marginStart); assertEquals(-1, gp.a)
+        assertSame(p, view.layoutParams); assertSame(gp, guide.layoutParams)
+    }
 }

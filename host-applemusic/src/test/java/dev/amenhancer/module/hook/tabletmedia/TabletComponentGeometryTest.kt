@@ -12,7 +12,7 @@ class TabletComponentGeometryTest {
             val volume = checkNotNull(TabletComponentGeometry.bottomVolume(px(64), px(568), px(756), px(698), px(800), density))
             assertEquals(px(44), volume.height)
             assertTrue(kotlin.math.abs(volume.top + volume.height / 2 - px(756)) <= 1)
-            assertTrue(volume.top >= px(698) + px(4))
+            assertTrue(volume.top >= px(698))
             assertTrue(output.left + output.width + px(8) <= px(64))
             assertEquals(px(64), volume.left)
             assertEquals(px(568), volume.left + volume.width)
@@ -24,21 +24,22 @@ class TabletComponentGeometryTest {
         val narrow = checkNotNull(TabletComponentGeometry.cornerOutput(20, 80, 734, 1f))
         assertEquals(28, narrow.left); assertEquals(72, narrow.left + narrow.width)
         assertNull(TabletComponentGeometry.cornerOutput(20, 71, 734, 1f))
+        assertNotNull(TabletComponentGeometry.cornerOutput(20, 71, 734, 1f, separateRow = true))
     }
     @Test fun insufficientPreferredSpaceMovesVolumeDownAndShrinksOnlyEmptyTouchPadding() {
         val normal = checkNotNull(TabletComponentGeometry.bottomVolume(48, 552, 156, 130, 200, 1f))
         assertEquals(134, normal.top); assertEquals(44, normal.height)
-        val moved = checkNotNull(TabletComponentGeometry.bottomVolume(48, 552, 156, 131, 200, 1f))
+        val moved = checkNotNull(TabletComponentGeometry.bottomVolume(48, 552, 156, 135, 200, 1f))
         assertEquals(135, moved.top); assertEquals(44, moved.height)
         val tight = checkNotNull(TabletComponentGeometry.bottomVolume(48, 552, 156, 166, 200, 1f))
-        assertEquals(170, tight.top); assertEquals(30, tight.height)
-        val glyphHeight = checkNotNull(TabletComponentGeometry.bottomVolume(48, 552, 156, 172, 200, 1f))
+        assertEquals(166, tight.top); assertEquals(34, tight.height)
+        val glyphHeight = checkNotNull(TabletComponentGeometry.bottomVolume(48, 552, 156, 176, 200, 1f))
         assertEquals(176, glyphHeight.top); assertEquals(24, glyphHeight.height)
     }
     @Test fun differentNativeTransportBoundsNeverOverlapTheFooterSlider() {
         for (center in 60..240) for (contentBottom in listOf(40, 80, 120, 160)) {
             val volume = checkNotNull(TabletComponentGeometry.bottomVolume(48, 552, center, contentBottom, 260, 1f))
-            assertTrue(volume.top >= contentBottom + 4)
+            assertTrue(volume.top >= contentBottom)
             assertTrue(volume.top + volume.height <= 260)
             assertEquals(48, volume.left); assertEquals(552, volume.left + volume.width)
         }
@@ -55,5 +56,9 @@ class TabletComponentGeometryTest {
         assertEquals(48, volume.left); assertEquals(200, volume.left + volume.width)
         val centered = checkNotNull(TabletComponentGeometry.bottomVolume(348, 852, 156, 100, 200, 1f))
         assertEquals(348, centered.left)
+    }
+    @Test fun volumeCanTouchThePlaybackTargetWithoutAnExtraSafetyGap() {
+        val volume = checkNotNull(TabletComponentGeometry.bottomVolume(48, 552, 178, 156, 200, 1f))
+        assertEquals(156, volume.top); assertEquals(44, volume.height)
     }
 }
