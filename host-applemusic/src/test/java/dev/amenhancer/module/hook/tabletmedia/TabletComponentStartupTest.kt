@@ -130,7 +130,7 @@ class TabletComponentStartupTest {
             assertEquals(.345f, percent.matchConstraintPercentHeight, 0f)
         } finally { components.close(); activity.finish() }
     }
-    @Test fun outputStaysInTheCornerAndVolumeFollowsProgressBoundsWhileTheRightButtonsKeepTheirPositions() {
+    @Test fun outputAlignsBelowVolumeWhileTheRightButtonsKeepTheirPositions() {
         val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
         val density = activity.resources.displayMetrics.density
         fun dp(value: Int) = kotlin.math.round(value * density).toInt()
@@ -170,11 +170,12 @@ class TabletComponentStartupTest {
             assertTrue(play.y >= progress.bottom)
             assertEquals((root.height * .061f).toInt().coerceAtLeast(dp(55)), volume.top + volume.height / 2 - (song.top + group.top + play.y.toInt() + play.height / 2))
             assertTrue(volume.top < output.top)
-            assertEquals(dp(12), output.left)
-            assertTrue(volume.left >= output.right + dp(8))
+            assertEquals(volume.left, output.left)
+            assertTrue(output.top >= volume.bottom + dp(8))
+            assertTrue(output.right <= volume.right)
             assertEquals(song.left + track.left + track.paddingLeft, volume.left)
             assertEquals(song.left + track.right - track.paddingRight, volume.right)
-            assertEquals(dp(26), root.height - output.bottom)
+            assertEquals(dp(17), root.height - output.bottom)
             assertTrue(root.height - volume.bottom > dp(28))
             offset = 0f; song.translationX = 0f
             listOf(180, 160, 220).forEach { height ->
@@ -189,8 +190,12 @@ class TabletComponentStartupTest {
                 assertTrue(volume.top >= group.top + play.y.toInt() + play.height)
                 assertTrue(volume.bottom <= root.height)
                 assertTrue(volume.height >= dp(24))
-                assertEquals(View.VISIBLE, output.visibility)
-                assertEquals(group.top + nativeFooter.top + nativeFooter.height / 2 - dp(4), output.top + output.height / 2)
+                if (height < 220) assertEquals(View.INVISIBLE, output.visibility)
+                else {
+                    assertEquals(View.VISIBLE, output.visibility)
+                    assertEquals(volume.left, output.left)
+                    assertTrue(output.top >= volume.bottom + dp(8))
+                }
                 assertEquals(dp(44), volume.height)
                 val shortRightTop = group.top + group.height - dp(12) - dp(44)
                 assertEquals(shortRightTop, lyrics.top); assertEquals(shortRightTop, queue.top)
@@ -204,11 +209,11 @@ class TabletComponentStartupTest {
             assertEquals(dp(60), nativeFooter.height)
             offset = dp(300).toFloat(); song.translationX = offset
             components.update(1f, false)
-            assertEquals(dp(12), output.left)
+            assertEquals(volume.left, output.left)
             assertEquals(song.left + dp(300) + track.left + track.paddingLeft, volume.left)
             assertEquals(song.left + dp(300) + track.right - track.paddingRight, volume.right)
             assertEquals(rightTop, lyrics.top); assertEquals(rightTop, queue.top)
-            assertEquals(dp(26), root.height - output.bottom)
+            assertEquals(dp(17), root.height - output.bottom)
             assertTrue(root.height - volume.bottom > dp(28))
             components.close()
             names.subList(1, 4).forEach { name ->
@@ -281,6 +286,7 @@ class TabletComponentStartupTest {
             val play = first.findViewById<View>(ids.getValue("play_pause"))
             assertEquals(dp(61), volume.top + volume.height / 2 - (first.top + play.y.toInt() + play.height / 2))
             assertEquals(dp(26), root.height - output.bottom)
+            assertEquals(volume.left, output.left)
             assertTrue(volume.bottom <= output.top)
             assertEquals(dp(12), root.height - lyrics.bottom); assertEquals(lyrics.top, queue.top)
             components.update(1f, false); verify(first, dp(62))
@@ -299,7 +305,7 @@ class TabletComponentStartupTest {
             assertEquals(View.VISIBLE, volume.visibility)
             assertTrue(volume.top >= incoming.top + smallPlay.y.toInt() + smallPlay.height)
             assertTrue(volume.bottom <= root.height)
-            assertEquals(dp(44), volume.height); assertEquals(dp(26), root.height - output.bottom)
+            assertEquals(dp(44), volume.height); assertEquals(View.INVISIBLE, output.visibility)
             components.close()
             assertEquals(dp(16), guideParams.guideBegin)
             listOf(first, incoming).forEach { group ->

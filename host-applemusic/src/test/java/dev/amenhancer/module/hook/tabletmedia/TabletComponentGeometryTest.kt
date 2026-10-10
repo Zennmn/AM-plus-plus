@@ -5,26 +5,30 @@ import org.junit.Test
 import kotlin.math.roundToInt
 
 class TabletComponentGeometryTest {
-    @Test fun volumeIncludesItsIconsWithinTheProgressBoundsAndOutputStaysOutside() {
+    @Test fun volumeAndOutputRowAlignWithinTheProgressBounds() {
         listOf(1f, 2.25f, 2.625f, 3.3125f, 4f).forEach { density ->
             fun px(dp: Int) = (dp * density).roundToInt()
-            val output = checkNotNull(TabletComponentGeometry.cornerOutput(0, px(64), px(734), density))
-            val volume = checkNotNull(TabletComponentGeometry.bottomVolume(px(64), px(568), px(756), px(698), px(800), density))
+            val volume = checkNotNull(TabletComponentGeometry.bottomVolume(px(64), px(568), px(700), px(642), px(800), density))
+            val output = checkNotNull(TabletComponentGeometry.outputRow(px(64), px(568), px(734),
+                volume.top + volume.height, px(800), px(220), density))
             assertEquals(px(44), volume.height)
-            assertTrue(kotlin.math.abs(volume.top + volume.height / 2 - px(756)) <= 1)
-            assertTrue(volume.top >= px(698))
-            assertTrue(output.left + output.width + px(8) <= px(64))
+            assertTrue(kotlin.math.abs(volume.top + volume.height / 2 - px(700)) <= 1)
+            assertTrue(volume.top >= px(642))
+            assertEquals(volume.left, output.left)
+            assertTrue(output.top >= volume.top + volume.height + px(8))
+            assertTrue(output.left + output.width <= px(568))
             assertEquals(px(64), volume.left)
             assertEquals(px(568), volume.left + volume.width)
         }
     }
-    @Test fun cornerOutputUsesAvailableGutterWithoutCrossingTheProgressEdge() {
-        val wide = checkNotNull(TabletComponentGeometry.cornerOutput(0, 64, 734, 1f))
-        assertEquals(12, wide.left); assertEquals(44, wide.width)
-        val narrow = checkNotNull(TabletComponentGeometry.cornerOutput(20, 80, 734, 1f))
-        assertEquals(28, narrow.left); assertEquals(72, narrow.left + narrow.width)
-        assertNull(TabletComponentGeometry.cornerOutput(20, 71, 734, 1f))
-        assertNotNull(TabletComponentGeometry.cornerOutput(20, 71, 734, 1f, separateRow = true))
+    @Test fun outputRowKeepsPreferredHeightAndBoundsLongNamesWithoutCrossingVolume() {
+        val normal = checkNotNull(TabletComponentGeometry.outputRow(64, 568, 734, 710, 800, 220, 1f))
+        assertEquals(64, normal.left); assertEquals(734, normal.top); assertEquals(220, normal.width)
+        val moved = checkNotNull(TabletComponentGeometry.outputRow(64, 568, 734, 742, 800, 220, 1f))
+        assertEquals(750, moved.top); assertEquals(44, moved.height)
+        val longName = checkNotNull(TabletComponentGeometry.outputRow(64, 160, 734, 710, 800, 220, 1f))
+        assertEquals(96, longName.width)
+        assertNull(TabletComponentGeometry.outputRow(64, 568, 734, 762, 800, 220, 1f))
     }
     @Test fun insufficientPreferredSpaceMovesVolumeDownAndShrinksOnlyEmptyTouchPadding() {
         val normal = checkNotNull(TabletComponentGeometry.bottomVolume(48, 552, 156, 130, 200, 1f))
@@ -51,7 +55,7 @@ class TabletComponentGeometryTest {
         assertNull(TabletComponentGeometry.centeredOffset(600, 0, 600))
     }
     @Test fun volumeKeepsItsProgressWidthWhenOutputDoesNotFit() {
-        assertNull(TabletComponentGeometry.cornerOutput(0, 48, 134, 1f))
+        assertNull(TabletComponentGeometry.outputRow(48, 200, 134, 180, 200, 160, 1f))
         val volume = checkNotNull(TabletComponentGeometry.bottomVolume(48, 200, 156, 100, 200, 1f))
         assertEquals(48, volume.left); assertEquals(200, volume.left + volume.width)
         val centered = checkNotNull(TabletComponentGeometry.bottomVolume(348, 852, 156, 100, 200, 1f))

@@ -39,8 +39,7 @@ internal class TabletPlayerComponents(
     private val actionStyle = TabletNativeActionStyle()
     private val transportRipple = TabletTransportRipple()
     private val outputIcon = IosDeviceOutputDrawable.Factory(TabletMediaAssets, root.resources).create()
-    private val output = button().apply {
-        setImageDrawable(outputIcon); contentDescription = "音频输出"
+    private val output = TabletAudioOutputView(root.context, outputIcon).apply {
         setOnClickListener { PlatformAudioOutputSwitcher.open(context) }
     }
     private var lyricsSource: View? = null
@@ -83,9 +82,7 @@ internal class TabletPlayerComponents(
             .takeIf { it != 0 }?.let(::setImageResource)
     }
     private fun refreshOutput() {
-        val state = audio.current()
-        outputIcon.kind = state.icon
-        output.contentDescription = state.name?.let { "音频输出 · $it" } ?: "音频输出"
+        output.bind(audio.current())
     }
     private fun location(view: View): Pair<Int, Int> {
         view.getLocationInWindow(point)
@@ -265,25 +262,24 @@ internal class TabletPlayerComponents(
         val progressAt = location(nativeProgress)
         val progressLeft = progressAt.first + nativeProgress.paddingLeft
         val progressRight = progressAt.first + nativeProgress.width - nativeProgress.paddingRight
-        // Output retains its existing corner height; volume forms a separate row above it.
+        // Keep the output row near its old height, below volume and aligned to metadata.
         val nativeFooterAt = location(nativeLyrics)
         val center = nativeFooterAt.second + nativeLyrics.height / 2
         val outputCenter = center - dp(4)
         val volumeCenter = location(play).second + play.height / 2 + (root.height * .061f).roundToInt()
         val contentBottom = (listOf(play, previous, next, progress)).maxOf { location(it).second + it.height }
         // Volume owns the replaced footer. Fit it first, keeping the visible glyph sizes.
+        val contentBottomEdge = minOf(root.height, column.second + group.height)
         val slot = if (nativeLyrics.height > 0) TabletComponentGeometry.bottomVolume(progressLeft,
-            progressRight, volumeCenter, contentBottom, minOf(root.height, column.second + group.height),
+            progressRight, volumeCenter, contentBottom, contentBottomEdge,
             root.resources.displayMetrics.density) else null
         if (slot != null) place(volume, slot.left, slot.top, slot.width, slot.height)
         else volume.visibility = View.INVISIBLE
         volume.setPageVisible(visible && expansion >= .999f && volume.visibility == View.VISIBLE)
         val outputTop = if (nativeLyrics.height > 0) outputCenter - size / 2 else footerTop - dp(4)
-        // Keep the corner action outside the progress edge, even when the song column centers.
-        val corner = TabletComponentGeometry.cornerOutput(systemInsets?.left ?: 0,
-            progressLeft - horizontalOffset().roundToInt(), outputTop,
-            root.resources.displayMetrics.density, separateRow = slot != null && outputTop >= slot.top + slot.height)
-        if (corner != null) place(output, corner.left, corner.top, corner.width, corner.height)
+        val outputSlot = slot?.let { TabletComponentGeometry.outputRow(progressLeft, progressRight,
+            outputTop, it.top + it.height, contentBottomEdge, output.preferredWidth(), root.resources.displayMetrics.density) }
+        if (outputSlot != null) place(output, outputSlot.left, outputSlot.top, outputSlot.width, outputSlot.height)
         else output.visibility = View.INVISIBLE
 
         val vocal = find(rightHost, "vocal_ctrl")?.takeIf { it.isShown && it.width > 0 }
