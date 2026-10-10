@@ -5,17 +5,26 @@ import org.junit.Test
 import kotlin.math.roundToInt
 
 class TabletComponentGeometryTest {
-    @Test fun volumeOccupiesTheNativeFooterCenterAtTabletDensitiesAndAvoidsOutput() {
+    @Test fun volumeIncludesItsIconsWithinTheProgressBoundsAndOutputStaysOutside() {
         listOf(1f, 2.25f, 2.625f, 3.3125f, 4f).forEach { density ->
             fun px(dp: Int) = (dp * density).roundToInt()
-            val volume = checkNotNull(TabletComponentGeometry.bottomVolume(px(48), px(552), px(756), px(698),
-                listOf(px(58) until px(102)), density))
+            val output = checkNotNull(TabletComponentGeometry.cornerOutput(0, px(64), px(734), density))
+            val volume = checkNotNull(TabletComponentGeometry.bottomVolume(px(64), px(568), px(756), px(698),
+                listOf(output.left until output.left + output.width), density))
             assertEquals(px(44), volume.height)
             assertTrue(kotlin.math.abs(volume.top + volume.height / 2 - px(756)) <= 1)
             assertTrue(volume.top >= px(698) + px(4))
-            assertTrue(volume.left >= px(102) + px(8))
-            assertEquals(px(552), volume.left + volume.width)
+            assertTrue(output.left + output.width + px(8) <= px(64))
+            assertEquals(px(64), volume.left)
+            assertEquals(px(568), volume.left + volume.width)
         }
+    }
+    @Test fun cornerOutputUsesAvailableGutterWithoutCrossingTheProgressEdge() {
+        val wide = checkNotNull(TabletComponentGeometry.cornerOutput(0, 64, 734, 1f))
+        assertEquals(12, wide.left); assertEquals(44, wide.width)
+        val narrow = checkNotNull(TabletComponentGeometry.cornerOutput(20, 80, 734, 1f))
+        assertEquals(28, narrow.left); assertEquals(72, narrow.left + narrow.width)
+        assertNull(TabletComponentGeometry.cornerOutput(20, 71, 734, 1f))
     }
     @Test fun insufficientFooterSpaceHidesVolumeWithoutShrinkingTheNativeTransport() {
         assertNotNull(TabletComponentGeometry.bottomVolume(48, 552, 156, 130, emptyList(), 1f))

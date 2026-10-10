@@ -206,8 +206,9 @@ internal class TabletPlayerComponents(
         overlay.z = maxOf(songHost.z, rightHost.z) + dp(2)
         overlay.alpha = alpha(group)
         val size = dp(44)
-        val rightInset = if (Build.VERSION.SDK_INT >= 30)
-            root.rootWindowInsets?.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.systemBars())?.right ?: 0 else 0
+        val systemInsets = if (Build.VERSION.SDK_INT >= 30)
+            root.rootWindowInsets?.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.systemBars()) else null
+        val rightInset = systemInsets?.right ?: 0
         val queueLeft = root.width - rightInset - dp(44) - size
         val lyricsLeft = queueLeft - dp(8) - size
         val pairFits = lyricsLeft >= column.first + group.width + dp(16)
@@ -224,22 +225,32 @@ internal class TabletPlayerComponents(
             val a = location(nativeLyrics); val b = location(nativeQueue)
             place(lyrics, a.first, footerTop, size, size); place(queue, b.first, footerTop, size, size)
         }
-        val outputLeft = column.first - horizontalOffset().roundToInt() + dp(10)
+        val nativeProgress = find(progress, "progress")?.takeIf { it.isShown && it.width > 0 } ?: progress
+        val progressAt = location(nativeProgress)
+        val progressLeft = progressAt.first + nativeProgress.paddingLeft
+        val progressRight = progressAt.first + nativeProgress.width - nativeProgress.paddingRight
         // The invisible native actions retain their dimensions and constraints:
         // use that original row for volume without moving any native playback control.
         val nativeFooterAt = location(nativeLyrics)
         val center = nativeFooterAt.second + nativeLyrics.height / 2
         val volumeTop = center - size / 2
-        place(output, outputLeft, if (nativeLyrics.height > 0) volumeTop else footerTop, size, size)
-        val blockers = mutableListOf(outputLeft until outputLeft + size)
+        // Keep the corner action outside the progress edge, even when the song column centers.
+        val corner = TabletComponentGeometry.cornerOutput(systemInsets?.left ?: 0,
+            progressLeft - horizontalOffset().roundToInt(), if (nativeLyrics.height > 0) volumeTop else footerTop,
+            root.resources.displayMetrics.density)
+        if (corner != null) place(output, corner.left, corner.top, corner.width, corner.height)
+        else output.visibility = View.INVISIBLE
+        val blockers = mutableListOf<IntRange>()
+        if (output.visibility == View.VISIBLE) blockers += output.left until output.right
         find(group, "shareplay_badge")?.takeIf { it.isShown && alpha(it) > .01f }?.let {
             val at = location(it)
             if (at.second < volumeTop + size && at.second + it.height > volumeTop)
                 blockers += at.first until at.first + it.width
         }
         val contentBottom = (listOf(play, previous, next, progress)).maxOf { location(it).second + it.height }
-        val slot = if (nativeLyrics.height > 0) TabletComponentGeometry.bottomVolume(column.first,
-            column.first + group.width, center, contentBottom, blockers, root.resources.displayMetrics.density) else null
+        // The entire volume view, including both speaker icons, stays within the playback track.
+        val slot = if (nativeLyrics.height > 0) TabletComponentGeometry.bottomVolume(progressLeft,
+            progressRight, center, contentBottom, blockers, root.resources.displayMetrics.density) else null
         if (slot != null) place(volume, slot.left, slot.top, slot.width, slot.height)
         else volume.visibility = View.INVISIBLE
         volume.setPageVisible(visible && expansion >= .999f && volume.visibility == View.VISIBLE)

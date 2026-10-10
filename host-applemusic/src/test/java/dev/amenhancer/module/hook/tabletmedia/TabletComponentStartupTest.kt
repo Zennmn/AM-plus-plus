@@ -124,7 +124,7 @@ class TabletComponentStartupTest {
             assertEquals(.345f, percent.matchConstraintPercentHeight, 0f)
         } finally { components.close(); activity.finish() }
     }
-    @Test fun bottomVolumeUsesTheOriginalActionRowWhileTheRightButtonsKeepTheirPositions() {
+    @Test fun outputStaysInTheCornerAndVolumeFollowsProgressBoundsWhileTheRightButtonsKeepTheirPositions() {
         val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
         val density = activity.resources.displayMetrics.density
         fun dp(value: Int) = kotlin.math.round(value * density).toInt()
@@ -132,9 +132,10 @@ class TabletComponentStartupTest {
         activity.setContentView(root)
         root.addView(song, FrameLayout.LayoutParams(dp(504), dp(800)).apply { leftMargin = dp(48) })
         root.addView(right, FrameLayout.LayoutParams(dp(568), dp(800)).apply { leftMargin = dp(616) })
-        val components = TabletPlayerComponents(root, song, right, { true }, { true }, {})
+        var offset = 0f
+        val components = TabletPlayerComponents(root, song, right, { true }, { true }, {}, { offset })
         val names = listOf("player_controls", "play_pause", "previous_rewind", "next_fast_forward",
-            "player_lyrics", "player_queue", "media_route_button", "seek_bar_controls")
+            "player_lyrics", "player_queue", "media_route_button", "seek_bar_controls", "progress")
         val ids = resourceIds(components, names)
         val group = FrameLayout(activity).apply { id = ids.getValue("player_controls") }
         song.addView(group, FrameLayout.LayoutParams(dp(504), dp(220), Gravity.BOTTOM))
@@ -145,7 +146,10 @@ class TabletComponentStartupTest {
             ImageView(activity).apply { id = ids.getValue("media_route_button") }).forEach { view ->
             group.addView(view, FrameLayout.LayoutParams(dp(60), dp(60), Gravity.BOTTOM).apply { bottomMargin = dp(14) })
         }
-        group.addView(View(activity).apply { id = ids.getValue("seek_bar_controls") }, FrameLayout.LayoutParams(dp(504), dp(41)))
+        val progress = FrameLayout(activity).apply { id = ids.getValue("seek_bar_controls") }
+        group.addView(progress, FrameLayout.LayoutParams(dp(504), dp(41)))
+        val track = View(activity).apply { id = ids.getValue("progress"); setPadding(dp(8), 0, dp(10), 0) }
+        progress.addView(track, FrameLayout.LayoutParams(dp(472), dp(12)).apply { leftMargin = dp(16) })
         try {
             root.measure(View.MeasureSpec.makeMeasureSpec(dp(1200), View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(dp(800), View.MeasureSpec.EXACTLY))
@@ -157,14 +161,24 @@ class TabletComponentStartupTest {
             assertEquals(View.VISIBLE, volume.visibility)
             assertEquals(group.top + nativeFooter.top + nativeFooter.height / 2, volume.top + volume.height / 2)
             assertEquals(volume.top, output.top)
+            assertEquals(dp(12), output.left)
             assertTrue(volume.left >= output.right + dp(8))
-            assertEquals(song.left + group.width, volume.right)
+            assertEquals(song.left + track.left + track.paddingLeft, volume.left)
+            assertEquals(song.left + track.right - track.paddingRight, volume.right)
+            assertEquals(dp(22), root.height - output.bottom)
             val rightTop = group.top + group.height - dp(12) - dp(44)
             assertEquals(rightTop, lyrics.top); assertEquals(rightTop, queue.top)
             assertEquals(dp(44), lyrics.height); assertEquals(dp(44), queue.height)
             assertEquals(root.width - dp(44) - dp(44), queue.left)
             assertEquals(queue.left - dp(8) - dp(44), lyrics.left)
             assertEquals(dp(60), nativeFooter.height)
+            offset = dp(300).toFloat(); song.translationX = offset
+            components.update(1f, false)
+            assertEquals(dp(12), output.left)
+            assertEquals(song.left + dp(300) + track.left + track.paddingLeft, volume.left)
+            assertEquals(song.left + dp(300) + track.right - track.paddingRight, volume.right)
+            assertEquals(rightTop, lyrics.top); assertEquals(rightTop, queue.top)
+            assertEquals(dp(22), root.height - output.bottom)
         } finally { components.close(); activity.finish() }
     }
 }
