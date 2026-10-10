@@ -36,6 +36,43 @@
 
 7.0.0-beta/1606 已新增精确生产 profile，为用户测试启用；历史 research 夹具继续留在测试目录。工厂按 `fragment-content` 分派 settings2、双栏与 Fragment 玻璃。新平板使用顶部导航和独立底部 mini 的原生边界，抽屉保留原生交互；玻璃不依赖双栏开关。新布局和渐变字段只从当前 tuple 读取。700 适配过程记录已从当前目录移除，可从 Git 历史查阅；真机验收仍需逐项确认。正式版和其他 beta 必须重新取证。此前实验 APK 没有整体合并。
 
+## 1606 平板双栏与媒体组件
+
+当前实现入口为 `FragmentTabletDualPaneCoordinator` / `FragmentTabletDualPaneSession`，媒体组件位于 `hook/tabletmedia/`。门禁仍是精确宿主 tuple、双栏设置开启、`screenWidthDp >= 600`、横屏及原生 `useNavigationDrawer`；不要把这些改动直接推广到其他版本或手机。
+
+### 最终布局规则
+
+- SONG/QUEUE 控制区使用原布局参数的 `matchConstraintPercentHeight = 0.25f`。这是容器内比例，不是整屏高度；保留原生 metadata 缩进、字体、播放图标尺寸、padding 和封面尺寸。混淆 `androidx.constraintlayout.widget.ConstraintLayout$b` 的高度比例字段为 `S`，guideline begin 为 `a`；修改和恢复原 params，不用通用构造器复制，避免丢失原生约束。
+- 原生底部歌词、队列、输出动作保留布局尺寸但隐藏显示/点击，音量条占用原 footer。音量条连同两端图标，总宽度对齐原生进度条的内容边界；优先移动音量行或把空白触摸高度从 44dp 压到 24dp，保留 24dp 图标。音量条触摸区域与播放/进度控件仍保留 4dp 净间距；可用宽度不超过 80dp 或高度不足 24dp 时音量条无法放入。
+- 输出只显示图标，44dp 点击区域位于屏幕左下侧、进度条外侧，边界不足时隐藏输出。当前输出中心比音量中心低 2dp；音量正常中心比原 footer 中心高 6dp。设备名用于无障碍说明，不显示设备名文字。
+- 右下歌词/队列代理使用原生 drawable、selector、tint 和状态样式，44dp 点击区域、8dp 间隔、底部 12dp。队列点击/长按交回原生控件；歌词点击执行双栏展开/关闭。翻译按钮保留原生；不新增随机/循环按钮。原生三颗播放图标保持默认大小，仅将水波纹半径设为图标最大半径外加 8dp，并使用白色 20% 不透明度；关闭组件恢复原 drawable。
+- 原生 pane `onViewCreated` 就准备比例、图标和隐藏 footer；每次 update 在切页快速返回之前再次隐藏所有保留 pane 的 footer，避免首次打开延后生效或 SONG/QUEUE 交叉淡入时闪出旧按钮。歌词渐变视口不额外预留底部按钮高度。
+
+媒体资源从打包的 `tablet-media/` 读取，APK 内资源读取由 `AppleMusicHostProfiles.openTabletMediaAsset` 处理；来源见根目录 `THIRD_PARTY_NOTICES.md`。profile 中保留了导入播放模式代码的 `tablet-playback-*` 调用契约，不能据此认定当前 UI 启用了随机/循环按钮。`invocationOnly` 允许抽象接口方法参与调用验证；Hook 目标仍不能是抽象、bridge 或 synthetic 方法。
+
+### 当前歌曲歌词可用性
+
+`FragmentTabletLyricsAvailability` 每次读取当前歌曲并使用原生规则：`i1.i(currentItem) && (fc.d.c(context) || currentItem.hasOfflineLyrics())`。`i1.i` 包含原生订阅资格及普通/自定义歌词判断，`fc.d.c` 使用原生网络许可。不要只读取保留控件的 `isEnabled`、右栏是否可见或旧歌词文本：原生 binding 的 forced-open 标志可在换歌后继续保持启用，造成无歌词歌曲显示上一首歌词。
+
+| 原生契约 | 完整成员与类型 |
+|---|---|
+| 当前歌曲 | `com.apple.android.music.player.fragment.PlayerMainFragment.M : com.apple.android.music.model.BaseContentItem`，非静态；值需实现 `PlaybackItem` |
+| 歌词资格 | `com.apple.android.music.player.i1.i(com.apple.android.music.model.PlaybackItem) : boolean`，静态 |
+| 网络许可 | `fc.d.c(android.content.Context) : boolean`，静态 |
+| 离线歌词 | `com.apple.android.music.model.PlaybackItem.hasOfflineLyrics() : boolean`，非静态接口调用 |
+
+这四项目前在 `FragmentTabletLyricsAvailability.native` 中解析和校验类型，尚未纳入 JSON 的 `indexed` 契约；适配下一 tuple 时必须单独核对实际 DEX，不能仅复制 profile 或把 profile 静态通过当作这些成员已验证。当前歌曲缺失或查询失败时代理禁用并关闭右栏；可用性恢复只重新打开自动关闭的右栏，手动关闭的状态保持。
+
+### 封面与下半区动画
+
+关闭歌词时，SONG 和 QUEUE 共用居中的左 host，保留列宽。歌词开关和自动可用性变化使用 280ms 平移/淡入淡出；切换 SONG/QUEUE 不清空手动关闭状态或重置居中位置。
+
+播放器展开/收起时，下半区保持最终横坐标，继续使用原生显现过程；只有封面按原生 slide 移动。`TabletLyricsPaneMotion` 令 `C = centeredOffset * 歌词关闭动画比例`，左 host 保持原生 X 加 `C`，选中的封面在原生 X 上补偿 `-C * (1 - slide)`，所以封面净新增位移为 `C * slide`。不要用 95% 阈值清零位移，也不要把整个 host 乘 slide，否则分别产生封面横跳和下半区从左侧滑入。
+
+封面沿用原生 selector `PlayerMainFragment.f1(PlayerMainFragment) : android.view.View`（静态）。在 `PlayerMainFragment$i.d(float) : void` 的前置回调释放上一帧 X 补偿，原生计算完后再合成；owner 字段是 `h : PlayerMainFragment`。保留原生 scale、Y、暂停比例和视频内容，重复 pre-draw 不累计补偿，换 pane 或释放会话时恢复模块仍拥有的原生 X。
+
+相关自动回归包括 `TabletSongLayoutTest`、`TabletNativeControlRowsTest`、`TabletComponentGeometryTest`、`TabletComponentStartupTest`、`TabletNativeActionStyleTest`、`TabletTransportRippleTest`、`FragmentTabletLyricsAvailabilityTest` 和 `TabletLyricsPaneMotionTest`。覆盖混淆 params、保留 pane 首帧、短窗口 footer、旧歌词/旧按钮、SONG/QUEUE 切换、双向/反向拖动和补偿恢复；完整真机场景见 [功能保全与验收矩阵](feature-preservation.md#1606-平板双栏补充验收)，自动通过不能替代该验收。
+
 ## 热路径与安装
 
 冷启动顺序维持：精确版本 → 配置迁移/绑定 → DPI → 资源回调 → Application 后功能 → 设置入口。资源基础设施失败停止后续安装；目标缺失只降级对应能力。
