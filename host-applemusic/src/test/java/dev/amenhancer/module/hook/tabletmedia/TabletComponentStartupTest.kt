@@ -1,6 +1,11 @@
 package dev.amenhancer.module.hook.tabletmedia
 
 import android.app.Activity
+import android.content.res.ColorStateList
+import android.graphics.Color
+import android.graphics.drawable.RippleDrawable
+import android.os.SystemClock
+import android.view.MotionEvent
 import android.view.View
 import android.view.Gravity
 import android.widget.FrameLayout
@@ -71,10 +76,11 @@ class TabletComponentStartupTest {
             actions.forEach { assertEquals(0f, it.alpha, 0f); assertFalse(it.isClickable) }
             components.javaClass.getDeclaredField("placed").apply { isAccessible = true }.setBoolean(components, true)
             // A late native media update can write alpha again during the crossfade.
-            actions.forEach { it.alpha = .8f }
+            actions.forEach { it.alpha = .8f; it.visibility = View.VISIBLE; it.isPressed = true }
             components.update(.5f, true)
             actions.forEach {
                 assertEquals(0f, it.alpha, 0f); assertFalse(it.isClickable)
+                assertEquals(View.INVISIBLE, it.visibility); assertFalse(it.isPressed)
                 assertEquals(if (it is android.view.ViewGroup) View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
                     else View.IMPORTANT_FOR_ACCESSIBILITY_NO, it.importantForAccessibility)
             }
@@ -83,6 +89,84 @@ class TabletComponentStartupTest {
                 assertEquals(.8f, it.alpha, 0f); assertTrue(it.isClickable)
                 assertEquals(View.IMPORTANT_FOR_ACCESSIBILITY_YES, it.importantForAccessibility)
             }
+        } finally { components.close(); activity.finish() }
+    }
+    @Test fun hiddenFooterStopsTouchFeedbackAndRestoresNativeVisibility() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        val root = FrameLayout(activity); val song = FrameLayout(activity); val right = FrameLayout(activity)
+        activity.setContentView(root)
+        root.addView(song, FrameLayout.LayoutParams(400, 400)); root.addView(right)
+        val components = TabletPlayerComponents(root, song, right, { true }, { true }, {})
+        val ids = resourceIds(components, listOf("player_controls", "play_pause", "player_lyrics",
+            "player_queue", "media_route_button", "badge_platter"))
+        val group = FrameLayout(activity).apply {
+            id = ids.getValue("player_controls")
+            setOnClickListener { } // Native controls consume presses in otherwise empty space.
+        }
+        song.addView(group, FrameLayout.LayoutParams(400, 240).apply { topMargin = 120 })
+        group.addView(ImageView(activity).apply { id = ids.getValue("play_pause") }, FrameLayout.LayoutParams(44, 44))
+        val nativeLyrics = ImageView(activity).apply {
+            id = ids.getValue("player_lyrics"); visibility = View.INVISIBLE
+        }
+        val nativeQueue = ImageView(activity).apply { id = ids.getValue("player_queue") }
+        val badge = View(activity).apply { id = ids.getValue("badge_platter"); visibility = View.GONE }
+        listOf(nativeLyrics, nativeQueue, badge).forEach { group.addView(it, FrameLayout.LayoutParams(44, 44)) }
+        var nativeTouches = 0
+        var nativeClicks = 0
+        val ripple = RippleDrawable(ColorStateList.valueOf(Color.WHITE), null, null)
+        val output = ImageView(activity).apply {
+            id = ids.getValue("media_route_button"); alpha = .8f; background = ripple
+            setOnClickListener { nativeClicks++ }
+            setOnTouchListener { _, _ -> nativeTouches++; false }
+        }
+        val outputParams = FrameLayout.LayoutParams(44, 44).apply { leftMargin = 178; topMargin = 180 }
+        group.addView(output, outputParams)
+        fun measure() {
+            root.measure(View.MeasureSpec.makeMeasureSpec(400, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(400, View.MeasureSpec.EXACTLY))
+            root.layout(0, 0, 400, 400)
+        }
+        try {
+            measure()
+            val originalBounds = listOf(output.left, output.top, output.right, output.bottom)
+            components.prepare()
+            measure()
+            val downTime = SystemClock.uptimeMillis()
+            for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
+                val event = MotionEvent.obtain(downTime, downTime + 10, action,
+                    (song.left + group.left + output.left + 22).toFloat(),
+                    (song.top + group.top + output.top + 22).toFloat(), 0)
+                try { root.dispatchTouchEvent(event) } finally { event.recycle() }
+            }
+            assertEquals(0, nativeTouches); assertEquals(0, nativeClicks)
+            assertSame(outputParams, output.layoutParams)
+            assertEquals(originalBounds, listOf(output.left, output.top, output.right, output.bottom))
+            assertEquals(View.GONE, badge.visibility)
+            assertTrue(nativeLyrics.isEnabled); assertEquals(true, components.lyricsAvailable())
+
+            group.isPressed = true // A non-clickable child also inherits its parent's press state.
+            assertTrue(output.isPressed)
+            components.prepare()
+            assertFalse(output.isPressed)
+            assertFalse(ripple.state.contains(android.R.attr.state_pressed))
+            group.isPressed = false
+
+            // A native update can re-show the route while hiding a different action.
+            output.visibility = View.VISIBLE; output.alpha = .6f; output.isPressed = true
+            nativeQueue.visibility = View.GONE
+            components.prepare()
+            assertEquals(View.INVISIBLE, output.visibility); assertFalse(output.isPressed)
+            assertEquals(View.GONE, nativeQueue.visibility)
+            nativeLyrics.isEnabled = false
+            components.prepare()
+            assertFalse(nativeLyrics.isEnabled); assertEquals(false, components.lyricsAvailable())
+
+            components.close()
+            assertEquals(View.VISIBLE, output.visibility); assertEquals(.6f, output.alpha, 0f)
+            assertEquals(View.INVISIBLE, nativeLyrics.visibility)
+            assertEquals(View.GONE, nativeQueue.visibility); assertEquals(View.GONE, badge.visibility)
+            assertSame(ripple, output.background); assertTrue(output.isClickable)
+            assertTrue(output.performClick()); assertEquals(1, nativeClicks)
         } finally { components.close(); activity.finish() }
     }
     @Test fun preparationKeepsNativeFontsAndControlDimensionsAndOnlyChangesQueuePercentage() {

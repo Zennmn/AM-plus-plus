@@ -26,7 +26,7 @@ internal class TabletPlayerComponents(
     private fun id(name: String) = ids.getOrPut(name) { root.resources.getIdentifier(name, "id", root.context.packageName) }
     private fun find(parent: View, name: String): View? = id(name).takeIf { it != 0 }?.let { parent.findViewById(it) }
     private fun dp(value: Int) = (value * root.resources.displayMetrics.density).roundToInt()
-    private data class Hidden(val alpha: Float, val clickable: Boolean, val accessibility: Int)
+    private data class Hidden(val alpha: Float, val visibility: Int, val clickable: Boolean, val accessibility: Int)
     private val hidden = IdentityHashMap<View, Hidden>()
     private val translations = IdentityHashMap<View, Pair<Float, Float>>()
     private var closed = false
@@ -121,15 +121,28 @@ internal class TabletPlayerComponents(
         percentTarget(group)?.let { rows.percentage(it, .25f) } ?: false
     private fun hideSource(view: View) {
         val current = hidden[view]
-        if (current == null) hidden[view] = Hidden(view.alpha, view.isClickable, view.importantForAccessibility)
-        else if (view.alpha != 0f) hidden[view] = current.copy(alpha = view.alpha)
+        val visibility = view.visibility
+        hidden[view] = if (current == null)
+            Hidden(view.alpha, visibility, view.isClickable, view.importantForAccessibility)
+        else current.copy(alpha = if (view.alpha != 0f) view.alpha else current.alpha,
+            visibility = if (visibility != View.INVISIBLE) visibility else current.visibility)
+        val cancelFeedback = current == null || visibility == View.VISIBLE || view.isPressed
         view.alpha = 0f; view.isClickable = false
+        // Alpha alone leaves the old footer in hit testing and parent press propagation.
+        // INVISIBLE keeps native constraints intact; never reveal a native GONE decoration.
+        if (visibility == View.VISIBLE) view.visibility = View.INVISIBLE
+        if (cancelFeedback) {
+            view.cancelPendingInputEvents()
+            view.isPressed = false
+            view.jumpDrawablesToCurrentState()
+        }
         view.importantForAccessibility = if (view is ViewGroup) View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
             else View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
     private fun restoreSource(view: View) {
         val saved = hidden.remove(view) ?: return
         if (view.alpha == 0f) view.alpha = saved.alpha
+        if (view.visibility == View.INVISIBLE) view.visibility = saved.visibility
         view.isClickable = saved.clickable; view.importantForAccessibility = saved.accessibility
     }
     private fun place(view: View, left: Int, top: Int, width: Int, height: Int) {

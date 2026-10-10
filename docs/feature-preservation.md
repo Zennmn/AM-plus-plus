@@ -33,7 +33,7 @@
 | 场景 | 应保留的行为 | 自动验证入口 | 真机状态 |
 |---|---|---|---|
 | 首次打开、旋转、重建 | SONG/QUEUE 控制区 25%；原生字体、缩进、图标/封面尺寸；首帧没有旧 footer 闪现 | TabletSongLayout、TabletNativeControlRows、TabletComponentStartup | 待完整验收 |
-| 音量与底部动作 | 音量总宽度对齐进度条；短窗口压缩音量触摸空白；不添加输出按钮，原生底部动作继续隐藏；音量拖动可用 | TabletComponentGeometry、TabletComponentStartup | 待横竖比、触摸及切页对照 |
+| 音量与底部动作 | 音量总宽度对齐进度条；短窗口压缩音量触摸空白；不添加输出按钮，原生底部动作不可见且不接收触摸；音量下方无残留水波纹，退出双栏恢复原生可见性；音量拖动可用 | TabletComponentGeometry、TabletComponentStartup | 待横竖比、触摸及切页对照 |
 | 原生动作与反馈 | 右下 selector/状态稳定，队列调用原生，翻译原生；播放图标默认大小，水波纹外加 8dp、白色 20% | TabletNativeActionStyle、TabletTransportRipple、TabletComponentStartup | 待首点/连点/长按对照 |
 | 换到无歌词歌曲 | 上一首文本或启用状态不能打开右栏；普通/自定义、网络许可和离线歌词按当前歌曲判定 | FragmentTabletLyricsAvailability、TabletComponentStartup | 待切歌、网络及离线对照 |
 | 关闭歌词后切队列 | SONG/QUEUE 都居中，右栏继续关闭；可用歌词恢复只解除自动关闭，保留手动关闭状态 | TabletLyricsPaneMotion、TabletComponentStartup | 待切页和换歌对照 |
