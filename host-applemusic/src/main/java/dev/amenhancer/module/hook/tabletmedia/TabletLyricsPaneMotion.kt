@@ -26,7 +26,12 @@ internal class TabletLyricsPaneMotion(
         this.expansion = expansion
         if (!safe) {
             animation?.cancel(); animation = null; target = 0f; fraction = 0f
-            render(); return
+            render()
+            if (!available) {
+                right.alpha = 0f; right.visibility = View.INVISIBLE
+                right.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+            }
+            return
         }
         val desired = if (collapsed || !available) 1f else 0f
         if (target != desired) {

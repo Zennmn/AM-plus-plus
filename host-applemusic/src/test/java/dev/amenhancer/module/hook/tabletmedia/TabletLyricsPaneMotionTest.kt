@@ -81,9 +81,13 @@ class TabletLyricsPaneMotionTest {
             assertEquals(View.INVISIBLE, right.visibility)
             // Queue/sheet transitions retain the original native coordinates.
             motion.apply(false, false, .5f, available = false)
-            assertEquals(0f, left.translationX, 0f); assertEquals(View.VISIBLE, right.visibility)
+            assertEquals(0f, left.translationX, 0f); assertEquals(View.INVISIBLE, right.visibility)
+            assertEquals(0f, right.alpha, 0f)
             motion.apply(false, true, 1f, available = false)
             assertEquals(View.INVISIBLE, right.visibility)
+            motion.apply(false, false, .5f, available = true)
+            assertEquals(0f, left.translationX, 0f); assertEquals(View.VISIBLE, right.visibility)
+            assertEquals(.5f, right.alpha, 0f)
         } finally { motion.close(); activity.finish() }
     }
 }

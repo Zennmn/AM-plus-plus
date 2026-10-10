@@ -20,6 +20,7 @@ internal class TabletPlayerComponents(
     private val rightHost: ViewGroup, private val songVisible: () -> Boolean,
     private val lyricsExpanded: () -> Boolean, private val lyricsClick: () -> Unit,
     private val horizontalOffset: () -> Float = { 0f },
+    private val currentLyricsAvailability: (() -> Boolean?)? = null,
 ) : AutoCloseable {
     private val overlay = FrameLayout(root.context).apply { clipChildren = false; clipToPadding = false }
     private val rows = TabletNativeControlRows()
@@ -46,8 +47,8 @@ internal class TabletPlayerComponents(
     private var lyricsSource: View? = null
     private var queueSource: View? = null
     private val lyrics = nativeButton("selector_nowplaying_lyrics").apply {
-        setOnClickListener { if (lyricsAvailable() != false) lyricsClick() }
-        setOnLongClickListener { lyricsSource?.takeIf { it.isEnabled }?.performLongClick() == true }
+        setOnClickListener { if (lyricsAvailable() == true) lyricsClick() }
+        setOnLongClickListener { lyricsAvailable() == true && lyricsSource?.performLongClick() == true }
     }
     private val queue = nativeButton("selector_nowplaying_queue").apply {
         setOnClickListener { queueSource?.takeIf { it.isEnabled }?.performClick() }
@@ -113,8 +114,9 @@ internal class TabletPlayerComponents(
     }
     private fun controls(): ViewGroup? = groups(songHost).filter { it.isShown && it.height > 0 }
         .maxByOrNull(::alpha)
-    /** Read the host's own availability even though its original footer is hidden. */
-    fun lyricsAvailable(): Boolean? = controls()?.let { find(it, "player_lyrics")?.isEnabled }
+    /** Current-item state overrides retained controls, which can still describe the previous song. */
+    fun lyricsAvailable(): Boolean? = currentLyricsAvailability?.let { it() == true }
+        ?: controls()?.let { find(it, "player_lyrics")?.isEnabled }
 
     /** Prepare retained panes before sheet opening or native shared-element capture. */
     fun prepare(start: View = songHost): Boolean {
@@ -221,7 +223,7 @@ internal class TabletPlayerComponents(
         val lyricsLeft = queueLeft - dp(8) - size
         val pairFits = lyricsLeft >= column.first + group.width + dp(16)
         lyricsSource = nativeLyrics; queueSource = nativeQueue
-        lyrics.isEnabled = nativeLyrics.isEnabled; queue.isEnabled = nativeQueue.isEnabled; output.isEnabled = true
+        lyrics.isEnabled = lyricsAvailable() == true; queue.isEnabled = nativeQueue.isEnabled; output.isEnabled = true
         lyrics.contentDescription = nativeLyrics.contentDescription; queue.contentDescription = nativeQueue.contentDescription
         actionStyle.bind(lyrics, nativeLyrics as? ImageView)
         actionStyle.bind(queue, nativeQueue as? ImageView)

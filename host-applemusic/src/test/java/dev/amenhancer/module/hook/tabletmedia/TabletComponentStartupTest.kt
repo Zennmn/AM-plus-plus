@@ -257,4 +257,54 @@ class TabletComponentStartupTest {
             assertEquals(true, components.lyricsAvailable())
         } finally { components.close(); activity.finish() }
     }
+    @Test fun currentItemAvailabilityOverridesOldLyricsAndAnEnabledRetainedButton() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        val root = FrameLayout(activity); val song = FrameLayout(activity); val right = FrameLayout(activity)
+        activity.setContentView(root)
+        root.addView(song, FrameLayout.LayoutParams(504, 800).apply { leftMargin = 48 })
+        root.addView(right, FrameLayout.LayoutParams(568, 800).apply { leftMargin = 616 })
+        val oldLyrics = TextView(activity).apply { text = "Lyrics from the previous song" }
+        right.addView(oldLyrics)
+        var currentAvailable: Boolean? = true
+        var clicks = 0
+        val components = TabletPlayerComponents(root, song, right, { true }, { currentAvailable == true },
+            { clicks++ }, currentLyricsAvailability = { currentAvailable })
+        val names = listOf("player_controls", "play_pause", "previous_rewind", "next_fast_forward",
+            "player_lyrics", "player_queue", "media_route_button", "seek_bar_controls")
+        val ids = resourceIds(components, names)
+        val group = FrameLayout(activity).apply { id = ids.getValue("player_controls") }
+        song.addView(group, FrameLayout.LayoutParams(504, 220, Gravity.BOTTOM))
+        names.subList(1, 4).forEach { name -> group.addView(ImageView(activity).apply { id = ids.getValue(name) },
+            FrameLayout.LayoutParams(66, 66).apply { topMargin = 50 }) }
+        names.subList(4, 7).forEach { name -> group.addView(ImageView(activity).apply { id = ids.getValue(name) },
+            FrameLayout.LayoutParams(60, 60, Gravity.BOTTOM).apply { bottomMargin = 14 }) }
+        group.addView(FrameLayout(activity).apply { id = ids.getValue("seek_bar_controls") },
+            FrameLayout.LayoutParams(504, 41))
+        try {
+            root.measure(View.MeasureSpec.makeMeasureSpec(1200, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY))
+            root.layout(0, 0, 1200, 800)
+            components.update(1f, false)
+            val proxy = (root.getChildAt(2) as FrameLayout).getChildAt(1)
+            val native = group.findViewById<View>(ids.getValue("player_lyrics"))
+            assertTrue(proxy.isEnabled)
+            proxy.performClick(); assertEquals(1, clicks)
+            currentAvailable = false
+            assertTrue(native.isEnabled)
+            assertEquals("Lyrics from the previous song", oldLyrics.text.toString())
+            assertEquals(false, components.lyricsAvailable())
+            proxy.performClick(); assertEquals(1, clicks)
+            components.update(1f, false)
+            assertFalse(proxy.isEnabled); assertFalse(proxy.isSelected)
+            right.visibility = View.INVISIBLE
+            currentAvailable = true
+            components.update(1f, false)
+            assertTrue(proxy.isEnabled); assertTrue(proxy.isSelected)
+            proxy.performClick(); assertEquals(2, clicks)
+            currentAvailable = null
+            components.update(1f, false)
+            assertEquals(false, components.lyricsAvailable()); assertFalse(proxy.isEnabled)
+            proxy.performClick(); assertEquals(2, clicks)
+        } finally { components.close(); activity.finish() }
+    }
 }

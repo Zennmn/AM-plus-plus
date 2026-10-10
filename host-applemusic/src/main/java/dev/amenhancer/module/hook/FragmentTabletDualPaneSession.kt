@@ -33,6 +33,7 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
     }
     private val loader = controller.javaClass.classLoader!!
+    private val nativeLyricsAvailability = FragmentTabletLyricsAvailability.native(controller, root.context)
     private val stateClass = loader.loadClass("com.apple.android.music.player.fragment.PlayerMainFragment\$l")
     private val states = checkNotNull(stateClass.enumConstants).associateBy { (it as Enum<*>).name }
     private val fragmentAccessor = stateClass.getDeclaredMethod("a")
@@ -270,7 +271,7 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
         if (components == null) components = TabletPlayerComponents(root, songHost, right,
             { (paneField.get(controller) as? Enum<*>)?.name == "SONG" },
             { lyricsExpanded && components?.lyricsAvailable() != false }, ::toggleLyrics,
-            { paneMotion.horizontalOffset })
+            { paneMotion.horizontalOffset }, { nativeLyricsAvailability.available() })
     }
 
     fun prepareComponents(pane: View) {
