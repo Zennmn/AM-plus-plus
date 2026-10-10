@@ -230,13 +230,15 @@ internal class TabletPlayerComponents(
         val progressLeft = progressAt.first + nativeProgress.paddingLeft
         val progressRight = progressAt.first + nativeProgress.width - nativeProgress.paddingRight
         // The invisible native actions retain their dimensions and constraints:
-        // use that original row for volume without moving any native playback control.
+        // offset volume up 4dp and output down 4dp without moving native playback controls.
         val nativeFooterAt = location(nativeLyrics)
         val center = nativeFooterAt.second + nativeLyrics.height / 2
-        val volumeTop = center - size / 2
+        val volumeCenter = center - dp(4)
+        val volumeTop = volumeCenter - size / 2
+        val outputTop = (if (nativeLyrics.height > 0) center - size / 2 else footerTop) + dp(4)
         // Keep the corner action outside the progress edge, even when the song column centers.
         val corner = TabletComponentGeometry.cornerOutput(systemInsets?.left ?: 0,
-            progressLeft - horizontalOffset().roundToInt(), if (nativeLyrics.height > 0) volumeTop else footerTop,
+            progressLeft - horizontalOffset().roundToInt(), outputTop,
             root.resources.displayMetrics.density)
         if (corner != null) place(output, corner.left, corner.top, corner.width, corner.height)
         else output.visibility = View.INVISIBLE
@@ -250,7 +252,7 @@ internal class TabletPlayerComponents(
         val contentBottom = (listOf(play, previous, next, progress)).maxOf { location(it).second + it.height }
         // The entire volume view, including both speaker icons, stays within the playback track.
         val slot = if (nativeLyrics.height > 0) TabletComponentGeometry.bottomVolume(progressLeft,
-            progressRight, center, contentBottom, blockers, root.resources.displayMetrics.density) else null
+            progressRight, volumeCenter, contentBottom, blockers, root.resources.displayMetrics.density) else null
         if (slot != null) place(volume, slot.left, slot.top, slot.width, slot.height)
         else volume.visibility = View.INVISIBLE
         volume.setPageVisible(visible && expansion >= .999f && volume.visibility == View.VISIBLE)
