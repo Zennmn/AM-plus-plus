@@ -64,4 +64,28 @@ class TabletNativeControlRowsTest {
         assertEquals(11, p.j); assertEquals(12, p.k); assertEquals(-1, p.l)
         assertEquals(3, p.topMargin); assertEquals(14, p.bottomMargin)
     }
+    @Test fun queuePercentUsesTheSameHeightAsSongAndRestoresOnlyItsOwnField() {
+        val view = view(); val p = view.layoutParams as b
+        p.height = 0; p.S = .345f
+        assertTrue(rows.percentage(view, .25f))
+        assertEquals(.25f, p.S, 0f)
+        p.marginStart = 41; p.k = 77
+        assertFalse(rows.percentage(view, .25f))
+        rows.close()
+        assertEquals(.345f, p.S, 0f); assertEquals(41, p.marginStart); assertEquals(77, p.k)
+    }
+    @Test fun smallerMetadataGlyphsKeepTheCoverBarrierHeightAndNativeStartInset() {
+        val text = android.widget.TextView(activity).apply {
+            textSize = 22f; minimumHeight = 0
+            layoutParams = b(ViewGroup.LayoutParams(200, -2)).apply { marginStart = 16 }
+            layout(0, 0, 200, 66)
+        }
+        val originalSize = text.textSize
+        assertTrue(rows.text(text, 18f, true))
+        assertEquals(66, text.minimumHeight); assertEquals(16, (text.layoutParams as b).marginStart)
+        assertTrue(text.textSize < originalSize)
+        assertFalse(rows.text(text, 18f, true))
+        rows.close()
+        assertEquals(originalSize, text.textSize, 0f); assertEquals(0, text.minimumHeight)
+    }
 }

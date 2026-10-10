@@ -14,13 +14,14 @@ class TabletComponentGeometryTest {
             assertTrue(rows.transportTop >= px(41) + px(4))
             assertTrue(rows.transportTop + rows.transportHeight + px(4) <= volume)
             assertTrue(volume + rows.volumeHeight + px(4) <= rows.footerTop)
-            assertTrue(rows.footerTop + rows.footerHeight + px(8) <= px(220))
+            assertTrue(rows.footerTop + rows.footerHeight + px(12) <= px(220))
         }
     }
     @Test fun smallerWindowsKeepFullTouchTargetsAndNeverGrowTheirContainer() {
-        val withVolume = checkNotNull(TabletComponentGeometry.rows(195, 41, 1f))
+        val withVolume = checkNotNull(TabletComponentGeometry.rows(199, 41, 1f))
         assertEquals(44, withVolume.transportHeight)
         assertNotNull(withVolume.volumeTop)
+        assertNull(checkNotNull(TabletComponentGeometry.rows(195, 41, 1f)).volumeTop)
         val narrow = checkNotNull(TabletComponentGeometry.rows(173, 41, 1f))
         assertNull(narrow.volumeTop)
         assertEquals(44, narrow.transportHeight)
@@ -37,7 +38,7 @@ class TabletComponentGeometryTest {
                 assertTrue(it >= rows.transportTop + rows.transportHeight + 4)
                 assertTrue(it + rows.volumeHeight + 4 <= rows.footerTop)
             }
-            assertEquals(height - 8, rows.footerTop + rows.footerHeight)
+            assertEquals(height - 12, rows.footerTop + rows.footerHeight)
         }
     }
     @Test fun centeredSongKeepsItsWidthAndCanRestoreItsOriginalLeft() {
@@ -45,10 +46,6 @@ class TabletComponentGeometryTest {
         assertEquals(300f, offset, 0f)
         assertEquals((1200 - 504) / 2f, 48 + offset, 0f)
         assertNull(TabletComponentGeometry.centeredOffset(600, 0, 600))
-    }
-    @Test fun playbackModesRequireFull44dpTargetsOutsideNativeTransport() {
-        assertNotNull(TabletComponentGeometry.modes(48, 500, 160, 400, 44, 4))
-        assertNull(TabletComponentGeometry.modes(48, 300, 80, 320, 44, 4))
     }
     @Test fun longDeviceNamesStopBeforeFooterButtonsOrTheColumnEdge() {
         assertEquals(152, TabletComponentGeometry.deviceLabelWidth(100, 500, listOf(260, 330), 8, 240))

@@ -10,7 +10,7 @@ internal object TabletComponentGeometry {
     fun rows(height: Int, progressHeight: Int, density: Float): Rows? {
         if (height <= 0 || progressHeight < 0 || !density.isFinite() || density <= 0f) return null
         fun dp(value: Int) = (value * density).roundToInt()
-        val footer = dp(44); val bottom = dp(8); val volume = dp(44)
+        val footer = dp(44); val bottom = dp(12); val volume = dp(44)
         val footerTop = height - bottom - footer
         // Prefer the reference's compact row. Retain a full touch target on shorter windows.
         for (transport in listOf(dp(52), dp(44))) {
@@ -25,13 +25,6 @@ internal object TabletComponentGeometry {
         if (footerTop - progressHeight < transport + gap * 2) return null
         val top = progressHeight + (footerTop - progressHeight - transport) / 2
         return Rows(top, transport, null, volume, footerTop, footer)
-    }
-
-    data class Modes(val shuffleLeft: Int, val repeatLeft: Int)
-    fun modes(left: Int, width: Int, previousLeft: Int, nextRight: Int, size: Int, gap: Int): Modes? {
-        if (size <= 0 || width <= 0 || gap < 0 || previousLeft - left < size + gap ||
-            left + width - nextRight < size + gap) return null
-        return Modes(left, left + width - size)
     }
 
     fun centeredOffset(parentWidth: Int, left: Int, width: Int): Float? {

@@ -5,6 +5,8 @@ import android.view.ViewGroup
 import dev.amenhancer.module.hook.dualPaneField
 import java.lang.reflect.Field
 import java.util.IdentityHashMap
+import android.widget.TextView
+import android.util.TypedValue
 
 /** Mutate the existing host params; generic LayoutParams copies lose native constraints. */
 internal class TabletNativeControlRows : AutoCloseable {
@@ -12,6 +14,10 @@ internal class TabletNativeControlRows : AutoCloseable {
         val paddingTop: Int, val paddingBottom: Int, val top: Int, val bottom: Int,
         val constraints: Map<Field, Int>)
     private val originals = IdentityHashMap<View, Original>()
+    private data class Percent(val params: ViewGroup.LayoutParams, val field: Field, val value: Float)
+    private val percentages = IdentityHashMap<View, Percent>()
+    private data class Text(val size: Float, val minimum: Int)
+    private val texts = IdentityHashMap<TextView, Text>()
     private fun anchors(params: ViewGroup.LayoutParams): List<Field> {
         val fields = listOf("topToTop", "topToBottom", "bottomToTop", "bottomToBottom")
         val obfuscated = listOf("i", "j", "k", "l")
@@ -37,6 +43,31 @@ internal class TabletNativeControlRows : AutoCloseable {
             if (p.topMargin != top || p.bottomMargin != bottom) {
                 p.topMargin = top; p.bottomMargin = bottom; view.layoutParams = p; changed = true
             }
+        }
+        return changed
+    }
+    fun percentage(view: View, value: Float): Boolean {
+        val p = view.layoutParams
+        if (p.height != 0) return false
+        val field = dualPaneField(p.javaClass, "matchConstraintPercentHeight") ?: if
+            (p.javaClass.name == "androidx.constraintlayout.widget.ConstraintLayout\$b") dualPaneField(p.javaClass, "S") else null
+        field ?: return false
+        val saved = percentages[view]?.takeIf { it.params === p }
+            ?: Percent(p, field, field.getFloat(p)).also { percentages[view] = it }
+        if (field.getFloat(p) == value) return false
+        saved.field.setFloat(p, value); view.layoutParams = p
+        return true
+    }
+    /** Preserve the metadata row height, so reducing glyphs cannot move the existing cover barrier. */
+    fun text(view: TextView, sizeSp: Float, preserveHeight: Boolean): Boolean {
+        val saved = texts.getOrPut(view) { Text(view.textSize, view.minimumHeight) }
+        @Suppress("DEPRECATION") val size = minOf(saved.size, sizeSp * view.resources.displayMetrics.scaledDensity)
+        var changed = false
+        if (preserveHeight && view.height > 0 && view.minimumHeight < view.height) {
+            view.minimumHeight = view.height; changed = true
+        }
+        if (kotlin.math.abs(view.textSize - size) > .1f) {
+            view.setTextSize(TypedValue.COMPLEX_UNIT_PX, size); changed = true
         }
         return changed
     }
@@ -78,6 +109,8 @@ internal class TabletNativeControlRows : AutoCloseable {
     }
     fun retain(views: Collection<View>) {
         originals.keys.toList().filter { it !in views }.forEach(::restore)
+        percentages.keys.toList().filter { it !in views }.forEach(::restorePercent)
+        texts.keys.toList().filter { it !in views }.forEach(::restoreText)
     }
     private fun restore(view: View) {
         val saved = originals.remove(view) ?: return
@@ -89,5 +122,18 @@ internal class TabletNativeControlRows : AutoCloseable {
         view.setPadding(view.paddingLeft, saved.paddingTop, view.paddingRight, saved.paddingBottom)
         view.layoutParams = p
     }
-    override fun close() { originals.keys.toList().forEach(::restore) }
+    private fun restorePercent(view: View) {
+        val saved = percentages.remove(view) ?: return
+        if (view.layoutParams !== saved.params) return
+        saved.field.setFloat(saved.params, saved.value); view.layoutParams = saved.params
+    }
+    private fun restoreText(view: TextView) {
+        val saved = texts.remove(view) ?: return
+        view.setTextSize(TypedValue.COMPLEX_UNIT_PX, saved.size); view.minimumHeight = saved.minimum
+    }
+    override fun close() {
+        originals.keys.toList().forEach(::restore)
+        percentages.keys.toList().forEach(::restorePercent)
+        texts.keys.toList().forEach(::restoreText)
+    }
 }

@@ -2,7 +2,6 @@ package dev.amenhancer.module.hook.tabletmedia
 
 import android.content.res.ColorStateList
 import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
 import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
@@ -15,15 +14,15 @@ import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.TextView
-import dev.amenhancer.module.hook.ModernXposedRuntime
 import java.util.IdentityHashMap
 import kotlin.math.roundToInt
 
 /** Selected media-plugin components, scoped to the host's native 1606 tablet session. */
 internal class TabletPlayerComponents(
-    private val controller: Any, private val root: ViewGroup, private val songHost: ViewGroup,
+    private val root: ViewGroup, private val songHost: ViewGroup,
     private val rightHost: ViewGroup, private val songVisible: () -> Boolean,
     private val lyricsExpanded: () -> Boolean, private val lyricsClick: () -> Unit,
+    private val horizontalOffset: () -> Float = { 0f },
 ) : AutoCloseable {
     private val overlay = FrameLayout(root.context).apply { clipChildren = false; clipToPadding = false }
     private val rows = TabletNativeControlRows()
@@ -40,9 +39,9 @@ internal class TabletPlayerComponents(
     private var running = false
     private var closed = false
     private var placed = false
-    private val modes by lazy { TabletPlaybackModes(controller) }
+    private val transportStyle = TabletTransportStyle()
     private val outputIcon = IosDeviceOutputDrawable.Factory(TabletMediaAssets, root.resources).create()
-    private val output = button(null).apply {
+    private val output = button().apply {
         setImageDrawable(outputIcon); contentDescription = "音频输出"
         setOnClickListener { PlatformAudioOutputSwitcher.open(context) }
     }
@@ -53,36 +52,27 @@ internal class TabletPlayerComponents(
     }
     private var lyricsSource: View? = null
     private var queueSource: View? = null
-    private var languageSource: View? = null
-    private val lyrics = button("ic_nowplaying_lyrics").apply {
+    private val lyricsIcon = TabletFooterDrawable(TabletFooterDrawable.Kind.LYRICS)
+    private val queueIcon = TabletFooterDrawable(TabletFooterDrawable.Kind.QUEUE)
+    private val lyrics = button().apply {
+        imageTintList = null; setPadding(0, 0, 0, 0); setImageDrawable(lyricsIcon)
         setOnClickListener { lyricsClick() }
         setOnLongClickListener { lyricsSource?.takeIf { it.isEnabled }?.performLongClick() == true }
     }
-    private val queue = button("ic_nowplaying_queue").apply {
+    private val queue = button().apply {
+        imageTintList = null; setPadding(0, 0, 0, 0); setImageDrawable(queueIcon)
         setOnClickListener { queueSource?.takeIf { it.isEnabled }?.performClick() }
         setOnLongClickListener { queueSource?.takeIf { it.isEnabled }?.performLongClick() == true }
     }
-    private val language = button("ic_nowplaying_translate").apply {
-        val drawable = root.resources.getIdentifier("ic_nowplaying_translate", "drawable", root.context.packageName)
-        if (drawable != 0) TabletTranslationGlyph.read(root.resources, drawable)?.let(::setImageDrawable)
-        setOnClickListener { languageSource?.takeIf { it.isEnabled }?.performClick() }
-        setOnLongClickListener { languageSource?.takeIf { it.isEnabled }?.performLongClick() == true }
-    }
-    private val shuffle = button("ic_nowplaying_shuffle").apply {
-        contentDescription = "随机播放"; setOnClickListener { command { modes.toggleShuffle() } }
-    }
-    private val repeat = button("ic_nowplaying_repeat").apply {
-        contentDescription = "循环播放"; setOnClickListener { command { modes.cycleRepeat() } }
-    }
     private val volume = IosVolumeSliderView(root.context)
-    private val views get() = listOf(output, caption, lyrics, queue, language, shuffle, repeat, volume)
+    private val views get() = listOf(output, caption, lyrics, queue, volume)
     private val audio = SystemAudioOutput(root.context, root.context.getSystemService(AudioManager::class.java)) {
         root.postInvalidateOnAnimation()
     }
     private val poll = object : Runnable {
         override fun run() {
             if (!running || closed) return
-            refreshOutput(); refreshModes(); root.postInvalidateOnAnimation()
+            refreshOutput(); root.postInvalidateOnAnimation()
             main.postDelayed(this, 500)
         }
     }
@@ -92,35 +82,10 @@ internal class TabletPlayerComponents(
         root.addView(overlay, ViewGroup.LayoutParams(-1, -1))
         refreshOutput()
     }
-    private fun button(icon: String?) = ImageButton(root.context).apply {
+    private fun button() = ImageButton(root.context).apply {
         background = null; scaleType = ImageView.ScaleType.FIT_CENTER
-        setPadding(dp(10), dp(10), dp(10), dp(10))
+        setPadding(dp(12), dp(12), dp(12), dp(12))
         imageTintList = ColorStateList.valueOf(Color.WHITE)
-        icon?.let { name -> root.resources.getIdentifier(name, "drawable", root.context.packageName)
-            .takeIf { it != 0 }?.let(::setImageResource) }
-    }
-    private fun command(action: () -> Unit) {
-        runCatching(action).onFailure { ModernXposedRuntime.log("Tablet media command failed", it) }
-        refreshModes(); root.invalidate()
-    }
-    private fun refreshModes() {
-        val state = runCatching { modes.state() }.getOrElse {
-            ModernXposedRuntime.log("Tablet playback modes unavailable", it); TabletPlaybackModes.State()
-        }
-        shuffle.isEnabled = state.canShuffle; repeat.isEnabled = state.canRepeat
-        decorate(shuffle, state.shuffle == true); decorate(repeat, state.repeat != null && state.repeat != 0)
-        val icon = if (state.repeat == 1) "ic_nowplaying_repeatone" else "ic_nowplaying_repeat"
-        root.resources.getIdentifier(icon, "drawable", root.context.packageName).takeIf { it != 0 }?.let(repeat::setImageResource)
-        repeat.contentDescription = if (state.repeat == 1) "单曲循环" else "循环播放"
-        shuffle.alpha = if (!state.canShuffle) .3f else if (state.shuffle == true) 1f else .55f
-        repeat.alpha = if (!state.canRepeat) .3f else if (state.repeat != 0) 1f else .55f
-    }
-    private fun decorate(view: ImageButton, selected: Boolean, always: Boolean = false) {
-        if (view.isSelected == selected && (view.background != null) == (selected || always)) return
-        view.isSelected = selected
-        view.background = if (selected || always) GradientDrawable().apply {
-            shape = GradientDrawable.OVAL; setColor(Color.argb(30, 255, 255, 255))
-        } else null
     }
     private fun refreshOutput() {
         val state = audio.current()
@@ -140,17 +105,57 @@ internal class TabletPlayerComponents(
         }
         return value
     }
-    private fun controls(): ViewGroup? {
+    private fun groups(start: View): List<ViewGroup> {
         val found = ArrayList<ViewGroup>()
         fun visit(view: View) {
             if (view is ViewGroup) {
-                if (view.id == id("player_controls") && view.isShown && view.height > 0 &&
-                    find(view, "play_pause")?.isShown == true) found += view
+                if (view.id == id("player_controls") && find(view, "play_pause") != null) found += view
                 else for (index in 0 until view.childCount) visit(view.getChildAt(index))
             }
         }
-        visit(songHost)
-        return found.maxByOrNull(::alpha)?.takeIf { alpha(it) > .01f }
+        visit(start)
+        return found
+    }
+    private fun controls(): ViewGroup? = groups(songHost).filter { it.isShown && it.height > 0 }
+        .maxByOrNull(::alpha)
+
+    /** Prepare retained panes before sheet opening or native shared-element capture. */
+    fun prepare(start: View = songHost): Boolean {
+        var changed = false
+        groups(start).forEach {
+            nativeActions(it).forEach(::hideSource)
+            if (prepareGroup(it)) changed = true
+        }
+        return changed
+    }
+    private fun nativeActions(group: ViewGroup) =
+        listOf("player_lyrics", "player_queue", "media_route_button").mapNotNull { find(group, it) }
+    private fun suppressNativeActions() {
+        val retained = groups(songHost).flatMap(::nativeActions)
+        hidden.keys.toList().filter { it !in retained }.forEach(::restoreSource)
+        retained.forEach(::hideSource)
+    }
+    private fun percentTarget(group: ViewGroup): View? = (group.parent as? View)?.takeIf { it.id == id("controls") }
+    private fun metadata(group: ViewGroup): List<TextView> = (group.parent as? View)?.takeIf { it.id == id("player_container") }
+        ?.let { song -> listOf("title", "subtitle").mapNotNull { find(song, it) as? TextView } }.orEmpty()
+    private fun prepareGroup(group: ViewGroup): Boolean {
+        var changed = percentTarget(group)?.let { rows.percentage(it, .25f) } ?: false
+        val times = listOf("current_time_progress", "total_time_progress").mapNotNull { find(group, it) }
+        if (rows.prepareTimes(times, dp(4))) changed = true
+        times.filterIsInstance<TextView>().forEach { if (rows.text(it, 10f, false)) changed = true }
+        (find(group, "audio_badge_text") as? TextView)?.let { if (rows.text(it, 10f, false)) changed = true }
+        metadata(group).forEach { if (it.height > 0 && rows.text(it, if (it.id == id("title")) 18f else 16f, true)) changed = true }
+        listOf("player_lyrics", "player_queue", "media_route_button").mapNotNull { find(group, it) }
+            .forEach { if (rows.footer(it, dp(44), dp(12))) changed = true }
+        val progress = listOf("seek_bar_controls", "live_radio_container").mapNotNull { find(group, it) }
+            .firstOrNull { it.visibility != View.GONE && it.height > 0 }
+        if (group.height > 0 && progress != null) TabletComponentGeometry.rows(group.height, progress.height,
+            root.resources.displayMetrics.density)?.let { layout ->
+            listOf("play_pause", "previous_rewind", "next_fast_forward").mapNotNull { find(group, it) }.forEach {
+                if (rows.transport(it, layout.transportTop, layout.transportHeight, dp(7))) changed = true
+            }
+        }
+        return changed
     }
     private fun hideSource(view: View) {
         val current = hidden[view]
@@ -189,16 +194,17 @@ internal class TabletPlayerComponents(
 
     fun update(expansion: Float, transitioning: Boolean) {
         if (closed) return
-        if (!root.isShown || expansion < .95f) {
-            overlay.visibility = View.INVISIBLE; volume.setPageVisible(false); stopPolling()
-            if (expansion <= .001f || !root.isShown) restore()
-            return
-        }
-        if (transitioning || expansion < .999f) {
+        // Both retained fragments can draw during a queue crossfade. Hide their
+        // native actions before the transition fast path or any relayout return.
+        suppressNativeActions()
+        if (!transitioning) prepare()
+        val visible = root.isShown && expansion > .001f
+        if (transitioning && placed) {
             overlay.alpha = expansion
-            overlay.visibility = if (placed) View.VISIBLE else View.INVISIBLE
-            listOf(lyrics, queue, language, shuffle, repeat, output).forEach { it.isEnabled = false }
+            overlay.visibility = if (visible) View.VISIBLE else View.INVISIBLE
+            listOf(lyrics, queue, output).forEach { it.isEnabled = false }
             volume.setPageVisible(false)
+            if (!visible) stopPolling()
             return
         }
         val group = controls() ?: run { overlay.visibility = View.INVISIBLE; return }
@@ -211,7 +217,7 @@ internal class TabletPlayerComponents(
         val times = listOf("current_time_progress", "total_time_progress").mapNotNull { find(group, it) }
         val footer = listOfNotNull(nativeLyrics, nativeQueue, nativeOutput)
         var changed = rows.prepareTimes(times, dp(4))
-        footer.forEach { if (rows.footer(it, dp(44), dp(8))) changed = true }
+        footer.forEach { if (rows.footer(it, dp(44), dp(12))) changed = true }
         if (changed || group.isLayoutRequested) { overlay.visibility = View.INVISIBLE; return }
         val progress = listOf("seek_bar_controls", "live_radio_container").mapNotNull { find(group, it) }
             .firstOrNull { it.isShown && it.height > 0 } ?: return
@@ -220,7 +226,6 @@ internal class TabletPlayerComponents(
                 // Keep the prepared compact rows. Restoring them here would request
                 // another layout that prepares them again on every short-window frame.
                 overlay.visibility = View.INVISIBLE; placed = false; volume.setPageVisible(false); stopPolling()
-                hidden.keys.toList().forEach(::restoreSource)
                 translations.keys.toList().forEach(::restoreTranslation)
                 rows.retain(times + footer)
                 return
@@ -239,23 +244,22 @@ internal class TabletPlayerComponents(
         val size = dp(44)
         val rightInset = if (Build.VERSION.SDK_INT >= 30)
             root.rootWindowInsets?.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.systemBars())?.right ?: 0 else 0
-        val queueLeft = root.width - rightInset - dp(32) - size
-        val lyricsLeft = queueLeft - dp(16) - size
+        val queueLeft = root.width - rightInset - dp(44) - size
+        val lyricsLeft = queueLeft - dp(8) - size
         val pairFits = lyricsLeft >= column.first + group.width + dp(16)
         lyricsSource = nativeLyrics; queueSource = nativeQueue
         // Pane visibility is independent of a song's native lyric availability.
         lyrics.isEnabled = true; queue.isEnabled = nativeQueue.isEnabled; output.isEnabled = true
         lyrics.contentDescription = nativeLyrics.contentDescription; queue.contentDescription = nativeQueue.contentDescription
-        decorate(lyrics, lyricsExpanded()); decorate(queue, !songVisible())
+        lyrics.isSelected = lyricsExpanded(); queue.isSelected = !songVisible()
+        lyricsIcon.active = lyrics.isSelected; queueIcon.active = queue.isSelected
         if (pairFits) {
             place(lyrics, lyricsLeft, footerTop, size, size); place(queue, queueLeft, footerTop, size, size)
         } else {
             val a = location(nativeLyrics); val b = location(nativeQueue)
             place(lyrics, a.first, footerTop, size, size); place(queue, b.first, footerTop, size, size)
         }
-        val centered = if (!lyricsExpanded() && songVisible())
-            TabletComponentGeometry.centeredOffset((songHost.parent as View).width, songHost.left, songHost.width) ?: 0f else 0f
-        val outputLeft = column.first - centered.roundToInt() + dp(10)
+        val outputLeft = column.first - horizontalOffset().roundToInt() + dp(10)
         val sharePlay = find(group, "shareplay_badge")?.takeIf { it.isShown && alpha(it) > .01f }
         if (sharePlay == null) place(output, outputLeft, footerTop, size, size) else output.visibility = View.INVISIBLE
         val captionHeight = maxOf(dp(18), caption.paint.fontSpacing.roundToInt())
@@ -274,15 +278,8 @@ internal class TabletPlayerComponents(
             val right = minOf(column.first + group.width, trackAt.first + track.width - track.paddingRight + dp(20))
             place(volume, left, column.second + layout.volumeTop, right - left, layout.volumeHeight)
         } else volume.visibility = View.INVISIBLE
-        volume.setPageVisible(volume.visibility == View.VISIBLE)
-        val p = location(previous); val n = location(next)
-        val slots = TabletComponentGeometry.modes(column.first, group.width, p.first, n.first + next.width, size, dp(4))
-        if (slots != null) {
-            val top = column.second + layout.transportTop + (layout.transportHeight - size) / 2
-            place(shuffle, slots.shuffleLeft, top, size, size); place(repeat, slots.repeatLeft, top, size, size)
-        } else { shuffle.visibility = View.INVISIBLE; repeat.visibility = View.INVISIBLE }
+        volume.setPageVisible(visible && expansion >= .999f && volume.visibility == View.VISIBLE)
 
-        val nativeLanguage = find(rightHost, "translations_button")?.takeIf { it.isShown && it.width > 0 }
         val vocal = find(rightHost, "vocal_ctrl")?.takeIf { it.isShown && it.width > 0 }
         val limits = vocal?.let { find(rightHost, "vocal_ctrl_drag_limits") }
         val topInset = if (Build.VERSION.SDK_INT >= 30)
@@ -299,32 +296,32 @@ internal class TabletPlayerComponents(
             }
             top += it.height + dp(4)
         }
-        languageSource = nativeLanguage
-        if (nativeLanguage != null) {
-            language.isEnabled = nativeLanguage.isEnabled; language.contentDescription = nativeLanguage.contentDescription
-            decorate(language, nativeLanguage.isSelected, always = true)
-            place(language, edge - size, top, size, size); top += size + dp(12)
-        } else language.visibility = View.INVISIBLE
         val gradients = find(rightHost, "recycler_view_gradients")
         if (gradients != null && rightHost.isShown) {
             val parentTop = location(gradients.parent as View).second
-            rows.lyricViewport(gradients, if (vocal != null || nativeLanguage != null) (top - parentTop).coerceAtLeast(0) else 0,
+            rows.lyricViewport(gradients, if (vocal != null) (top + dp(8) - parentTop).coerceAtLeast(0) else 0,
                 (root.height - footerTop + dp(8)).coerceAtLeast(0))
         }
-        val active = listOfNotNull(nativeLyrics, nativeQueue, nativeOutput, nativeLanguage)
-        hidden.keys.toList().filter { it !in active }.forEach(::restoreSource)
-        active.forEach(::hideSource)
         translations.keys.toList().filter { it !== vocal && it !== limits }.forEach(::restoreTranslation)
-        rows.retain(times + footer + listOf(play, previous, next) + listOfNotNull(gradients))
-        overlay.visibility = View.VISIBLE; placed = true
-        if (!running) { running = true; refreshModes(); main.postDelayed(poll, 500) }
+        // Keep every retained pane prepared, including the collapsed sheet and outgoing queue.
+        val retained = groups(songHost).flatMap { retainedGroup ->
+            listOf("current_time_progress", "total_time_progress", "audio_badge_text", "player_lyrics", "player_queue",
+                "media_route_button", "play_pause", "previous_rewind", "next_fast_forward").mapNotNull { find(retainedGroup, it) } +
+                metadata(retainedGroup) + listOfNotNull(percentTarget(retainedGroup))
+        }
+        rows.retain(retained + listOfNotNull(gradients))
+        transportStyle.apply(previous as? ImageView, play as? ImageView, next as? ImageView)
+        overlay.visibility = if (visible) View.VISIBLE else View.INVISIBLE; placed = true
+        if (visible && !running) { running = true; main.postDelayed(poll, 500) }
+        else if (!visible) stopPolling()
     }
     private fun stopPolling() { running = false; main.removeCallbacks(poll) }
     private fun restore() {
         overlay.visibility = View.INVISIBLE; placed = false; volume.setPageVisible(false); stopPolling()
         hidden.keys.toList().forEach(::restoreSource); translations.keys.toList().forEach(::restoreTranslation)
         rows.close()
-        lyricsSource = null; queueSource = null; languageSource = null
+        transportStyle.restore()
+        lyricsSource = null; queueSource = null
     }
     override fun close() {
         if (closed) return

@@ -39,6 +39,15 @@ internal object FragmentTabletDualPaneCoordinator {
         val controller = loader.loadClass("com.apple.android.music.player.fragment.PlayerMainFragment")
         val state = loader.loadClass("com.apple.android.music.player.fragment.PlayerMainFragment\$l")
         val bag = loader.loadClass("com.apple.android.music.storeapi.model.BagConfig")
+        val pane = loader.loadClass("com.apple.android.music.player.fragment.l")
+        hook(pane.getDeclaredMethod("onViewCreated", View::class.java, Bundle::class.java), object : ModernMethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                if (param.throwable != null) return
+                val view = param.args.firstOrNull() as? View ?: return
+                val owner = param.thisObject?.let { ModernXposedRuntime.callMethod(it, "getParentFragment") } ?: return
+                sessions[owner]?.takeIf { eligible(view.context) }?.prepareComponents(view)
+            }
+        })
         hook(controller.getDeclaredMethod("j1", bag), object : ModernMethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 val owner = param.thisObject ?: return

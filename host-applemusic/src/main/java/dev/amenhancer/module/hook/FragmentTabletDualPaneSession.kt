@@ -2,6 +2,7 @@ package dev.amenhancer.module.hook
 
 import android.annotation.SuppressLint
 import dev.amenhancer.module.hook.tabletmedia.TabletPlayerComponents
+import dev.amenhancer.module.hook.tabletmedia.TabletLyricsPaneMotion
 import android.graphics.Rect
 import android.view.Gravity
 import android.view.View
@@ -61,7 +62,7 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
     private var components: TabletPlayerComponents? = null
     private var componentsFailed = false
     private var lyricsExpanded = true
-    private val nativeSongTranslation = songHost.translationX
+    private val paneMotion = TabletLyricsPaneMotion(wrapper, songHost, right) { root.postInvalidateOnAnimation() }
     private var nativeArtworkSize = 0
     private var artworkDirty = true
     private val artworkLayoutBounds = Rect()
@@ -100,6 +101,7 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
         contentAttached = true
         observer = root.viewTreeObserver.also { it.addOnPreDrawListener(this) }
         songHost.addOnLayoutChangeListener(artworkListener)
+        prepareComponents(songHost)
         forceSong()
         val tx = transaction()
         val currentSong = fragment("SONG")
@@ -200,8 +202,7 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
             if (artworkDirty && (slide <= .001f || slide >= .999f)) styleArtwork()
             applyPanePresentation()
             if (!componentsFailed) runCatching {
-                if (components == null) components = TabletPlayerComponents(controller, root, songHost, right,
-                    { (paneField.get(controller) as? Enum<*>)?.name == "SONG" }, { lyricsExpanded }, ::toggleLyrics)
+                ensureComponents()
                 components?.update(slide, switchingField.getBoolean(controller) || transitionField.getBoolean(controller))
             }.onFailure { error ->
                 runCatching { components?.close() }; components = null; componentsFailed = true
@@ -252,23 +253,32 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
             lyricsExpanded = true
             ModernXposedRuntime.callMethod(controller, "s1", states.getValue("SONG"), null)
         }
-        applyPanePresentation()
+        applyPanePresentation(animate = true)
         root.invalidate()
     }
 
-    private fun applyPanePresentation() {
+    private fun applyPanePresentation(animate: Boolean = false) {
         val song = (paneField.get(controller) as? Enum<*>)?.name == "SONG"
-        val centered = song && !lyricsExpanded && slide >= .95f &&
+        val safe = song && slide >= .95f &&
             !switchingField.getBoolean(controller) && !transitionField.getBoolean(controller)
-        val offset = if (centered) dev.amenhancer.module.hook.tabletmedia.TabletComponentGeometry
-            .centeredOffset(wrapper.width, songHost.left, songHost.width) ?: 0f else 0f
-        songHost.translationX = nativeSongTranslation + offset
-        right.visibility = if (song && !lyricsExpanded) View.INVISIBLE else View.VISIBLE
-        right.importantForAccessibility = if (right.visibility == View.VISIBLE && slide >= .6f)
-            View.IMPORTANT_FOR_ACCESSIBILITY_AUTO else View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+        paneMotion.apply(!lyricsExpanded, safe, FragmentPlayerSurfaceMotion.tabletFrame(slide).expansion, animate)
     }
 
-    fun prepareNativeTransition() { songHost.translationX = nativeSongTranslation }
+    private fun ensureComponents() {
+        if (components == null) components = TabletPlayerComponents(root, songHost, right,
+            { (paneField.get(controller) as? Enum<*>)?.name == "SONG" }, { lyricsExpanded }, ::toggleLyrics,
+            { paneMotion.horizontalOffset })
+    }
+
+    fun prepareComponents(pane: View) {
+        if (!installed || componentsFailed) return
+        runCatching { ensureComponents(); components?.prepare(pane) }.onFailure {
+            runCatching { components?.close() }; components = null; componentsFailed = true
+            ModernXposedRuntime.log("Tablet component preparation failed", it)
+        }
+    }
+
+    fun prepareNativeTransition() { paneMotion.close() }
 
     private fun styleArtwork() {
         if (!canTransformSong()) return
@@ -363,7 +373,7 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
     private fun restoreDecorations() {
         components?.close(); components = null
         componentsFailed = false
-        songHost.translationX = nativeSongTranslation
+        paneMotion.close()
         right.visibility = View.VISIBLE
         songLayoutRestore?.invoke(); songLayoutRestore = null
         hidden.forEach { (view, visibility) -> view.visibility = visibility }; hidden.clear()
@@ -383,7 +393,7 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
     fun destroy() {
         destroyed = true; stopObserver()
         components?.close(); components = null
-        songHost.translationX = nativeSongTranslation
+        paneMotion.close()
         songLayoutRestore?.invoke(); songLayoutRestore = null
         hidden.clear(); margins.clear(); cover = null
     }
