@@ -89,6 +89,7 @@ internal object ConstraintLayoutPane {
      */
     private const val TARGET_650_LAYOUT_PARAMS = "androidx.constraintlayout.widget.ConstraintLayout\$b"
     private val TARGET_650_FIELD_NAMES = mapOf(
+        "guideBegin" to "a",
         "guidePercent" to "c",
         "leftToLeft" to "h",
         "leftToRight" to "g",
@@ -107,6 +108,7 @@ internal object ConstraintLayoutPane {
         "matchConstraintDefaultWidth" to "L",
         "matchConstraintMinWidth" to "N",
         "matchConstraintMaxWidth" to "P",
+        "matchConstraintPercentHeight" to "S",
         "constrainedWidth" to "W",
     )
 
@@ -156,6 +158,22 @@ internal object ConstraintLayoutPane {
         params.setInt("bottomToTop", -1); params.setInt("bottomToBottom", -1)
         artwork.layoutParams = params
         return true
+    }
+
+    /** 1606 tablet song pane: a shorter control section with native metadata insets. */
+    fun configureTabletSongLayout(host: View): (() -> Unit)? {
+        val controls = host.findViewById<View>(targetId(host.resources, "player_controls")) ?: return null
+        val params = constraintMarginParams(controls, "player_controls")
+        val heightPercent = checkNotNull(constraintField(params.javaClass, "matchConstraintPercentHeight"))
+        val nativeHeightPercent = heightPercent.getFloat(params)
+        // The native player excludes its top margin; 25% here is about 23% of the screen.
+        // Keep the original params: the host's generic constructor drops native constraints.
+        heightPercent.setFloat(params, 0.25f)
+        controls.layoutParams = params
+        return {
+            heightPercent.setFloat(params, nativeHeightPercent)
+            controls.layoutParams = params
+        }
     }
 
     /**

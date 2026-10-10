@@ -46,6 +46,18 @@ object AppleMusicHostProfiles {
         all.firstNotNullOfOrNull { it.document.optJSONObject("catalogQueryRenames")?.optJSONObject(owner)
             ?.optString(preferredName)?.takeIf(String::isNotBlank) }
 
+    internal fun openTabletMediaAsset(name: String): java.io.InputStream {
+        val path = "tablet-media/$name"
+        AppleMusicHostProfiles::class.java.classLoader?.getResourceAsStream(path)?.let { return it }
+        apkPaths.forEach { apk ->
+            val bytes = ZipFile(apk).use { zip -> zip.getEntry(path)?.let { entry ->
+                zip.getInputStream(entry).use { it.readBytes() }
+            } }
+            if (bytes != null) return bytes.inputStream()
+        }
+        error("Packaged tablet media asset is unavailable: $name")
+    }
+
     private fun read(name: String): JSONObject {
         require(Regex("[A-Za-z0-9._-]+\\.json").matches(name))
         val path = "host-profiles/$name"

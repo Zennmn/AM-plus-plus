@@ -393,6 +393,76 @@
         "parameters": [],
         "returns": "void",
         "static": false
+      },
+      "tablet-playback-media-browser": {
+        "owner": "ia.a$c",
+        "name": "getMediaBrowser",
+        "parameters": [],
+        "returns": "J4.w",
+        "static": false,
+        "invocationOnly": true
+      },
+      "tablet-playback-get-shuffle": {
+        "owner": "J4.B",
+        "name": "getShuffleModeEnabled",
+        "parameters": [],
+        "returns": "boolean",
+        "static": false,
+        "invocationOnly": true
+      },
+      "tablet-playback-set-shuffle": {
+        "owner": "J4.B",
+        "name": "setShuffleModeEnabled",
+        "parameters": [
+          "boolean"
+        ],
+        "returns": "void",
+        "static": false,
+        "invocationOnly": true
+      },
+      "tablet-playback-get-repeat": {
+        "owner": "J4.B",
+        "name": "getRepeatMode",
+        "parameters": [],
+        "returns": "int",
+        "static": false,
+        "invocationOnly": true
+      },
+      "tablet-playback-set-repeat": {
+        "owner": "J4.B",
+        "name": "setRepeatMode",
+        "parameters": [
+          "int"
+        ],
+        "returns": "void",
+        "static": false,
+        "invocationOnly": true
+      },
+      "tablet-playback-command-available": {
+        "owner": "J4.B",
+        "name": "g",
+        "parameters": [
+          "int"
+        ],
+        "returns": "boolean",
+        "static": false,
+        "invocationOnly": true
+      },
+      "tablet-playback-application-looper": {
+        "owner": "J4.B",
+        "name": "getApplicationLooper",
+        "parameters": [],
+        "returns": "android.os.Looper",
+        "static": false,
+        "invocationOnly": true
+      },
+      "tablet-playback-backend-connected": {
+        "owner": "J4.B$b",
+        "name": "k",
+        "parameters": [],
+        "returns": "boolean",
+        "static": false,
+        "invocationOnly": true
       }
     },
     "fieldContracts": {
@@ -480,6 +550,21 @@
         "owner": "com.apple.android.music.player.LyricsBackgroundLayerView",
         "name": "y",
         "type": "android.animation.ValueAnimator"
+      },
+      "tablet-playback-main-state": {
+        "owner": "com.apple.android.music.player.fragment.PlayerMainFragment",
+        "name": "H",
+        "type": "com.apple.android.music.player.b1"
+      },
+      "tablet-playback-mode-blocked": {
+        "owner": "com.apple.android.music.player.b1",
+        "name": "M",
+        "type": "boolean"
+      },
+      "tablet-playback-controller-backend": {
+        "owner": "J4.B",
+        "name": "c",
+        "type": "J4.B$b"
       }
     }
   },

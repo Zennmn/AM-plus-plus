@@ -1,6 +1,8 @@
 package dev.amenhancer.module.hook
 
 import android.annotation.SuppressLint
+import dev.amenhancer.module.hook.tabletmedia.TabletPlayerComponents
+import dev.amenhancer.module.hook.tabletmedia.TabletLyricsPaneMotion
 import android.graphics.Rect
 import android.view.Gravity
 import android.view.View
@@ -9,7 +11,7 @@ import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import java.util.IdentityHashMap
 
-/** Native fragments and media callbacks remain native; only their containers change. */
+/** Native fragments and media callbacks remain native; presentation composes around their layout. */
 internal class FragmentTabletDualPaneSession(val controller: Any, val root: ViewGroup) : ViewTreeObserver.OnPreDrawListener {
     private val ids = HashMap<String, Int>()
     val player = find(root, "player_root") as ViewGroup
@@ -31,6 +33,7 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
     }
     private val loader = controller.javaClass.classLoader!!
+    private val nativeLyricsAvailability = FragmentTabletLyricsAvailability.native(controller, root.context)
     private val stateClass = loader.loadClass("com.apple.android.music.player.fragment.PlayerMainFragment\$l")
     private val states = checkNotNull(stateClass.enumConstants).associateBy { (it as Enum<*>).name }
     private val fragmentAccessor = stateClass.getDeclaredMethod("a")
@@ -56,6 +59,13 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
     private var artworkContainer: View? = null
     private var metadataBarrier: View? = null
     private var artworkParams: ViewGroup.LayoutParams? = null
+    private var songLayoutRestore: (() -> Unit)? = null
+    private var components: TabletPlayerComponents? = null
+    private var componentsFailed = false
+    private var lyricsExpanded = true
+    private val paneMotion = TabletLyricsPaneMotion(wrapper, songHost, right,
+        invalidate = { root.postInvalidateOnAnimation() },
+        artwork = { nativeCoverGetter.invoke(null, controller) as? View })
     private var nativeArtworkSize = 0
     private var artworkDirty = true
     private val artworkLayoutBounds = Rect()
@@ -94,6 +104,7 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
         contentAttached = true
         observer = root.viewTreeObserver.also { it.addOnPreDrawListener(this) }
         songHost.addOnLayoutChangeListener(artworkListener)
+        prepareComponents(songHost)
         forceSong()
         val tx = transaction()
         val currentSong = fragment("SONG")
@@ -171,6 +182,8 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
                 root.post { restore() }
                 return true
             }
+            // A completed rebound can omit the last slide(1); trust the native settled state.
+            if (behaviorField.get(controller)?.let { behaviorState.getInt(it) == 3 } == true) slide = 1f
             // Native lyrics chrome can be re-shown by asynchronous media updates.
             val child = if (right.childCount > 0) right.getChildAt(0) else null
             if (rightRoot !== child) {
@@ -190,6 +203,15 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
             applyTransition()
             wrapper.z = songHost.z
             if (artworkDirty && (slide <= .001f || slide >= .999f)) styleArtwork()
+            applyPanePresentation()
+            if (!componentsFailed) runCatching {
+                ensureComponents()
+                components?.update(slide, switchingField.getBoolean(controller) || transitionField.getBoolean(controller))
+            }.onFailure { error ->
+                runCatching { components?.close() }; components = null; componentsFailed = true
+                lyricsExpanded = true; applyPanePresentation()
+                ModernXposedRuntime.log("Tablet media components failed; retaining native dual pane", error)
+            }
         } catch (error: Throwable) { FragmentTabletDualPaneCoordinator.fail(controller, error) }
         return true
     }
@@ -198,7 +220,10 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
         if (!installed || closing || !progress.isFinite()) return
         slide = progress.coerceIn(0f, 1f)
         applyTransition()
+        applyPanePresentation()
     }
+
+    fun prepareNativeCoverFrame() { paneMotion.prepareNativeCoverFrame() }
 
     /** Same current SONG/QUEUE cover that the native animator selects; measurement only. */
     fun nativeCoverReady(): Boolean {
@@ -210,6 +235,7 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
         val artwork = nativeCoverGetter.invoke(null, controller) as? View ?: return null
         if (cover !== artwork) {
             if (artworkContainer !== artwork.parent) {
+                songLayoutRestore?.invoke(); songLayoutRestore = null
                 artworkContainer?.removeOnLayoutChangeListener(artworkListener)
                 (artworkContainer?.parent as? View)?.removeOnLayoutChangeListener(artworkListener)
                 metadataBarrier?.removeOnLayoutChangeListener(artworkListener)
@@ -226,6 +252,41 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
         right.importantForAccessibility = if (slide >= .6f) View.IMPORTANT_FOR_ACCESSIBILITY_AUTO else View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
     }
 
+    private fun toggleLyrics() {
+        if (components?.lyricsAvailable() == false) return
+        if ((paneField.get(controller) as? Enum<*>)?.name == "SONG") lyricsExpanded = !lyricsExpanded
+        else {
+            lyricsExpanded = true
+            ModernXposedRuntime.callMethod(controller, "s1", states.getValue("SONG"), null)
+        }
+        applyPanePresentation(animate = true)
+        root.invalidate()
+    }
+
+    private fun applyPanePresentation(animate: Boolean = false) {
+        val pane = (paneField.get(controller) as? Enum<*>)?.name
+        // SONG and QUEUE share this host, including their native shared-element transition.
+        // Keep its presentation offset; the native artwork/child geometry stays native.
+        paneMotion.apply(!lyricsExpanded, pane, slide,
+            FragmentPlayerSurfaceMotion.tabletFrame(slide).expansion, animate,
+            available = components?.lyricsAvailable() != false)
+    }
+
+    private fun ensureComponents() {
+        if (components == null) components = TabletPlayerComponents(root, songHost, right,
+            { (paneField.get(controller) as? Enum<*>)?.name == "SONG" },
+            { lyricsExpanded && components?.lyricsAvailable() != false }, ::toggleLyrics,
+            { paneMotion.horizontalOffset }, { nativeLyricsAvailability.available() })
+    }
+
+    fun prepareComponents(pane: View) {
+        if (!installed || componentsFailed) return
+        runCatching { ensureComponents(); components?.prepare(pane) }.onFailure {
+            runCatching { components?.close() }; components = null; componentsFailed = true
+            ModernXposedRuntime.log("Tablet component preparation failed", it)
+        }
+    }
+
     private fun styleArtwork() {
         if (!canTransformSong()) return
         trackArtworkLayout() ?: return
@@ -240,6 +301,11 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
         } ?: return
         if (artwork.width <= 0 || songHost.height <= 0) return
         if (nativeArtworkSize == 0) nativeArtworkSize = artwork.width
+        if (songLayoutRestore == null) {
+            songLayoutRestore = ConstraintLayoutPane.configureTabletSongLayout(songHost)
+            // Let the metadata barrier settle before calculating the cover's new center.
+            return
+        }
         val artworkParent = artwork.parent as? View ?: return
         val sheet = root.parent as? ViewGroup ?: return
         val coordinator = sheet.parent as? View ?: return
@@ -312,6 +378,11 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
     }
 
     private fun restoreDecorations() {
+        components?.close(); components = null
+        componentsFailed = false
+        paneMotion.close()
+        right.visibility = View.VISIBLE
+        songLayoutRestore?.invoke(); songLayoutRestore = null
         hidden.forEach { (view, visibility) -> view.visibility = visibility }; hidden.clear()
         margins.forEach { (view, top) -> (view.layoutParams as? ViewGroup.MarginLayoutParams)?.let { it.topMargin = top; view.layoutParams = it } }; margins.clear()
         artworkContainer?.let { view -> artworkParams?.let { view.layoutParams = it } }
@@ -326,7 +397,13 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
         (artworkContainer?.parent as? View)?.removeOnLayoutChangeListener(artworkListener)
         metadataBarrier?.removeOnLayoutChangeListener(artworkListener)
     }
-    fun destroy() { destroyed = true; stopObserver(); hidden.clear(); margins.clear(); cover = null }
+    fun destroy() {
+        destroyed = true; stopObserver()
+        components?.close(); components = null
+        paneMotion.close()
+        songLayoutRestore?.invoke(); songLayoutRestore = null
+        hidden.clear(); margins.clear(); cover = null
+    }
     private fun find(parent: View, name: String): View? = ids.getOrPut(name) { parent.resources.getIdentifier(name, "id", dev.amenhancer.module.ModuleConstants.TARGET_PACKAGE) }
         .takeIf { it != 0 }?.let { parent.findViewById(it) }
 }

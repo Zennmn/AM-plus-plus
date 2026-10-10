@@ -1,0 +1,11 @@
+Speaker and AirPods images: Apple Music User Guide, Symbols used in Music on Mac.
+Source: https://support.apple.com/zh-cn/guide/music/mus131245dbe/mac
+Retrieved: 2026-10-06. Copyright Apple Inc.
+
+Speaker:
+https://help.apple.com/assets/6940592177CC4A95400B60EF/694059233A98DA7C77096BC2/zh_CN/178f319b8c1a3baf1d38031f9d89f807.png
+AirPods:
+https://help.apple.com/assets/6940592177CC4A95400B60EF/694059233A98DA7C77096BC2/zh_CN/4810fbe9072feb0492dc3d29587ca95b.png
+
+These Apple images are not covered by the plugin's GPL license.
+The generic earphone vector asset was supplied by Kifranei from Halcyon.

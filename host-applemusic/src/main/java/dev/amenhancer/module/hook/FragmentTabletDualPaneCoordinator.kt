@@ -39,6 +39,15 @@ internal object FragmentTabletDualPaneCoordinator {
         val controller = loader.loadClass("com.apple.android.music.player.fragment.PlayerMainFragment")
         val state = loader.loadClass("com.apple.android.music.player.fragment.PlayerMainFragment\$l")
         val bag = loader.loadClass("com.apple.android.music.storeapi.model.BagConfig")
+        val pane = loader.loadClass("com.apple.android.music.player.fragment.l")
+        hook(pane.getDeclaredMethod("onViewCreated", View::class.java, Bundle::class.java), object : ModernMethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                if (param.throwable != null) return
+                val view = param.args.firstOrNull() as? View ?: return
+                val owner = param.thisObject?.let { ModernXposedRuntime.callMethod(it, "getParentFragment") } ?: return
+                sessions[owner]?.takeIf { eligible(view.context) }?.prepareComponents(view)
+            }
+        })
         hook(controller.getDeclaredMethod("j1", bag), object : ModernMethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 val owner = param.thisObject ?: return
@@ -69,7 +78,8 @@ internal object FragmentTabletDualPaneCoordinator {
         hook(controller.getDeclaredMethod("s1", state, Bundle::class.java), object : ModernMethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 val owner = param.thisObject ?: return
-                val session = sessions[owner]?.takeIf { it.installed && eligible(it.root.context) } ?: return
+                val session = sessions[owner] ?: return
+                if (!session.installed || !eligible(session.root.context)) return
                 val requested = (param.args[0] as? Enum<*>)?.name ?: return
                 // Match the established dual-pane player: only lyrics are fixed on the right.
                 // SONG/QUEUE retain Apple's state, shared-element transitions and left controls.
@@ -96,12 +106,18 @@ internal object FragmentTabletDualPaneCoordinator {
         check(ModernXposedRuntime.hookMethod(method, callback, registration)) { "Reference dual-pane hook failed: $method" }
     }
 
-    /** Observe the completed native frame for lyrics/materials; never replace its artwork writes. */
+    /** Let native animation compute its frame, then compose the centered cover offset. */
     private fun installProgressObserver(loader: ClassLoader) {
         val callback = loader.loadClass("com.apple.android.music.player.fragment.PlayerMainFragment\$i")
         val artwork = callback.getDeclaredMethod("d", Float::class.javaPrimitiveType)
         val owner = callback.getDeclaredField("h").apply { isAccessible = true }
         hook(artwork, object : ModernMethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                val controller = owner.get(param.thisObject) ?: return
+                sessions[controller]?.takeIf { failed[controller] != true }?.let { session ->
+                    guarded(controller) { session.prepareNativeCoverFrame() }
+                }
+            }
             override fun afterHookedMethod(param: MethodHookParam) {
                 if (param.throwable != null) return
                 val controller = owner.get(param.thisObject) ?: return

@@ -4,7 +4,7 @@
 
 7.0.0-beta/1606 的历史适配记录可从 Git 历史查阅，真机验收仍需逐项确认。下表保留旧版验收基线；新平板玻璃按 7.0 顶部导航和独立底部 mini 实现。
 
-按最新用户要求，1606 v9 试用版交回原生封面过渡，并保留双栏原生动态封面。这一变化仅针对 7.0；下表 6.5.x 的 Editorial 保全语义保持不变。
+1606 双栏保留原生封面尺寸、缩放、暂停比例和视频内容；关闭歌词后的居中目标通过封面 X 补偿接入原生展开/收起过程，下半区保持居中显现。具体契约见 [宿主适配手册](host-adaptation-guide.md#1606-平板双栏与媒体组件)。这一变化仅针对 7.0；下表 6.5.x 的 Editorial 保全语义保持不变。
 
 | 功能 | 保全语义 | 自动验证入口 | 真机状态 |
 |---|---|---|---|
@@ -25,6 +25,19 @@
 | 存储/迁移 | 原键/目录/ID/marker/schema/ZIP/SQLite；ordinary不覆盖资产；原子发布；只读重试 | ConfigurationMigration/Session/Storage/Index/Transaction | 待升级/回滚 |
 
 1583 的玻璃/蜂窝保持不支持。6.5.0/1580 仅参考，不在生产注册范围。停用的全局目录语言功能不重新启用。
+
+## 1606 平板双栏补充验收
+
+以下补充对应当前平板双栏实现；上面的旧版验收基线不变。宿主单测和 release 构建已通过，完整真机验收仍待记录。
+
+| 场景 | 应保留的行为 | 自动验证入口 | 真机状态 |
+|---|---|---|---|
+| 首次打开、旋转、重建 | SONG/QUEUE 控制区 25%；原生字体、缩进、图标/封面尺寸；首帧没有旧 footer 闪现 | TabletSongLayout、TabletNativeControlRows、TabletComponentStartup | 待完整验收 |
+| 音量与输出 | 音量总宽度对齐进度条；短窗口优先音量，输出不足则隐藏；无设备名文字，输出选择和拖动可用 | TabletComponentGeometry、TabletComponentStartup | 待横竖比、触摸及路由对照 |
+| 原生动作与反馈 | 右下 selector/状态稳定，队列调用原生，翻译原生；播放图标默认大小，水波纹外加 8dp、白色 20% | TabletNativeActionStyle、TabletTransportRipple、TabletComponentStartup | 待首点/连点/长按对照 |
+| 换到无歌词歌曲 | 上一首文本或启用状态不能打开右栏；普通/自定义、网络许可和离线歌词按当前歌曲判定 | FragmentTabletLyricsAvailability、TabletComponentStartup | 待切歌、网络及离线对照 |
+| 关闭歌词后切队列 | SONG/QUEUE 都居中，右栏继续关闭；可用歌词恢复只解除自动关闭，保留手动关闭状态 | TabletLyricsPaneMotion、TabletComponentStartup | 待切页和换歌对照 |
+| 展开、收起、反向拖动 | 封面 mini 到居中目标连续，下半区不从左侧滑入；保留原生 scale/Y，重复帧和换 pane 不累计 X 补偿 | TabletLyricsPaneMotion、TabletComponentStartup | 待录屏、暂停/播放及动态封面对照 |
 
 ## 既有降级（独立修复）
 
