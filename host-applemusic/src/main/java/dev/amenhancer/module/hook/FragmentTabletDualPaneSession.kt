@@ -248,6 +248,7 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
     }
 
     private fun toggleLyrics() {
+        if (components?.lyricsAvailable() == false) return
         if ((paneField.get(controller) as? Enum<*>)?.name == "SONG") lyricsExpanded = !lyricsExpanded
         else {
             lyricsExpanded = true
@@ -261,12 +262,14 @@ internal class FragmentTabletDualPaneSession(val controller: Any, val root: View
         val song = (paneField.get(controller) as? Enum<*>)?.name == "SONG"
         val safe = song && slide >= .95f &&
             !switchingField.getBoolean(controller) && !transitionField.getBoolean(controller)
-        paneMotion.apply(!lyricsExpanded, safe, FragmentPlayerSurfaceMotion.tabletFrame(slide).expansion, animate)
+        paneMotion.apply(!lyricsExpanded, safe, FragmentPlayerSurfaceMotion.tabletFrame(slide).expansion, animate,
+            available = components?.lyricsAvailable() != false)
     }
 
     private fun ensureComponents() {
         if (components == null) components = TabletPlayerComponents(root, songHost, right,
-            { (paneField.get(controller) as? Enum<*>)?.name == "SONG" }, { lyricsExpanded }, ::toggleLyrics,
+            { (paneField.get(controller) as? Enum<*>)?.name == "SONG" },
+            { lyricsExpanded && components?.lyricsAvailable() != false }, ::toggleLyrics,
             { paneMotion.horizontalOffset })
     }
 

@@ -26,9 +26,6 @@ class TabletComponentStartupTest {
     private class PercentParams(width: Int, height: Int) : FrameLayout.LayoutParams(width, height) {
         @JvmField var matchConstraintPercentHeight = .345f
     }
-    private class GuideParams(begin: Int) : FrameLayout.LayoutParams(0, 0) {
-        @JvmField var guideBegin = begin
-    }
     @Test fun packagedIconsInitializeAndCollapsedPlayerReleasesItsOverlay() {
         val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
         val root = FrameLayout(activity)
@@ -139,7 +136,8 @@ class TabletComponentStartupTest {
         root.addView(song, FrameLayout.LayoutParams(dp(504), dp(800)).apply { leftMargin = dp(48) })
         root.addView(right, FrameLayout.LayoutParams(dp(568), dp(800)).apply { leftMargin = dp(616) })
         var offset = 0f
-        val components = TabletPlayerComponents(root, song, right, { true }, { true }, {}, { offset })
+        var lyricClicks = 0
+        val components = TabletPlayerComponents(root, song, right, { true }, { true }, { lyricClicks++ }, { offset })
         val names = listOf("player_controls", "play_pause", "previous_rewind", "next_fast_forward",
             "player_lyrics", "player_queue", "media_route_button", "seek_bar_controls", "progress")
         val ids = resourceIds(components, names)
@@ -165,20 +163,31 @@ class TabletComponentStartupTest {
             val output = overlay.getChildAt(0); val lyrics = overlay.getChildAt(1)
             val queue = overlay.getChildAt(2); val volume = overlay.getChildAt(3)
             assertEquals(View.VISIBLE, volume.visibility)
-            val play = group.findViewById<View>(ids.getValue("play_pause"))
-            assertTrue(play.y < dp(50))
-            assertTrue(play.y >= progress.bottom)
-            assertEquals((root.height * .061f).toInt().coerceAtLeast(dp(55)), volume.top + volume.height / 2 - (song.top + group.top + play.y.toInt() + play.height / 2))
-            assertTrue(output is android.widget.ImageButton)
-            assertEquals(volume.top + volume.height / 2, output.top + output.height / 2)
+            assertEquals(group.top + nativeFooter.top + nativeFooter.height / 2 - dp(4) - dp(2), volume.top + volume.height / 2)
+            assertEquals(volume.top + dp(2), output.top)
             assertEquals(dp(12), output.left)
             assertTrue(volume.left >= output.right + dp(8))
             assertEquals(song.left + track.left + track.paddingLeft, volume.left)
             assertEquals(song.left + track.right - track.paddingRight, volume.right)
-            assertEquals(root.height - volume.bottom, root.height - output.bottom)
-            assertTrue(root.height - volume.bottom > dp(28))
+            assertEquals(dp(26), root.height - output.bottom)
+            assertEquals(dp(28), root.height - volume.bottom)
+            assertEquals(true, components.lyricsAvailable())
+            lyrics.performClick(); assertEquals(1, lyricClicks)
+            nativeFooter.isEnabled = false
+            // Reject a late native disable even before the next frame updates the proxy.
+            lyrics.performClick(); assertEquals(1, lyricClicks)
+            components.update(1f, false)
+            assertEquals(false, components.lyricsAvailable()); assertFalse(lyrics.isEnabled)
+            assertTrue(queue.isEnabled); assertFalse(nativeFooter.isEnabled)
+            // Collapsing the right pane must not prevent detection of the next native enable.
+            right.visibility = View.INVISIBLE
+            nativeFooter.isEnabled = true
+            components.update(1f, false)
+            assertEquals(true, components.lyricsAvailable()); assertTrue(lyrics.isEnabled)
+            lyrics.performClick(); assertEquals(2, lyricClicks)
+            right.visibility = View.VISIBLE
             offset = 0f; song.translationX = 0f
-            listOf(180, 160, 131, 220).forEach { height ->
+            listOf(180, 160, 220).forEach { height ->
                 group.layoutParams = (group.layoutParams as FrameLayout.LayoutParams).apply { this.height = dp(height) }
                 root.measure(View.MeasureSpec.makeMeasureSpec(dp(1200), View.MeasureSpec.EXACTLY),
                     View.MeasureSpec.makeMeasureSpec(dp(800), View.MeasureSpec.EXACTLY))
@@ -187,15 +196,15 @@ class TabletComponentStartupTest {
                 assertEquals(View.VISIBLE, volume.visibility)
                 assertEquals(song.left + track.left + track.paddingLeft, volume.left)
                 assertEquals(song.left + track.right - track.paddingRight, volume.right)
-                assertTrue(volume.top >= group.top + play.y.toInt() + play.height)
+                assertTrue(volume.top >= group.top + dp(50) + dp(66) + dp(4))
                 assertTrue(volume.bottom <= root.height)
                 assertTrue(volume.height >= dp(24))
-                if (height == 131) {
+                if (height == 160) {
                     assertEquals(View.INVISIBLE, output.visibility)
-                    assertEquals(dp(24), volume.height)
+                    assertEquals(dp(40), volume.height)
                 } else {
                     assertEquals(View.VISIBLE, output.visibility)
-                    assertEquals(volume.top + volume.height / 2, output.top + output.height / 2)
+                    assertEquals(volume.top + volume.height / 2 + dp(2), output.top + output.height / 2)
                     assertEquals(dp(44), volume.height)
                 }
                 val shortRightTop = group.top + group.height - dp(12) - dp(44)
@@ -214,109 +223,38 @@ class TabletComponentStartupTest {
             assertEquals(song.left + dp(300) + track.left + track.paddingLeft, volume.left)
             assertEquals(song.left + dp(300) + track.right - track.paddingRight, volume.right)
             assertEquals(rightTop, lyrics.top); assertEquals(rightTop, queue.top)
-            assertEquals(root.height - volume.bottom, root.height - output.bottom)
-            assertTrue(root.height - volume.bottom > dp(28))
-            components.close()
-            names.subList(1, 4).forEach { name ->
-                val button = group.findViewById<View>(ids.getValue(name))
-                assertEquals(0f, button.translationX, 0f); assertEquals(0f, button.translationY, 0f)
-            }
+            assertEquals(dp(26), root.height - output.bottom)
+            assertEquals(dp(28), root.height - volume.bottom)
         } finally { components.close(); activity.finish() }
     }
-    @Test fun referenceRowsApplyBeforeQueueCrossfadeAndFitShorterWindowsWithoutResizingNativeSymbols() {
+    @Test fun lyricsAvailabilityFollowsTheVisibleRetainedNativeControlGroup() {
         val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
-        val density = activity.resources.displayMetrics.density
-        fun dp(value: Int) = kotlin.math.round(value * density).toInt()
         val root = FrameLayout(activity); val song = FrameLayout(activity); val right = FrameLayout(activity)
         activity.setContentView(root)
-        root.addView(song, FrameLayout.LayoutParams(dp(504), -1).apply { leftMargin = dp(48) })
-        root.addView(right, FrameLayout.LayoutParams(dp(568), -1).apply { leftMargin = dp(616) })
+        root.addView(song); root.addView(right)
         val components = TabletPlayerComponents(root, song, right, { true }, { true }, {})
-        val names = listOf("player_controls", "play_pause", "previous_rewind", "next_fast_forward",
-            "player_lyrics", "player_queue", "media_route_button", "seek_bar_controls", "progress", "metadata_guideline_start")
-        val ids = resourceIds(components, names)
-        val guide = View(activity).apply { id = ids.getValue("metadata_guideline_start") }
-        song.addView(guide)
-        val guideParams = GuideParams(dp(16))
-        guide.layoutParams = guideParams
-        fun pane(): FrameLayout = FrameLayout(activity).apply {
-            id = ids.getValue("player_controls"); setPadding(dp(32), 0, dp(32), 0)
-            song.addView(this, FrameLayout.LayoutParams(-1, dp(250), Gravity.BOTTOM))
-            names.subList(1, 4).forEachIndexed { index, name ->
-                addView(ImageView(activity).apply {
-                    id = ids.getValue(name); setPadding(dp(11), dp(11), dp(11), dp(11))
-                }, FrameLayout.LayoutParams(dp(66), dp(66)).apply {
-                    topMargin = dp(110); leftMargin = dp(110 + index * 99)
-                })
-            }
-            names.subList(4, 7).forEach { name -> addView(ImageView(activity).apply { id = ids.getValue(name) },
-                FrameLayout.LayoutParams(dp(60), dp(60), Gravity.BOTTOM).apply { bottomMargin = dp(14) }) }
-            addView(FrameLayout(activity).apply {
-                id = ids.getValue("seek_bar_controls")
-                addView(View(activity).apply { id = ids.getValue("progress") }, FrameLayout.LayoutParams(-1, dp(12)))
-            }, FrameLayout.LayoutParams(-1, dp(32)))
+        val ids = resourceIds(components, listOf("player_controls", "play_pause", "player_lyrics"))
+        fun pane(enabled: Boolean, alpha: Float): Pair<FrameLayout, ImageView> {
+            val group = FrameLayout(activity).apply { id = ids.getValue("player_controls"); this.alpha = alpha }
+            val lyrics = ImageView(activity).apply { id = ids.getValue("player_lyrics"); isEnabled = enabled }
+            group.addView(ImageView(activity).apply { id = ids.getValue("play_pause") })
+            group.addView(lyrics); song.addView(group, FrameLayout.LayoutParams(500, 220))
+            return group to lyrics
         }
-        fun layout(height: Int) {
-            root.measure(View.MeasureSpec.makeMeasureSpec(dp(1200), View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(dp(height), View.MeasureSpec.EXACTLY))
-            root.layout(0, 0, dp(1200), dp(height))
-        }
-        fun verify(group: FrameLayout, expectedGap: Int? = null) {
-            val play = group.findViewById<View>(ids.getValue("play_pause"))
-            val progress = group.findViewById<View>(ids.getValue("seek_bar_controls"))
-            val track = group.findViewById<View>(ids.getValue("progress"))
-            assertEquals(dp(16), group.paddingLeft); assertEquals(dp(32), group.paddingRight)
-            assertEquals(progress.left + track.width / 2, play.x.toInt() + play.width / 2)
-            assertTrue(play.y >= progress.bottom)
-            expectedGap?.let { assertEquals(it, play.y.toInt() + play.height / 2 - (progress.top + track.height / 2)) }
-            names.subList(1, 4).forEach { name ->
-                val button = group.findViewById<View>(ids.getValue(name))
-                assertEquals(dp(66), button.width); assertEquals(dp(66), button.height)
-                assertEquals(dp(11), button.paddingLeft); assertEquals(dp(11), button.paddingTop)
-                assertEquals(play.y.toInt() + play.height / 2, button.y.toInt() + button.height / 2)
-            }
-        }
-        val first = pane()
         try {
-            assertTrue(components.prepare(first))
-            layout(1000); components.update(1f, false)
-            verify(first, dp(62)); assertEquals(0, guideParams.guideBegin)
-            val overlay = root.getChildAt(2) as FrameLayout
-            val output = overlay.getChildAt(0); val lyrics = overlay.getChildAt(1)
-            val queue = overlay.getChildAt(2); val volume = overlay.getChildAt(3)
-            val play = first.findViewById<View>(ids.getValue("play_pause"))
-            assertEquals(dp(61), volume.top + volume.height / 2 - (first.top + play.y.toInt() + play.height / 2))
-            assertTrue(output is android.widget.ImageButton)
-            assertEquals(volume.top + volume.height / 2, output.top + output.height / 2)
-            assertTrue(output.right + dp(8) <= volume.left)
-            assertEquals(dp(12), root.height - lyrics.bottom); assertEquals(lyrics.top, queue.top)
-            components.update(1f, false); verify(first, dp(62))
-            val incoming = pane()
-            components.prepare(incoming); layout(1000)
-            components.update(.5f, true)
-            verify(first, dp(62)); verify(incoming, dp(62))
-            listOf(first, incoming).forEach {
-                assertEquals(0f, it.findViewById<View>(ids.getValue("player_lyrics")).alpha, 0f)
-                it.layoutParams = (it.layoutParams as FrameLayout.LayoutParams).apply { height = dp(150) }
-            }
-            first.alpha = .4f; incoming.alpha = .8f
-            layout(600); components.update(1f, false)
-            verify(first); verify(incoming)
-            val smallPlay = incoming.findViewById<View>(ids.getValue("play_pause"))
-            assertEquals(View.VISIBLE, volume.visibility)
-            assertTrue(volume.top >= incoming.top + smallPlay.y.toInt() + smallPlay.height)
-            assertTrue(volume.bottom <= root.height)
-            assertEquals(dp(44), volume.height)
-            assertEquals(volume.top + volume.height / 2, output.top + output.height / 2)
-            components.close()
-            assertEquals(dp(16), guideParams.guideBegin)
-            listOf(first, incoming).forEach { group ->
-                assertEquals(dp(32), group.paddingLeft)
-                names.subList(1, 4).forEach { name ->
-                    val button = group.findViewById<View>(ids.getValue(name))
-                    assertEquals(0f, button.translationX, 0f); assertEquals(0f, button.translationY, 0f)
-                }
-            }
+            assertNull(components.lyricsAvailable())
+            val outgoing = pane(true, .8f); val incoming = pane(false, .2f)
+            root.measure(View.MeasureSpec.makeMeasureSpec(1200, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY))
+            root.layout(0, 0, 1200, 800)
+            components.prepare()
+            assertEquals(0f, outgoing.second.alpha, 0f); assertFalse(outgoing.second.isClickable)
+            assertTrue(outgoing.second.isEnabled); assertFalse(incoming.second.isEnabled)
+            assertEquals(true, components.lyricsAvailable())
+            outgoing.first.alpha = .2f; incoming.first.alpha = .8f
+            assertEquals(false, components.lyricsAvailable())
+            incoming.second.isEnabled = true
+            assertEquals(true, components.lyricsAvailable())
         } finally { components.close(); activity.finish() }
     }
 }

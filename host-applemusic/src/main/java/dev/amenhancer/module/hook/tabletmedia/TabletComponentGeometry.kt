@@ -19,7 +19,7 @@ internal object TabletComponentGeometry {
         // Keep the whole progress width; both speaker icons occupy 80dp with their spacing.
         val width = right - left
         if (width <= dp(80)) return null
-        val minTop = contentBottom.coerceAtLeast(0)
+        val minTop = (contentBottom + dp(4)).coerceAtLeast(0)
         val height = minOf(dp(44), bottom - minTop)
         // Shrink only empty touch padding, keeping the 24dp glyphs at their normal size.
         if (height < dp(24)) return null
