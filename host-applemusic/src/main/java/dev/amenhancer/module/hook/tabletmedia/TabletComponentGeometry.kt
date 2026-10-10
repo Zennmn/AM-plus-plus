@@ -4,7 +4,7 @@ import kotlin.math.roundToInt
 
 /** Fit separate volume/output rows while preserving the native control dimensions. */
 internal object TabletComponentGeometry {
-    const val CONTROLS_HEIGHT_PERCENT = .32f
+    const val CONTROLS_HEIGHT_PERCENT = .25f
     data class Slot(val left: Int, val top: Int, val width: Int, val height: Int)
     fun volumeAboveOutput(left: Int, right: Int, outputTop: Int, contentBottom: Int,
         blockers: List<IntRange>, density: Float): Slot? {

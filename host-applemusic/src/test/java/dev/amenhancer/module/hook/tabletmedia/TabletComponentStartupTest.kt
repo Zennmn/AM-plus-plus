@@ -107,7 +107,7 @@ class TabletComponentStartupTest {
         val sizes = texts.map { it.textSize }; val params = (nativeImages + texts).map { it.layoutParams }
         try {
             assertTrue(components.prepare(wrapper))
-            assertEquals(.32f, percent.matchConstraintPercentHeight, 0f)
+            assertEquals(.25f, percent.matchConstraintPercentHeight, 0f)
             assertFalse(components.prepare(wrapper))
             (nativeImages + texts).forEachIndexed { i, view ->
                 assertSame(params[i], view.layoutParams); assertEquals(66, view.layoutParams.height)

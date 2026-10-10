@@ -41,7 +41,7 @@ class TabletSongLayoutTest {
 
     @Test fun usesObfuscatedFieldsWithoutDroppingNativeConstraints() {
         assertNotNull(ConstraintLayoutPane.configureTabletSongLayout(host))
-        assertEquals(.32f, params[0].S, 0f)
+        assertEquals(.25f, params[0].S, 0f)
         assertEquals(16, params[1].a)
         views.forEachIndexed { index, view ->
             assertSame(params[index], view.layoutParams)
