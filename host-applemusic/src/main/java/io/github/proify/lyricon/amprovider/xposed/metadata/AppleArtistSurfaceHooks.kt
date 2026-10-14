@@ -518,14 +518,15 @@ internal class AppleArtistSurfaceHooks(
             kind = InAppLibraryEntityKind.ARTIST,
             attributes = attributes,
         )
-        val songIds = registerComposeProfileTopSongs(owner, entity, session, installation)
-        var aliasApplied = false
+        val shelf = registerComposeProfileShelfEntities(owner, entity, session, installation)
+        val songIds = shelf.mediaIds
+        var aliasApplied = shelf.aliasApplied
         host.effectiveAlias(mediaId)?.let { alias ->
             aliasApplied = librarySurfaceHooks.applyAliasToEntity(
                 entity = entity,
                 kind = InAppLibraryEntityKind.ARTIST,
                 alias = alias,
-            )
+            ) || aliasApplied
         }
         val pageWork = {
             if (sessions.isCurrent(session)) {
@@ -554,7 +555,7 @@ internal class AppleArtistSurfaceHooks(
                 "Apple Music 元数据链路: seq=${host.nextMetadataTraceSequence()}, " +
                     "event=artist_compose_profile_state, contentId=$mediaId, " +
                     "owner=${owner.javaClass.name}@${System.identityHashCode(owner)}, " +
-                    "topSongs=${songIds.size}, aliasApplied=$aliasApplied"
+                    "shelfItems=${songIds.size}, aliasApplied=$aliasApplied"
             )
         }
         if (!aliasApplied) return null
@@ -575,8 +576,10 @@ internal class AppleArtistSurfaceHooks(
                 alias = alias,
             )
         }
-        val rebuilt = members.rebuildState(owner, state, entity)
-        if (rebuilt == state || !sessions.isCurrent(session)) return
+        // Song/album aliases may have resolved since the shelf entities were registered.
+        applyCachedShelfAliases(members, entity)
+        val rebuilt = members.rebuildState(owner, state, entity, bumpRevision = true)
+        if (!sessions.isCurrent(session)) return
         // The re-entrant setUiState hook only records the state it publishes.
         val previous = composeProfileRepublishing.get()
         composeProfileRepublishing.set(session)
@@ -594,38 +597,70 @@ internal class AppleArtistSurfaceHooks(
         }
     }
 
-    private fun registerComposeProfileTopSongs(owner: Any, profileEntity: Any,
-        session: ArtistComposeProfileSession, installation: ComposeProfileInstallation): List<String> {
+    private class ComposeShelfRegistration(val mediaIds: List<String>, val aliasApplied: Boolean)
+
+    /**
+     * Registers every shelf entity (top songs, latest release, albums, ...) with the existing
+     * entity/alias pipeline and requests their original-region attributes on first display.
+     * Cached song/album aliases are applied before the first Success is published.
+     */
+    private fun registerComposeProfileShelfEntities(owner: Any, profileEntity: Any,
+        session: ArtistComposeProfileSession, installation: ComposeProfileInstallation): ComposeShelfRegistration {
         val members = installation.members
-        val songEntities = host.mediaApiEntityRelationshipEntities(profileEntity, members.topSongsView)
+        val topSongs = host.mediaApiEntityRelationshipEntities(profileEntity, members.topSongsView)
             .ifEmpty { members.topSongEntities(profileEntity) }
-        val songIds = songEntities.mapNotNull { songEntity ->
-            val attributes = host.mediaApiEntityAttributes(songEntity) ?: return@mapNotNull null
-            val mediaId = host.mediaApiEntityCatalogId(songEntity, attributes)
+            .map { members.topSongsView to it }
+        val candidates = (topSongs + members.shelfEntities(profileEntity))
+            .distinctBy { System.identityHashCode(it.second) }
+        var aliasApplied = false
+        val mediaIds = candidates.mapNotNull { (view, shelfEntity) ->
+            val kind = if (view == members.topSongsView) {
+                InAppLibraryEntityKind.SONG
+            } else {
+                composeShelfEntityKind(members.entityTypeOf(shelfEntity))
+            } ?: return@mapNotNull null
+            val attributes = host.mediaApiEntityAttributes(shelfEntity) ?: return@mapNotNull null
+            val mediaId = host.mediaApiEntityCatalogId(shelfEntity, attributes)
                 ?: return@mapNotNull null
             host.registerLibraryEntity(
                 mediaId = mediaId,
-                entity = songEntity,
-                kind = InAppLibraryEntityKind.SONG,
+                entity = shelfEntity,
+                kind = kind,
                 knownAttributes = attributes,
             )
             // Associate before enrich so a missing song artist still gets the profile candidate.
-            associateTopSongWithProfileArtist(owner, mediaId)
+            if (kind == InAppLibraryEntityKind.SONG) associateTopSongWithProfileArtist(owner, mediaId)
             host.enrichLibraryEntity(
                 mediaId = mediaId,
-                entity = songEntity,
-                kind = InAppLibraryEntityKind.SONG,
+                entity = shelfEntity,
+                kind = kind,
                 attributes = attributes,
             )
-            // Song aliases rewrite artistName on the shared entity; republish the shelves.
+            host.effectiveAlias(mediaId)?.let { alias ->
+                if (librarySurfaceHooks.applyAliasToEntity(shelfEntity, kind, alias)) aliasApplied = true
+            }
+            // Shelf aliases rewrite name/album/artist on the shared entity; republish the shelves.
             installation.sessions.register(session, mediaId)
             mediaId
         }.distinct()
-        if (songIds.isNotEmpty()) {
-            host.markMetadataVisible(songIds)
-            host.enrichLibraryEntitiesForResolution(songIds)
+        if (mediaIds.isNotEmpty()) {
+            host.markMetadataVisible(mediaIds)
+            host.enrichLibraryEntitiesForResolution(mediaIds)
         }
-        return songIds
+        return ComposeShelfRegistration(mediaIds, aliasApplied)
+    }
+
+    private fun applyCachedShelfAliases(members: ArtistComposeProfileContract, profileEntity: Any) {
+        members.shelfEntities(profileEntity).forEach { (view, shelfEntity) ->
+            val kind = if (view == members.topSongsView) {
+                InAppLibraryEntityKind.SONG
+            } else {
+                composeShelfEntityKind(members.entityTypeOf(shelfEntity))
+            } ?: return@forEach
+            val attributes = host.mediaApiEntityAttributes(shelfEntity) ?: return@forEach
+            val mediaId = host.mediaApiEntityCatalogId(shelfEntity, attributes) ?: return@forEach
+            host.effectiveAlias(mediaId)?.let { librarySurfaceHooks.applyAliasToEntity(shelfEntity, kind, it) }
+        }
     }
 
     /**

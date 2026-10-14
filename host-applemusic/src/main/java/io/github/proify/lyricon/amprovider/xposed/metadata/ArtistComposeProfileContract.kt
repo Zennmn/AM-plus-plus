@@ -90,15 +90,38 @@ internal class ArtistComposeProfileContract private constructor(
         }
     }
 
-    /** Contract v1 preserves native identity/revision and rebuilds immutable presentation data. */
-    fun rebuildState(owner: Any, state: Any, value: Any): Any = constructor.newInstance(
-        id.get(state),
-        entityTitle.invoke(value) ?: title.get(state),
-        headerData.invoke(owner, value) ?: header.get(state),
-        shelves.invoke(owner, value) ?: shelfData.get(state),
-        value,
-        revision.getLong(state),
-    )
+    /**
+     * Every entity rendered by the native shelves (top songs, latest release, albums, ...).
+     * extractShelves reads the same views map, so these are the objects the shelf items show.
+     */
+    fun shelfEntities(value: Any): List<Pair<String, Any>> {
+        val views = entityViews.invoke(value) as? Map<*, *> ?: return emptyList()
+        return views.entries.flatMap { (key, view) ->
+            if (key !is String || view == null || !viewEntities.declaringClass.isInstance(view)) {
+                return@flatMap emptyList()
+            }
+            val values = viewEntities.invoke(view) as? Array<*> ?: return@flatMap emptyList()
+            values.filterNotNull().filter(mediaEntityClass::isInstance).map { key to it }
+        }
+    }
+
+    fun entityTypeOf(value: Any): String? =
+        if (mediaEntityClass.isInstance(value)) entityType.invoke(value) as? String else null
+
+    /**
+     * Contract v1 preserves native identity and rebuilds immutable presentation data.
+     * Shelf entities are mutated in place, so a republish must change the revision: Success is
+     * a data class and the host StateFlow drops equal values, which hid shelf title rewrites.
+     */
+    fun rebuildState(owner: Any, state: Any, value: Any, bumpRevision: Boolean = false): Any =
+        constructor.newInstance(
+            id.get(state),
+            entityTitle.invoke(value) ?: title.get(state),
+            headerData.invoke(owner, value) ?: header.get(state),
+            shelves.invoke(owner, value) ?: shelfData.get(state),
+            value,
+            composeProfileRevision(revision.getLong(state), bumpRevision),
+        )
 
     companion object {
         const val SECTION = "artistComposeProfile"
@@ -135,4 +158,15 @@ internal class ArtistComposeProfileContract private constructor(
             return ArtistComposeProfileContract(names, FragmentProfileMembers(loader, names, SECTION, REQUIRED), classes)
         }
     }
+}
+
+/** Next Success revision; a republish must differ from the state it replaces. */
+internal fun composeProfileRevision(current: Long, bump: Boolean): Long =
+    if (bump) current + 1 else current
+
+/** Maps a shelf MediaEntity type to the alias kind used by the existing entity pipeline. */
+internal fun composeShelfEntityKind(type: String?): InAppLibraryEntityKind? = when (type) {
+    "songs", "library-songs" -> InAppLibraryEntityKind.SONG
+    "albums", "library-albums" -> InAppLibraryEntityKind.ALBUM
+    else -> null
 }
