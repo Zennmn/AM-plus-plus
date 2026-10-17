@@ -11,6 +11,9 @@ internal class PhoneLiquidGlassFeature : FeatureHook {
         if (!context.config.settings().phoneLiquidGlassEnabled) return FeatureInstallResult.disabled()
         if (Build.VERSION.SDK_INT < 33) return FeatureInstallResult.unsupported("完整玻璃折射需要 Android 13+")
         val build = context.target.build
+        GlassDiagLog.i("phone glass feature install: ${build.versionName}/${build.versionCode}, " +
+            "glass=${dev.amenhancer.host.applemusic.AppleMusicHostProfiles.supportsGlass(build.versionCode, build.versionName)}, " +
+            "collapse=${dev.amenhancer.host.applemusic.AppleMusicHostProfiles.supportsGlassScrollCollapse(build.versionCode, build.versionName)}")
         if (!dev.amenhancer.host.applemusic.AppleMusicHostProfiles.supportsGlass(build.versionCode, build.versionName)) {
             return FeatureInstallResult.unsupported("当前宿主 profile 未提供已验收的玻璃能力")
         }

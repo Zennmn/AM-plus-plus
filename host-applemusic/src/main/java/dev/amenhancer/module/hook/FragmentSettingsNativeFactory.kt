@@ -144,7 +144,10 @@ internal class FragmentSettingsRuntime(
                 require(Activity::class.java.isAssignableFrom(returnType))
             }
             val view = inherited(fragment, "getView").apply { require(View::class.java.isAssignableFrom(returnType)) }
-            val compose = fragment.getDeclaredMethod(names.composeMethod, loader.loadClass(names.composerClass)).apply {
+            val composer = loader.loadClass(names.composerClass)
+            // 1606-1609 expose compose(Composer); 1611 renamed it PageContent(Composer, int $changed).
+            val compose = runCatching { fragment.getDeclaredMethod(names.composeMethod, composer) }
+                .getOrElse { fragment.getDeclaredMethod(names.composeMethod, composer, Integer.TYPE) }.apply {
                 require(!Modifier.isStatic(modifiers) && returnType == Void.TYPE)
                 isAccessible = true
             }

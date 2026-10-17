@@ -30,6 +30,7 @@ internal object FragmentGlassRuntime {
         val activity = activity(view.context) ?: return
         val build = targetBuild(activity)
         if (!FragmentChromeFactory.supports(build) || installation != null || failedInstall) return
+        GlassDiagLog.i("fragment glass discover: ${build.packageName} ${build.versionName}/${build.versionCode}, sdk=${Build.VERSION.SDK_INT}, activity=${activity.javaClass.name}")
         try {
             installation = FragmentChromeFactory.install(activity.classLoader, build, object : FragmentPlayerSurfaceObserver {
                 override fun onPreparing(root: ViewGroup) {
@@ -45,10 +46,12 @@ internal object FragmentGlassRuntime {
                         val pendingDraw = firstDraws[identity]
                         val ready = {
                             if (firstDraws[identity] === pendingDraw) firstDraws.remove(identity)?.close()
+                            GlassDiagLog.i("fragment glass first frame ready")
                             config.reportHealth(FeatureHealth(ModuleConstants.FEATURE_PHONE_LIQUID_GLASS,
                                 FeatureState.ACTIVE, "Fragment 玻璃已渲染：原生布局、导航透镜及完整迷你播放器", build.displayName))
                         }
                         val failure: (Throwable) -> Unit = { error -> onFailure(identity, error) }
+                        GlassDiagLog.i("fragment glass session created (${if (surface.tabletChrome != null) "tablet" else "phone"})")
                         sessions[identity] = if (surface.tabletChrome != null)
                             FragmentTabletGlassSession(surface, config, ready, failure)
                         else FragmentPhoneGlassSession(surface, config, ready, failure)
@@ -70,11 +73,12 @@ internal object FragmentGlassRuntime {
                         firstDraws.values.forEach { it.close() }; firstDraws.clear()
                         sessions.values.forEach { it.close() }; sessions.clear()
                     }
-                    ModernXposedRuntime.log("Fragment glass restored native chrome", error)
+                    GlassDiagLog.e("Fragment glass restored native chrome", error)
                     config.reportHealth(FeatureHealth(ModuleConstants.FEATURE_PHONE_LIQUID_GLASS,
                         FeatureState.FAILED, "Fragment 玻璃失败，已恢复原生界面：${error.javaClass.simpleName}", build.displayName))
                 }
             })
+            GlassDiagLog.i("fragment glass hooks installed")
             if (!registered) {
                 registered = true
                 activity.application.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
@@ -95,7 +99,7 @@ internal object FragmentGlassRuntime {
             }
         } catch (error: Throwable) {
             failedInstall = true
-            ModernXposedRuntime.log("Fragment glass installation failed", error)
+            GlassDiagLog.e("Fragment glass installation failed; glass hooks NOT active, host left native", error)
             config.reportHealth(FeatureHealth(ModuleConstants.FEATURE_PHONE_LIQUID_GLASS, FeatureState.FAILED,
                 "Fragment 玻璃安装失败：${error.javaClass.simpleName}: ${error.message}", build.displayName))
         }

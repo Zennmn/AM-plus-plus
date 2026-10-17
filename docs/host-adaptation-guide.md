@@ -374,6 +374,7 @@ Android 12 起在歌词视图创建前观察 SDK `View` 构造和 `setRenderEffe
 |---|---|---|
 | `7.0.0-beta / 1606` | [7.0.0-beta-1606.json](../host-applemusic/src/main/resources/host-profiles/7.0.0-beta-1606.json) | `contractVersion = 1` |
 | `7.0.0-beta / 1609` | [7.0.0-beta-1609.json](../host-applemusic/src/main/resources/host-profiles/7.0.0-beta-1609.json) | `contractVersion = 1` |
+| `7.0.0-beta / 1611` | [7.0.0-beta-1611.json](../host-applemusic/src/main/resources/host-profiles/7.0.0-beta-1611.json) | `contractVersion = 1` |
 
 缺少本契约的已登记版本保留原有辉光，安装信息明确报告末词补偿不支持。已声明契约但成员解析或注册失败时，CJK 能力报告降级，已安装的辉光继续运行。未知版本不借用这两个档案。
 
@@ -414,7 +415,7 @@ Android 12 起在歌词视图创建前观察 SDK `View` 构造和 `setRenderEffe
 
 它是独立能力：使用自己的能力集合、契约区域、注册作用域与安装状态，不读取 `cjkKaraokeAnimationEnabled`，不依赖 `cjk.terminalGradient` 的安装结果。两者会接入同一个原生 `d0`，但契约和作用域独立：单行尾词保留 7.2 补偿；跨行接管成功后由本节更新各行遮罩及片段羽化，原生单行更新被抑制，避免叠加写入。能力键为 `ModuleConstants.FEATURE_LYRIC_WRAP_SWEEP`（`lyric_wrap_sweep`），由 `LyricWrapSweepFeature` 通过能力接口安装，没有独立设置项。
 
-模块启用后，仅当当前精确 profile 在顶层声明 `lyricWrapSweep` 且 `contractVersion = 1` 时默认安装，无需手动开启；未声明的已登记版本明确报告不支持并保留原生渲染。当前声明本契约的版本为 `7.0.0-beta / 1609`。
+模块启用后，仅当当前精确 profile 在顶层声明 `lyricWrapSweep` 且 `contractVersion = 1` 时默认安装，无需手动开启；未声明的已登记版本明确报告不支持并保留原生渲染。当前声明本契约的版本为 `7.0.0-beta / 1609` 与 `7.0.0-beta / 1611`。
 
 #### 7.3.1 代码与安装链
 
@@ -482,6 +483,7 @@ Android 12 起在歌词视图创建前观察 SDK `View` 构造和 `setRenderEffe
 | 宿主 | profile | 契约 |
 |---|---|---|
 | `7.0.0-beta / 1609` | [7.0.0-beta-1609.json](../host-applemusic/src/main/resources/host-profiles/7.0.0-beta-1609.json) | `contractVersion = 1` |
+| `7.0.0-beta / 1611` | [7.0.0-beta-1611.json](../host-applemusic/src/main/resources/host-profiles/7.0.0-beta-1611.json) | `contractVersion = 1` |
 
 缺少本契约的已登记版本报告不支持并保留原生渲染；已声明契约但成员解析或注册失败时报告降级，同样保留原生行为。未知版本不借用 1609 档案。
 

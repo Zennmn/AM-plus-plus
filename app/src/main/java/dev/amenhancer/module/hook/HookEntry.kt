@@ -153,6 +153,8 @@ class HookEntry : XposedModule() {
                         val config = embeddedConfig ?: return
                         if (!initializationStarted.compareAndSet(false, true)) return
                         val session = embeddedSession ?: return
+                        GlassDiagLog.bindFile(application.filesDir)
+                        GlassDiagLog.i("application ready; ${application.packageName} sdk=${android.os.Build.VERSION.SDK_INT}")
                         val currentSong = CurrentSongIdentityCache()
                         runCatching {
                             FeatureInstallation.installEmbedded(

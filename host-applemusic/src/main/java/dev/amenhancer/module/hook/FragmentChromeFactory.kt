@@ -24,7 +24,15 @@ object FragmentChromeFactory {
     fun install(loader: ClassLoader, build: TargetBuild, observer: FragmentPlayerSurfaceObserver): HostSubscription {
         val profile = checkNotNull(AppleMusicHostProfiles.find(build.packageName, build.versionName, build.versionCode))
         check(profile.family == "fragment-content") { "Fragment chrome cannot own ${profile.family}" }
-        val contract = FragmentChromeContract(loader, profile.document.getJSONObject("fragmentChrome"))
+        GlassDiagLog.i("resolving fragmentChrome contract for ${build.packageName} ${build.versionName}/${build.versionCode} (profile ${profile.id})")
+        val contract = try {
+            FragmentChromeContract(loader, profile.document.getJSONObject("fragmentChrome"))
+        } catch (error: Throwable) {
+            // The message lists every unresolved role/descriptor; glass stays off and the host stays native.
+            GlassDiagLog.e("fragmentChrome contract did NOT resolve; glass disabled, native chrome kept", error)
+            throw error
+        }
+        GlassDiagLog.i("fragmentChrome contract resolved; registering hooks")
         val scope = HookRegistrationScope()
         val bindings = FragmentViewSessions<Any, ViewGroup, FragmentSurfaceBinding> { binding ->
             observer.onDestroyed(binding.viewSessionIdentity)
@@ -46,9 +54,17 @@ object FragmentChromeFactory {
         }
         fun fail(owner: Any?, error: Throwable, expectedRoot: ViewGroup? = null) {
             if (expectedRoot != null && (owner == null || !bindings.current(owner, expectedRoot))) return
+            GlassDiagLog.e("glass binding failed (owner=${owner?.javaClass?.name}); restoring native chrome", error)
             val identity = owner?.let(bindings::root)
             if (owner != null) destroy(owner)
             observer.onFailure(identity, error)
+        }
+        // Hot-path hooks run for every View, popup and bottom sheet in the host. Any failure here
+        // restores native chrome for all sessions instead of letting an exception reach the host.
+        fun <T> guarded(site: String, block: () -> T?): T? = try { block() } catch (error: Throwable) {
+            GlassDiagLog.e("glass hook '$site' threw; restoring native chrome (fail-open)", error)
+            runCatching { observer.onFailure(null, error) }.onFailure { GlassDiagLog.e("onFailure handler threw at '$site'", it) }
+            null
         }
         fun bind(owner: Any, root: ViewGroup) {
             if (!scope.isActive || !root.isAttachedToWindow) return
@@ -116,13 +132,15 @@ object FragmentChromeFactory {
             })
             hook(contract.renderTab, object : ModernMethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    val owner = param.thisObject ?: return
-                    val model = param.args[0] ?: return
-                    val action = param.args[2] ?: return
+                    guarded("renderTab") {
+                    val owner = param.thisObject ?: return@guarded null
+                    val model = param.args[0] ?: return@guarded null
+                    val action = param.args[2] ?: return@guarded null
                     val actions = callbacks.getOrPut(owner) { IdentityHashMap() }
                     val kind = contract.modelKind.get(model)
                     actions.keys.removeAll { it !== model && contract.modelKind.get(it) == kind }
                     actions[model] = action
+                    null }
                 }
             })
             hook(contract.slide, object : ModernMethodHook() {
@@ -152,7 +170,10 @@ object FragmentChromeFactory {
             hook(ViewGroup::class.java.getDeclaredMethod("dispatchTouchEvent", MotionEvent::class.java),
                 object : ModernMethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
-                        val view = param.thisObject as? View ?: return
+                        guarded("ViewGroup.dispatchTouchEvent") { dispatch(param) }
+                    }
+                    private fun dispatch(param: MethodHookParam): Unit? {
+                        val view = param.thisObject as? View ?: return null
                         val event = param.args[0] as MotionEvent
                         // Root dispatch observes one event before native child controls consume it.
                         bindings.values.forEach { binding ->
@@ -160,7 +181,7 @@ object FragmentChromeFactory {
                                 // Skip only the hidden native navigation subtree. Returning false
                                 // leaves the parent free to route empty glass space to native input.
                                 param.result = false
-                                return
+                                return null
                             }
                             if (binding.tabletChrome == null && binding.isMiniTouchPanel(view)) {
                                 // The current phone session observes presses and returns null,
@@ -182,14 +203,17 @@ object FragmentChromeFactory {
                                 if (claimed == true) param.result = true
                             }
                         }
+                        return null
                     }
                 })
             hook(View::class.java.getDeclaredMethod("setAlpha", java.lang.Float.TYPE), object : ModernMethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    val view = param.thisObject as? View ?: return
+                    guarded("View.setAlpha") {
+                    val view = param.thisObject as? View ?: return@guarded null
                     val original = param.args[0] as Float
                     bindings.values.firstNotNullOfOrNull { it.nativeAlphaWrite(view, original) }
                         ?.let { param.args[0] = it }
+                    null }
                 }
             })
             hook(contract.activityTouch, object : ModernMethodHook() {
@@ -203,23 +227,29 @@ object FragmentChromeFactory {
             })
             hook(contract.blurDraw, object : ModernMethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    val view = param.thisObject as? View ?: return
+                    guarded("BlurView.draw") {
+                    val view = param.thisObject as? View ?: return@guarded null
                     if (bindings.values.any { it.replacesBlur(view) }) param.result = null
+                    null }
                 }
             })
             hook(View::class.java.getDeclaredMethod("setPadding", java.lang.Integer.TYPE, java.lang.Integer.TYPE,
                 java.lang.Integer.TYPE, java.lang.Integer.TYPE), object : ModernMethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    val view = param.thisObject as? View ?: return
+                    guarded("View.setPadding") {
+                    val view = param.thisObject as? View ?: return@guarded null
                     bindings.values.firstNotNullOfOrNull { it.phoneChrome?.padding(view) }?.let { param.args[3] = it }
+                    null }
                 }
             })
             hook(contract.tabletMiniMargins, object : ModernMethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
+                    guarded("miniMargins") {
                     val view = param.args[0] as View
                     val bottom = Math.round(param.args[2] as Float)
                     bindings.values.firstNotNullOfOrNull { it.tabletChrome?.miniBottomMargin(view, bottom) }
                         ?.let { param.args[2] = it.toFloat() }
+                    null }
                 }
             })
             hook(contract.settleSheet, object : ModernMethodHook() {
@@ -234,14 +264,17 @@ object FragmentChromeFactory {
             })
             hook(contract.writePeek, object : ModernMethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    val owner = param.thisObject ?: return
+                    guarded("writePeek") {
+                    val owner = param.thisObject ?: return@guarded null
                     bindings.values.firstNotNullOfOrNull {
                         it.phoneChrome?.peek(owner, param.args[0] as Int)
                             ?: it.tabletChrome?.peek(owner, param.args[0] as Int)
                     }
                         ?.let { param.args[0] = it }
+                    null }
                 }
             })
+            GlassDiagLog.i("fragmentChrome hooks registered (collapse hooks included: settleSheet/refreshCollapsedOffset resolved)")
             scope.onClose {
                 bindings.owners.toList().forEach(::destroy)
                 watched.clear(); callbacks.clear(); playerProgress.clear()
