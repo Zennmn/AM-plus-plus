@@ -217,7 +217,8 @@
 [维护规则](host-adaptation-guide.md#chrome-glass) · [人工场景](feature-preservation.md#chrome-glass)
 
 - [ ] 精确玻璃/API/形态资格，导航模型/getter/callback与资源已核对。
-- [ ] 手机/平板导航、抽屉、mini与采样区域按真实树接入，材质就绪才接管。
+- [ ] 手机/平板导航、抽屉、mini与采样区域按真实树接入；菜单与布局就绪分别有据，平板顶栏的单抽屉按钮占位保持原生，材质展开、锚点/玻璃承载均无待布局且宽高一致、Compose内容度量有效后才接管。
+- [ ] 窗口/配置变化及导航暂时透明时仍跟随锚点；几何同步后的同一就绪结果控制原生显隐、玻璃透明度与背景采样启停，布局未稳定时恢复原生且无双导航重叠。
 - [ ] sheet状态/peek/settle/坐标刷新与原生动画终点、基线恢复有证据。
 - [ ] 若声明 `collapsedPeekMode=offset`，已证明当前 setter 的完整副作用；只在当前owner、固定peek、稳定收起且无待布局时偏移，其他状态/关闭恢复沿原生 setter。
 - [ ] 若声明 `contentBackdropNode`，完整字段与原生录制更新时机有据；唯一子树、坐标/尺寸/显隐及就绪门禁、View回退和宿主节点所有权正确。

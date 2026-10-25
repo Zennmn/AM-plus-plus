@@ -2,9 +2,12 @@ package dev.amenhancer.module.hook
 
 /** Reference595581b layout/visibility contract. */
 object FragmentTabletGlassPolicy {
-    /** The initial 1px host and an old Compose layout must never hide native navigation. */
+    /**
+     * A complete menu can precede the native material expanding beyond its drawer-only square.
+     * Keep native navigation visible until the expanded material and glass content are laid out.
+     */
     fun navigationLayoutReady(width: Int, height: Int, contentWidth: Int, contentHeight: Int): Boolean =
-        width > 1 && height > 1 && contentWidth == width && contentHeight in 2..height
+        height > 1 && width > height && contentWidth == width && contentHeight in 2..height
 
     /** The overlay shares the root's alpha; only the native layers below that root are multiplied. */
     fun opacity(shown: Boolean, nativeAlphas: Iterable<Float>): Float {

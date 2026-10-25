@@ -4,6 +4,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class FragmentTabletGlassPolicyTest {
+    @Test fun `drawer-only startup material cannot take ownership even with a complete glass layout`() {
+        // OPD2515, density 420: native top_nav_blur and glass both measured 126 x 126
+        // while the model already contained all five destinations.
+        assertFalse(FragmentTabletGlassPolicy.navigationLayoutReady(126, 126, 126, 126))
+        assertFalse(FragmentTabletGlassPolicy.navigationLayoutReady(125, 126, 125, 126))
+        // Native composition is allowed to finish, then glass follows the expanded material.
+        assertFalse(FragmentTabletGlassPolicy.navigationLayoutReady(1068, 126, 126, 126))
+        assertTrue(FragmentTabletGlassPolicy.navigationLayoutReady(1068, 126, 1068, 126))
+        // A later recreation must wait for the native menu again.
+        assertFalse(FragmentTabletGlassPolicy.navigationLayoutReady(126, 126, 126, 126))
+        assertTrue(FragmentTabletGlassPolicy.navigationLayoutReady(700, 56, 700, 56))
+    }
+
     @Test fun `screen coordinates project to the root without resizing native wide controls`() {
         val bounds = FragmentTabletGlassPolicy.bounds(100, 80, 350, 900, 690, 64)!!
         assertEquals(FragmentTabletGlassPolicy.Bounds(250, 820, 690, 64), bounds)
