@@ -12,7 +12,12 @@ class TtmlNativeParserTest {
 
     @Test fun `opaque payload keeps native identity and checks liveness after release`() {
         val native = requireNotNull(parserWith(SongInfo.SongInfoNative::class.java))
-        val adapter = OpaqueTtmlParser(native)
+        val adapter = OpaqueTtmlParser(
+            native = native,
+            executor = java.util.concurrent.Executor { it.run() },
+            onSubmissionReady = {},
+            logger = {},
+        )
         val payload = requireNotNull(adapter.parse("<tt/>"))
         val pointer = adapter.unwrap(payload) as SongInfo.SongInfoPtr
         assertTrue(adapter.isAlive(payload))

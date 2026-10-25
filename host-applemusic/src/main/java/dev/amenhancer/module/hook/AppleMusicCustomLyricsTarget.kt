@@ -77,7 +77,28 @@ internal class AppleMusicCustomLyricsTarget(
                     nativeResolution.summary,
                 ).joinToString("; "),
         )
-        val parser = OpaqueTtmlParser(nativeParser)
+        val mainHandler = Handler(Looper.getMainLooper())
+        lateinit var resultBridge: LyricsResultSubmissionBridge
+        val preparationExecutor = ThreadPoolExecutor(
+            1,
+            1,
+            0L,
+            TimeUnit.MILLISECONDS,
+            ArrayBlockingQueue(1),
+            { runnable -> Thread(runnable, "ampp-custom-lyrics").apply { isDaemon = true } },
+            ThreadPoolExecutor.AbortPolicy(),
+        )
+        val parser = OpaqueTtmlParser(
+            native = nativeParser,
+            executor = preparationExecutor,
+            onSubmissionReady = { id ->
+                mainHandler.post {
+                    if (registration.isActive) resultBridge.onReplacementPublished(id)
+                }
+            },
+            logger = ModernXposedRuntime::log,
+        )
+        registration.onClose { preparationExecutor.shutdownNow() }
         val timingObservations = TtmlTimingObservationRegistry()
         val fileReader = CustomLyricsFileReader { fileId ->
             config.openFile(fileId)?.let { input ->
@@ -86,8 +107,6 @@ internal class AppleMusicCustomLyricsTarget(
                 }.getOrNull()
             }
         }
-        val mainHandler = Handler(Looper.getMainLooper())
-        lateinit var resultBridge: LyricsResultSubmissionBridge
         var refreshSession: AutoLyricsRefreshSession? = null
         var llmSession: LlmLyricsReplacementSession? = null
         val configuredManualIds = runCatching {
@@ -117,15 +136,7 @@ internal class AppleMusicCustomLyricsTarget(
                     }
                 }
             },
-            executor = ThreadPoolExecutor(
-                1,
-                1,
-                0L,
-                TimeUnit.MILLISECONDS,
-                ArrayBlockingQueue(1),
-                { runnable -> Thread(runnable, "ampp-custom-lyrics").apply { isDaemon = true } },
-                ThreadPoolExecutor.AbortPolicy(),
-            ),
+            executor = preparationExecutor,
             logger = ModernXposedRuntime::log,
         )
         refreshSession = autoLyricsRuntime?.let { runtime ->
@@ -217,13 +228,13 @@ internal class AppleMusicCustomLyricsTarget(
             }
         }
         // All sources share the host result channel; no Fragment re-entry ledger.
-        val selectReplacement: (Long, Any?) -> Any? = { id, original ->
+        val selectReplacement: (Long, Long, Any?) -> Any? = { id, nativeId, original ->
             val manual = session.replacementFor(id)
             val metadata = timingObservations.metadataOf(original)
             val eligible = shouldTryAutoLyrics(original, metadata)
             val automatic = if (manual == null) {
                 if (eligible) autoSession?.replacementFor(id)
-                else autoSession?.takeoverReplacementFor(id, parser.wrap(original), metadata)
+                else autoSession?.takeoverReplacementFor(id, parser.wrap(original, id), metadata)
             } else null
             if (manual == null && automatic != null) autoSession?.markTakeoverApplied(id)
             val llmEligible = eligible && metadata?.hasTranslation != true &&
@@ -242,15 +253,18 @@ internal class AppleMusicCustomLyricsTarget(
                 llmSession?.onHigherPriorityResult(id)
                 null
             }
-            parser.unwrap(manual ?: automatic ?: translated)
+            parser.forSubmission(manual ?: automatic ?: translated, id, nativeId)
         }
         resultBridge = LyricsResultSubmissionBridge.create(
             symbols = symbols,
             registration = registration,
             currentSong = currentSong,
-            fragmentSongId = seam::currentItemAdamIdOf,
+            fragmentSongId = { seam.currentItemCanonicalIdOf(it, currentSong.current()) },
+            nativeFragmentSongId = seam::currentItemAdamIdOf,
+            itemSongId = { seam.canonicalAdamIdOf(it, currentSong.current()) },
             selectReplacement = selectReplacement,
             isAlive = parser::isAlive,
+            isCurrentSubmission = parser::isCurrentSubmission,
             documentOf = parser::documentOf,
             logger = ModernXposedRuntime::log,
         ) ?: return TargetCapabilityInstall.Degraded("Lyric ViewModel result contract unavailable")
@@ -282,11 +296,14 @@ internal class AppleMusicCustomLyricsTarget(
                 }
             })
         }.getOrDefault(false)
-        // Observe installation solely to attach the exact host ViewModel. Selection
-        // and publication happen upstream, before the native observer enters here.
+        // Attach the exact host ViewModel and guard an empty native fallback.
+        // Selection and recovery still publish through the upstream result channel.
         val hooked = hook(installMethod, object : ModernMethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
-                param.thisObject?.let(resultBridge::attach)
+                val fragment = param.thisObject ?: return
+                val emptyInstall = param.args.isNotEmpty() && param.args[0] == null
+                resultBridge.attach(fragment, publish = !emptyInstall)
+                if (emptyInstall && resultBridge.suppressEmptyInstall(fragment)) param.result = null
             }
             override fun afterHookedMethod(param: MethodHookParam) {
                 if (param.throwable == null) param.thisObject?.let { fragment ->
@@ -304,7 +321,7 @@ internal class AppleMusicCustomLyricsTarget(
                     runCatching {
                         val nativeLyricsAvailable = param.result as? Boolean ?: return@runCatching
                         if (nativeLyricsAvailable) return@runCatching
-                        val appleMusicId = seam.detailsOfItem(param.args.getOrNull(0))?.appleMusicId
+                        val appleMusicId = seam.canonicalAdamIdOf(param.args.getOrNull(0), currentSong.current())
                         appleMusicId?.let { id ->
                             session.ensureRequested(id)
                             autoSession?.ensureRequested(id)
