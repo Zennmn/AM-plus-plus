@@ -12,9 +12,9 @@ import org.junit.Test
  * ledger: every source (configured mappings, automatic fallback, cache
  * refresh and LLM translation) submits its replacement through the exact-profile
  * LyricsResultSubmissionBridge, which owns the host result/index contract.
- * Selection happens upstream of publication, and the Fragment install hook
- * observes the owner and acknowledges installation, so no hook path mutates
- * installer arguments or performs IO, native parsing or lyric-state mutation.
+ * Selection and recovery publish upstream, and the Fragment install hook
+ * observes the owner, guards empty fallback and acknowledges installation.
+ * No hook writes installer arguments or performs IO or native parsing.
  */
 class CustomLyricsItemUpdateStructuralRegressionTest {
     private fun projectFile(relativePath: String): String = sequenceOf(
@@ -51,11 +51,11 @@ class CustomLyricsItemUpdateStructuralRegressionTest {
         val installHook = target.substringAfter("val hooked = hook(installMethod")
             .substringBefore("val availabilityResolution")
 
-        assertTrue(installHook.contains("resultBridge::attach"))
+        assertTrue(installHook.contains("resultBridge.attach("))
         assertTrue(installHook.contains("param.thisObject"))
         assertTrue(installHook.contains("resultBridge.onInstalled(fragment, param.args.getOrNull(0))"))
         assertTrue(installHook.contains("param.throwable == null"))
-        assertFalse(installHook.contains("param.args[0] ="))
+        assertFalse(Regex("""param\.args\[0\]\s*=(?!=)""").containsMatchIn(installHook))
         assertFalse(installHook.contains("param.extras"))
         assertFalse(installHook.contains("mLyricsResult"))
         assertFalse(installHook.contains("loadLyrics"))
@@ -65,7 +65,7 @@ class CustomLyricsItemUpdateStructuralRegressionTest {
         assertFalse(installHook.contains("parseTtml"))
         assertFalse(installHook.contains("HttpLyricTransport"))
         assertFalse(target.contains("installMethod.invoke"))
-        assertFalse(target.contains("param.args[0] ="))
+        assertFalse(Regex("""param\.args\[0\]\s*=(?!=)""").containsMatchIn(target))
         assertFalse(target.contains("ampp-installed-lyrics"))
     }
 
@@ -82,8 +82,9 @@ class CustomLyricsItemUpdateStructuralRegressionTest {
         assertTrue(target.contains("mainHandler.post {"))
         assertTrue(target.contains("resultBridge.onReplacementPublished(appleMusicId)"))
         assertEquals(
-            // Configured lyrics, automatic fallback, cache refresh and LLM each publish.
-            4,
+            // Configured lyrics, automatic fallback, cache refresh, LLM and
+            // native-ID submission repair each publish.
+            5,
             Regex("resultBridge\\.onReplacementPublished").findAll(target).count(),
         )
         assertTrue(
@@ -98,12 +99,12 @@ class CustomLyricsItemUpdateStructuralRegressionTest {
             "host-applemusic/src/main/java/dev/amenhancer/module/hook/AppleMusicCustomLyricsTarget.kt",
         )
 
-        assertTrue(target.contains("val selectReplacement: (Long, Any?) -> Any?"))
+        assertTrue(target.contains("val selectReplacement: (Long, Long, Any?) -> Any?"))
         assertTrue(target.contains("selectReplacement = selectReplacement,"))
         assertTrue(target.contains("session.replacementFor(id)"))
         assertTrue(target.contains("autoSession?.takeoverReplacementFor("))
         assertTrue(target.contains("autoSession?.markTakeoverApplied(id)"))
-        assertTrue(target.contains("parser.unwrap(manual ?: automatic ?: translated)"))
+        assertTrue(target.contains("parser.forSubmission(manual ?: automatic ?: translated, id, nativeId)"))
         assertTrue(
             target.indexOf("val selectReplacement:") <
                 target.indexOf("LyricsResultSubmissionBridge.create("),
@@ -128,7 +129,7 @@ class CustomLyricsItemUpdateStructuralRegressionTest {
             "host-applemusic/src/main/java/dev/amenhancer/module/hook/AppleMusicCustomLyricsTarget.kt",
         )
         val parseHook = target.substringAfter("hook(parseMethod, object : ModernMethodHook()")
-            .substringBefore("// Observe installation")
+            .substringBefore("val hooked = hook(installMethod")
         val availabilityHook = target.substringAfter(
             "hook(availabilityMethod, object : ModernMethodHook()",
         )

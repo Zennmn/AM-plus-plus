@@ -20,7 +20,7 @@ class CustomLyricsReadyLateStructuralRegressionTest {
         val installHook = target.substringAfter("val hooked = hook(installMethod")
             .substringBefore("val availabilityResolution")
 
-        assertTrue(installHook.contains("resultBridge::attach"))
+        assertTrue(installHook.contains("resultBridge.attach("))
         assertTrue(installHook.contains("param.thisObject"))
         assertFalse(installHook.contains("shouldRecordReadyLateMiss"))
         assertFalse(installHook.contains("session.isTracking"))

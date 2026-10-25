@@ -5,9 +5,10 @@ import java.util.ArrayDeque
 import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.atomic.AtomicReference
 
-data class TargetCurrentSong(
+data class TargetCurrentSong @JvmOverloads constructor(
     val item: Any,
     val details: CurrentSongDetails,
+    val persistentId: Long? = null,
 )
 
 /** Shared target-process state from Apple's player-level metadata funnel. */
@@ -17,9 +18,10 @@ class CurrentSongIdentityCache {
     private val recentIds = ArrayDeque<Long>()
     private val recentIdsLock = Any()
 
-    fun publish(item: Any?, details: CurrentSongDetails?) {
+    @JvmOverloads
+    fun publish(item: Any?, details: CurrentSongDetails?, persistentId: Long? = null) {
         val published = if (item != null && details != null && details.appleMusicId > 0L) {
-            TargetCurrentSong(item, details)
+            TargetCurrentSong(item, details, persistentId?.takeIf { it != 0L })
         } else {
             null
         }

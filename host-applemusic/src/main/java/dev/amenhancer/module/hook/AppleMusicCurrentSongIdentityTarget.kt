@@ -60,7 +60,7 @@ internal class AppleMusicCurrentSongIdentityTarget(
                 override fun afterHookedMethod(param: MethodHookParam) {
                     runCatching {
                         val item = converterMethod.invoke(null, param.args.getOrNull(0))
-                        cache.publish(item, seam.detailsOfItem(item))
+                        cache.publish(item, seam.detailsOfItem(item), seam.persistentIdOf(item))
                     }.onFailure { error ->
                         ModernXposedRuntime.log("current song identity publish failed: $error")
                     }

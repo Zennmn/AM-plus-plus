@@ -22,6 +22,7 @@ internal class CurrentItemIdentitySeam(
 ) {
     private lateinit var currentItemField: Field
     private lateinit var currentItemGetId: Method
+    private var currentItemGetPersistentId: Method? = null
     private var currentItemGetTitle: Method? = null
     private var currentItemGetArtistName: Method? = null
 
@@ -50,6 +51,11 @@ internal class CurrentItemIdentitySeam(
         }
         currentItemField = currentItemFieldValue.apply { isAccessible = true }
         currentItemGetId = getId
+        currentItemGetPersistentId = runCatching {
+            currentItemFieldValue.type.getMethod("getPersistentId")
+                .takeIf { it.returnType == Long::class.javaPrimitiveType }
+                ?.apply { isAccessible = true }
+        }.getOrNull()
         currentItemGetTitle = resolveStringGetter(currentItemFieldValue.type, "getTitle")
         currentItemGetArtistName = resolveStringGetter(currentItemFieldValue.type, "getArtistName")
         fieldSummary = currentItemResolution.summary
@@ -68,6 +74,25 @@ internal class CurrentItemIdentitySeam(
             parseCurrentItemAdamId(currentItemGetId.invoke(item))
         }.getOrNull()
     }
+
+    /** Config identity survives the host replacing getId with a library ID. */
+    fun canonicalAdamIdOf(item: Any?, published: TargetCurrentSong?): Long? {
+        val id = runCatching {
+            item?.let { parseCurrentItemAdamId(currentItemGetId.invoke(it)) }
+        }.getOrNull() ?: return null
+        if (published == null || id == published.details.appleMusicId) return id
+        val persistentId = persistentIdOf(item) ?: return id
+        return if (persistentId == published.persistentId) published.details.appleMusicId else id
+    }
+
+    fun currentItemCanonicalIdOf(fragment: Any?, published: TargetCurrentSong?): Long? = runCatching {
+        fragment?.let { canonicalAdamIdOf(currentItemField.get(it), published) }
+    }.getOrNull()
+
+    fun persistentIdOf(item: Any?): Long? = runCatching {
+        if (item == null) return@runCatching null
+        (currentItemGetPersistentId?.invoke(item) as? Long)?.takeIf { it != 0L }
+    }.getOrNull()
 
     /** Rebinds the verified lyrics fragment field to an exact player item. */
     fun bindCurrentItemOf(fragment: Any?, item: Any?): Boolean {
