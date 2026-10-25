@@ -49,6 +49,7 @@ internal class LyricsResultSubmissionBridge private constructor(
     @Volatile private var closed = false
     private var nativeObserved = false
     private var nativeOriginal: Any? = null
+    private var deferredNativeResult: Any? = null
     private var selectedPointer: Any? = null
     private var selectedDocument: String? = null
     private var selectedNativeId: Long? = null
@@ -112,9 +113,26 @@ internal class LyricsResultSubmissionBridge private constructor(
                 // metadata cache; disagreement must not relabel its native result.
                 val native = nativePointerOf(incoming)
                 if (!recoverRequestBinding(native)) return@runCatching
+                val stamp = synchronized(lock) { generation }
                 if (native != null && !matchesRequest(native)) {
+                    // A captured request can lead its owner's raw item ID.
+                    // Keep its host Pair without submitting to the old item.
+                    if (currentRequest() && matchesCapturedNativeRequest(native)) {
+                        synchronized(lock) {
+                            if (!closed && generation == stamp) deferredNativeResult = incoming
+                        }
+                        onReplacementPublished(requestIdSnapshot())
+                    }
                     param.result = null
                     return@runCatching
+                }
+                if (native == null && currentDeferredResult() != null) {
+                    param.result = null
+                    onReplacementPublished(requestIdSnapshot())
+                    return@runCatching
+                }
+                if (native != null && matchesCapturedNativeRequest(native)) synchronized(lock) {
+                    if (generation == stamp) deferredNativeResult = null
                 }
                 if (native == null) {
                     hydrateStoredResult(receiver)
@@ -412,6 +430,7 @@ internal class LyricsResultSubmissionBridge private constructor(
         if (closed) return
         if (!runCatching {
                 if (!recoverRequestBinding()) return@runCatching false
+                if (handleDeferredResult()) return@runCatching false
                 containerSnapshot()?.let(::hydrateStoredResult)
                 true
             }.onFailure { report("lyric result recovery failed", it) }.getOrDefault(false)) return
@@ -535,6 +554,41 @@ internal class LyricsResultSubmissionBridge private constructor(
     private fun matchesRequest(pointer: Any): Boolean =
         isAlive(pointer) && pointerId(pointer) == nativeIdForRequest()
 
+    private fun matchesCapturedNativeRequest(pointer: Any): Boolean {
+        if (!isAlive(pointer)) return false
+        val nativeId = pointerId(pointer) ?: return false
+        return synchronized(lock) { !closed && requestCaptured && nativeId == requestNativeId }
+    }
+
+    private fun currentDeferredResult(): Any? {
+        val value = synchronized(lock) { deferredNativeResult } ?: return null
+        val pointer = nativePointerOf(value)
+        if (pointer != null && matchesCapturedNativeRequest(pointer)) return value
+        synchronized(lock) {
+            if (deferredNativeResult === value) deferredNativeResult = null
+        }
+        return null
+    }
+
+    /** A retained result owns this wakeup, whether waiting for its owner or replayed. */
+    private fun handleDeferredResult(): Boolean {
+        val stamp = synchronized(lock) { generation }
+        val value = currentDeferredResult() ?: return false
+        val pointer = nativePointerOf(value) ?: return true
+        val fragment = attachedFragment.get() ?: return true
+        if (fragmentSongId(fragment) != requestIdSnapshot() ||
+            contract.fragmentViewModelField.get(fragment) !== vmSnapshot()) return true
+        if (!currentRequest() || !matchesRequest(pointer)) return true
+        val target = containerSnapshot() ?: return true
+        synchronized(lock) {
+            if (closed || generation != stamp || container !== target || deferredNativeResult !== value) return true
+            deferredNativeResult = null
+        }
+        // Let setValueHook observe the original result and arbitrate it as usual.
+        contract.setValueMethod.invoke(target, value)
+        return true
+    }
+
     /** A result without an ID can fill an empty state, but cannot disprove a usable document. */
     private fun hydrateStoredResult(result: Any) {
         if (!currentRequest()) return
@@ -645,6 +699,7 @@ internal class LyricsResultSubmissionBridge private constructor(
     private fun clearSelectionLocked() {
         nativeOriginal = null
         nativeObserved = false
+        deferredNativeResult = null
         selectedPointer = null
         selectedDocument = null
         selectedNativeId = null
