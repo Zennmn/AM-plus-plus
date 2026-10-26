@@ -705,7 +705,7 @@ private fun EmbeddedSettingsHost.renderEmbeddedCategoryPage(
                     settings.cjkKaraokeAnimationEnabled) {
                     onSettingsChanged(currentSettings().copy(cjkKaraokeAnimationEnabled = it))
                 }
-                setting(ModuleText.LYRIC_EFFECTS_OPTIMIZATION, ModuleText.SHORT_LYRIC_EFFECTS_SUMMARY,
+                setting(ModuleText.LYRIC_EFFECTS_OPTIMIZATION, ModuleText.LYRIC_EFFECTS_OPTIMIZATION_SUMMARY,
                     settings.lyricEffectsOptimizationEnabled) {
                     onSettingsChanged(currentSettings().copy(lyricEffectsOptimizationEnabled = it))
                 }

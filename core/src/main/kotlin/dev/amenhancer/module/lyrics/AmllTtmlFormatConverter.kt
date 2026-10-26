@@ -84,13 +84,19 @@ object AmllTtmlFormatConverter {
     /** How Apple labels a translation meant to be shown under the lyric. */
     private const val TRANSLATION_TYPE = "subtitle"
 
+    /** Apple's translated copy of a line, including its background words. */
+    private const val REPLACEMENT_TYPE = "replacement"
+
     /** Stands in for a line the track has no text for, keeping the entry there. */
     private const val ABSENT_TEXT = " "
 
     private val EMPTY_DEFAULT_NAMESPACE = Regex("""\s+xmlns\s*=\s*(?:""|'')""")
+    private val DEFAULT_NAMESPACE = attributePattern("xmlns")
+    private val TTM_DECLARATION = attributePattern("xmlns:ttm")
     private val ROLE_ATTRIBUTE = attributePattern("ttm:role")
     private val LANGUAGE_ATTRIBUTE = attributePattern("xml:lang")
     private val KEY_ATTRIBUTE = attributePattern("itunes:key")
+    private val TYPE_ATTRIBUTE = attributePattern("type")
     private val FOR_ATTRIBUTE = attributePattern("for")
     private val BEGIN_ATTRIBUTE_VALUE = attributePattern("begin")
     private val END_ATTRIBUTE_VALUE = attributePattern("end")
@@ -131,6 +137,291 @@ object AmllTtmlFormatConverter {
         )
         val result = formatTimeline(normalized)
         return TtmlFormatConversion(result, result != ttml)
+    }
+
+    /**
+     * Copies background words from Apple's simplified replacement track into
+     * the timed words already present in the body. Only the word text changes;
+     * foreground text, tags, attributes, timing and surrounding whitespace stay
+     * byte-for-byte intact. Ambiguous or unsupported structure is left alone.
+     */
+    fun repairSimplifiedReplacementBackgrounds(ttml: String): String {
+        if (!ttml.contains(ROLE_BACKGROUND) || !ttml.contains(REPLACEMENT_TYPE) ||
+            !TtmlInputPolicy.isAcceptable(ttml)
+        ) {
+            return ttml
+        }
+        val root = documentRoot(ttml) ?: return ttml
+        if (attribute(root.attributes, DEFAULT_NAMESPACE) != TTML_NAMESPACE ||
+            attribute(root.attributes, TTM_DECLARATION) != TTML_METADATA_NAMESPACE ||
+            attribute(root.attributes, ITUNES_DECLARATION) != ITUNES_NAMESPACE
+        ) {
+            return ttml
+        }
+
+        val rootChildren = childElements(ttml, root)
+        val head = rootChildren.singleOrNull { isElement(ttml, it.start, "head") } ?: return ttml
+        val body = rootChildren.singleOrNull { isElement(ttml, it.start, "body") } ?: return ttml
+        if (!namespacesAreSupported(head.attributes, TTML_NAMESPACE) ||
+            !namespacesAreSupported(body.attributes, TTML_NAMESPACE)
+        ) {
+            return ttml
+        }
+
+        val headChildren = childElements(ttml, head)
+        val metadata = headChildren.singleOrNull { isElement(ttml, it.start, "metadata") }
+            ?: return ttml
+        if (!namespacesAreSupported(metadata.attributes, TTML_NAMESPACE)) return ttml
+
+        val metadataChildren = childElements(ttml, metadata)
+        val appleMetadata = metadataChildren.singleOrNull {
+            isElement(ttml, it.start, "iTunesMetadata")
+        } ?: return ttml
+        if (attribute(appleMetadata.attributes, DEFAULT_NAMESPACE) != ITUNES_NAMESPACE ||
+            !namespacesAreSupported(appleMetadata.attributes, ITUNES_NAMESPACE)
+        ) {
+            return ttml
+        }
+
+        val appleChildren = childElements(ttml, appleMetadata)
+        val translations = appleChildren.singleOrNull {
+            isElement(ttml, it.start, "translations")
+        } ?: return ttml
+        if (!namespacesAreSupported(translations.attributes, ITUNES_NAMESPACE)) return ttml
+
+        val replacements = childElements(ttml, translations).filter { child ->
+            isElement(ttml, child.start, "translation") &&
+                attribute(child.attributes, TYPE_ATTRIBUTE) == REPLACEMENT_TYPE &&
+                attribute(child.attributes, LANGUAGE_ATTRIBUTE) == TRANSLATION_LANGUAGE
+        }
+        val replacement = replacements.singleOrNull() ?: return ttml
+        if (!namespacesAreSupported(replacement.attributes, ITUNES_NAMESPACE)) return ttml
+
+        val replacementByKey = linkedMapOf<String, Element>()
+        childElements(ttml, replacement).forEach { text ->
+            if (!isElement(ttml, text.start, "text") ||
+                !namespacesAreSupported(text.attributes, ITUNES_NAMESPACE)
+            ) {
+                return ttml
+            }
+            val key = attribute(text.attributes, FOR_ATTRIBUTE)?.takeIf(String::isNotBlank)
+                ?: return ttml
+            if (replacementByKey.put(key, text) != null) return ttml
+        }
+        if (replacementByKey.isEmpty()) return ttml
+
+        val lines = bodyLines(ttml, body) ?: return ttml
+        val linesByKey = linkedMapOf<String, Element>()
+        lines.forEach { line ->
+            val key = attribute(line.attributes, KEY_ATTRIBUTE)?.takeIf(String::isNotBlank)
+            if (key != null && linesByKey.put(key, line) != null) return ttml
+        }
+
+        val edits = mutableListOf<Edit>()
+        linesByKey.forEach { (key, line) ->
+            val replacementText = replacementByKey[key] ?: return@forEach
+            edits += replacementBackgroundEdits(ttml, line, replacementText) ?: return@forEach
+        }
+        return applyEdits(ttml, edits)
+    }
+
+    /** Skips leading XML literals and accepts a canonical document element. */
+    private fun documentRoot(ttml: String): Element? {
+        var index = if (ttml.isNotEmpty() && ttml[0] == '\uFEFF') 1 else 0
+        while (index < ttml.length) {
+            while (index < ttml.length && ttml[index].isWhitespace()) index += 1
+            if (index >= ttml.length) return null
+            if (ttml.startsWith("<?", index) || ttml.startsWith("<!--", index)) {
+                index = literalEnd(ttml, index)
+                continue
+            }
+            if (!ttml.startsWith("<", index) || ttml.startsWith("<!", index) ||
+                ttml.startsWith("</", index)
+            ) {
+                return null
+            }
+            val end = tagEnd(ttml, index)
+            if (end < 0 || elementName(ttml, index, end) != "tt") return null
+            return parseElement(ttml, "tt", index, end)
+        }
+        return null
+    }
+
+    /** Finds keyed lyric lines through the body's canonical div nests. */
+    private fun bodyLines(ttml: String, body: Element): List<Element>? {
+        val lines = mutableListOf<Element>()
+
+        fun collect(parent: Element): Boolean {
+            childElements(ttml, parent).forEach { child ->
+                when {
+                    isElement(ttml, child.start, "div") -> {
+                        if (!namespacesAreSupported(child.attributes, TTML_NAMESPACE) ||
+                            !collect(child)
+                        ) {
+                            return false
+                        }
+                    }
+                    isElement(ttml, child.start, "p") -> {
+                        if (!namespacesAreSupported(child.attributes, TTML_NAMESPACE)) return false
+                        lines += child
+                    }
+                    else -> return false
+                }
+            }
+            return true
+        }
+
+        return if (collect(body)) lines else null
+    }
+
+    /**
+     * A local namespace may be repeated with its canonical value, but changing
+     * the default or Apple/TTML prefixes makes the lexical structure ambiguous.
+     */
+    private fun namespacesAreSupported(attributes: String, vararg defaults: String): Boolean {
+        val defaultNamespace = attribute(attributes, DEFAULT_NAMESPACE)
+        if (defaultNamespace != null && defaults.none { it == defaultNamespace }) return false
+        val ttm = attribute(attributes, TTM_DECLARATION)
+        if (ttm != null && ttm != TTML_METADATA_NAMESPACE) return false
+        val itunes = attribute(attributes, ITUNES_DECLARATION)
+        return itunes == null || itunes == ITUNES_NAMESPACE
+    }
+
+    /** Direct x-bg groups. A renamed or prefixed group is unsupported. */
+    private fun backgroundGroups(
+        ttml: String,
+        parent: Element,
+        vararg defaults: String,
+    ): List<Element>? {
+        val groups = mutableListOf<Element>()
+        childElements(ttml, parent).forEach { child ->
+            if (attribute(child.attributes, ROLE_ATTRIBUTE) != ROLE_BACKGROUND) return@forEach
+            if (!isElement(ttml, child.start, "span") ||
+                !namespacesAreSupported(child.attributes, *defaults)
+            ) {
+                return null
+            }
+            groups += child
+        }
+        return groups
+    }
+
+    /**
+     * Timed leaf spans in one background group. Their begin/end pair must be
+     * readable and unique so a replacement word cannot be attached twice.
+     */
+    private fun timedWords(
+        ttml: String,
+        background: Element,
+        vararg defaults: String,
+    ): List<Element>? {
+        val words = mutableListOf<Element>()
+        val ranges = mutableSetOf<Pair<BigDecimal, BigDecimal>>()
+
+        fun hasTimingBelow(element: Element): Boolean =
+            childElements(ttml, element).any { child ->
+                attribute(child.attributes, BEGIN_ATTRIBUTE_VALUE) != null ||
+                    attribute(child.attributes, END_ATTRIBUTE_VALUE) != null ||
+                    hasTimingBelow(child)
+            }
+
+        fun collect(parent: Element): Boolean {
+            childElements(ttml, parent).forEach { child ->
+                if (!isElement(ttml, child.start, "span") ||
+                    !namespacesAreSupported(child.attributes, *defaults) ||
+                    attribute(child.attributes, ROLE_ATTRIBUTE) != null
+                ) {
+                    return false
+                }
+                val begin = attribute(child.attributes, BEGIN_ATTRIBUTE_VALUE)
+                val end = attribute(child.attributes, END_ATTRIBUTE_VALUE)
+                if ((begin == null) != (end == null)) return false
+                if (begin == null) {
+                    if (!collect(child)) return false
+                } else {
+                    val start = timelineTime(begin) ?: return false
+                    val finish = timelineTime(end) ?: return false
+                    if (finish <= start || hasTimingBelow(child) || !ranges.add(start to finish)) {
+                        return false
+                    }
+                    words += child
+                }
+            }
+            return true
+        }
+
+        if (!collect(background) || words.isEmpty()) return null
+        return words
+    }
+
+    /** Raw text of a word span, or null when it contains unsupported markup. */
+    private fun wordText(ttml: String, word: Element): String? {
+        if (word.selfClosing) return null
+        return content(ttml, word).takeUnless { '<' in it }
+    }
+
+    /**
+     * Copies only the source x-bg words whose begin/end pair exists in the
+     * matching body group. Both groups must have the same complete time map.
+     */
+    private fun replacementBackgroundEdits(
+        ttml: String,
+        line: Element,
+        replacementText: Element,
+    ): List<Edit>? {
+        val targetGroups = backgroundGroups(ttml, line, TTML_NAMESPACE) ?: return null
+        if (targetGroups.isEmpty()) return emptyList()
+        val sourceGroups = backgroundGroups(
+            ttml,
+            replacementText,
+            TTML_NAMESPACE,
+        ) ?: return null
+        if (sourceGroups.size != targetGroups.size) return null
+        // The metadata parent is Apple XML; each source group must explicitly switch to TTML.
+        if (sourceGroups.any { attribute(it.attributes, DEFAULT_NAMESPACE) != TTML_NAMESPACE }) return null
+
+        val edits = mutableListOf<Edit>()
+        targetGroups.zip(sourceGroups).forEach { (targetGroup, sourceGroup) ->
+            listOf(BEGIN_ATTRIBUTE_VALUE, END_ATTRIBUTE_VALUE).forEach { pattern ->
+                val targetTime = attribute(targetGroup.attributes, pattern)
+                val sourceTime = attribute(sourceGroup.attributes, pattern)
+                if (targetTime != null && sourceTime != null) {
+                    val targetValue = timelineTime(targetTime) ?: return null
+                    val sourceValue = timelineTime(sourceTime) ?: return null
+                    if (targetValue.compareTo(sourceValue) != 0) return null
+                }
+            }
+            val targetWords = timedWords(ttml, targetGroup, TTML_NAMESPACE) ?: return null
+            val sourceWords = timedWords(
+                ttml,
+                sourceGroup,
+                TTML_NAMESPACE,
+            ) ?: return null
+            if (sourceWords.size != targetWords.size) return null
+
+            val sourceByTime = sourceWords.associateBy { word ->
+                val start = timelineTime(attribute(word.attributes, BEGIN_ATTRIBUTE_VALUE))
+                    ?: return null
+                val end = timelineTime(attribute(word.attributes, END_ATTRIBUTE_VALUE))
+                    ?: return null
+                start to end
+            }
+            if (sourceByTime.size != sourceWords.size) return null
+
+            targetWords.forEach { target ->
+                val start = timelineTime(attribute(target.attributes, BEGIN_ATTRIBUTE_VALUE))
+                    ?: return null
+                val end = timelineTime(attribute(target.attributes, END_ATTRIBUTE_VALUE))
+                    ?: return null
+                val source = sourceByTime[start to end] ?: return null
+                val replacement = wordText(ttml, source)?.takeIf(String::isNotBlank) ?: return null
+                val current = wordText(ttml, target) ?: return null
+                if (replacement != current) {
+                    edits += Edit(target.contentStart, target.contentEnd, replacement)
+                }
+            }
+        }
+        return edits
     }
 
     /** Sort lines and head entries together, retaining simultaneous voices. */

@@ -22,7 +22,7 @@
 生产准入、能力可用和人工通过分别判断：
 
 1. 精确 `versionName`+`versionCode` 组合已登记且生产入口启用，才允许模块接入。
-2. 功能按当前 profile 的能力位、独立契约、设置、Android API 和设备形态共同判断。`capabilities` 不是全部功能的目录；例如跨行扫光虽由“歌词效果优化”设置门禁，仍依赖自己的顶层契约，LLM 则复用已有歌词通道。
+2. 功能按当前 profile 的能力位、独立契约、设置、Android API 和设备形态共同判断。`capabilities` 不是全部功能的目录；例如简体替换和声修复与跨行扫光虽由“歌词效果优化”设置门禁，仍依赖各自的精确接缝，LLM 则复用已有歌词通道。
 3. 成员解析与 Hook 安装成功只说明该阶段就绪，不能代替页面完成、显示结果或人工验收。`productionEnabled` 与 `runtimeVerified` 各自依据实际证据维护，局部反馈不扩展为整个构建通过。
 
 页面族按实际入口、生命周期和布局识别：`legacy-activity` 与 `fragment-content` 分别使用自己的接入。相邻构建、版本号大小和主版本号均不能代替该判断；新页面族先建立有证据的能力工厂。
@@ -162,9 +162,9 @@ Fragment view 重建、配置变化与 controller 销毁分别关闭会话。状
 | 功能域 | profile / 主要接缝 | 人工场景 |
 |---|---|---|
 | [共用歌词结果提交](#lyrics-result-submission) | `indexed`、`lyricResultSubmission`、原生安装与 item 更新 | [结果提交](feature-preservation.md#lyrics-result-submission) |
-| [歌词来源](#lyrics-sources)、[LLM](#llm-lyrics-fallback) | 原生 TTML 观察、指针/歌曲身份及共用结果通道 | [来源](feature-preservation.md#lyrics-sources)、[LLM](feature-preservation.md#llm-lyrics-fallback) |
+| [歌词来源](#lyrics-sources)、[简体替换和声修复](#simplified-replacement-backgrounds)、[LLM](#llm-lyrics-fallback) | 原生 TTML 观察、共享歌词效果优化门禁的单解析器修复、指针/歌曲身份及共用结果通道 | [来源](feature-preservation.md#lyrics-sources)、[LLM](feature-preservation.md#llm-lyrics-fallback) |
 | [模糊](#lyrics-blur)、[CJK](#cjk-animation)、[字体](#lyrics-typeface) | 各自契约、显示状态、绑定与资源 | [模糊](feature-preservation.md#lyrics-blur)、[CJK](feature-preservation.md#cjk-animation)、[字体](feature-preservation.md#lyrics-typeface) |
-| [歌词效果优化](#lyric-background-highlight)：[跨行扫光](#lyric-wrap-sweep)与活动行高亮 | 共享设置门禁；`lyricWrapSweep` / `lyricBackgroundHighlight` 独立契约、安装状态和验收 | [跨行](feature-preservation.md#lyric-wrap-sweep)、[活动行](feature-preservation.md#lyric-background-highlight) |
+| [歌词效果优化](#lyric-background-highlight)：[简体替换和声修复](#simplified-replacement-backgrounds)、[跨行扫光](#lyric-wrap-sweep)与活动行高亮 | 共享设置门禁；单解析器接缝，以及 `lyricWrapSweep` / `lyricBackgroundHighlight` 独立契约、安装状态和验收 | [跨行](feature-preservation.md#lyric-wrap-sweep)、[活动行](feature-preservation.md#lyric-background-highlight) |
 | [玻璃导航](#chrome-glass)、[收缩](#glass-collapse-rendering) | `chrome` / `fragmentChrome`、独立能力位、滚动与 sheet 端口 | [玻璃](feature-preservation.md#chrome-glass)、[收缩](feature-preservation.md#glass-collapse-rendering) |
 | [启动预热](#startup-page-prewarm) | 独立能力、`startupPagePrewarm` 与形态导航资源 | [预热](feature-preservation.md#startup-page-prewarm) |
 | [平板布局、视频与恢复](#tablet-layout) | 双栏、binding、资源、视频/恢复与布局变体 | [平板](feature-preservation.md#tablet-layout) |
@@ -264,6 +264,31 @@ TTML 文件有界读取、输入合法性、原生指针存活/ID 检查和来�
 AMLL 转换器及 `scripts/amll_to_apple_ttml.py` 的译文/音译和声节点须显式绑定 TTML 默认命名空间和 `ttm` 元数据命名空间。`iTunesMetadata`、轨道及 `text` 属于 Apple 命名空间，内部 `x-bg` 的 `span` 属于 TTML，不能让它继承 Apple 默认命名空间；维护 Kotlin 与 CLI 时同步这项输出约定。
 
 仅原生成员变化时更新精确档案；若原生质量/可用性含义、TTML 时间轴或生命周期变化，再调整对应宿主接缝或业务策略。[来源人工场景](feature-preservation.md#lyrics-sources)负责行为要求。
+
+<a id="simplified-replacement-backgrounds"></a>
+
+#### 5.2.1 简体系统语言下的替换和声修复
+
+**安装与单一解析接缝。** `FeatureInstallation` 始终登记 `LyricsParserFeature`，由现有 `ModuleSettings.lyricEffectsOptimizationEnabled`（配置键 `lyric_effects_optimization_enabled`）控制生效；默认及缺键关闭，更改后按现有设置策略重启宿主。关闭时该 Feature 返回 `DISABLED`，且不调用 `LyricsParserTarget.install()`。开启时经 `LyricsParserTarget.install()` 委派 `AppleMusicCustomLyricsTarget.installParserRepair()`；宿主解析器不可用时只降级本项修复，不影响普通原生显示。
+
+`CustomLyricsFeature` 开启时也可调用同一 `installParserRepair()`，以便自定义替换、自动来源或 LLM 取得原生元数据和修复前 TTML。两个入口复用同一目标实例及同一个解析 Hook；重复调用返回已安装结果，不产生第二 Hook。before 阶段先检查共享设置，再按语言和修复契约处理 `String` 参数；共享设置关闭时直接跳过输入改写。after 阶段的观察者仍接收修复前的原始 TTML，自定义歌词不另装解析 Hook。
+
+**完整签名。** `TtmlSongInfoFromTtml` 必须解析到实例方法 `TTMLParser$TTMLParserNative#songInfoFromTTML(String): SongInfo$SongInfoPtr`：owner 为解析器类，非静态，唯一参数为 `String`，返回 `SongInfo$SongInfoPtr`。模块解析器的 `TtmlParserNative` 与这个既有符号必须指向同一宿主入口。完整签名不可验证或 Hook 安装失败时报告本能力降级并保留原生解析；不得用相似签名或原生内存位移补齐。
+
+**语言与开关门禁。** 修复只在“歌词效果优化”开启且用户所选的系统语言命中时执行，不另增设置；开启后不要求自定义歌词替换已启用，自定义歌词开关也不能替代共享设置或语言门禁。locale 的语言必须为 `zh`：脚本显式标为 `Hans` 时命中；脚本缺省且地区为 `CN` 或 `SG` 时命中。`zh-Hant`、`zh-TW`、`zh-HK`、`zh-MO`、缺省脚本但地区不是 `CN`/`SG` 的 locale，以及非中文 locale 都直接返回原文。原生 `replacement` 轨是否存在、是否会被 Apple 的原生资格路径采用，不能替代这两道门禁，也不能放宽门禁。
+
+**修复契约。** 专项处理入口为 `AmllTtmlFormatConverter.repairSimplifiedReplacementBackgrounds`；它不做通用 XML/TTML 转换，只按下列关系从唯一、明确标注 `type="replacement"` 与 `xml:lang="zh-Hans"` 的替换轨取得背景词文本：
+
+1. 以唯一的正文 `itunes:key` 对应唯一的 `<text for="该 key">`。
+2. 在每条 `text` 内按 `x-bg` 分组顺序对应正文与替换轨；两侧均声明的组起止时间必须数值等价。
+3. 每组的背景词数量相同，所有词必须具备完整、有效且唯一的 `begin`/`end`，以数值等价的起止时间匹配词文本。
+4. 仅替换正文既有 `x-bg` 内对应词 span 的文本内容。正文行与 span 的 begin/end、层次、属性和其他标签，主唱前景文本，以及翻译、音译等其他轨道全部保留。
+
+修复仅接受默认 TTML 根及规范的 `ttm`、`itunes` 绑定；替换轨容器和 `text` 属于 Apple 命名空间，其中每个 `x-bg` 必须显式切回 TTML。其他前缀或重绑定无法可靠解释时保留原文。输入超过既有 TTML 大小/标签数上限、轨道不唯一或 key 重复时整份透传；缺少对应内容、分组/词数/时间不兼容时整行保持原文，该行不部分写入，其他可对应行仍可修复。修复异常不能阻断原生解析。
+
+**原文与观察。** 发生修复时，before 阶段另外保留未经修改的原始 String；after 阶段向 `TtmlTimingObservationRegistry` 和 LLM 输入登记该原文及解析结果身份，不能把修复后的宿主入参当作原生原文。共享设置关闭时不写回任何文本，after 阶段仍可把原样的宿主输入交给观察者，因此自定义歌词开启时原生元数据与 raw-TTML 观察继续工作。`OpaqueTtmlParser.isModuleParse()` 继续排除模块解析的原生来源归属。普通原生歌词与模块生成的文档都经过同一个设置及语言门禁；设置开启时，普通原生歌词不依赖自定义歌词开关即可修复。
+
+人工复核至少覆盖：共享设置关闭时普通原生歌词与自定义歌词输入都不发生改写，且开启自定义歌词时观察仍可用；设置开启后，`zh-Hans`、`zh-CN`、`zh-SG` 下普通原生歌词在自定义歌词关闭时修复成功；`zh-Hant`、`zh-TW` 与非中文 locale 保持原文；模块生成文档走同一门禁；修复后正文时间、标签、主唱前景与其他辅助轨不变；缺 key、重复 key、时间或分组冲突时原歌词仍能正常解析和显示。
 
 <a id="llm-lyrics-fallback"></a>
 
@@ -374,7 +399,7 @@ Native vector/pointer 在 Hook 当次同步解码，只把复制数值送主线�
 
 ### 5.6 跨行歌词扫光
 
-**生效与接缝。** 设置 `ModuleSettings.lyricEffectsOptimizationEnabled`（配置键 `lyric_effects_optimization_enabled`）是跨行扫光与活动行高亮共用的唯一开关，默认及缺键均为关闭，更改后重启宿主生效。关闭时 `LyricWrapSweepFeature` 与 `LyricBackgroundHighlightFeature` 都返回 `DISABLED`，且不调用各自 `target.install`。开启后仍分别按精确 profile 的 `lyricWrapSweep` 与 `lyricBackgroundHighlight` 契约安装和核对，各自报告支持、降级或失败；任一能力未声明或安装失败不阻止另一项。跨行扫光的 `LyricWrapSweepTarget` 使用能力键 `FEATURE_LYRIC_WRAP_SWEEP`，不新增独立设置。CJK 辉光开关不控制这两个 Feature。
+**生效与接缝。** 设置 `ModuleSettings.lyricEffectsOptimizationEnabled`（配置键 `lyric_effects_optimization_enabled`）是简体替换和声修复、跨行扫光与活动行高亮共用的现有开关，默认及缺键均为关闭，更改后重启宿主生效。关闭时 `LyricsParserFeature`、`LyricWrapSweepFeature` 与 `LyricBackgroundHighlightFeature` 都返回 `DISABLED`，且不调用各自 `target.install`；自定义歌词开启时仍可安装同一解析 Hook 供观察，但 before 不执行修复。开启后，解析修复经单解析 Hook 生效，跨行扫光与活动行高亮仍分别按精确 profile 的 `lyricWrapSweep` 与 `lyricBackgroundHighlight` 契约安装和核对，各自报告支持、降级或失败；任一能力不可用不阻止其他能力。跨行扫光的 `LyricWrapSweepTarget` 使用能力键 `FEATURE_LYRIC_WRAP_SWEEP`，不新增独立设置。CJK 辉光开关不控制这三个 Feature。
 
 入口为 [LyricWrapSweepContract](../host-applemusic/src/main/java/dev/amenhancer/module/hook/LyricWrapSweepContract.kt)、[Geometry](../host-applemusic/src/main/java/dev/amenhancer/module/hook/LyricWrapSweepGeometry.kt)、[AppleMusicLyricWrapSweepTarget](../host-applemusic/src/main/java/dev/amenhancer/module/hook/AppleMusicLyricWrapSweepTarget.kt) 和 core 的 [LyricWrapSweepPolicy](../core/src/main/kotlin/dev/amenhancer/module/hook/LyricWrapSweepPolicy.kt)。Contract 的必需清单与关系校验是协议依据，不另写混淆名或支持版本表。
 
@@ -422,7 +447,7 @@ staticMask 同时用于未来行初始化和已唱恢复，不能因它被调用
 
 #### 5.6.1 歌词效果优化：活动行高亮
 
-**生效与接缝。** 本能力与跨行扫光共用前述“歌词效果优化”开关及重启门禁；开关开启后，本能力仍按自己的精确契约单独安装。[AppleMusicHostFactory](../host-applemusic/src/main/java/dev/amenhancer/module/hook/AppleMusicHostFactory.kt) 经 `TargetAdaptation.lyricBackgroundHighlight` 提供独立的 [AppleMusicLyricBackgroundHighlightTarget](../host-applemusic/src/main/java/dev/amenhancer/module/hook/AppleMusicLyricBackgroundHighlightTarget.kt)，不依赖跨行扫光的安装结果；跨行不支持或失败不影响本能力，反之亦然。
+**生效与接缝。** 本能力与简体替换和声修复、跨行扫光共用前述“歌词效果优化”开关及重启门禁；开关开启后，本能力仍按自己的精确契约单独安装。[AppleMusicHostFactory](../host-applemusic/src/main/java/dev/amenhancer/module/hook/AppleMusicHostFactory.kt) 经 `TargetAdaptation.lyricBackgroundHighlight` 提供独立的 [AppleMusicLyricBackgroundHighlightTarget](../host-applemusic/src/main/java/dev/amenhancer/module/hook/AppleMusicLyricBackgroundHighlightTarget.kt)，不依赖跨行扫光的安装结果；跨行不支持或失败不影响本能力，反之亦然。
 
 启用要求精确 profile 声明 `lyricBackgroundHighlight`、`contractVersion: 4`，通过全部成员及关系校验，并成功对活动行提交方法 `O` 执行 `deoptimize` 后注册、激活 Hook。`lineSubset` 为 `f1.D(TreeSet,Collection)boolean static`，去优化确保此内部调用可被拦截。支持范围以精确 profile 的契约声明为准；开关开启后未声明契约报告不支持，解析、去优化或注册失败关闭本次注册 scope 并报告降级。
 

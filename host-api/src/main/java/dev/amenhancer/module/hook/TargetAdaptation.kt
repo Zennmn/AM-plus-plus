@@ -47,6 +47,9 @@ data class TargetAdaptation(
     val startupPagePrewarm: StartupPagePrewarmTarget = StartupPagePrewarmTarget {
         TargetCapabilityInstall.Unsupported("Startup page prewarming has no exact host contract")
     },
+    val lyricsParser: LyricsParserTarget = LyricsParserTarget {
+        TargetCapabilityInstall.Unsupported("Native lyric parser repair has no exact host contract")
+    },
 ) {
 }
 
@@ -79,6 +82,10 @@ fun interface LyricsTypefaceTarget {
 }
 
 fun interface CustomLyricsTarget {
+    fun install(): TargetCapabilityInstall
+}
+
+fun interface LyricsParserTarget {
     fun install(): TargetCapabilityInstall
 }
 
