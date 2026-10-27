@@ -39,20 +39,33 @@ data class AutoLyricsSource(
 class AutoLyricsSourceResolver(
     private val sources: List<AutoLyricsSource>,
 ) {
-    fun fetch(appleMusicId: Long): AutoLyricsCandidate? {
+    fun fetch(appleMusicId: Long): AutoLyricsCandidate? =
+        fetch(appleMusicId, sources.map { it.name })
+
+    /** Uses the caller's provider order and consults [cached] only at its recorded source. */
+    fun fetch(
+        appleMusicId: Long,
+        sourceOrder: List<String>,
+        cached: AutoLyricsCandidate? = null,
+    ): AutoLyricsCandidate? {
         if (appleMusicId <= 0L) return null
-        sources.forEach { source ->
+        val sourcesById = sources.associateBy { it.name }
+        sourceOrder.forEach { sourceId ->
+            if (sourceId == CustomLyricsSources.AM_NATIVE) return@forEach
+            val source = sourcesById[sourceId] ?: return@forEach
+            cached?.takeIf { it.source == sourceId && isUsable(it.ttml) }?.let { return it }
             val ttml = runCatching { source.fetch(appleMusicId) }.getOrNull() ?: return@forEach
-            if (!TtmlInputPolicy.isAcceptable(ttml) || !TtmlTimingPolicy.isWord(ttml)) {
-                return@forEach
-            }
+            if (!isUsable(ttml)) return@forEach
             return AutoLyricsCandidate(source.name, ttml)
         }
         return null
     }
 
+    private fun isUsable(ttml: String): Boolean =
+        TtmlInputPolicy.isAcceptable(ttml) && TtmlTimingPolicy.isWord(ttml)
+
     companion object {
-        /** Wires the fixed AMLL → Lunabeat → AM-Lyrics priority. */
+        /** Wires the known provider adapters; ordered lookups use the caller's source order. */
         fun fixed(
             amll: AmllTtmlClient,
             amLyrics: AmLyricsClient,

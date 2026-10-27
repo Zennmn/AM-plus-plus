@@ -285,8 +285,9 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                 return
             }
             val customLyricsPage = nextPage == EmbeddedSettingsPage.CUSTOM_LYRICS
+            val automaticLyricsPage = nextPage == EmbeddedSettingsPage.AUTOMATIC_LYRICS
             val llmLyricsPage = nextPage == EmbeddedSettingsPage.LLM_LYRICS
-            val lyricsPage = customLyricsPage || llmLyricsPage
+            val lyricsPage = customLyricsPage || automaticLyricsPage || llmLyricsPage
             val bottomInset = dp(activity, when {
                 nextPage == EmbeddedSettingsPage.MAIN -> 0
                 lyricsPage -> 8
@@ -369,6 +370,7 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                 pageTitle.text = when (page) {
                     EmbeddedSettingsPage.MAIN -> "AM++"
                     EmbeddedSettingsPage.CUSTOM_LYRICS -> localizedText(ModuleText.CATEGORY_LYRICS_MANAGEMENT)
+                    EmbeddedSettingsPage.AUTOMATIC_LYRICS -> localizedText(ModuleText.AUTO_LYRICS)
                     EmbeddedSettingsPage.LYRICS_EFFECTS -> localizedText(ModuleText.CATEGORY_LYRICS_EFFECTS)
                     EmbeddedSettingsPage.INTERFACE -> localizedText(ModuleText.CATEGORY_INTERFACE)
                     EmbeddedSettingsPage.TITLE_REGION -> localizedText(ModuleText.CATEGORY_TITLE_REGION)
@@ -433,6 +435,16 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                     onOpenLlmLyrics = {
                         renderPage(EmbeddedSettingsPage.LLM_LYRICS)
                     },
+                    onOpenAutomaticLyrics = {
+                        renderPage(EmbeddedSettingsPage.AUTOMATIC_LYRICS)
+                    },
+                )
+            } else if (automaticLyricsPage) {
+                renderEmbeddedAutomaticLyricsPage(
+                    activity = activity,
+                    parent = content,
+                    settings = draft.settings,
+                    onSettingsChanged = ::updateDraft,
                 )
             } else if (llmLyricsPage) {
                 renderEmbeddedLlmLyricsPage(
@@ -544,6 +556,7 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
 
         fun navigateBack() {
             val parentPage = when (page) {
+                EmbeddedSettingsPage.AUTOMATIC_LYRICS -> EmbeddedSettingsPage.CUSTOM_LYRICS
                 EmbeddedSettingsPage.LLM_LYRICS -> EmbeddedSettingsPage.CUSTOM_LYRICS
                 EmbeddedSettingsPage.BOTTOM_BAR_ANIMATION -> EmbeddedSettingsPage.INTERFACE
                 EmbeddedSettingsPage.MAIN -> {
@@ -820,7 +833,15 @@ private fun EmbeddedSettingsHost.showEmbeddedPageDetails(activity: Activity, pag
         EmbeddedSettingsPage.CUSTOM_LYRICS -> listOf(
             ModuleText.CUSTOM_LYRICS_REPLACEMENT to ModuleText.CUSTOM_LYRICS_REPLACEMENT_SUMMARY,
             ModuleText.AUTO_LYRICS to ModuleText.AUTO_LYRICS_SUMMARY,
-            ModuleText.LLM_LYRICS_FALLBACK to ModuleText.LLM_LYRICS_ENABLED_SUMMARY,
+            ModuleText.LLM_LYRICS_FALLBACK to ModuleText.SHORT_LLM_LYRICS_SUMMARY,
+        )
+        EmbeddedSettingsPage.AUTOMATIC_LYRICS -> listOf(
+            ModuleText.AUTO_LYRICS_ENABLED to ModuleText.AUTO_LYRICS_SUMMARY,
+            ModuleText.AUTO_LYRICS_PREFER_NATIVE to ModuleText.AUTO_LYRICS_PREFER_NATIVE_SUMMARY,
+            ModuleText.AUTO_LYRICS_SOURCE_ORDER to
+                if (controller.currentSettings().automaticLyricsPreferNative) {
+                    ModuleText.AUTO_LYRICS_SOURCE_ORDER_NATIVE_HIDDEN
+                } else ModuleText.AUTO_LYRICS_SOURCE_ORDER_ALL,
         )
         EmbeddedSettingsPage.LYRICS_EFFECTS -> listOf(
             ModuleText.BIDIRECTIONAL_LYRIC_BLUR to ModuleText.BIDIRECTIONAL_LYRIC_BLUR_SUMMARY,
@@ -881,6 +902,7 @@ internal fun EmbeddedSettingsHost.renderEmbeddedCustomLyricsPage(
         song: CurrentSongDetails?,
         onSettingsChanged: (ModuleSettings) -> Unit,
         onOpenLlmLyrics: () -> Unit,
+        onOpenAutomaticLyrics: () -> Unit,
     ) {
         val entries = runCatching { controller.lyricsEntries() }.getOrDefault(emptyList())
         customLyricsListState.update(entries, customLyricsSearchQuery)
@@ -898,18 +920,14 @@ internal fun EmbeddedSettingsHost.renderEmbeddedCustomLyricsPage(
             pageRefresh?.invoke()
         })
         parent.addView(embeddedSpacer(activity, if (isEmbeddedPhone(activity)) 10 else 14))
-        parent.addView(embeddedSettingRow(
-            activity,
-            localizedText(ModuleText.AUTO_LYRICS),
-            localizedText(ModuleText.SHORT_AUTO_LYRICS_SUMMARY),
-            settings.automaticLyricsEnabled,
-            enabled = settings.customLyricsEnabled,
+        parent.addView(embeddedNavigationRow(
+            activity = activity,
+            title = localizedText(ModuleText.AUTO_LYRICS),
+            summary = localizedText(ModuleText.SHORT_AUTO_LYRICS_SUMMARY),
             compactWidePadding = true,
-        ) {
-            onSettingsChanged(settings.copy(automaticLyricsEnabled = it))
-            // The LLM fallback tier sits below automatic completion.
-            pageRefresh?.invoke()
-        })
+            chevronTint = EmbeddedSettingsPalette.Light.accent,
+            onClick = onOpenAutomaticLyrics,
+        ))
         parent.addView(embeddedSpacer(activity, if (isEmbeddedPhone(activity)) 10 else 14))
         parent.addView(embeddedNavigationRow(
             activity = activity,
@@ -1097,6 +1115,124 @@ internal fun EmbeddedSettingsHost.renderEmbeddedCustomLyricsPage(
         }
         parent.addView(lyricsContent)
     }
+
+
+private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
+    activity: Activity,
+    parent: LinearLayout,
+    settings: ModuleSettings,
+    onSettingsChanged: (ModuleSettings) -> Unit,
+) {
+    val sourceOrder = ModuleSettings.normalizeAutomaticLyricsSourceOrder(settings.automaticLyricsSourceOrder)
+    val nativeIndex = sourceOrder.indexOf(CustomLyricsSources.AM_NATIVE)
+    val visibleSources = if (settings.automaticLyricsPreferNative) {
+        sourceOrder.filterNot { it == CustomLyricsSources.AM_NATIVE }
+    } else {
+        sourceOrder
+    }
+
+    fun moveSource(index: Int, offset: Int) {
+        val target = index + offset
+        if (target !in visibleSources.indices) return
+        val nextSources = visibleSources.toMutableList().apply {
+            add(target, removeAt(index))
+        }
+        if (settings.automaticLyricsPreferNative) {
+            nextSources.add(nativeIndex.coerceIn(0, nextSources.size), CustomLyricsSources.AM_NATIVE)
+        }
+        onSettingsChanged(settings.copy(
+            automaticLyricsSourceOrder = ModuleSettings.normalizeAutomaticLyricsSourceOrder(nextSources),
+        ))
+        pageRefresh?.invoke()
+    }
+
+    val settingsGroup = embeddedCard(activity, null) {
+        setPadding(dp(activity, 8), dp(activity, 8), dp(activity, 8), dp(activity, 8))
+    }
+    parent.addView(settingsGroup, matchWidthWrapContent())
+    settingsGroup.addView(embeddedSettingRow(
+        activity,
+        localizedText(ModuleText.AUTO_LYRICS_ENABLED),
+        localizedText(ModuleText.AUTO_LYRICS_SUMMARY),
+        settings.automaticLyricsEnabled,
+        enabled = settings.customLyricsEnabled,
+        compactWidePadding = true,
+    ) {
+        onSettingsChanged(settings.copy(automaticLyricsEnabled = it))
+        pageRefresh?.invoke()
+    })
+    settingsGroup.addView(embeddedSpacer(activity, if (isEmbeddedPhone(activity)) 10 else 14))
+    settingsGroup.addView(embeddedSettingRow(
+        activity,
+        localizedText(ModuleText.AUTO_LYRICS_PREFER_NATIVE),
+        localizedText(ModuleText.AUTO_LYRICS_PREFER_NATIVE_SUMMARY),
+        settings.automaticLyricsPreferNative,
+        compactWidePadding = true,
+    ) {
+        onSettingsChanged(settings.copy(
+            automaticLyricsPreferNative = it,
+            automaticLyricsSourceOrder = sourceOrder,
+        ))
+        pageRefresh?.invoke()
+    })
+
+    parent.addView(embeddedSpacer(activity, if (isEmbeddedPhone(activity)) 10 else 14))
+    val sourceGroup = embeddedCard(
+        activity,
+        localizedText(ModuleText.AUTO_LYRICS_SOURCE_ORDER),
+    ) {
+        setPadding(dp(activity, 8), dp(activity, 8), dp(activity, 8), dp(activity, 8))
+        addView(TextView(activity).apply {
+            text = localizedText(
+                if (settings.automaticLyricsPreferNative) {
+                    ModuleText.AUTO_LYRICS_SOURCE_ORDER_NATIVE_HIDDEN
+                } else {
+                    ModuleText.AUTO_LYRICS_SOURCE_ORDER_ALL
+                },
+            )
+            textSize = 12f
+            setEmbeddedTextColor(activity) { colors -> colors.secondary }
+            setSingleLine(false)
+            setPadding(0, 0, 0, dp(activity, 4))
+        }, matchWidthWrapContent())
+    }
+    parent.addView(sourceGroup, matchWidthWrapContent())
+    visibleSources.forEachIndexed { index, source ->
+        sourceGroup.addView(LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(activity, 52)
+            setPaddingRelative(dp(activity, 4), dp(activity, 2), dp(activity, 4), dp(activity, 2))
+            addView(TextView(activity).apply {
+                text = embeddedCustomLyricsSourceName(source)
+                textSize = 14f
+                setEmbeddedTextColor(activity) { colors -> colors.text }
+                setSingleLine(false)
+                maxLines = 2
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(embeddedActionButton(
+                activity = activity,
+                label = localizedText(ModuleText.MOVE_UP),
+                enabled = index > 0,
+            ) {
+                moveSource(index, -1)
+            }, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { marginStart = dp(activity, 4) })
+            addView(embeddedActionButton(
+                activity = activity,
+                label = localizedText(ModuleText.MOVE_DOWN),
+                enabled = index < visibleSources.lastIndex,
+            ) {
+                moveSource(index, 1)
+            }, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { marginStart = dp(activity, 4) })
+        }, matchWidthWrapContent())
+    }
+}
 
 
 private fun EmbeddedSettingsHost.renderEmbeddedLlmLyricsPage(
@@ -1346,6 +1482,7 @@ internal fun EmbeddedSettingsHost.embeddedCustomLyricsSourceName(source: String)
         CustomLyricsSources.AMLL -> "AMLL"
         CustomLyricsSources.AM_LYRICS -> localizedText(ModuleText.AM_LYRICS_REPOSITORY)
         CustomLyricsSources.LUNABEAT -> "Lunabeat"
+        CustomLyricsSources.AM_NATIVE -> localizedText(ModuleText.AM_NATIVE)
         else -> localizedText(ModuleText.MANUAL_TTML)
     }
 

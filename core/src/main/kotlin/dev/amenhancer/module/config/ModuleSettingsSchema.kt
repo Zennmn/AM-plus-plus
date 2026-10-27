@@ -95,6 +95,8 @@ object ModuleSettingsSchema {
             default = values.boolean(KEY_LEGACY_ONLINE_LYRIC_REPLACEMENT, default = false),
         ),
         automaticLyricsEnabled = values.boolean(KEY_AUTOMATIC_LYRICS_ENABLED, default = true),
+        automaticLyricsPreferNative = values.boolean(KEY_AUTOMATIC_LYRICS_PREFER_NATIVE, default = true),
+        automaticLyricsSourceOrder = values.automaticLyricsSourceOrder(),
         llmLyricsEnabled = values.boolean(KEY_LLM_LYRICS_ENABLED, default = false),
         llmLyricsBaseUrl = ModuleSettings.normalizeLlmLyricsBaseUrl(values.string(KEY_LLM_LYRICS_BASE_URL)),
         llmLyricsApiKey = ModuleSettings.normalizeLlmLyricsApiKey(values.string(KEY_LLM_LYRICS_API_KEY)),
@@ -166,6 +168,10 @@ object ModuleSettingsSchema {
             KEY_TITLE_CORRECTION_MODE to settings.titleCorrectionMode.storageValue,
             KEY_CUSTOM_LYRICS_ENABLED to settings.customLyricsEnabled,
             KEY_AUTOMATIC_LYRICS_ENABLED to settings.automaticLyricsEnabled,
+            KEY_AUTOMATIC_LYRICS_PREFER_NATIVE to settings.automaticLyricsPreferNative,
+            KEY_AUTOMATIC_LYRICS_SOURCE_ORDER to
+                ModuleSettings.normalizeAutomaticLyricsSourceOrder(settings.automaticLyricsSourceOrder)
+                    .joinToString(","),
             KEY_LLM_LYRICS_ENABLED to settings.llmLyricsEnabled,
             KEY_LLM_LYRICS_BASE_URL to
                 ModuleSettings.normalizeLlmLyricsBaseUrl(settings.llmLyricsBaseUrl),
@@ -265,6 +271,11 @@ object ModuleSettingsSchema {
         )
     }
 
+    private fun Map<String, *>.automaticLyricsSourceOrder(): List<String> =
+        ModuleSettings.normalizeAutomaticLyricsSourceOrder(
+            string(KEY_AUTOMATIC_LYRICS_SOURCE_ORDER).split(','),
+        )
+
     /**
      * Returns the host-local values required before removing the v11 target
      * language key.  This is intentionally independent of the schema version:
@@ -338,6 +349,8 @@ object ModuleSettingsSchema {
         KEY_TITLE_CORRECTION_TARGET_LANGUAGE,
         KEY_CUSTOM_LYRICS_ENABLED,
         KEY_AUTOMATIC_LYRICS_ENABLED,
+        KEY_AUTOMATIC_LYRICS_PREFER_NATIVE,
+        KEY_AUTOMATIC_LYRICS_SOURCE_ORDER,
         KEY_LLM_LYRICS_ENABLED,
         KEY_LLM_LYRICS_BASE_URL,
         KEY_LLM_LYRICS_API_KEY,
@@ -389,6 +402,8 @@ object ModuleSettingsSchema {
     private const val KEY_TITLE_CORRECTION_TARGET_LANGUAGE = "title_correction_target_language"
     private const val KEY_CUSTOM_LYRICS_ENABLED = "custom_lyrics_enabled"
     private const val KEY_AUTOMATIC_LYRICS_ENABLED = "automatic_lyrics_enabled"
+    private const val KEY_AUTOMATIC_LYRICS_PREFER_NATIVE = "automatic_lyrics_prefer_native"
+    private const val KEY_AUTOMATIC_LYRICS_SOURCE_ORDER = "automatic_lyrics_source_order"
     private const val KEY_LLM_LYRICS_ENABLED = "llm_lyrics_enabled"
     private const val KEY_LLM_LYRICS_BASE_URL = "llm_lyrics_base_url"
     private const val KEY_LLM_LYRICS_API_KEY = "llm_lyrics_api_key"

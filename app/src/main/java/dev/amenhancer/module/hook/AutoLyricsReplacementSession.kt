@@ -73,12 +73,17 @@ internal fun createAutoLyricsRuntime(
         session = EmbeddedConfigurationSession(HostPrivateEmbeddedStorage(application)),
     )
     val publisher = AutoLyricsPublisher { appleMusicId, candidate ->
+        // Native lyrics are selected from the host result, never copied into the managed index.
+        if (candidate.source == CustomLyricsSources.AM_NATIVE) return@AutoLyricsPublisher AutoLyricsPublishResult.FAILED
         val existing = runCatching {
             configuredContent.listLyrics().firstOrNull { it.appleMusicId == appleMusicId }
         }.getOrNull()
         when {
-            existing != null && existing.enabled -> AutoLyricsPublishResult.ALREADY_CONFIGURED
-            existing != null -> AutoLyricsPublishResult.FAILED
+            existing != null && !existing.enabled -> AutoLyricsPublishResult.FAILED
+            existing != null && !existing.autoManaged -> AutoLyricsPublishResult.ALREADY_CONFIGURED
+            existing != null && existing.source == candidate.source &&
+                runCatching { configuredContent.readLyrics(appleMusicId) }
+                    .getOrNull() == candidate.ttml -> AutoLyricsPublishResult.PUBLISHED
             else -> {
                 val displayName = candidate.displayName
                     ?.takeIf(String::isNotBlank)
@@ -91,7 +96,9 @@ internal fun createAutoLyricsRuntime(
                                 displayName = displayName,
                                 ttml = candidate.ttml,
                                 source = candidate.source,
+                                autoManaged = true,
                             ),
+                            replacingAppleMusicId = existing?.appleMusicId,
                         )
                     }.getOrNull()
                 ) {
@@ -144,7 +151,11 @@ internal fun createAutoLyricsRuntime(
         fetchAmLyricsTtml = amLyrics::fetchTtml,
         loadLunabeatCatalog = lunabeat::loadCatalog,
         fetchLunabeatTtml = lunabeat::fetch,
-        fetchAutoCache = resolver::fetch,
+        fetchAutoCache = { id ->
+            resolver.fetch(id, ModuleSettings.normalizeAutomaticLyricsSourceOrder(
+                configuration().automaticLyricsSourceOrder,
+            ).filterNot { it == CustomLyricsSources.AM_NATIVE })
+        },
     )
     val llmExecutor = ThreadPoolExecutor(
         1, 1, 0L, TimeUnit.MILLISECONDS, ArrayBlockingQueue(1),

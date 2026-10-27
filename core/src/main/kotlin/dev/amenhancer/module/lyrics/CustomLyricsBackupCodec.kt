@@ -62,6 +62,7 @@ object CustomLyricsBackupCodec {
     private const val KEY_SHA256 = "sha256"
     private const val KEY_SOURCE = "source"
     private const val KEY_ENABLED = "enabled"
+    private const val KEY_AUTO_MANAGED = "autoManaged"
 
     /**
      * Independent resource guards for untrusted backups, not user-facing
@@ -241,5 +242,6 @@ object CustomLyricsBackupCodec {
         sha256 = entry.optString(KEY_SHA256),
         source = entry.optString(KEY_SOURCE),
         enabled = entry.optBoolean(KEY_ENABLED, false),
+        autoManaged = entry.optBoolean(KEY_AUTO_MANAGED, false),
     )
 }

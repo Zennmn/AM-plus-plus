@@ -22,6 +22,7 @@ import kotlin.math.sin
 internal enum class EmbeddedSettingsPage {
     MAIN,
     CUSTOM_LYRICS,
+    AUTOMATIC_LYRICS,
     LYRICS_EFFECTS,
     INTERFACE,
     TITLE_REGION,

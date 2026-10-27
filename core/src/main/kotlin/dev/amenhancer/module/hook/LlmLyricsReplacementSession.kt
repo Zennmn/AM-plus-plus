@@ -23,7 +23,7 @@ data class LlmLyricsRuntime(
 )
 
 /**
- * Final fallback for one playback visit. Sources must explicitly report a miss
+ * Native lyric translation for one playback visit. The host must confirm native selection
  * before either disk cache or network is touched. Native pointers are retained
  * only for the current visit; each subsequent visit repeats source selection.
  */
@@ -40,7 +40,7 @@ class LlmLyricsReplacementSession(
     private val lock = Any()
     private var activeId: Long? = null
     private var generation = 0L
-    private var sourcesMissed = false
+    private var nativeSelected = false
     private var original: String? = null
     private var configuration: LlmLyricsConfig? = null
     private var attempted = false
@@ -50,23 +50,28 @@ class LlmLyricsReplacementSession(
     fun onSongChanged(appleMusicId: Long?) = synchronized(lock) {
         if (closed || activeId == appleMusicId) return@synchronized
         activeId = appleMusicId
-        sourcesMissed = false
+        nativeSelected = false
         invalidateLocked()
     }
 
-    /** Called only after the existing automatic resolver has exhausted its sources. */
+    /** Opens the LLM path for the native document selected during this host selection pass. */
+    fun onNativeSelected(appleMusicId: Long) = synchronized(lock) {
+        if (!closed && activeId == appleMusicId) nativeSelected = true
+    }
+
+    /** Compatibility entry for callers that have not moved to explicit native selection. */
     fun onSourcesMissed(appleMusicId: Long) {
         val wake = synchronized(lock) {
-            if (closed || activeId != appleMusicId || sourcesMissed) false
-            else { sourcesMissed = true; true }
+            if (closed || activeId != appleMusicId || nativeSelected) false
+            else { nativeSelected = true; true }
         }
         if (wake) onReplacementPublished(appleMusicId)
     }
 
-    /** A native/manual/source result always revokes a pending or prepared LLM result. */
+    /** A manual or third-party result always revokes a pending or prepared LLM result. */
     fun onHigherPriorityResult(appleMusicId: Long) = synchronized(lock) {
-        if (activeId == appleMusicId && (sourcesMissed || original != null || ready != null)) {
-            sourcesMissed = false
+        if (activeId == appleMusicId && (nativeSelected || original != null || ready != null)) {
+            nativeSelected = false
             invalidateLocked()
         }
     }
@@ -74,7 +79,10 @@ class LlmLyricsReplacementSession(
     /** Missing exact native input revokes old work without inventing a new source outcome. */
     fun onNativeInputUnavailable(appleMusicId: Long) {
         synchronized(lock) {
-            if (activeId == appleMusicId && original != null) invalidateLocked()
+            if (activeId == appleMusicId) {
+                nativeSelected = false
+                invalidateLocked()
+            }
         }
     }
 
@@ -98,7 +106,7 @@ class LlmLyricsReplacementSession(
                 original = originalTtml
                 configuration = config
             }
-            if (!sourcesMissed) return null
+            if (!nativeSelected) return null
             ready?.let { pointer ->
                 if (runCatching { isAlive(pointer) }.getOrDefault(false)) return pointer
                 // Rebuild a released native wrapper from the independent raw cache.
@@ -141,7 +149,7 @@ class LlmLyricsReplacementSession(
             isAllowed(request.appleMusicId) && runtime.configuration() == request.config
 
     private fun matchesLocked(request: LlmLyricsRequest, stamp: Long): Boolean =
-        !closed && generation == stamp && sourcesMissed && activeId == request.appleMusicId &&
+        !closed && generation == stamp && nativeSelected && activeId == request.appleMusicId &&
             original == request.originalTtml && configuration == request.config
 
     private fun invalidateLocked() {
@@ -155,7 +163,7 @@ class LlmLyricsReplacementSession(
     override fun close() {
         synchronized(lock) {
             closed = true
-            sourcesMissed = false
+            nativeSelected = false
             activeId = null
             invalidateLocked()
         }
