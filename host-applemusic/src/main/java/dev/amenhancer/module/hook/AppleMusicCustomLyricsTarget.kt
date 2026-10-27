@@ -3,15 +3,17 @@ package dev.amenhancer.module.hook
 import android.os.Handler
 import android.os.Looper
 import dev.amenhancer.module.config.TargetConfigClient
+import dev.amenhancer.module.lyrics.AmllTtmlFormatConverter
 import dev.amenhancer.module.lyrics.CustomLyricsFilePolicy
 import dev.amenhancer.module.lyrics.CustomLyricsFileReader
 import dev.amenhancer.module.model.CustomLyricsEntry
+import java.util.Locale
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.Executor
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
-/** Submits prepared user and automatic lyrics through the exact host result contract. */
+/** Owns the native parser seam and submits prepared lyrics through the host result contract. */
 internal class AppleMusicCustomLyricsTarget(
     private val config: TargetConfigClient,
     private val symbols: TargetSymbolResolver,
@@ -20,6 +22,54 @@ internal class AppleMusicCustomLyricsTarget(
 ) : CustomLyricsTarget {
     private var installedResult: TargetCapabilityInstall? = null
     private val registration = HookRegistrationScope()
+    private var installedParserResult: TargetCapabilityInstall? = null
+    private val parserRegistration = HookRegistrationScope()
+    @Volatile private var parserObserver: ((String, Any?) -> Unit)? = null
+
+    /** Native input repair is independent of enabling user-managed lyric replacement. */
+    @Synchronized fun installParserRepair(): TargetCapabilityInstall {
+        installedParserResult?.let { return it }
+        val result = runCatching {
+            val resolution = symbols.resolve(AppleMusicSymbols.TtmlSongInfoFromTtml)
+            val method = resolution.valueOrNull()
+                ?: return@runCatching TargetCapabilityInstall.Degraded(resolution.summary)
+            method.isAccessible = true
+            check(ModernXposedRuntime.hookMethod(method, object : ModernMethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    val ttml = param.args.getOrNull(0) as? String ?: return
+                    runCatching {
+                        // Custom lyrics may still need this hook for observation while repair is off.
+                        if (!config.settings().lyricEffectsOptimizationEnabled ||
+                            !isSimplifiedLyricsLocale(Locale.getDefault())
+                        ) return@runCatching
+                        val repaired = AmllTtmlFormatConverter.repairSimplifiedReplacementBackgrounds(ttml)
+                        if (repaired != ttml) {
+                            param.extras["originalTtml"] = ttml
+                            param.args[0] = repaired
+                        }
+                    }.onFailure { error ->
+                        ModernXposedRuntime.log("native TTML background repair failed: $error")
+                    }
+                }
+
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    if (param.throwable != null) return
+                    // Observations retain the exact host input, not the repaired display document.
+                    val original = param.extras["originalTtml"] as? String
+                        ?: param.args.getOrNull(0) as? String ?: return
+                    parserObserver?.invoke(original, param.result)
+                }
+            }, parserRegistration)) { "Native TTML parser hook unavailable" }
+            parserRegistration.activate()
+            TargetCapabilityInstall.Active("Native TTML parser hook installed")
+        }.getOrElse { error ->
+            TargetCapabilityInstall.Degraded("Native TTML parser repair unavailable: ${error.message}")
+        }
+        if (result !is TargetCapabilityInstall.Active) parserRegistration.close()
+        installedParserResult = result
+        return result
+    }
+
     @Synchronized override fun install(): TargetCapabilityInstall {
         installedResult?.let { return it }
         return try {
@@ -269,13 +319,11 @@ internal class AppleMusicCustomLyricsTarget(
             logger = ModernXposedRuntime::log,
         ) ?: return TargetCapabilityInstall.Degraded("Lyric ViewModel result contract unavailable")
         registration.onClose(resultBridge::close)
-        val parserHooked = runCatching {
-            parseMethod.isAccessible = true
-            hook(parseMethod, object : ModernMethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
+        val parserHooked = installParserRepair() is TargetCapabilityInstall.Active
+        if (parserHooked) {
+            parserObserver = { ttml, pointer ->
+                if (registration.isActive) {
                     runCatching {
-                        val ttml = param.args.getOrNull(0) as? String ?: return@runCatching
-                        val pointer = param.result
                         val moduleParse = parser.isModuleParse()
                         val metadata = TtmlTimingPolicy.metadataOf(ttml)
                         val appleMusicId = pointer?.let(parser::adamIdOf)
@@ -294,8 +342,9 @@ internal class AppleMusicCustomLyricsTarget(
                         ModernXposedRuntime.log("custom lyrics TTML timing observation failed: $error")
                     }
                 }
-            })
-        }.getOrDefault(false)
+            }
+            registration.onClose { parserObserver = null }
+        }
         // Attach the exact host ViewModel and guard an empty native fallback.
         // Selection and recovery still publish through the upstream result channel.
         val hooked = hook(installMethod, object : ModernMethodHook() {
@@ -390,6 +439,13 @@ internal class AppleMusicCustomLyricsTarget(
         )
     }
 
+}
+
+/** Explicit script wins over region; ambiguous Chinese locales are left unchanged. */
+internal fun isSimplifiedLyricsLocale(locale: Locale): Boolean {
+    if (!locale.language.equals("zh", ignoreCase = true)) return false
+    return if (locale.script.isNotEmpty()) locale.script.equals("Hans", ignoreCase = true)
+        else locale.country.equals("CN", ignoreCase = true) || locale.country.equals("SG", ignoreCase = true)
 }
 
 internal fun selectLyricsInjectionAdamId(

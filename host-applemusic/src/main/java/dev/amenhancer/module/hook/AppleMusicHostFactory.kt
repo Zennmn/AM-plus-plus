@@ -63,6 +63,12 @@ object AppleMusicHostFactory {
             source = ApkTargetClassSource(application, classLoader),
         )
         val settings = config.settings()
+        val customLyrics = AppleMusicCustomLyricsTarget(
+            config = config,
+            symbols = resolver,
+            currentSong = currentSong,
+            autoLyricsRuntime = autoLyricsRuntime,
+        )
         return TargetAdaptation(
             identity = build.displayName,
             build = build,
@@ -109,12 +115,8 @@ object AppleMusicHostFactory {
                 symbols = resolver,
                 session = lyricsTypefaceSession as LyricsTypefaceSession,
             ),
-            customLyrics = AppleMusicCustomLyricsTarget(
-                config = config,
-                symbols = resolver,
-                currentSong = currentSong,
-                autoLyricsRuntime = autoLyricsRuntime,
-            ),
+            customLyrics = customLyrics,
+            lyricsParser = LyricsParserTarget(customLyrics::installParserRepair),
             currentSongIdentity = AppleMusicCurrentSongIdentityTarget(
                 resolver,
                 currentSong,

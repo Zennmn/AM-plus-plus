@@ -14,7 +14,8 @@ import org.junit.Test
  * LyricsResultSubmissionBridge, which owns the host result/index contract.
  * Selection and recovery publish upstream, and the Fragment install hook
  * observes the owner, guards empty fallback and acknowledges installation.
- * No hook writes installer arguments or performs IO or native parsing.
+ * Installer hooks do not write arguments. The shared parser hook may repair
+ * input TTML; hooks and their parser observer perform no IO or native parsing.
  */
 class CustomLyricsItemUpdateStructuralRegressionTest {
     private fun projectFile(relativePath: String): String = sequenceOf(
@@ -65,7 +66,8 @@ class CustomLyricsItemUpdateStructuralRegressionTest {
         assertFalse(installHook.contains("parseTtml"))
         assertFalse(installHook.contains("HttpLyricTransport"))
         assertFalse(target.contains("installMethod.invoke"))
-        assertFalse(Regex("""param\.args\[0\]\s*=(?!=)""").containsMatchIn(target))
+        val installPath = target.substringAfter("private fun installOnce(): TargetCapabilityInstall {")
+        assertFalse(Regex("""param\.args\[0\]\s*=(?!=)""").containsMatchIn(installPath))
         assertFalse(target.contains("ampp-installed-lyrics"))
     }
 
@@ -128,13 +130,21 @@ class CustomLyricsItemUpdateStructuralRegressionTest {
         val target = projectFile(
             "host-applemusic/src/main/java/dev/amenhancer/module/hook/AppleMusicCustomLyricsTarget.kt",
         )
-        val parseHook = target.substringAfter("hook(parseMethod, object : ModernMethodHook()")
-            .substringBefore("val hooked = hook(installMethod")
+        val parseHookStart = "check(ModernXposedRuntime.hookMethod(method, object : ModernMethodHook()"
+        val parseHookEnd = "}, parserRegistration))"
+        assertTrue(target.contains(parseHookStart))
+        assertTrue(target.contains(parseHookEnd))
+        val parseHook = target.substringAfter(parseHookStart).substringBefore(parseHookEnd)
+        val observerStart = "parserObserver = { ttml, pointer ->"
+        val observerEnd = "registration.onClose { parserObserver = null }"
+        assertTrue(target.contains(observerStart))
+        assertTrue(target.contains(observerEnd))
+        val parseObserver = target.substringAfter(observerStart).substringBefore(observerEnd)
         val availabilityHook = target.substringAfter(
             "hook(availabilityMethod, object : ModernMethodHook()",
         )
 
-        for (hookPath in listOf(parseHook, availabilityHook)) {
+        for (hookPath in listOf(parseHook, parseObserver, availabilityHook)) {
             assertFalse(hookPath.contains("openRemoteFile"))
             assertFalse(hookPath.contains("readTtml"))
             assertFalse(hookPath.contains("parseTtml"))

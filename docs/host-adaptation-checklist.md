@@ -49,12 +49,13 @@
 
 ### 2.2 功能覆盖表
 
-按此表逐域填写。自动来源/LLM虽然共用提交，模糊与CJK各有适用结论；跨行扫光与活动行高亮共用“歌词效果优化”开关，但仍按各自契约分别填写安装、降级与失败结论。
+按此表逐域填写。自动来源/LLM虽然共用提交，模糊与CJK各有适用结论；简体替换和声修复、跨行扫光与活动行高亮共用“歌词效果优化”开关，但仍分别填写安装、降级与失败结论。
 
 | 功能域 | 资料 / 接入依据 | 源码与包证据 | 安装 / 降级状态 | 人工结果入口 |
 |---|---|---|---|---|
 | 共用歌词结果提交 | indexed、lyricResultSubmission、安装与item更新 | 待填写 | 待填写 | 待填写 |
 | 当前歌曲、手动/自动/刷新来源 | 身份、parser、资格、来源与缓存会话 | 待填写 | 待填写 | 待填写 |
+| 简体替换和声修复 | 共享lyric_effects_optimization_enabled、LyricsParserFeature/LyricsParserTarget、单installParserRepair与replacement x-bg | 待填写 | 待填写 | 待填写 |
 | LLM翻译 | 精确原文观察、模块解析排除、共用通道 | 待填写 | 待填写 | 待填写 |
 | 模糊 | lyricBlur、显示提交、行词动画、效果所有权 | 待填写 | 待填写 | 待填写 |
 | CJK辉光与末词 | cjk、可选terminalGradient、原生动画 | 待填写 | 待填写 | 待填写 |
@@ -136,6 +137,25 @@
 - [ ] 缓存/来源刷新/发布与后台代次、取消、恢复和共用提交都有当前接入依据。
 - [ ] AMLL Kotlin 转换器与 CLI 的译文/音译和声 `span` 显式使用 TTML 默认命名空间及 `ttm` 元数据命名空间，未继承 Apple 轨道的默认命名空间。
 
+<a id="simplified-replacement-backgrounds-checks"></a>
+
+#### 4.2.1 简体系统语言替换和声修复
+
+[维护规则](host-adaptation-guide.md#simplified-replacement-backgrounds) · [人工场景](feature-preservation.md#lyrics-sources)
+
+- [ ] `FeatureInstallation` 始终登记 `LyricsParserFeature`；共享 `lyricEffectsOptimizationEnabled` 关闭时返回 `DISABLED` 且不调用 `LyricsParserTarget.install()`，无新增设置，并遵循现有重启策略。
+- [ ] 共享设置开启时，`LyricsParserTarget.install()` 委派的 `AppleMusicCustomLyricsTarget.installParserRepair()` 提供单解析 Hook；普通原生修复不依赖自定义歌词开关或替换会话运行。
+- [ ] 自定义歌词开启而 `LyricsParserFeature` 关闭时，`CustomLyricsFeature` 仍可安装同一 `installParserRepair()` 以保留元数据和 raw-TTML 观察；重复入口复用同一 Hook，before 在共享设置关闭时跳过改写。
+- [ ] `TTMLParser$TTMLParserNative#songInfoFromTTML(String): SongInfo$SongInfoPtr` 的 owner、实例归属、唯一参数与返回闭合到同一精确符号；不可用时只降级本能力并透传原歌词。
+- [ ] 只安装一个解析 Hook：before 先检查共享设置及 locale 再修复参数，after 向可选观察者提供修复前的原始 TTML；设置关闭时观察仍可用，不存在第二 Hook 顺序依赖。
+- [ ] 门禁要求共享设置开启，且 locale 语言为 `zh`、显式 `Hans`，或脚本缺省、地区为 `CN`/`SG`；其他情况不执行。原生 replacement 资格或自定义歌词开关不能替代门禁。
+- [ ] 仅使用唯一 `type="replacement"`、`xml:lang="zh-Hans"` 轨道；正文 key 唯一，`x-bg` 组顺序对应，组内词数和完整、有效、唯一的词时间数值等价，双方声明的组时间一致。
+- [ ] 规范 TTML 根/前缀与 Apple 轨道命名空间可验证，替换轨每个 `x-bg` 显式切回 TTML；超出输入上限、重复 key 或轨道歧义时整份透传，缺内容或词/时间不兼容时整行回退，无行内部分写入。
+- [ ] 只填正文既有 `x-bg` 的词文本；正文行/span 时间、层次、属性、主唱前景及其他辅助轨不变，未引入通用转换器或原生内存位移。
+- [ ] 共享设置开启时，普通原生歌词和 `OpaqueTtmlParser` 的模块文档都经过同一门禁与修复入口，普通原生歌词不需要启用自定义歌词；模块解析标记继续排除其原生来源归属。
+- [ ] LLM 注册表持有原始原生 TTML，而非修复后的宿主入参；修复失败、输出不兼容或能力降级时仍以原文调用原生解析。
+- [ ] 人工结果分别覆盖共享设置关闭、开启但自定义歌词关闭、自定义歌词开启而设置关闭的观察路径、`zh-Hans`/`zh-CN`/`zh-SG` 正向、`zh-Hant`/`zh-TW`/非中文反向、模块文档、正文与其他轨保持不变，以及缺 key/重复 key/时间冲突的原文回退。
+
 <a id="llm-lyrics-fallback-checks"></a>
 
 ### 4.3 LLM翻译兜底
@@ -179,7 +199,7 @@
 
 [维护规则](host-adaptation-guide.md#lyric-wrap-sweep) · [人工场景](feature-preservation.md#lyric-wrap-sweep)
 
-- [ ] 与活动行高亮共用“歌词效果优化”开关；默认/缺键关闭且更改后重启生效。关闭时本 Feature 返回 `DISABLED`、不调用 `target.install`，CJK 辉光开关不控制本项。
+- [ ] 与简体替换和声修复、活动行高亮共用“歌词效果优化”开关；默认/缺键关闭且更改后重启生效。关闭时本 Feature 返回 `DISABLED`、不调用 `target.install`，CJK 辉光开关不控制本项。
 - [ ] 独立 `lyricWrapSweep` 契约/资格/作用域明确；设置开启只作门禁，不因共用开关或其他能力成功而授予支持。
 - [ ] 视觉行键、child范围、原文/发音bank与四路模型关系有当前证据。
 - [ ] 时间单位、原生动画、静态/暗色/渐暗/后继写入的真实路径已核对。
@@ -191,7 +211,7 @@
 
 [维护规则](host-adaptation-guide.md#lyric-background-highlight) · [人工场景](feature-preservation.md#lyric-background-highlight)
 
-- [ ] 与跨行扫光共用“歌词效果优化”开关；默认/缺键关闭且更改后重启生效。关闭时本 Feature 返回 `DISABLED`、不调用 `target.install`。
+- [ ] 与简体替换和声修复、跨行扫光共用“歌词效果优化”开关；默认/缺键关闭且更改后重启生效。关闭时本 Feature 返回 `DISABLED`、不调用 `target.install`。
 - [ ] 精确 profile 的 `lyricBackgroundHighlight` 分区声明独立契约，代码必需成员/关系校验、调用方去优化和注册均成功；未声明与安装失败的状态及 scope 清理正确。与 `lyricWrapSweep` 分别报告支持、降级或失败，一方不可用不阻止另一方。
 - [ ] 当前构建活动行的内部过滤路径有据；原始输入仍含父行时也能识别未结束背景句，候选覆盖当前、输入与已保留行。
 - [ ] `lineSubset` 仅处理同次提交、同一当前集合的首次过滤结果及真子集变化；模块保留与释放不影响其他原生成员或调用。
@@ -330,9 +350,10 @@
 |---|---|---|
 | 歌词结果桥 | 请求/文档/owner边界、索引异常对齐、原生异步合并、安装前附加与空安装抑制、实际容器值驱动的选择/安装确认和去重 | [规则](host-adaptation-guide.md#lyrics-result-submission)；矩阵结果链接 |
 | 来源/LLM | 资格/优先级、格式校验、客户端共享编码、独立缓存、取消/迟到及失败恢复 | [规则](host-adaptation-guide.md#llm-lyrics-fallback)；矩阵结果链接 |
+| 简体替换和声修复 | 共享歌词效果优化开关/重启门禁、单 parser Hook 两处安装入口、语言门禁、原文快照、专项修复完整性与失败透传 | [规则](host-adaptation-guide.md#simplified-replacement-backgrounds)；矩阵结果链接 |
 | 模糊 | 显示提交与四路动画保护、代际、帧驱动、效果/裁剪所有权 | [规则](host-adaptation-guide.md#lyrics-blur)；矩阵结果链接 |
 | CJK辉光与末词 | 独立 `cjk` 配置/作用域、原生时序、末词释放与补偿一致性 | [CJK](host-adaptation-guide.md#cjk-animation)；矩阵结果链接 |
-| 歌词效果优化 | 共用配置键与重启门禁；跨行扫光、活动行高亮各按独立契约安装、报告和验收，一方不可用不阻断另一方 | [跨行](host-adaptation-guide.md#lyric-wrap-sweep) / [活动行](host-adaptation-guide.md#lyric-background-highlight)；矩阵结果链接 |
+| 歌词效果优化 | 共用配置键与重启门禁；替换和声修复使用单解析 Hook，跨行扫光与活动行高亮各按独立契约安装、报告和验收 | [替换和声](host-adaptation-guide.md#simplified-replacement-backgrounds) / [跨行](host-adaptation-guide.md#lyric-wrap-sweep) / [活动行](host-adaptation-guide.md#lyric-background-highlight)；矩阵结果链接 |
 | 玻璃输入/动画 | 单一owner、起点归属、方向/边界、共享几何、原生触摸及展开恢复 | [规则](host-adaptation-guide.md#glass-collapse-rendering)；矩阵结果链接 |
 | 玻璃材质/上游 | 默认门禁、前缀/承载复用、帧阶段、隐藏资源与当前窗口失效 | [规则](host-adaptation-guide.md#glass-collapse-rendering)；来源pin与人工结果 |
 | 预热 | 隐藏事务/同步副作用归属、有界任务与日志阶段，不改导航状态 | [规则](host-adaptation-guide.md#startup-page-prewarm)；矩阵结果链接 |

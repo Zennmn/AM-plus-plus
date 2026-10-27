@@ -273,6 +273,7 @@ private fun productionFeatureInstallationModule(
             ),
             FeatureInstallationPlan(feature = CurrentSongIdentityFeature()),
             FeatureInstallationPlan(feature = TitleCorrectionFeature()),
+            FeatureInstallationPlan(feature = LyricsParserFeature()),
             FeatureInstallationPlan(feature = CustomLyricsFeature()),
             // The actual resource hook is installed during the Application
             // before-hook; this plan records its final health alongside the
