@@ -1,3 +1,6 @@
+// The app runtime has a same-package Kotlin file with the same name.
+@file:kotlin.jvm.JvmName("AutoLyricsReplacementCoreKt")
+
 package dev.amenhancer.module.hook
 
 import dev.amenhancer.module.lyrics.source.AutoLyricsSourceResolver
