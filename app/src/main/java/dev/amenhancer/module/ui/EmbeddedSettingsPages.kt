@@ -1142,13 +1142,19 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
         sourceOrder
     }.toMutableList()
 
-    fun saveSourceOrder() {
-        val nextSources = visibleSources.toMutableList()
+    fun sourceOrderWithNative(sources: List<String>): List<String> {
+        val nextSources = sources.toMutableList()
         if (settings.automaticLyricsPreferNative) {
             nextSources.add(nativeIndex.coerceIn(0, nextSources.size), CustomLyricsSources.AM_NATIVE)
         }
+        return nextSources
+    }
+
+    fun saveSourceOrder() {
         onSettingsChanged(currentSettings().copy(
-            automaticLyricsSourceOrder = ModuleSettings.normalizeAutomaticLyricsSourceOrder(nextSources),
+            automaticLyricsSourceOrder = ModuleSettings.normalizeAutomaticLyricsSourceOrder(
+                sourceOrderWithNative(visibleSources),
+            ),
         ))
     }
 
@@ -1199,7 +1205,8 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
                 } else {
                     ModuleText.AUTO_LYRICS_SOURCE_ORDER_ALL
                 },
-            ) + "\n" + localizedText(ModuleText.DRAG_TO_REORDER)
+            ) + "\n" + localizedText(ModuleText.DRAG_TO_REORDER) +
+                "\n" + localizedText(ModuleText.LUNABEAT_AFTER_NATIVE)
             textSize = 12f
             setEmbeddedTextColor(activity) { colors -> colors.secondary }
             setSingleLine(false)
@@ -1212,8 +1219,16 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
     var dragStartOrder: List<String>? = null
     var refreshAfterDrop = false
 
-    fun moveSource(from: Int, to: Int): Boolean {
+    fun canMoveSource(from: Int, to: Int): Boolean {
         if (from !in visibleSources.indices || to !in visibleSources.indices || from == to) return false
+        val nextSources = visibleSources.toMutableList().apply { add(to, removeAt(from)) }
+        val fullOrder = sourceOrderWithNative(nextSources)
+        // Validate the complete order even while the native row is hidden.
+        return ModuleSettings.normalizeAutomaticLyricsSourceOrder(fullOrder) == fullOrder
+    }
+
+    fun moveSource(from: Int, to: Int): Boolean {
+        if (!canMoveSource(from, to)) return false
         visibleSources.add(to, visibleSources.removeAt(from))
         sourceAdapter.notifyItemMoved(from, to)
         return true
@@ -1351,11 +1366,11 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
                 override fun onInitializeAccessibilityNodeInfo(host: View, info: AccessibilityNodeInfo) {
                     super.onInitializeAccessibilityNodeInfo(host, info)
                     val index = holder.bindingAdapterPosition
-                    if (index > 0) info.addAction(AccessibilityNodeInfo.AccessibilityAction(
+                    if (canMoveSource(index, index - 1)) info.addAction(AccessibilityNodeInfo.AccessibilityAction(
                         AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP.id,
                         localizedText(ModuleText.MOVE_UP),
                     ))
-                    if (index in 0 until visibleSources.lastIndex) {
+                    if (canMoveSource(index, index + 1)) {
                         info.addAction(AccessibilityNodeInfo.AccessibilityAction(
                             AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.id,
                             localizedText(ModuleText.MOVE_DOWN),
@@ -1383,6 +1398,9 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
     dragHelper = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0) {
         override fun isLongPressDragEnabled(): Boolean = false
         override fun isItemViewSwipeEnabled(): Boolean = false
+
+        override fun canDropOver(list: RecyclerView, holder: RecyclerView.ViewHolder, target: RecyclerView.ViewHolder): Boolean =
+            canMoveSource(holder.bindingAdapterPosition, target.bindingAdapterPosition)
 
         override fun onMove(list: RecyclerView, holder: RecyclerView.ViewHolder, target: RecyclerView.ViewHolder): Boolean =
             moveSource(holder.bindingAdapterPosition, target.bindingAdapterPosition)

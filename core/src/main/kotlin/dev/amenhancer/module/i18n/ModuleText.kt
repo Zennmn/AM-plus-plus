@@ -224,6 +224,10 @@ enum class ModuleText(internal val english: String, internal val chinese: String
         "开启后优先使用达标原生；关闭后按来源排序，但原生仍须符合条件",
     ),
     AUTO_LYRICS_SOURCE_ORDER("Source priority", "来源排序"),
+    LUNABEAT_AFTER_NATIVE(
+        "Lunabeat must be placed after AM native",
+        "Lunabeat 必须排在 AM 原生之后",
+    ),
     AUTO_LYRICS_SOURCE_ORDER_NATIVE_HIDDEN(
         "Prefer word-synced AM native lyrics, with translations for foreign-language lyrics; otherwise search in this order. Keep native lyrics if no source matches.",
         "AM 原生为逐字歌词且外语有译文时优先使用；否则按下方顺序查找，无结果则保留原生。",

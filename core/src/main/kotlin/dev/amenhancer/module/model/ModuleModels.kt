@@ -120,15 +120,24 @@ data class ModuleSettings(
 
         val DEFAULT_AUTOMATIC_LYRICS_SOURCE_ORDER: List<String> = listOf(
             CustomLyricsSources.AMLL,
-            CustomLyricsSources.LUNABEAT,
             CustomLyricsSources.AM_LYRICS,
             CustomLyricsSources.AM_NATIVE,
+            CustomLyricsSources.LUNABEAT,
         )
 
         fun normalizeAutomaticLyricsSourceOrder(values: List<String>): List<String> {
             val known = DEFAULT_AUTOMATIC_LYRICS_SOURCE_ORDER.toSet()
             val normalized = values.map { it.trim() }.filter { it in known }.distinct()
-            return normalized + DEFAULT_AUTOMATIC_LYRICS_SOURCE_ORDER.filterNot { it in normalized }
+            val ordered = (normalized + DEFAULT_AUTOMATIC_LYRICS_SOURCE_ORDER.filterNot { it in normalized })
+                .toMutableList()
+            val lunabeatIndex = ordered.indexOf(CustomLyricsSources.LUNABEAT)
+            val nativeIndex = ordered.indexOf(CustomLyricsSources.AM_NATIVE)
+            if (lunabeatIndex in 0 until nativeIndex) {
+                // Correct old configurations without reordering the other providers.
+                ordered.removeAt(lunabeatIndex)
+                ordered.add(ordered.indexOf(CustomLyricsSources.AM_NATIVE) + 1, CustomLyricsSources.LUNABEAT)
+            }
+            return ordered
         }
 
         fun isValidAppleMusicDpi(value: Int): Boolean =
