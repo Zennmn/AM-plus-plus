@@ -232,6 +232,11 @@ enum class ModuleText(internal val english: String, internal val chinese: String
         "All sources, including AM native, follow this order",
         "包括 AM 原生在内，所有来源按此顺序查找",
     ),
+    DRAG_TO_REORDER(
+        "Hold the drag handle on the right to reorder",
+        "按住右侧拖动柄调整顺序",
+    ),
+    DRAG_SOURCE("Drag to reorder %1\$s", "拖动以调整 %1\$s 的顺序"),
     MOVE_UP("Move up", "上移"),
     MOVE_DOWN("Move down", "下移"),
     SEARCH_LYRICS("Search name or Apple Music ID", "搜索名称或 Apple Music ID"),

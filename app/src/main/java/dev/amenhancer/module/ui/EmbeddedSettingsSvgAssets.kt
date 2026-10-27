@@ -43,6 +43,7 @@ internal enum class EmbeddedSvgIcon {
     Delete,
     ChevronRight,
     MoreVertical,
+    DragHandle,
     Document,
 
     // Dedicated settings semantics.
@@ -226,6 +227,10 @@ internal object EmbeddedSettingsSvgAssets {
         EmbeddedSvgIcon.MoreVertical to stroked(
             "M12 5.5h.01 M12 12h.01 M12 18.5h.01",
             2.8f,
+        ),
+        EmbeddedSvgIcon.DragHandle to stroked(
+            "M9 7h.01 M15 7h.01 M9 12h.01 M15 12h.01 M9 17h.01 M15 17h.01",
+            2.4f,
         ),
         EmbeddedSvgIcon.Document to stroked(
             "M7 3.5H14.5L19 8V19Q19 20.5 17.5 20.5H7Q5.5 20.5 5.5 19V5Q5.5 3.5 7 3.5Z M14.5 3.5V8H19 " +

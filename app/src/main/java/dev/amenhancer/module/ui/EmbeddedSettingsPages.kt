@@ -6,7 +6,10 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.app.Dialog
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.res.ColorStateList
+import android.content.res.Configuration
+import android.content.res.Resources
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -14,13 +17,17 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.RippleDrawable
+import android.os.Bundle
 import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.view.accessibility.AccessibilityNodeInfo
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.Button
@@ -31,6 +38,9 @@ import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import androidx.recyclerview.widget.ItemTouchHelper
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import dev.amenhancer.glass.GlassPolicy
 import dev.amenhancer.module.CurrentSongDetails
 import dev.amenhancer.module.lyrics.LlmLyricsClient
@@ -443,7 +453,7 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                 renderEmbeddedAutomaticLyricsPage(
                     activity = activity,
                     parent = content,
-                    settings = draft.settings,
+                    currentSettings = { draft.settings },
                     onSettingsChanged = ::updateDraft,
                 )
             } else if (llmLyricsPage) {
@@ -1120,30 +1130,26 @@ internal fun EmbeddedSettingsHost.renderEmbeddedCustomLyricsPage(
 private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
     activity: Activity,
     parent: LinearLayout,
-    settings: ModuleSettings,
+    currentSettings: () -> ModuleSettings,
     onSettingsChanged: (ModuleSettings) -> Unit,
 ) {
+    val settings = currentSettings()
     val sourceOrder = ModuleSettings.normalizeAutomaticLyricsSourceOrder(settings.automaticLyricsSourceOrder)
     val nativeIndex = sourceOrder.indexOf(CustomLyricsSources.AM_NATIVE)
     val visibleSources = if (settings.automaticLyricsPreferNative) {
         sourceOrder.filterNot { it == CustomLyricsSources.AM_NATIVE }
     } else {
         sourceOrder
-    }
+    }.toMutableList()
 
-    fun moveSource(index: Int, offset: Int) {
-        val target = index + offset
-        if (target !in visibleSources.indices) return
-        val nextSources = visibleSources.toMutableList().apply {
-            add(target, removeAt(index))
-        }
+    fun saveSourceOrder() {
+        val nextSources = visibleSources.toMutableList()
         if (settings.automaticLyricsPreferNative) {
             nextSources.add(nativeIndex.coerceIn(0, nextSources.size), CustomLyricsSources.AM_NATIVE)
         }
-        onSettingsChanged(settings.copy(
+        onSettingsChanged(currentSettings().copy(
             automaticLyricsSourceOrder = ModuleSettings.normalizeAutomaticLyricsSourceOrder(nextSources),
         ))
-        pageRefresh?.invoke()
     }
 
     val settingsGroup = embeddedCard(activity, null) {
@@ -1158,7 +1164,7 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
         enabled = settings.customLyricsEnabled,
         compactWidePadding = true,
     ) {
-        onSettingsChanged(settings.copy(automaticLyricsEnabled = it))
+        onSettingsChanged(currentSettings().copy(automaticLyricsEnabled = it))
         pageRefresh?.invoke()
     })
     settingsGroup.addView(embeddedSpacer(activity, if (isEmbeddedPhone(activity)) 10 else 14))
@@ -1169,9 +1175,8 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
         settings.automaticLyricsPreferNative,
         compactWidePadding = true,
     ) {
-        onSettingsChanged(settings.copy(
+        onSettingsChanged(currentSettings().copy(
             automaticLyricsPreferNative = it,
-            automaticLyricsSourceOrder = sourceOrder,
         ))
         pageRefresh?.invoke()
     })
@@ -1189,49 +1194,217 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
                 } else {
                     ModuleText.AUTO_LYRICS_SOURCE_ORDER_ALL
                 },
-            )
+            ) + "\n" + localizedText(ModuleText.DRAG_TO_REORDER)
             textSize = 12f
             setEmbeddedTextColor(activity) { colors -> colors.secondary }
             setSingleLine(false)
-            setPadding(0, 0, 0, dp(activity, 4))
+            setPadding(0, 0, 0, dp(activity, 8))
         }, matchWidthWrapContent())
     }
     parent.addView(sourceGroup, matchWidthWrapContent())
-    visibleSources.forEachIndexed { index, source ->
-        sourceGroup.addView(LinearLayout(activity).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = dp(activity, 52)
-            setPaddingRelative(dp(activity, 4), dp(activity, 2), dp(activity, 4), dp(activity, 2))
-            addView(TextView(activity).apply {
-                text = embeddedCustomLyricsSourceName(source)
-                textSize = 14f
-                setEmbeddedTextColor(activity) { colors -> colors.text }
-                setSingleLine(false)
-                maxLines = 2
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            addView(embeddedActionButton(
-                activity = activity,
-                label = localizedText(ModuleText.MOVE_UP),
-                enabled = index > 0,
-            ) {
-                moveSource(index, -1)
-            }, LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { marginStart = dp(activity, 4) })
-            addView(embeddedActionButton(
-                activity = activity,
-                label = localizedText(ModuleText.MOVE_DOWN),
-                enabled = index < visibleSources.lastIndex,
-            ) {
-                moveSource(index, 1)
-            }, LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { marginStart = dp(activity, 4) })
-        }, matchWidthWrapContent())
+    lateinit var sourceAdapter: RecyclerView.Adapter<RecyclerView.ViewHolder>
+    lateinit var dragHelper: ItemTouchHelper
+    var dragStartOrder: List<String>? = null
+    var refreshAfterDrop = false
+
+    fun moveSource(from: Int, to: Int): Boolean {
+        if (from !in visibleSources.indices || to !in visibleSources.indices || from == to) return false
+        visibleSources.add(to, visibleSources.removeAt(from))
+        sourceAdapter.notifyItemMoved(from, to)
+        return true
     }
+
+    // AndroidX reads its own dimensions and IDs; the host Activity's resources
+    // belong to Apple Music, not to the module that owns this RecyclerView.
+    val moduleInfo = checkNotNull(dev.amenhancer.module.hook.ModernXposedRuntime.activeModule())
+        .moduleApplicationInfo
+    val moduleResources = activity.packageManager.getResourcesForApplication(moduleInfo)
+    @Suppress("DEPRECATION")
+    val listResources = Resources(moduleResources.assets, activity.resources.displayMetrics,
+        Configuration(activity.resources.configuration))
+    val listTheme = listResources.newTheme().apply {
+        applyStyle(moduleInfo.theme.takeIf { it != 0 } ?: android.R.style.Theme_Material_Light_NoActionBar, true)
+    }
+    val listContext = object : ContextWrapper(activity) {
+        override fun getResources(): Resources = listResources
+        override fun getAssets() = listResources.assets
+        override fun getTheme(): Resources.Theme = listTheme
+        override fun getClassLoader(): ClassLoader = RecyclerView::class.java.classLoader!!
+    }
+    val sourceList = object : RecyclerView(listContext) {
+        override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+            val initialOrder = dragStartOrder
+            if (initialOrder != null &&
+                (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL)
+            ) {
+                dragStartOrder = null
+                if (event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                    visibleSources.clear()
+                    visibleSources.addAll(initialOrder)
+                    sourceAdapter.notifyDataSetChanged()
+                } else if (visibleSources != initialOrder) {
+                    // Persist before drop animation or a following control can change this page.
+                    refreshAfterDrop = true
+                    saveSourceOrder()
+                }
+            }
+            val handled = super.dispatchTouchEvent(event)
+            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                this.parent?.requestDisallowInterceptTouchEvent(false)
+            }
+            return handled
+        }
+
+        override fun onAttachedToWindow() {
+            super.onAttachedToWindow()
+            dragHelper.attachToRecyclerView(this)
+        }
+
+        override fun onDetachedFromWindow() {
+            dragStartOrder?.let { initialOrder ->
+                visibleSources.clear()
+                visibleSources.addAll(initialOrder)
+                sourceAdapter.notifyDataSetChanged()
+            }
+            dragStartOrder = null
+            refreshAfterDrop = false
+            dragHelper.attachToRecyclerView(null)
+            super.onDetachedFromWindow()
+        }
+    }.apply {
+        layoutManager = LinearLayoutManager(activity)
+        isNestedScrollingEnabled = false
+        overScrollMode = View.OVER_SCROLL_NEVER
+        clipToPadding = false
+        setPadding(0, dp(activity, 4), 0, 0)
+        setHasFixedSize(true)
+    }
+
+    sourceAdapter = object : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+        init { setHasStableIds(true) }
+
+        override fun getItemCount(): Int = visibleSources.size
+
+        override fun getItemId(position: Int): Long =
+            ModuleSettings.DEFAULT_AUTOMATIC_LYRICS_SOURCE_ORDER.indexOf(visibleSources[position]).toLong()
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+            val row = LinearLayout(activity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = dp(activity, 56)
+                setPaddingRelative(dp(activity, 12), dp(activity, 4), dp(activity, 4), dp(activity, 4))
+                layoutParams = RecyclerView.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { bottomMargin = dp(activity, 6) }
+                bindEmbeddedTheme(activity) { colors ->
+                    background = EmbeddedG3Drawable().apply {
+                        setColor(colors.raised)
+                        cornerRadius = dp(activity, 12).toFloat()
+                    }
+                }
+                addView(TextView(activity).apply {
+                    textSize = 14f
+                    setEmbeddedTextColor(activity) { colors -> colors.text }
+                    setSingleLine(false)
+                    maxLines = 2
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(ImageView(activity).apply {
+                    setEmbeddedImageDrawable(activity, EmbeddedSettingsSvgAssets.glyphDrawable(
+                        EmbeddedSvgIcon.DragHandle, EmbeddedSettingsPalette.Light.secondary,
+                    ))
+                    scaleType = ImageView.ScaleType.CENTER_INSIDE
+                    setPadding(dp(activity, 12), dp(activity, 12), dp(activity, 12), dp(activity, 12))
+                    isFocusable = true
+                    tooltipText = localizedText(ModuleText.DRAG_TO_REORDER)
+                }, LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 48)))
+            }
+            return object : RecyclerView.ViewHolder(row) {}
+        }
+
+        override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+            val row = holder.itemView as LinearLayout
+            val label = row.getChildAt(0) as TextView
+            val handle = row.getChildAt(1) as ImageView
+            val sourceName = embeddedCustomLyricsSourceName(visibleSources[position])
+            label.text = sourceName
+            handle.contentDescription = localizedText(ModuleText.DRAG_SOURCE, sourceName)
+            handle.setOnTouchListener { view, event ->
+                if (event.actionMasked == MotionEvent.ACTION_DOWN &&
+                    holder.bindingAdapterPosition != RecyclerView.NO_POSITION
+                ) {
+                    sourceList.stopScroll()
+                    sourceList.parent?.requestDisallowInterceptTouchEvent(true)
+                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                    dragHelper.startDrag(holder)
+                } else if (event.actionMasked == MotionEvent.ACTION_UP) {
+                    view.performClick()
+                }
+                true
+            }
+            handle.accessibilityDelegate = object : View.AccessibilityDelegate() {
+                override fun onInitializeAccessibilityNodeInfo(host: View, info: AccessibilityNodeInfo) {
+                    super.onInitializeAccessibilityNodeInfo(host, info)
+                    val index = holder.bindingAdapterPosition
+                    if (index > 0) info.addAction(AccessibilityNodeInfo.AccessibilityAction(
+                        AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP.id,
+                        localizedText(ModuleText.MOVE_UP),
+                    ))
+                    if (index in 0 until visibleSources.lastIndex) {
+                        info.addAction(AccessibilityNodeInfo.AccessibilityAction(
+                            AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.id,
+                            localizedText(ModuleText.MOVE_DOWN),
+                        ))
+                    }
+                }
+
+                override fun performAccessibilityAction(host: View, action: Int, args: Bundle?): Boolean {
+                    val offset = when (action) {
+                        AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP.id -> -1
+                        AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.id -> 1
+                        else -> return super.performAccessibilityAction(host, action, args)
+                    }
+                    if (dragStartOrder != null || sourceList.isComputingLayout) return false
+                    val index = holder.bindingAdapterPosition
+                    if (!moveSource(index, index + offset)) return false
+                    saveSourceOrder()
+                    pageRefresh?.invoke()
+                    return true
+                }
+            }
+        }
+    }
+    sourceList.adapter = sourceAdapter
+    dragHelper = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0) {
+        override fun isLongPressDragEnabled(): Boolean = false
+        override fun isItemViewSwipeEnabled(): Boolean = false
+
+        override fun onMove(list: RecyclerView, holder: RecyclerView.ViewHolder, target: RecyclerView.ViewHolder): Boolean =
+            moveSource(holder.bindingAdapterPosition, target.bindingAdapterPosition)
+
+        override fun onSwiped(holder: RecyclerView.ViewHolder, direction: Int) = Unit
+
+        override fun onSelectedChanged(holder: RecyclerView.ViewHolder?, actionState: Int) {
+            super.onSelectedChanged(holder, actionState)
+            if (holder != null && actionState == ItemTouchHelper.ACTION_STATE_DRAG) {
+                dragStartOrder = visibleSources.toList()
+                refreshAfterDrop = false
+                holder.itemView.elevation = dp(activity, 8).toFloat()
+                holder.itemView.alpha = 0.96f
+            }
+        }
+
+        override fun clearView(list: RecyclerView, holder: RecyclerView.ViewHolder) {
+            super.clearView(list, holder)
+            holder.itemView.elevation = 0f
+            holder.itemView.alpha = 1f
+            if (refreshAfterDrop) {
+                refreshAfterDrop = false
+                list.post { if (list.isAttachedToWindow) pageRefresh?.invoke() }
+            }
+        }
+    })
+    sourceGroup.addView(sourceList, matchWidthWrapContent())
 }
 
 
