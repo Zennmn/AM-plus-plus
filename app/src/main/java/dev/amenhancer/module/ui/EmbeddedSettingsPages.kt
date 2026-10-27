@@ -1182,11 +1182,16 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
     })
 
     parent.addView(embeddedSpacer(activity, if (isEmbeddedPhone(activity)) 10 else 14))
+    val sourceContentStart = dp(activity, if (isEmbeddedPhone(activity)) 12 else 8)
+    val sourceContentEnd = dp(activity, 8)
     val sourceGroup = embeddedCard(
         activity,
         localizedText(ModuleText.AUTO_LYRICS_SOURCE_ORDER),
     ) {
         setPadding(dp(activity, 8), dp(activity, 8), dp(activity, 8), dp(activity, 8))
+        (getChildAt(0) as TextView).apply {
+            setPaddingRelative(sourceContentStart, paddingTop, sourceContentEnd, paddingBottom)
+        }
         addView(TextView(activity).apply {
             text = localizedText(
                 if (settings.automaticLyricsPreferNative) {
@@ -1198,7 +1203,7 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
             textSize = 12f
             setEmbeddedTextColor(activity) { colors -> colors.secondary }
             setSingleLine(false)
-            setPadding(0, 0, 0, dp(activity, 8))
+            setPaddingRelative(sourceContentStart, 0, sourceContentEnd, dp(activity, 8))
         }, matchWidthWrapContent())
     }
     parent.addView(sourceGroup, matchWidthWrapContent())
@@ -1293,7 +1298,7 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 minimumHeight = dp(activity, 56)
-                setPaddingRelative(dp(activity, 12), dp(activity, 4), dp(activity, 4), dp(activity, 4))
+                setPaddingRelative(sourceContentStart, dp(activity, 4), sourceContentEnd, dp(activity, 4))
                 layoutParams = RecyclerView.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                 ).apply { bottomMargin = dp(activity, 6) }

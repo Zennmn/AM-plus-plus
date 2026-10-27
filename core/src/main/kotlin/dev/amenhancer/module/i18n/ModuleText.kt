@@ -220,17 +220,17 @@ enum class ModuleText(internal val english: String, internal val chinese: String
     ),
     AUTO_LYRICS_PREFER_NATIVE("Prefer AM native", "优先使用 AM 原生"),
     AUTO_LYRICS_PREFER_NATIVE_SUMMARY(
-        "When enabled, qualifying AM native lyrics are used directly; otherwise continue with the source order",
-        "开启后 AM 原生达标时直接使用；未达标时按来源顺序查找",
+        "When enabled, qualifying AM native lyrics are preferred; when off, the same eligibility rules apply in source order",
+        "开启后优先使用达标原生；关闭后按来源排序，但原生仍须符合条件",
     ),
     AUTO_LYRICS_SOURCE_ORDER("Source priority", "来源排序"),
     AUTO_LYRICS_SOURCE_ORDER_NATIVE_HIDDEN(
-        "AM native is tried first when qualified; the remaining sources follow this order",
-        "AM 原生达标时优先使用；其余来源按此顺序查找",
+        "Prefer word-synced AM native lyrics, with translations for foreign-language lyrics; otherwise search in this order. Keep native lyrics if no source matches.",
+        "AM 原生为逐字歌词且外语有译文时优先使用；否则按下方顺序查找，无结果则保留原生。",
     ),
     AUTO_LYRICS_SOURCE_ORDER_ALL(
-        "All sources, including AM native, follow this order",
-        "包括 AM 原生在内，所有来源按此顺序查找",
+        "Search in this order. AM native lyrics must still be word-synced, with translations for foreign-language lyrics; otherwise keep searching. Fall back to native lyrics if no source matches.",
+        "按下方顺序查找；AM 原生须为逐字歌词，外语还需有译文，否则继续查找。均无结果时保留原生。",
     ),
     DRAG_TO_REORDER(
         "Hold the drag handle on the right to reorder",

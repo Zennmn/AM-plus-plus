@@ -257,7 +257,9 @@ Fragment view 重建、配置变化与 controller 销毁分别关闭会话。状
 | `host-applemusic` | `CurrentItemIdentitySeam`、`OpaqueTtmlParser`、`TtmlTimingObservationRegistry` 与结果 Bridge：原生对象及反射只在适配层 |
 | `app` | `AppleMusicAssembly` 与 [AutoLyricsReplacementSession.kt](../app/src/main/java/dev/amenhancer/module/hook/AutoLyricsReplacementSession.kt) 的 `createAutoLyricsRuntime`：存储、执行器、来源服务与配置装配 |
 
-**通用维护。** 歌曲禁用优先于模块候选，可用手动结果优先。`automatic_lyrics_prefer_native` 默认及缺键开启，沿用原生保留与逐字/语言/译文资格；关闭后，AM 原生按 `automatic_lyrics_source_order` 的位置参与选择。有可用原生结果时只查询排在原生前的第三方来源；这些来源均未命中即采用原生，不再查询其后的来源。原生不可用时跳过该项，查询其余来源。AM 原生来自宿主结果，不新增网络客户端，也不发布成自定义条目。
+**通用维护。** 歌曲禁用优先于模块候选，可用手动结果优先。`automatic_lyrics_prefer_native` 默认及缺键开启；开启时达标原生优先，关闭时 AM 原生按 `automatic_lyrics_source_order` 的位置参与选择。两种模式共用既有逐字/语言/译文资格：已观察的原生须为逐字，已声明外语的逐字原生还须有非空译文；未观察的现存原生指针继续保守保留，不从正文猜测语言或质量。
+
+只有原生符合上述资格时，排序模式才仅查询其前置第三方来源，前置均未命中后采用原生。不达标或不可用时跳过原生项，查询所有第三方来源，包括原生之后的来源；全部未命中时仍保留可用原生，不清空当前歌词。AM 原生来自宿主结果，不新增网络客户端，也不发布成自定义条目。
 
 来源顺序以稳定 ID 保存，默认 AMLL → Lunabeat → AM-Lyrics → AM 原生；配置解码及写入过滤未知项、去重并补齐缺项。`automaticLyricsLookupSources` 统一计算结果选择、解析观察、可用性补偿和切歌预热的第三方查询范围。来源范围变化撤销旧请求代次，迟到结果不能越过新的原生位置；宿主通道适配不能重置用户顺序或改变这套选择规则。
 
@@ -312,7 +314,7 @@ AMLL 转换器及 `scripts/amll_to_apple_ttml.py` 的译文/音译和声节点�
 | [LlmLyricsReplacementSession.kt](../core/src/main/kotlin/dev/amenhancer/module/hook/LlmLyricsReplacementSession.kt) | 播放代次、原生被采用的门禁、去重与原生指针准备 |
 | `app` / `host-applemusic` | 设置/私有存储/后台装配，以及原文观察/模块解析排除/共用结果提交，各守既有边界 |
 
-手动/禁用状态及来源选择先于 LLM 缓存；只有最终采用 AM 原生时才允许补翻译，每次再播放重新判断。原生前的来源尚未完成时不开始翻译，原生后的来源不阻挡翻译；采用第三方或手动结果时撤销在途及就绪译文。`onNativeSelected` 只由选源结果授予资格，输入仍须来自当前原生指针关联的原文，不以模块生成的 TTML 代替。
+手动/禁用状态及来源选择先于 LLM 缓存；只有最终采用 AM 原生时才允许补翻译，每次再播放重新判断。所需的第三方查询尚未完成时不开始翻译；原生不达标时须等全部第三方未命中后回退原生，再判断翻译资格。达标原生之后的来源不参与本次查询；采用第三方或手动结果时撤销在途及就绪译文。`onNativeSelected` 只由选源结果授予资格，输入仍须来自当前原生指针关联的原文，不以模块生成的 TTML 代替。
 
 输入须有可用逐行或逐字时间轴；纯文本、无时间轴、空歌词不翻译。根 `xml:lang` 的中文、简繁体/地区标签与中文别名整首跳过；逐字文档缺根语言时不调用 LLM，自动查源仍按所选策略判断。逐行文档保守判断文本，含汉字的日文不能直接判中文。
 

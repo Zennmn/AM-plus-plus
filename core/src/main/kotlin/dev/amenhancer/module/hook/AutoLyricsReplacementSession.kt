@@ -42,13 +42,15 @@ fun automaticLyricsLookupSources(
     if (!settings.customLyricsEnabled || !settings.automaticLyricsEnabled) return emptyList()
     val order = ModuleSettings.normalizeAutomaticLyricsSourceOrder(settings.automaticLyricsSourceOrder)
     val thirdParty = order.filterNot { it == CustomLyricsSources.AM_NATIVE }
+    // Source position never relaxes the existing native timing/translation policy.
+    // Unobserved live native pointers retain the same conservative handling.
+    val nativeMeetsPolicy = nativeAvailable &&
+        metadata?.timingMode != TtmlTimingMode.NON_WORD &&
+        metadata?.needsTranslationFallback != true
     if (settings.automaticLyricsPreferNative) {
-        val nativeWins = nativeAvailable &&
-            metadata?.timingMode != TtmlTimingMode.NON_WORD &&
-            metadata?.needsTranslationFallback != true
-        return if (nativeWins) emptyList() else thirdParty
+        return if (nativeMeetsPolicy) emptyList() else thirdParty
     }
-    if (!nativeAvailable) return thirdParty
+    if (!nativeMeetsPolicy) return thirdParty
     return order.takeWhile { it != CustomLyricsSources.AM_NATIVE }
         .filterNot { it == CustomLyricsSources.AM_NATIVE }
 }
