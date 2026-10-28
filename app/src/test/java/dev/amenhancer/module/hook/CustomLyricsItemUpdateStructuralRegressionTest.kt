@@ -84,9 +84,9 @@ class CustomLyricsItemUpdateStructuralRegressionTest {
         assertTrue(target.contains("mainHandler.post {"))
         assertTrue(target.contains("resultBridge.onReplacementPublished(appleMusicId)"))
         assertEquals(
-            // Configured lyrics, automatic fallback, cache refresh, LLM and
-            // native-ID submission repair each publish.
-            5,
+            // Configured lyrics, automatic fallback, cache refresh, LLM,
+            // native-ID submission repair and automatic lookup misses each publish.
+            6,
             Regex("resultBridge\\.onReplacementPublished").findAll(target).count(),
         )
         assertTrue(
@@ -104,9 +104,10 @@ class CustomLyricsItemUpdateStructuralRegressionTest {
         assertTrue(target.contains("val selectReplacement: (Long, Long, Any?) -> Any?"))
         assertTrue(target.contains("selectReplacement = selectReplacement,"))
         assertTrue(target.contains("session.replacementFor(id)"))
-        assertTrue(target.contains("autoSession?.takeoverReplacementFor("))
-        assertTrue(target.contains("autoSession?.markTakeoverApplied(id)"))
-        assertTrue(target.contains("parser.forSubmission(manual ?: automatic ?: translated, id, nativeId)"))
+        assertTrue(target.contains("automaticLyricsLookupSources(settings, native != null, metadata)"))
+        assertTrue(target.contains("autoSession?.configureSources(id, sources)"))
+        assertTrue(target.contains("if (sources.isNotEmpty()) autoSession?.replacementFor(id) else null"))
+        assertTrue(target.contains("parser.forSubmission(manual ?: automatic ?: translated ?: native, id, nativeId)"))
         assertTrue(
             target.indexOf("val selectReplacement:") <
                 target.indexOf("LyricsResultSubmissionBridge.create("),
@@ -163,8 +164,9 @@ class CustomLyricsItemUpdateStructuralRegressionTest {
         )
 
         assertTrue(target.contains("metadataOfAppleMusicId(id)"))
-        assertTrue(target.contains("shouldTryAutoLyricsForMetadata(metadata)"))
-        assertTrue(target.contains("session.readyReplacementFor(appleMusicId) == null"))
+        assertTrue(target.contains("automaticLyricsLookupSources(config.settings(), true, metadata)"))
+        assertTrue(target.contains("(!session.isMapped(appleMusicId) || session.isAutoManaged(appleMusicId))"))
+        assertTrue(target.contains("if (manual == null && automaticEnabled)"))
     }
 
     @Test
