@@ -1199,8 +1199,26 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.TOP
             setPaddingRelative(sourceContentStart, 0, sourceContentEnd, 0)
-            addView(embeddedSectionLabel(activity, localizedText(ModuleText.AUTO_LYRICS_SOURCE_ORDER)),
-                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(LinearLayout(activity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(embeddedSectionLabel(activity, localizedText(ModuleText.AUTO_LYRICS_SOURCE_ORDER)).apply {
+                    setPadding(0, 0, 0, dp(activity, 4))
+                }, matchWidthWrapContent())
+                addView(TextView(activity).apply {
+                    text = localizedText(
+                        if (settings.automaticLyricsPreferNative) {
+                            ModuleText.AUTO_LYRICS_SOURCE_ORDER_NATIVE_HIDDEN
+                        } else {
+                            ModuleText.AUTO_LYRICS_SOURCE_ORDER_ALL
+                        },
+                    ) + "\n" + localizedText(ModuleText.DRAG_TO_REORDER) +
+                        if (settings.automaticLyricsPreferNative) "" else "\n" + localizedText(ModuleText.LUNABEAT_AFTER_NATIVE)
+                    textSize = 12f
+                    setEmbeddedTextColor(activity) { colors -> colors.secondary }
+                    setSingleLine(false)
+                    setPadding(0, 0, 0, dp(activity, 8))
+                }, matchWidthWrapContent())
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             addView(ImageView(activity).apply {
                 setEmbeddedImageDrawable(activity, embeddedSvgDrawable(EmbeddedSvgIcon.RestoreDefault, activity))
                 scaleType = ImageView.ScaleType.CENTER_INSIDE
@@ -1222,20 +1240,6 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
             }, LinearLayout.LayoutParams(dp(activity, 44), dp(activity, 44)).apply {
                 marginStart = dp(activity, 8)
             })
-        }, matchWidthWrapContent())
-        addView(TextView(activity).apply {
-            text = localizedText(
-                if (settings.automaticLyricsPreferNative) {
-                    ModuleText.AUTO_LYRICS_SOURCE_ORDER_NATIVE_HIDDEN
-                } else {
-                    ModuleText.AUTO_LYRICS_SOURCE_ORDER_ALL
-                },
-            ) + "\n" + localizedText(ModuleText.DRAG_TO_REORDER) +
-                if (settings.automaticLyricsPreferNative) "" else "\n" + localizedText(ModuleText.LUNABEAT_AFTER_NATIVE)
-            textSize = 12f
-            setEmbeddedTextColor(activity) { colors -> colors.secondary }
-            setSingleLine(false)
-            setPaddingRelative(sourceContentStart, 0, sourceContentEnd, dp(activity, 8))
         }, matchWidthWrapContent())
     }
     parent.addView(sourceGroup, matchWidthWrapContent())
