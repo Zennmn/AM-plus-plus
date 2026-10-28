@@ -276,7 +276,6 @@ enum class ModuleText(internal val english: String, internal val chinese: String
     GOT_IT("Got it", "知道了"),
     LYRIC_BLUR_OFFSET("Lyric blur radius offset", "歌词模糊半径偏移"),
     RESET_DEFAULT("Reset to default", "恢复默认"),
-    RESET("Reset", "重置"),
     /**
      * The module's "this has never run on a device" marker, shown as a badge on the row.
      *

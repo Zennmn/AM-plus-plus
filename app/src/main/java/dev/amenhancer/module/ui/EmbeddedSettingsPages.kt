@@ -1201,16 +1201,25 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
             setPaddingRelative(sourceContentStart, 0, sourceContentEnd, 0)
             addView(embeddedSectionLabel(activity, localizedText(ModuleText.AUTO_LYRICS_SOURCE_ORDER)),
                 LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            addView(embeddedActionButton(activity, localizedText(ModuleText.RESET)) {
-                onSettingsChanged(currentSettings().copy(
-                    automaticLyricsSourceOrder = ModuleSettings.DEFAULT_AUTOMATIC_LYRICS_SOURCE_ORDER,
-                ))
-                pageRefresh?.invoke()
-            }.apply {
-                minHeight = dp(activity, 44)
-                minimumHeight = dp(activity, 44)
-                setPadding(dp(activity, 12), 0, dp(activity, 12), 0)
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(activity, 44)).apply {
+            addView(ImageView(activity).apply {
+                setEmbeddedImageDrawable(activity, embeddedSvgDrawable(EmbeddedSvgIcon.RestoreDefault, activity))
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                contentDescription = localizedText(ModuleText.AUTO_LYRICS_SOURCE_ORDER) +
+                    "，" + localizedText(ModuleText.RESET_DEFAULT)
+                tooltipText = localizedText(ModuleText.RESET_DEFAULT)
+                isClickable = true
+                isFocusable = true
+                setPadding(dp(activity, 13), dp(activity, 13), dp(activity, 13), dp(activity, 13))
+                bindEmbeddedClickFeedback(activity, cornerRadiusDp = 22)
+                setOnClickListener {
+                    fromEmbeddedSettingsView(this) {
+                        onSettingsChanged(currentSettings().copy(
+                            automaticLyricsSourceOrder = ModuleSettings.DEFAULT_AUTOMATIC_LYRICS_SOURCE_ORDER,
+                        ))
+                        pageRefresh?.invoke()
+                    }
+                }
+            }, LinearLayout.LayoutParams(dp(activity, 44), dp(activity, 44)).apply {
                 marginStart = dp(activity, 8)
             })
         }, matchWidthWrapContent())
