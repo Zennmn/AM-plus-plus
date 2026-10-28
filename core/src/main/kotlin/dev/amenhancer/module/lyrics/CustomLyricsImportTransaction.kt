@@ -13,6 +13,7 @@ data class CustomLyricsDraft(
     val ttml: String,
     val source: String = CustomLyricsSources.MANUAL,
     val enabled: Boolean = true,
+    val autoManaged: Boolean = false,
 )
 
 data class CustomLyricsMultiIdDraft(
@@ -21,6 +22,7 @@ data class CustomLyricsMultiIdDraft(
     val ttml: String,
     val source: String = CustomLyricsSources.MANUAL,
     val enabled: Boolean = true,
+    val autoManaged: Boolean = false,
 )
 
 sealed interface CustomLyricsSaveResult {
@@ -61,6 +63,7 @@ class CustomLyricsImportTransaction(
                 ttml = draft.ttml,
                 source = draft.source,
                 enabled = draft.enabled,
+                autoManaged = draft.autoManaged,
             ),
             replacingAppleMusicIds = replacingAppleMusicId?.let(::listOf).orEmpty(),
         )
@@ -91,6 +94,11 @@ class CustomLyricsImportTransaction(
         val replacedEntries = oldManifest.entries.filter { it.appleMusicId in replacingIds }
         if (replacedEntries.size != replacingIds.size) {
             return CustomLyricsBatchSaveResult.Failed(ModuleText.ORIGINAL_MAPPING_MISSING.text())
+        }
+        // This runs under the content transaction's mutation lock. A manual edit or
+        // disable made after the automatic publisher's initial read must still win.
+        if (draft.autoManaged && replacedEntries.any { !it.autoManaged || !it.enabled }) {
+            return CustomLyricsBatchSaveResult.Failed(ModuleText.LYRICS_INDEX_CHANGED.text())
         }
         if (oldManifest.entries.any {
                 it.appleMusicId in draft.appleMusicIds && it.appleMusicId !in replacingIds
@@ -132,6 +140,7 @@ class CustomLyricsImportTransaction(
                 sha256 = accepted.sha256,
                 source = draft.source,
                 enabled = draft.enabled,
+                autoManaged = draft.autoManaged,
             )
         }
 

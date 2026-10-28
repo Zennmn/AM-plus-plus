@@ -210,7 +210,7 @@ class CustomLyricsUpdateTransaction(
                 sizeBytes = accepted.bytes.size.toLong(),
                 sha256 = accepted.sha256,
                 source = item.replacementSource ?: previous.source,
-                // ID, enabled and displayName remain local state. Only a legacy
+                // ID, enabled, displayName and autoManaged remain local state. Only a legacy
                 // AUTO_CACHE origin can be recovered from a remote candidate.
             )
         }

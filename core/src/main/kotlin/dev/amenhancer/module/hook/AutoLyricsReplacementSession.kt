@@ -1,3 +1,6 @@
+// The app runtime has a same-package Kotlin file with the same name.
+@file:kotlin.jvm.JvmName("AutoLyricsReplacementCoreKt")
+
 package dev.amenhancer.module.hook
 
 import dev.amenhancer.module.lyrics.source.AutoLyricsSourceResolver
@@ -6,6 +9,7 @@ import dev.amenhancer.module.lyrics.CustomLyricsDraft
 import dev.amenhancer.module.lyrics.CustomLyricsSaveResult
 import dev.amenhancer.module.lyrics.TtmlInputPolicy
 import dev.amenhancer.module.model.CustomLyricsSources
+import dev.amenhancer.module.model.ModuleSettings
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -28,6 +32,28 @@ data class AutoLyricsCandidate(
     val ttml: String,
     val displayName: String? = null,
 )
+
+/** Selects remote providers to query; AM_NATIVE itself is handled by the host. */
+fun automaticLyricsLookupSources(
+    settings: ModuleSettings,
+    nativeAvailable: Boolean,
+    metadata: TtmlDocumentMetadata?,
+): List<String> {
+    if (!settings.customLyricsEnabled || !settings.automaticLyricsEnabled) return emptyList()
+    val order = ModuleSettings.normalizeAutomaticLyricsSourceOrder(settings.automaticLyricsSourceOrder)
+    val thirdParty = order.filterNot { it == CustomLyricsSources.AM_NATIVE }
+    // Source position never relaxes the existing native timing/translation policy.
+    // Unobserved live native pointers retain the same conservative handling.
+    val nativeMeetsPolicy = nativeAvailable &&
+        metadata?.timingMode != TtmlTimingMode.NON_WORD &&
+        metadata?.needsTranslationFallback != true
+    if (settings.automaticLyricsPreferNative) {
+        return if (nativeMeetsPolicy) emptyList() else thirdParty
+    }
+    if (!nativeMeetsPolicy) return thirdParty
+    return order.takeWhile { it != CustomLyricsSources.AM_NATIVE }
+        .filterNot { it == CustomLyricsSources.AM_NATIVE }
+}
 
 /** Persistent raw-TTML cache seam; all calls happen off the I2/main hot path. */
 interface AutoLyricsCache {
@@ -231,6 +257,8 @@ class AutoLyricsReplacementSession(
     private val retryCooldownMs: Long = DEFAULT_RETRY_COOLDOWN_MS,
     private val onFreshCandidate: ((Long) -> Unit)? = null,
     private val onLookupMiss: ((Long) -> Unit)? = null,
+    private val fetchOrderedCandidate: ((Long, List<String>, AutoLyricsCandidate?) -> AutoLyricsCandidate?)? =
+        null,
 ) {
     private val pointers = object : LinkedHashMap<Long, Any>(CACHE_CAPACITY, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, Any>?): Boolean =
@@ -239,29 +267,56 @@ class AutoLyricsReplacementSession(
     private val lock = Any()
     private val pending = mutableMapOf<Long, Long>()
     private val failedUntil = mutableMapOf<Long, Long>()
-    private var generation = 0L
+    private val sourcePlans = mutableMapOf<Long, List<String>>()
+    private val currentRequests = mutableMapOf<Long, Long>()
+    private val lookupMisses = mutableMapOf<Long, Long>()
+    private var nextRequestStamp = 0L
     private var activeSongKnown = false
     private var activeAppleMusicId: Long? = null
     private val activeTakeovers = mutableSetOf<Long>()
 
     /** Invalidates in-flight results and native pointers only when playback changes. */
-    fun onSongChanged(appleMusicId: Long?) {
-        val changed = synchronized(lock) {
-            val sameSong = activeSongKnown == (appleMusicId != null) &&
-                activeAppleMusicId == appleMusicId
-            if (!sameSong) {
-                generation += 1L
-                activeSongKnown = appleMusicId != null
-                activeAppleMusicId = appleMusicId
-                pending.clear()
-                failedUntil.clear()
-                activeTakeovers.clear()
-            }
-            !sameSong
-        }
-        if (changed) {
+    fun onSongChanged(appleMusicId: Long?) = synchronized(lock) {
+        val sameSong = activeSongKnown == (appleMusicId != null) &&
+            activeAppleMusicId == appleMusicId
+        if (!sameSong) {
+            activeSongKnown = appleMusicId != null
+            activeAppleMusicId = appleMusicId
+            pending.clear()
+            failedUntil.clear()
+            sourcePlans.clear()
+            currentRequests.clear()
+            lookupMisses.clear()
+            activeTakeovers.clear()
             synchronized(pointers) {
                 pointers.clear()
+            }
+        }
+    }
+
+    /** Replaces one song's lookup plan without disturbing work for other songs. */
+    fun configureSources(appleMusicId: Long, sources: List<String>) {
+        if (appleMusicId <= 0L) return
+        val plan = sources.toList()
+        synchronized(lock) {
+            if (!isCurrentSongLocked(appleMusicId)) return@synchronized
+            if (sourcePlans[appleMusicId] == plan) return@synchronized
+            sourcePlans[appleMusicId] = plan
+            invalidateSongLocked(appleMusicId)
+            synchronized(pointers) {
+                pointers.remove(appleMusicId)
+            }
+        }
+    }
+
+    /** Drops prepared work for one song while retaining its source plan for the next request. */
+    fun invalidate(appleMusicId: Long) {
+        if (appleMusicId <= 0L) return
+        synchronized(lock) {
+            if (!isCurrentSongLocked(appleMusicId)) return@synchronized
+            invalidateSongLocked(appleMusicId)
+            synchronized(pointers) {
+                pointers.remove(appleMusicId)
             }
         }
     }
@@ -282,6 +337,17 @@ class AutoLyricsReplacementSession(
     fun isTracking(appleMusicId: Long): Boolean = synchronized(lock) {
         appleMusicId > 0L && isCurrentSongLocked(appleMusicId) && isAllowed(appleMusicId) &&
             (appleMusicId in pending || synchronized(pointers) { appleMusicId in pointers })
+    }
+
+    /** True only while the active request's source plan has produced no usable candidate. */
+    fun hasLookupMiss(appleMusicId: Long): Boolean = synchronized(lock) {
+        if (appleMusicId <= 0L || !isCurrentSongLocked(appleMusicId) || !isAllowed(appleMusicId)) {
+            false
+        } else {
+            val plan = sourcePlans[appleMusicId]
+            plan != null && plan.isEmpty() ||
+                currentRequests[appleMusicId]?.let { lookupMisses[appleMusicId] == it } == true
+        }
     }
 
     fun readyReplacementFor(appleMusicId: Long): Any? {
@@ -333,45 +399,58 @@ class AutoLyricsReplacementSession(
     }
 
     private fun request(appleMusicId: Long) {
+        var lookupMissStamp: Long? = null
         synchronized(lock) {
             if (!isCurrentSongLocked(appleMusicId)) return
-            val requestGeneration = generation
-            if (pending[appleMusicId] == requestGeneration) return
+            if (pending[appleMusicId] != null) return
             synchronized(pointers) {
                 if (appleMusicId in pointers) return
             }
             val retryAt = failedUntil[appleMusicId] ?: 0L
             if (retryAt > nowMs()) return
-            pending[appleMusicId] = requestGeneration
-            try {
-                executor.execute { prepare(appleMusicId, requestGeneration) }
-            } catch (_: RejectedExecutionException) {
-                if (pending[appleMusicId] == requestGeneration) pending.remove(appleMusicId)
-                logger("automatic lyrics prepare was rejected for $appleMusicId")
+            val requestGeneration = ++nextRequestStamp
+            currentRequests[appleMusicId] = requestGeneration
+            val sources = sourcePlans[appleMusicId]?.toList()
+            if (sources != null && sources.isEmpty()) {
+                lookupMisses[appleMusicId] = requestGeneration
+                failedUntil[appleMusicId] = nowMs() + retryCooldownMs
+                lookupMissStamp = requestGeneration
+            } else {
+                lookupMisses.remove(appleMusicId)
+                pending[appleMusicId] = requestGeneration
+                try {
+                    executor.execute { prepare(appleMusicId, requestGeneration, sources) }
+                } catch (_: RejectedExecutionException) {
+                    if (pending[appleMusicId] == requestGeneration) pending.remove(appleMusicId)
+                    logger("automatic lyrics prepare was rejected for $appleMusicId")
+                }
             }
         }
+        lookupMissStamp?.let { notifyLookupMissIfCurrent(appleMusicId, it) }
     }
 
-    private fun prepare(appleMusicId: Long, requestGeneration: Long) {
+    private fun prepare(
+        appleMusicId: Long,
+        requestGeneration: Long,
+        sources: List<String>?,
+    ) {
         var published = false
         var preparedCandidate: AutoLyricsCandidate? = null
         var preparedPointer: Any? = null
+        var lookupMissed = false
         try {
             if (!isCurrentRequest(appleMusicId, requestGeneration)) return
-            val cached = runCatching { cache.readCandidate(appleMusicId) }.getOrNull()
-            if (cached != null && isCurrentRequest(appleMusicId, requestGeneration)) {
-                val candidate = cached
-                preparedPointer = preparePointer(
-                    candidate.ttml,
-                    appleMusicId,
-                    source = candidate.source,
-                    requestGeneration = requestGeneration,
-                )
-                published = preparedPointer != null
-                if (published) preparedCandidate = candidate
+            if (sources != null && sources.isEmpty()) {
+                lookupMissed = markLookupMissIfCurrent(appleMusicId, requestGeneration)
+                return
             }
-            if (!published && isCurrentRequest(appleMusicId, requestGeneration)) {
-                val candidate = runCatching { fetchCandidate(appleMusicId) }.getOrNull()
+            val orderedFetch = fetchOrderedCandidate
+            if (orderedFetch != null && sources != null) {
+                val cached = runCatching { cache.readCandidate(appleMusicId) }.getOrNull()
+                if (!isCurrentRequest(appleMusicId, requestGeneration)) return
+                val candidate = runCatching {
+                    orderedFetch(appleMusicId, sources, cached)
+                }.getOrNull()
                 if (candidate != null && isCurrentRequest(appleMusicId, requestGeneration)) {
                     preparedPointer = preparePointer(
                         candidate.ttml,
@@ -382,9 +461,43 @@ class AutoLyricsReplacementSession(
                     published = preparedPointer != null
                     if (published) {
                         preparedCandidate = candidate
-                        onFreshCandidate?.invoke(appleMusicId)
-                        if (isCurrentRequest(appleMusicId, requestGeneration)) {
-                            runCatching { cache.writeCandidate(appleMusicId, candidate) }
+                        if (candidate !== cached) {
+                            onFreshCandidate?.invoke(appleMusicId)
+                            if (isCurrentRequest(appleMusicId, requestGeneration)) {
+                                runCatching { cache.writeCandidate(appleMusicId, candidate) }
+                            }
+                        }
+                    }
+                }
+            } else {
+                val cached = runCatching { cache.readCandidate(appleMusicId) }.getOrNull()
+                if (!isCurrentRequest(appleMusicId, requestGeneration)) return
+                if (cached != null) {
+                    preparedPointer = preparePointer(
+                        cached.ttml,
+                        appleMusicId,
+                        cached.source,
+                        requestGeneration,
+                    )
+                    published = preparedPointer != null
+                    if (published) preparedCandidate = cached
+                }
+                if (!published && isCurrentRequest(appleMusicId, requestGeneration)) {
+                    val candidate = runCatching { fetchCandidate(appleMusicId) }.getOrNull()
+                    if (candidate != null && isCurrentRequest(appleMusicId, requestGeneration)) {
+                        preparedPointer = preparePointer(
+                            candidate.ttml,
+                            appleMusicId,
+                            candidate.source,
+                            requestGeneration,
+                        )
+                        published = preparedPointer != null
+                        if (published) {
+                            preparedCandidate = candidate
+                            onFreshCandidate?.invoke(appleMusicId)
+                            if (isCurrentRequest(appleMusicId, requestGeneration)) {
+                                runCatching { cache.writeCandidate(appleMusicId, candidate) }
+                            }
                         }
                     }
                 }
@@ -394,10 +507,7 @@ class AutoLyricsReplacementSession(
             ) {
                 removePointerIf(appleMusicId, preparedPointer)
                 if (!published || preparedCandidate == null) {
-                    markFailedIfCurrent(appleMusicId, requestGeneration)
-                    if (isCurrentRequest(appleMusicId, requestGeneration)) {
-                        runCatching { onLookupMiss?.invoke(appleMusicId) }
-                    }
+                    lookupMissed = markLookupMissIfCurrent(appleMusicId, requestGeneration)
                 }
                 return
             }
@@ -408,14 +518,15 @@ class AutoLyricsReplacementSession(
             when (publishResult) {
                 null,
                 AutoLyricsPublishResult.PUBLISHED -> {
-                    if (publishResult == AutoLyricsPublishResult.PUBLISHED) {
-                        runCatching { cache.delete(appleMusicId) }
-                    }
                     if (isCurrentRequest(appleMusicId, requestGeneration)) {
+                        if (publishResult == AutoLyricsPublishResult.PUBLISHED) {
+                            runCatching { cache.delete(appleMusicId) }
+                        }
                         onReplacementPublished?.invoke(appleMusicId)
                         synchronized(lock) {
                             if (isCurrentRequestLocked(appleMusicId, requestGeneration)) {
                                 failedUntil.remove(appleMusicId)
+                                lookupMisses.remove(appleMusicId)
                             }
                         }
                     } else {
@@ -423,7 +534,9 @@ class AutoLyricsReplacementSession(
                     }
                 }
                 AutoLyricsPublishResult.ALREADY_CONFIGURED -> {
-                    runCatching { cache.delete(appleMusicId) }
+                    if (isCurrentRequest(appleMusicId, requestGeneration)) {
+                        runCatching { cache.delete(appleMusicId) }
+                    }
                     removePointerIf(appleMusicId, preparedPointer)
                 }
                 AutoLyricsPublishResult.FAILED -> {
@@ -435,6 +548,7 @@ class AutoLyricsReplacementSession(
             synchronized(lock) {
                 if (pending[appleMusicId] == requestGeneration) pending.remove(appleMusicId)
             }
+            if (lookupMissed) notifyLookupMissIfCurrent(appleMusicId, requestGeneration)
         }
     }
 
@@ -479,6 +593,25 @@ class AutoLyricsReplacementSession(
         }
     }
 
+    private fun markLookupMissIfCurrent(appleMusicId: Long, requestGeneration: Long): Boolean =
+        synchronized(lock) {
+            if (!isCurrentRequestLocked(appleMusicId, requestGeneration)) {
+                false
+            } else {
+                failedUntil[appleMusicId] = nowMs() + retryCooldownMs
+                lookupMisses[appleMusicId] = requestGeneration
+                true
+            }
+        }
+
+    private fun notifyLookupMissIfCurrent(appleMusicId: Long, requestGeneration: Long) {
+        val current = synchronized(lock) {
+            isCurrentRequestLocked(appleMusicId, requestGeneration) &&
+                lookupMisses[appleMusicId] == requestGeneration
+        }
+        if (current) runCatching { onLookupMiss?.invoke(appleMusicId) }
+    }
+
     private fun isPrepared(pointer: Any?, appleMusicId: Long): Boolean = runCatching {
         pointer != null && verifyPtr(pointer) && readAdamId(pointer) == appleMusicId
     }.getOrDefault(false)
@@ -494,9 +627,17 @@ class AutoLyricsReplacementSession(
         synchronized(lock) { isCurrentRequestLocked(appleMusicId, requestGeneration) }
 
     private fun isCurrentRequestLocked(appleMusicId: Long, requestGeneration: Long): Boolean =
-        generation == requestGeneration &&
+        currentRequests[appleMusicId] == requestGeneration &&
             isCurrentSongLocked(appleMusicId) &&
             isAllowed(appleMusicId)
+
+    private fun invalidateSongLocked(appleMusicId: Long) {
+        currentRequests.remove(appleMusicId)
+        pending.remove(appleMusicId)
+        failedUntil.remove(appleMusicId)
+        lookupMisses.remove(appleMusicId)
+        activeTakeovers.remove(appleMusicId)
+    }
 
     private fun removePointerIf(appleMusicId: Long, pointer: Any?) {
         if (pointer == null) return

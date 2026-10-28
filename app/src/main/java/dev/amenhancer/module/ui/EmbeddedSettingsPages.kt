@@ -6,7 +6,10 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.app.Dialog
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.res.ColorStateList
+import android.content.res.Configuration
+import android.content.res.Resources
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -14,13 +17,17 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.RippleDrawable
+import android.os.Bundle
 import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.view.accessibility.AccessibilityNodeInfo
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.Button
@@ -31,6 +38,9 @@ import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import androidx.recyclerview.widget.ItemTouchHelper
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import dev.amenhancer.glass.GlassPolicy
 import dev.amenhancer.module.CurrentSongDetails
 import dev.amenhancer.module.lyrics.LlmLyricsClient
@@ -285,8 +295,9 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                 return
             }
             val customLyricsPage = nextPage == EmbeddedSettingsPage.CUSTOM_LYRICS
+            val automaticLyricsPage = nextPage == EmbeddedSettingsPage.AUTOMATIC_LYRICS
             val llmLyricsPage = nextPage == EmbeddedSettingsPage.LLM_LYRICS
-            val lyricsPage = customLyricsPage || llmLyricsPage
+            val lyricsPage = customLyricsPage || automaticLyricsPage || llmLyricsPage
             val bottomInset = dp(activity, when {
                 nextPage == EmbeddedSettingsPage.MAIN -> 0
                 lyricsPage -> 8
@@ -342,7 +353,7 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                 stopPageTransition = null
                 clearOutgoingPage()
                 val startBounds = RectF(panelBounds)
-                val snapshot = if (dialogReady) pageHost.captureEmbeddedSettingsBackdrop() else null
+                val snapshot = if (dialogReady && changingPage) pageHost.captureEmbeddedSettingsBackdrop() else null
                 val outgoing = snapshot?.let { backdrop ->
                     ImageView(activity).apply {
                         setImageDrawable(backdrop)
@@ -369,6 +380,7 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                 pageTitle.text = when (page) {
                     EmbeddedSettingsPage.MAIN -> "AM++"
                     EmbeddedSettingsPage.CUSTOM_LYRICS -> localizedText(ModuleText.CATEGORY_LYRICS_MANAGEMENT)
+                    EmbeddedSettingsPage.AUTOMATIC_LYRICS -> localizedText(ModuleText.AUTO_LYRICS)
                     EmbeddedSettingsPage.LYRICS_EFFECTS -> localizedText(ModuleText.CATEGORY_LYRICS_EFFECTS)
                     EmbeddedSettingsPage.INTERFACE -> localizedText(ModuleText.CATEGORY_INTERFACE)
                     EmbeddedSettingsPage.TITLE_REGION -> localizedText(ModuleText.CATEGORY_TITLE_REGION)
@@ -433,6 +445,16 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                     onOpenLlmLyrics = {
                         renderPage(EmbeddedSettingsPage.LLM_LYRICS)
                     },
+                    onOpenAutomaticLyrics = {
+                        renderPage(EmbeddedSettingsPage.AUTOMATIC_LYRICS)
+                    },
+                )
+            } else if (automaticLyricsPage) {
+                renderEmbeddedAutomaticLyricsPage(
+                    activity = activity,
+                    parent = content,
+                    currentSettings = { draft.settings },
+                    onSettingsChanged = ::updateDraft,
                 )
             } else if (llmLyricsPage) {
                 renderEmbeddedLlmLyricsPage(
@@ -544,6 +566,7 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
 
         fun navigateBack() {
             val parentPage = when (page) {
+                EmbeddedSettingsPage.AUTOMATIC_LYRICS -> EmbeddedSettingsPage.CUSTOM_LYRICS
                 EmbeddedSettingsPage.LLM_LYRICS -> EmbeddedSettingsPage.CUSTOM_LYRICS
                 EmbeddedSettingsPage.BOTTOM_BAR_ANIMATION -> EmbeddedSettingsPage.INTERFACE
                 EmbeddedSettingsPage.MAIN -> {
@@ -820,7 +843,15 @@ private fun EmbeddedSettingsHost.showEmbeddedPageDetails(activity: Activity, pag
         EmbeddedSettingsPage.CUSTOM_LYRICS -> listOf(
             ModuleText.CUSTOM_LYRICS_REPLACEMENT to ModuleText.CUSTOM_LYRICS_REPLACEMENT_SUMMARY,
             ModuleText.AUTO_LYRICS to ModuleText.AUTO_LYRICS_SUMMARY,
-            ModuleText.LLM_LYRICS_FALLBACK to ModuleText.LLM_LYRICS_ENABLED_SUMMARY,
+            ModuleText.LLM_LYRICS_FALLBACK to ModuleText.SHORT_LLM_LYRICS_SUMMARY,
+        )
+        EmbeddedSettingsPage.AUTOMATIC_LYRICS -> listOf(
+            ModuleText.AUTO_LYRICS_ENABLED to ModuleText.AUTO_LYRICS_SUMMARY,
+            ModuleText.AUTO_LYRICS_PREFER_NATIVE to ModuleText.AUTO_LYRICS_PREFER_NATIVE_SUMMARY,
+            ModuleText.AUTO_LYRICS_SOURCE_ORDER to
+                if (controller.currentSettings().automaticLyricsPreferNative) {
+                    ModuleText.AUTO_LYRICS_SOURCE_ORDER_NATIVE_HIDDEN
+                } else ModuleText.AUTO_LYRICS_SOURCE_ORDER_ALL,
         )
         EmbeddedSettingsPage.LYRICS_EFFECTS -> listOf(
             ModuleText.BIDIRECTIONAL_LYRIC_BLUR to ModuleText.BIDIRECTIONAL_LYRIC_BLUR_SUMMARY,
@@ -881,6 +912,7 @@ internal fun EmbeddedSettingsHost.renderEmbeddedCustomLyricsPage(
         song: CurrentSongDetails?,
         onSettingsChanged: (ModuleSettings) -> Unit,
         onOpenLlmLyrics: () -> Unit,
+        onOpenAutomaticLyrics: () -> Unit,
     ) {
         val entries = runCatching { controller.lyricsEntries() }.getOrDefault(emptyList())
         customLyricsListState.update(entries, customLyricsSearchQuery)
@@ -898,18 +930,14 @@ internal fun EmbeddedSettingsHost.renderEmbeddedCustomLyricsPage(
             pageRefresh?.invoke()
         })
         parent.addView(embeddedSpacer(activity, if (isEmbeddedPhone(activity)) 10 else 14))
-        parent.addView(embeddedSettingRow(
-            activity,
-            localizedText(ModuleText.AUTO_LYRICS),
-            localizedText(ModuleText.SHORT_AUTO_LYRICS_SUMMARY),
-            settings.automaticLyricsEnabled,
-            enabled = settings.customLyricsEnabled,
+        parent.addView(embeddedNavigationRow(
+            activity = activity,
+            title = localizedText(ModuleText.AUTO_LYRICS),
+            summary = localizedText(ModuleText.SHORT_AUTO_LYRICS_SUMMARY),
             compactWidePadding = true,
-        ) {
-            onSettingsChanged(settings.copy(automaticLyricsEnabled = it))
-            // The LLM fallback tier sits below automatic completion.
-            pageRefresh?.invoke()
-        })
+            chevronTint = EmbeddedSettingsPalette.Light.accent,
+            onClick = onOpenAutomaticLyrics,
+        ))
         parent.addView(embeddedSpacer(activity, if (isEmbeddedPhone(activity)) 10 else 14))
         parent.addView(embeddedNavigationRow(
             activity = activity,
@@ -1097,6 +1125,330 @@ internal fun EmbeddedSettingsHost.renderEmbeddedCustomLyricsPage(
         }
         parent.addView(lyricsContent)
     }
+
+
+private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
+    activity: Activity,
+    parent: LinearLayout,
+    currentSettings: () -> ModuleSettings,
+    onSettingsChanged: (ModuleSettings) -> Unit,
+) {
+    val settings = currentSettings()
+    val sourceOrder = ModuleSettings.normalizeAutomaticLyricsSourceOrder(settings.automaticLyricsSourceOrder)
+    var nativeIndex = sourceOrder.indexOf(CustomLyricsSources.AM_NATIVE)
+    val visibleSources = if (settings.automaticLyricsPreferNative) {
+        sourceOrder.filterNot { it == CustomLyricsSources.AM_NATIVE }
+    } else {
+        sourceOrder
+    }.toMutableList()
+
+    fun sourceOrderWithNative(sources: List<String>): List<String> {
+        val nextSources = sources.toMutableList()
+        if (settings.automaticLyricsPreferNative) {
+            // Native already has precedence in this mode; its hidden rank must not block a visible source.
+            val maximumNativeIndex = nextSources.indexOf(CustomLyricsSources.LUNABEAT)
+                .takeIf { it >= 0 } ?: nextSources.size
+            nextSources.add(nativeIndex.coerceIn(0, maximumNativeIndex), CustomLyricsSources.AM_NATIVE)
+        }
+        return nextSources
+    }
+
+    fun saveSourceOrder() {
+        val nextOrder = ModuleSettings.normalizeAutomaticLyricsSourceOrder(sourceOrderWithNative(visibleSources))
+        nativeIndex = nextOrder.indexOf(CustomLyricsSources.AM_NATIVE)
+        onSettingsChanged(currentSettings().copy(
+            automaticLyricsSourceOrder = nextOrder,
+        ))
+    }
+
+    val settingsGroup = embeddedCard(activity, null) {
+        setPadding(dp(activity, 8), dp(activity, 8), dp(activity, 8), dp(activity, 8))
+    }
+    parent.addView(settingsGroup, matchWidthWrapContent())
+    settingsGroup.addView(embeddedSettingRow(
+        activity,
+        localizedText(ModuleText.AUTO_LYRICS_ENABLED),
+        localizedText(ModuleText.AUTO_LYRICS_SUMMARY),
+        settings.automaticLyricsEnabled,
+        enabled = settings.customLyricsEnabled,
+        compactWidePadding = true,
+    ) {
+        onSettingsChanged(currentSettings().copy(automaticLyricsEnabled = it))
+        pageRefresh?.invoke()
+    })
+    settingsGroup.addView(embeddedSpacer(activity, if (isEmbeddedPhone(activity)) 10 else 14))
+    settingsGroup.addView(embeddedSettingRow(
+        activity,
+        localizedText(ModuleText.AUTO_LYRICS_PREFER_NATIVE),
+        localizedText(ModuleText.AUTO_LYRICS_PREFER_NATIVE_SUMMARY),
+        settings.automaticLyricsPreferNative,
+        compactWidePadding = true,
+    ) {
+        onSettingsChanged(currentSettings().copy(
+            automaticLyricsPreferNative = it,
+        ))
+        pageRefresh?.invoke()
+    })
+
+    parent.addView(embeddedSpacer(activity, if (isEmbeddedPhone(activity)) 10 else 14))
+    val sourceContentStart = dp(activity, if (isEmbeddedPhone(activity)) 12 else 8)
+    val sourceContentEnd = dp(activity, 8)
+    val sourceGroup = embeddedCard(activity, null) {
+        setPadding(dp(activity, 8), dp(activity, 8), dp(activity, 8), dp(activity, 8))
+        addView(LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.TOP
+            setPaddingRelative(sourceContentStart, 0, sourceContentEnd, 0)
+            addView(LinearLayout(activity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(embeddedSectionLabel(activity, localizedText(ModuleText.AUTO_LYRICS_SOURCE_ORDER)).apply {
+                    setPadding(0, 0, 0, dp(activity, 4))
+                }, matchWidthWrapContent())
+                addView(TextView(activity).apply {
+                    text = localizedText(
+                        if (settings.automaticLyricsPreferNative) {
+                            ModuleText.AUTO_LYRICS_SOURCE_ORDER_NATIVE_HIDDEN
+                        } else {
+                            ModuleText.AUTO_LYRICS_SOURCE_ORDER_ALL
+                        },
+                    ) + "\n" + localizedText(ModuleText.DRAG_TO_REORDER) +
+                        if (settings.automaticLyricsPreferNative) "" else "\n" + localizedText(ModuleText.LUNABEAT_AFTER_NATIVE)
+                    textSize = 12f
+                    setEmbeddedTextColor(activity) { colors -> colors.secondary }
+                    setSingleLine(false)
+                    setPadding(0, 0, 0, dp(activity, 8))
+                }, matchWidthWrapContent())
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(ImageView(activity).apply {
+                setEmbeddedImageDrawable(activity, embeddedSvgDrawable(EmbeddedSvgIcon.RestoreDefault, activity))
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                contentDescription = localizedText(ModuleText.AUTO_LYRICS_SOURCE_ORDER) +
+                    "，" + localizedText(ModuleText.RESET_DEFAULT)
+                tooltipText = localizedText(ModuleText.RESET_DEFAULT)
+                isClickable = true
+                isFocusable = true
+                setPadding(dp(activity, 13), dp(activity, 13), dp(activity, 13), dp(activity, 13))
+                bindEmbeddedClickFeedback(activity, cornerRadiusDp = 22)
+                setOnClickListener {
+                    fromEmbeddedSettingsView(this) {
+                        onSettingsChanged(currentSettings().copy(
+                            automaticLyricsSourceOrder = ModuleSettings.DEFAULT_AUTOMATIC_LYRICS_SOURCE_ORDER,
+                        ))
+                        pageRefresh?.invoke()
+                    }
+                }
+            }, LinearLayout.LayoutParams(dp(activity, 44), dp(activity, 44)).apply {
+                marginStart = dp(activity, 8)
+            })
+        }, matchWidthWrapContent())
+    }
+    parent.addView(sourceGroup, matchWidthWrapContent())
+    lateinit var sourceAdapter: RecyclerView.Adapter<RecyclerView.ViewHolder>
+    lateinit var dragHelper: ItemTouchHelper
+    var dragStartOrder: List<String>? = null
+
+    fun canMoveSource(from: Int, to: Int): Boolean {
+        if (from !in visibleSources.indices || to !in visibleSources.indices || from == to) return false
+        val nextSources = visibleSources.toMutableList().apply { add(to, removeAt(from)) }
+        val fullOrder = sourceOrderWithNative(nextSources)
+        // Hidden native can move ahead of Lunabeat without changing the visible order.
+        return ModuleSettings.normalizeAutomaticLyricsSourceOrder(fullOrder) == fullOrder
+    }
+
+    fun moveSource(from: Int, to: Int): Boolean {
+        if (!canMoveSource(from, to)) return false
+        visibleSources.add(to, visibleSources.removeAt(from))
+        sourceAdapter.notifyItemMoved(from, to)
+        return true
+    }
+
+    // AndroidX reads its own dimensions and IDs; the host Activity's resources
+    // belong to Apple Music, not to the module that owns this RecyclerView.
+    val moduleInfo = checkNotNull(dev.amenhancer.module.hook.ModernXposedRuntime.activeModule())
+        .moduleApplicationInfo
+    val moduleResources = activity.packageManager.getResourcesForApplication(moduleInfo)
+    @Suppress("DEPRECATION")
+    val listResources = Resources(moduleResources.assets, activity.resources.displayMetrics,
+        Configuration(activity.resources.configuration))
+    val listTheme = listResources.newTheme().apply {
+        applyStyle(moduleInfo.theme.takeIf { it != 0 } ?: android.R.style.Theme_Material_Light_NoActionBar, true)
+    }
+    val listContext = object : ContextWrapper(activity) {
+        override fun getResources(): Resources = listResources
+        override fun getAssets() = listResources.assets
+        override fun getTheme(): Resources.Theme = listTheme
+        override fun getClassLoader(): ClassLoader = RecyclerView::class.java.classLoader!!
+    }
+    val sourceList = object : RecyclerView(listContext) {
+        override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+            val initialOrder = dragStartOrder
+            if (initialOrder != null &&
+                (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL)
+            ) {
+                dragStartOrder = null
+                if (event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                    visibleSources.clear()
+                    visibleSources.addAll(initialOrder)
+                    sourceAdapter.notifyDataSetChanged()
+                } else if (visibleSources != initialOrder) {
+                    // Persist before drop animation or a following control can change this page.
+                    saveSourceOrder()
+                }
+            }
+            val handled = super.dispatchTouchEvent(event)
+            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                this.parent?.requestDisallowInterceptTouchEvent(false)
+            }
+            return handled
+        }
+
+        override fun onAttachedToWindow() {
+            super.onAttachedToWindow()
+            dragHelper.attachToRecyclerView(this)
+        }
+
+        override fun onDetachedFromWindow() {
+            dragStartOrder?.let { initialOrder ->
+                visibleSources.clear()
+                visibleSources.addAll(initialOrder)
+                sourceAdapter.notifyDataSetChanged()
+            }
+            dragStartOrder = null
+            dragHelper.attachToRecyclerView(null)
+            super.onDetachedFromWindow()
+        }
+    }.apply {
+        layoutManager = LinearLayoutManager(activity)
+        isNestedScrollingEnabled = false
+        overScrollMode = View.OVER_SCROLL_NEVER
+        clipToPadding = false
+        setPadding(0, dp(activity, 4), 0, 0)
+        setHasFixedSize(true)
+    }
+
+    sourceAdapter = object : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+        init { setHasStableIds(true) }
+
+        override fun getItemCount(): Int = visibleSources.size
+
+        override fun getItemId(position: Int): Long =
+            ModuleSettings.DEFAULT_AUTOMATIC_LYRICS_SOURCE_ORDER.indexOf(visibleSources[position]).toLong()
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+            val row = LinearLayout(activity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = dp(activity, 56)
+                setPaddingRelative(sourceContentStart, dp(activity, 4), sourceContentEnd, dp(activity, 4))
+                layoutParams = RecyclerView.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { bottomMargin = dp(activity, 6) }
+                bindEmbeddedTheme(activity) { colors ->
+                    background = EmbeddedG3Drawable().apply {
+                        setColor(colors.raised)
+                        cornerRadius = dp(activity, 12).toFloat()
+                    }
+                }
+                addView(TextView(activity).apply {
+                    textSize = 14f
+                    setEmbeddedTextColor(activity) { colors -> colors.text }
+                    setSingleLine(false)
+                    maxLines = 2
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(ImageView(activity).apply {
+                    setEmbeddedImageDrawable(activity, EmbeddedSettingsSvgAssets.glyphDrawable(
+                        EmbeddedSvgIcon.DragHandle, EmbeddedSettingsPalette.Light.secondary,
+                    ))
+                    scaleType = ImageView.ScaleType.CENTER_INSIDE
+                    setPadding(dp(activity, 12), dp(activity, 12), dp(activity, 12), dp(activity, 12))
+                    isFocusable = true
+                    tooltipText = localizedText(ModuleText.DRAG_TO_REORDER)
+                }, LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 48)))
+            }
+            return object : RecyclerView.ViewHolder(row) {}
+        }
+
+        override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+            val row = holder.itemView as LinearLayout
+            val label = row.getChildAt(0) as TextView
+            val handle = row.getChildAt(1) as ImageView
+            val sourceName = embeddedCustomLyricsSourceName(visibleSources[position])
+            label.text = sourceName
+            handle.contentDescription = localizedText(ModuleText.DRAG_SOURCE, sourceName)
+            handle.setOnTouchListener { view, event ->
+                if (event.actionMasked == MotionEvent.ACTION_DOWN &&
+                    holder.bindingAdapterPosition != RecyclerView.NO_POSITION
+                ) {
+                    sourceList.stopScroll()
+                    sourceList.parent?.requestDisallowInterceptTouchEvent(true)
+                    view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                    dragHelper.startDrag(holder)
+                } else if (event.actionMasked == MotionEvent.ACTION_UP) {
+                    view.performClick()
+                }
+                true
+            }
+            handle.accessibilityDelegate = object : View.AccessibilityDelegate() {
+                override fun onInitializeAccessibilityNodeInfo(host: View, info: AccessibilityNodeInfo) {
+                    super.onInitializeAccessibilityNodeInfo(host, info)
+                    val index = holder.bindingAdapterPosition
+                    if (canMoveSource(index, index - 1)) info.addAction(AccessibilityNodeInfo.AccessibilityAction(
+                        AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP.id,
+                        localizedText(ModuleText.MOVE_UP),
+                    ))
+                    if (canMoveSource(index, index + 1)) {
+                        info.addAction(AccessibilityNodeInfo.AccessibilityAction(
+                            AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.id,
+                            localizedText(ModuleText.MOVE_DOWN),
+                        ))
+                    }
+                }
+
+                override fun performAccessibilityAction(host: View, action: Int, args: Bundle?): Boolean {
+                    val offset = when (action) {
+                        AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP.id -> -1
+                        AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.id -> 1
+                        else -> return super.performAccessibilityAction(host, action, args)
+                    }
+                    if (dragStartOrder != null || sourceList.isComputingLayout) return false
+                    val index = holder.bindingAdapterPosition
+                    if (!moveSource(index, index + offset)) return false
+                    saveSourceOrder()
+                    return true
+                }
+            }
+        }
+    }
+    sourceList.adapter = sourceAdapter
+    dragHelper = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0) {
+        override fun isLongPressDragEnabled(): Boolean = false
+        override fun isItemViewSwipeEnabled(): Boolean = false
+
+        override fun canDropOver(list: RecyclerView, holder: RecyclerView.ViewHolder, target: RecyclerView.ViewHolder): Boolean =
+            canMoveSource(holder.bindingAdapterPosition, target.bindingAdapterPosition)
+
+        override fun onMove(list: RecyclerView, holder: RecyclerView.ViewHolder, target: RecyclerView.ViewHolder): Boolean =
+            moveSource(holder.bindingAdapterPosition, target.bindingAdapterPosition)
+
+        override fun onSwiped(holder: RecyclerView.ViewHolder, direction: Int) = Unit
+
+        override fun onSelectedChanged(holder: RecyclerView.ViewHolder?, actionState: Int) {
+            super.onSelectedChanged(holder, actionState)
+            if (holder != null && actionState == ItemTouchHelper.ACTION_STATE_DRAG) {
+                dragStartOrder = visibleSources.toList()
+                holder.itemView.elevation = dp(activity, 8).toFloat()
+                holder.itemView.alpha = 0.96f
+            }
+        }
+
+        override fun clearView(list: RecyclerView, holder: RecyclerView.ViewHolder) {
+            super.clearView(list, holder)
+            holder.itemView.elevation = 0f
+            holder.itemView.alpha = 1f
+        }
+    })
+    sourceGroup.addView(sourceList, matchWidthWrapContent())
+}
 
 
 private fun EmbeddedSettingsHost.renderEmbeddedLlmLyricsPage(
@@ -1346,6 +1698,7 @@ internal fun EmbeddedSettingsHost.embeddedCustomLyricsSourceName(source: String)
         CustomLyricsSources.AMLL -> "AMLL"
         CustomLyricsSources.AM_LYRICS -> localizedText(ModuleText.AM_LYRICS_REPOSITORY)
         CustomLyricsSources.LUNABEAT -> "Lunabeat"
+        CustomLyricsSources.AM_NATIVE -> localizedText(ModuleText.AM_NATIVE)
         else -> localizedText(ModuleText.MANUAL_TTML)
     }
 

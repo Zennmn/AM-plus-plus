@@ -257,7 +257,15 @@ Fragment view 重建、配置变化与 controller 销毁分别关闭会话。状
 | `host-applemusic` | `CurrentItemIdentitySeam`、`OpaqueTtmlParser`、`TtmlTimingObservationRegistry` 与结果 Bridge：原生对象及反射只在适配层 |
 | `app` | `AppleMusicAssembly` 与 [AutoLyricsReplacementSession.kt](../app/src/main/java/dev/amenhancer/module/hook/AutoLyricsReplacementSession.kt) 的 `createAutoLyricsRuntime`：存储、执行器、来源服务与配置装配 |
 
-**通用维护。** 歌曲禁用优先于模块候选，可用手动结果优先；自动来源保持 AMLL → Lunabeat → AM-Lyrics 的顺序及现有原生保留、逐字/语言/译文资格。新版本不能因安装通道改变而放宽原生可用性或自动补全条件。缓存、ETag、退避、来源更新及手动条目保护沿原会话维护，异步任务切歌/退役后不提交。
+**通用维护。** 歌曲禁用优先于模块候选，可用手动结果优先。`automatic_lyrics_prefer_native` 默认及缺键开启；开启时始终先判断达标 AM 原生，关闭时 AM 原生按 `automatic_lyrics_source_order` 的位置参与选择。两种模式共用既有逐字/语言/译文资格：已观察的原生须为逐字，已声明外语的逐字原生还须有非空译文；未观察的现存原生指针继续保守保留，不从正文猜测语言或质量。
+
+原生优先关闭且原生符合上述资格时，排序模式才仅查询其前置第三方来源，前置均未命中后采用原生。不达标或不可用时跳过原生项，仍按顺序查询全部第三方来源，包括排在原生之后的 Lunabeat；全部未命中时仍保留可用原生，不清空当前歌词。AM 原生来自宿主结果，不新增网络客户端，也不发布成自定义条目。
+
+来源顺序始终以稳定 ID 保存为同一份完整顺序，不新增显隐专用配置；默认 AMLL → AM-Lyrics → AM原生 → Lunabeat，配置解码及写入过滤未知项、去重并补齐缺项。规范化时若 Lunabeat 位于 AM 原生之前，只将 Lunabeat 移到 AM 原生之后，其他来源的相对顺序保持不变；读取、保存与运行时入口共同使用该结果，旧配置不能绕过约束。`automaticLyricsLookupSources` 统一计算结果选择、解析观察、可用性补偿和切歌预热的第三方查询范围。来源范围变化撤销旧请求代次，迟到结果不能越过新的原生位置；宿主通道适配不能重置用户顺序或改变这套选择规则。
+
+自动发布的条目通过现有 `CustomLyricsEntry.autoManaged` 标识归属，缓存只在其 provider 所处位置生效，不抢占更靠前的来源或原生。新自动结果可替换已有自动管理项；手动导入、用户明确选择及缺少归属字段的旧条目默认受手动保护，不根据 provider 名称推断归属。归属随索引、备份和来源更新保留；用户明确编辑后按手动项保存。来源刷新只更新所记录的 provider，不把“更新”隐式改成重新选源。ETag、退避及切歌/退役取消继续沿原会话维护。
+
+歌词管理页的“自动实时补全”进入独立二级页，总开关、原生优先和来源排序集中于该页。来源行使用右侧拖动柄：按住后上下拖动，松手保存；取消拖动不保存。拖动柄获得触摸后锁定行拖拽，柄外手势仍归页面滚动，拖动期间列表滚动不得与改序争用；触摸排序与无障碍的上移/下移动作更新同一份顺序。改序仅局部移动当前列表并写设置，不重建页面；连续改序及保存保持列表滚动位置和无障碍焦点，不造成屏幕闪暗。保存时必须先同步内部隐藏原生占位索引，使后续改序从最新完整顺序继续。排序列表使用模块自己的 AndroidX 与资源上下文，按宿主有效密度和配置展示，不借用宿主私有列表成员或资源 ID。原生优先开启时隐藏原生行；保存时采用用户调整后的可见来源顺序，并把隐藏原生占位放回：原位置仍能保持就保持，若 Lunabeat 已移动到该旧位置之前，则只把占位前插到 Lunabeat 之前，其他可见来源的相对顺序保持不变。隐藏期间旧原生位置不限制可见来源互调。原生优先关闭、原生与 Lunabeat 同时可见时，Lunabeat 不能上移跨过原生，原生不能下移跨过 Lunabeat；触摸拖动与无障碍上移/下移遵循同一约束，被阻止时不改顺序、不保存，完整顺序始终保持原生在 Lunabeat 之前。排序标题右上角复用既有重置 SVG 图标，只恢复 `ModuleSettings.DEFAULT_AUTOMATIC_LYRICS_SOURCE_ORDER`（AMLL → AM-Lyrics → AM 原生 → Lunabeat），不改变自动实时补全总开关或原生优先；重置后按当前原生优先状态重建显隐，隐藏原生仍按上述占位规则处理，完整顺序中 Lunabeat 仍位于 AM 原生之后。重置、原生显隐等同页刷新可沿用同页重建，但不得把旧内容当作跨页来源，不重放切页透明度或快照动画；真正跨页继续使用原有切页过渡。排序标题区沿用原有紧凑行样式，不额外设置最小高度或居中标题行；右上角重置沿用无底色 SVG 图标、主题配色和 44dp 触摸范围，标题与说明同列并保持 4dp 间距，标题、说明和来源行沿用相同的左右内容边界。设置保存和返回复用既有二级页流程，LLM 页面保持独立入口。
 
 TTML 文件有界读取、输入合法性、原生指针存活/ID 检查和来源转换分别保留。自动来源发布自定义条目与临时缓存迁移继续使用已有发布器，刷新只处理允许更新的来源条目；LLM 使用独立缓存，不混入该发布链。TTML 结构与 AMLL 时间轴整理见[格式说明](apple-music-ttml-format.md)。
 
@@ -292,7 +300,7 @@ AMLL 转换器及 `scripts/amll_to_apple_ttml.py` 的译文/音译和声节点�
 
 <a id="llm-lyrics-fallback"></a>
 
-### 5.3 LLM 歌词翻译兜底
+### 5.3 LLM 原生歌词翻译
 
 **生效与接缝。** LLM 复用歌词替换、自动补全与结果提交，不另建宿主成员映射。观察精确 `TtmlSongInfoFromTtml` 的真实调用，以原生结果指针弱身份关联有界原文快照；`OpaqueTtmlParser` 标记并排除模块自己的解析，防止生成歌词回流为原生输入。当前歌曲与原文的对应关系须可验证，不能使用“最近的 TTML”或视图文字补猜。
 
@@ -303,10 +311,12 @@ AMLL 转换器及 `scripts/amll_to_apple_ttml.py` 的译文/音译和声节点�
 | [LlmLyricsTtml.kt](../core/src/main/kotlin/dev/amenhancer/module/lyrics/LlmLyricsTtml.kt) | 时间轴/语言/译文资格、正文抽取、输出副本补 key 与 Apple 译文轨写入 |
 | [LlmLyricsClient.kt](../core/src/main/kotlin/dev/amenhancer/module/lyrics/LlmLyricsClient.kt) | 提示词、共享请求编码与传输、严格响应校验、期限与取消 |
 | [LlmLyricsCache.kt](../core/src/main/kotlin/dev/amenhancer/module/lyrics/LlmLyricsCache.kt) | 独立文件缓存与最近使用淘汰 |
-| [LlmLyricsReplacementSession.kt](../core/src/main/kotlin/dev/amenhancer/module/hook/LlmLyricsReplacementSession.kt) | 播放代次、来源明确未命中门禁、去重与原生指针准备 |
+| [LlmLyricsReplacementSession.kt](../core/src/main/kotlin/dev/amenhancer/module/hook/LlmLyricsReplacementSession.kt) | 播放代次、原生被采用的门禁、去重与原生指针准备 |
 | `app` / `host-applemusic` | 设置/私有存储/后台装配，以及原文观察/模块解析排除/共用结果提交，各守既有边界 |
 
-原生保留判断、手动/禁用状态及既有来源查询先于 LLM 缓存；仅来源明确未命中后才进入兜底，每次再播放重新判断。输入须有可用逐行或逐字时间轴；纯文本、无时间轴、空歌词不翻译。根 `xml:lang` 的中文、简繁体/地区标签与中文别名整首跳过；逐字文档缺根语言时保留原生且不触发来源或 LLM，逐行文档保守判断文本，含汉字的日文不能直接判中文。
+手动/禁用状态及来源选择先于 LLM 缓存；只有最终采用 AM 原生时才允许补翻译，每次再播放重新判断。所需的第三方查询尚未完成时不开始翻译；原生不达标时须等全部第三方未命中后回退原生，再判断翻译资格。达标原生之后的来源不参与本次查询；采用第三方或手动结果时撤销在途及就绪译文。`onNativeSelected` 只由选源结果授予资格，输入仍须来自当前原生指针关联的原文，不以模块生成的 TTML 代替。
+
+输入须有可用逐行或逐字时间轴；纯文本、无时间轴、空歌词不翻译。根 `xml:lang` 的中文、简繁体/地区标签与中文别名整首跳过；逐字文档缺根语言时不调用 LLM，自动查源仍按所选策略判断。逐行文档保守判断文本，含汉字的日文不能直接判中文。
 
 日文、韩文中的纯汉字行依据声明语言，明确标中文的行/词保留；其他外文歌曲的中文行按文本判断保留。任意语言原生译文轨阻止整首翻译，空 `translations` 容器不算译文。缺 `itunes:key` 的逐行文档可按行位置处理，原 key 重复而无法唯一对应时拒绝。
 

@@ -73,13 +73,16 @@ data class ModuleSettings(
     val customLyricsEnabled: Boolean = false,
     /** Enables background AMLL/Lunabeat/user-repository lyric completion. */
     val automaticLyricsEnabled: Boolean = true,
+    /** Prefers AM native lyrics over configured automatic sources when available. */
+    val automaticLyricsPreferNative: Boolean = true,
+    /** Automatic provider priority, normalized against [DEFAULT_AUTOMATIC_LYRICS_SOURCE_ORDER]. */
+    val automaticLyricsSourceOrder: List<String> = DEFAULT_AUTOMATIC_LYRICS_SOURCE_ORDER,
     /**
-     * Last-resort tier of the automatic lyrics chain: translate the original lyrics through an
-     * OpenAI-compatible endpoint, but only when the native lyrics and every configured source
-     * missed. Per-song eligibility gates live in the LLM lyrics runtime.
+     * Translates only the selected AM native lyrics through an OpenAI-compatible endpoint.
+     * Per-song eligibility gates live in the LLM lyrics runtime.
      */
     val llmLyricsEnabled: Boolean = false,
-    /** OpenAI-compatible Chat Completions endpoint; blank disables the fallback. */
+    /** OpenAI-compatible Chat Completions endpoint; blank disables AM native translation. */
     val llmLyricsBaseUrl: String = "",
     /** Bearer token sent to [llmLyricsBaseUrl]. Never logged or echoed back to the host. */
     val llmLyricsApiKey: String = "",
@@ -114,6 +117,28 @@ data class ModuleSettings(
         const val MAX_LLM_LYRICS_BASE_URL_LENGTH = 2048
         const val MAX_LLM_LYRICS_API_KEY_LENGTH = 4096
         const val MAX_LLM_LYRICS_MODEL_LENGTH = 256
+
+        val DEFAULT_AUTOMATIC_LYRICS_SOURCE_ORDER: List<String> = listOf(
+            CustomLyricsSources.AMLL,
+            CustomLyricsSources.AM_LYRICS,
+            CustomLyricsSources.AM_NATIVE,
+            CustomLyricsSources.LUNABEAT,
+        )
+
+        fun normalizeAutomaticLyricsSourceOrder(values: List<String>): List<String> {
+            val known = DEFAULT_AUTOMATIC_LYRICS_SOURCE_ORDER.toSet()
+            val normalized = values.map { it.trim() }.filter { it in known }.distinct()
+            val ordered = (normalized + DEFAULT_AUTOMATIC_LYRICS_SOURCE_ORDER.filterNot { it in normalized })
+                .toMutableList()
+            val lunabeatIndex = ordered.indexOf(CustomLyricsSources.LUNABEAT)
+            val nativeIndex = ordered.indexOf(CustomLyricsSources.AM_NATIVE)
+            if (lunabeatIndex in 0 until nativeIndex) {
+                // Correct old configurations without reordering the other providers.
+                ordered.removeAt(lunabeatIndex)
+                ordered.add(ordered.indexOf(CustomLyricsSources.AM_NATIVE) + 1, CustomLyricsSources.LUNABEAT)
+            }
+            return ordered
+        }
 
         fun isValidAppleMusicDpi(value: Int): Boolean =
             value == FOLLOW_SYSTEM_APPLE_MUSIC_DPI || value in MIN_APPLE_MUSIC_DPI..MAX_APPLE_MUSIC_DPI
@@ -175,7 +200,7 @@ data class LyricsFontManifest(
     }
 }
 
-/** One user-managed Apple Music ID -> TTML file mapping. */
+/** One Apple Music ID -> TTML file mapping. */
 data class CustomLyricsEntry(
     val appleMusicId: Long,
     val displayName: String,
@@ -184,6 +209,8 @@ data class CustomLyricsEntry(
     val sha256: String,
     val source: String,
     val enabled: Boolean = true,
+    /** True only when the automatic publisher owns this mapping; never inferred from [source]. */
+    val autoManaged: Boolean = false,
 )
 /** Small index shared through remote preferences; TTML bodies stay in remote files. */
 data class CustomLyricsManifest(
@@ -200,6 +227,8 @@ object CustomLyricsSources {
     const val AMLL = "amll-ttml-db"
     const val AM_LYRICS = "am-lyrics"
     const val LUNABEAT = "lunabeat-ttml-hub"
+    /** Native Apple Music selection placeholder; never a source for publishing or saving custom lyrics. */
+    const val AM_NATIVE = "am-native"
 }
 
 enum class FeatureState {

@@ -1613,7 +1613,9 @@ internal fun EmbeddedSettingsHost.embeddedDialogWidth(activity: Activity, page: 
         // AlertDialog applies a 16dp inset on each side. These fractions target
         // the visible white panel after that inset, not the outer window.
         val fraction = when (page) {
-            EmbeddedSettingsPage.CUSTOM_LYRICS, EmbeddedSettingsPage.LLM_LYRICS -> 0.418f
+            EmbeddedSettingsPage.CUSTOM_LYRICS,
+            EmbeddedSettingsPage.AUTOMATIC_LYRICS,
+            EmbeddedSettingsPage.LLM_LYRICS -> 0.418f
             else -> 0.514f
         }
         return (activity.resources.displayMetrics.widthPixels * fraction).toInt()
@@ -1663,7 +1665,9 @@ internal fun EmbeddedSettingsHost.embeddedDialogContentHeight(activity: Activity
         val height = activity.resources.displayMetrics.heightPixels
         if (isEmbeddedPhone(activity)) return (height * 0.70f).toInt()
         val fraction = when (page) {
-            EmbeddedSettingsPage.CUSTOM_LYRICS, EmbeddedSettingsPage.LLM_LYRICS -> 0.888f
+            EmbeddedSettingsPage.CUSTOM_LYRICS,
+            EmbeddedSettingsPage.AUTOMATIC_LYRICS,
+            EmbeddedSettingsPage.LLM_LYRICS -> 0.888f
             else -> 0.837f
         }
         return (height * fraction).toInt()

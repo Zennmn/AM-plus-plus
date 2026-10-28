@@ -97,6 +97,10 @@ class CustomLyricsReplacementSession(
         appleMusicId > 0L && appleMusicId in entriesById
     }
 
+    /** Automatically published entries keep following playback source selection. */
+    fun isAutoManaged(appleMusicId: Long): Boolean =
+        entriesById[appleMusicId]?.autoManaged == true
+
     /** Ready cache only; safe for availability predicates and other hot paths. */
     fun readyReplacementFor(appleMusicId: Long): Any? {
         if (appleMusicId <= 0L) return null
