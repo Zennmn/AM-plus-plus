@@ -1190,14 +1190,47 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
     parent.addView(embeddedSpacer(activity, if (isEmbeddedPhone(activity)) 10 else 14))
     val sourceContentStart = dp(activity, if (isEmbeddedPhone(activity)) 12 else 8)
     val sourceContentEnd = dp(activity, 8)
-    val sourceGroup = embeddedCard(
-        activity,
-        localizedText(ModuleText.AUTO_LYRICS_SOURCE_ORDER),
-    ) {
+    val sourceGroup = embeddedCard(activity, null) {
         setPadding(dp(activity, 8), dp(activity, 8), dp(activity, 8), dp(activity, 8))
-        (getChildAt(0) as TextView).apply {
-            setPaddingRelative(sourceContentStart, paddingTop, sourceContentEnd, paddingBottom)
-        }
+        addView(LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = embeddedSettingRowHeight(activity)
+            val verticalPadding = dp(activity, if (isEmbeddedPhone(activity)) 6 else 4)
+            setPaddingRelative(sourceContentStart, verticalPadding, sourceContentEnd, verticalPadding)
+            addView(LinearLayout(activity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(TextView(activity).apply {
+                    text = localizedText(ModuleText.AUTO_LYRICS_SOURCE_ORDER)
+                    textSize = embeddedTextSize(activity, 15f, 15f)
+                    setEmbeddedTextColor(activity) { colors -> colors.text }
+                    setTypeface(typeface, Typeface.NORMAL)
+                    setSingleLine(false)
+                    maxLines = 2
+                }, matchWidthWrapContent())
+                addView(TextView(activity).apply {
+                    text = localizedText(ModuleText.DRAG_TO_REORDER)
+                    textSize = embeddedTextSize(activity, 12f, 12f)
+                    setEmbeddedTextColor(activity) { colors -> colors.secondary }
+                    setSingleLine(false)
+                    maxLines = 2
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                    setPadding(0, dp(activity, 2), 0, 0)
+                }, matchWidthWrapContent())
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(embeddedActionButton(activity, localizedText(ModuleText.RESET)) {
+                onSettingsChanged(currentSettings().copy(
+                    automaticLyricsSourceOrder = ModuleSettings.DEFAULT_AUTOMATIC_LYRICS_SOURCE_ORDER,
+                ))
+                pageRefresh?.invoke()
+            }.apply {
+                minHeight = dp(activity, 44)
+                minimumHeight = dp(activity, 44)
+                setPadding(dp(activity, 12), 0, dp(activity, 12), 0)
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(activity, 44)).apply {
+                marginStart = dp(activity, 8)
+            })
+        }, matchWidthWrapContent())
         addView(TextView(activity).apply {
             text = localizedText(
                 if (settings.automaticLyricsPreferNative) {
@@ -1205,8 +1238,7 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
                 } else {
                     ModuleText.AUTO_LYRICS_SOURCE_ORDER_ALL
                 },
-            ) + "\n" + localizedText(ModuleText.DRAG_TO_REORDER) +
-                "\n" + localizedText(ModuleText.LUNABEAT_AFTER_NATIVE)
+            ) + "\n" + localizedText(ModuleText.LUNABEAT_AFTER_NATIVE)
             textSize = 12f
             setEmbeddedTextColor(activity) { colors -> colors.secondary }
             setSingleLine(false)
