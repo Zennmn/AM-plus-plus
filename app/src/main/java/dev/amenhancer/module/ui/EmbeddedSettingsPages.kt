@@ -1145,7 +1145,10 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
     fun sourceOrderWithNative(sources: List<String>): List<String> {
         val nextSources = sources.toMutableList()
         if (settings.automaticLyricsPreferNative) {
-            nextSources.add(nativeIndex.coerceIn(0, nextSources.size), CustomLyricsSources.AM_NATIVE)
+            // Native already has precedence in this mode; its hidden rank must not block a visible source.
+            val maximumNativeIndex = nextSources.indexOf(CustomLyricsSources.LUNABEAT)
+                .takeIf { it >= 0 } ?: nextSources.size
+            nextSources.add(nativeIndex.coerceIn(0, maximumNativeIndex), CustomLyricsSources.AM_NATIVE)
         }
         return nextSources
     }
@@ -1194,30 +1197,10 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
         setPadding(dp(activity, 8), dp(activity, 8), dp(activity, 8), dp(activity, 8))
         addView(LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = embeddedSettingRowHeight(activity)
-            val verticalPadding = dp(activity, if (isEmbeddedPhone(activity)) 6 else 4)
-            setPaddingRelative(sourceContentStart, verticalPadding, sourceContentEnd, verticalPadding)
-            addView(LinearLayout(activity).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(TextView(activity).apply {
-                    text = localizedText(ModuleText.AUTO_LYRICS_SOURCE_ORDER)
-                    textSize = embeddedTextSize(activity, 15f, 15f)
-                    setEmbeddedTextColor(activity) { colors -> colors.text }
-                    setTypeface(typeface, Typeface.NORMAL)
-                    setSingleLine(false)
-                    maxLines = 2
-                }, matchWidthWrapContent())
-                addView(TextView(activity).apply {
-                    text = localizedText(ModuleText.DRAG_TO_REORDER)
-                    textSize = embeddedTextSize(activity, 12f, 12f)
-                    setEmbeddedTextColor(activity) { colors -> colors.secondary }
-                    setSingleLine(false)
-                    maxLines = 2
-                    ellipsize = android.text.TextUtils.TruncateAt.END
-                    setPadding(0, dp(activity, 2), 0, 0)
-                }, matchWidthWrapContent())
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            gravity = Gravity.TOP
+            setPaddingRelative(sourceContentStart, 0, sourceContentEnd, 0)
+            addView(embeddedSectionLabel(activity, localizedText(ModuleText.AUTO_LYRICS_SOURCE_ORDER)),
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             addView(embeddedActionButton(activity, localizedText(ModuleText.RESET)) {
                 onSettingsChanged(currentSettings().copy(
                     automaticLyricsSourceOrder = ModuleSettings.DEFAULT_AUTOMATIC_LYRICS_SOURCE_ORDER,
@@ -1238,7 +1221,8 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
                 } else {
                     ModuleText.AUTO_LYRICS_SOURCE_ORDER_ALL
                 },
-            ) + "\n" + localizedText(ModuleText.LUNABEAT_AFTER_NATIVE)
+            ) + "\n" + localizedText(ModuleText.DRAG_TO_REORDER) +
+                if (settings.automaticLyricsPreferNative) "" else "\n" + localizedText(ModuleText.LUNABEAT_AFTER_NATIVE)
             textSize = 12f
             setEmbeddedTextColor(activity) { colors -> colors.secondary }
             setSingleLine(false)
@@ -1255,7 +1239,7 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
         if (from !in visibleSources.indices || to !in visibleSources.indices || from == to) return false
         val nextSources = visibleSources.toMutableList().apply { add(to, removeAt(from)) }
         val fullOrder = sourceOrderWithNative(nextSources)
-        // Validate the complete order even while the native row is hidden.
+        // Hidden native can move ahead of Lunabeat without changing the visible order.
         return ModuleSettings.normalizeAutomaticLyricsSourceOrder(fullOrder) == fullOrder
     }
 
