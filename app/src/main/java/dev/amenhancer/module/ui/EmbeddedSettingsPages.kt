@@ -353,7 +353,7 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                 stopPageTransition = null
                 clearOutgoingPage()
                 val startBounds = RectF(panelBounds)
-                val snapshot = if (dialogReady) pageHost.captureEmbeddedSettingsBackdrop() else null
+                val snapshot = if (dialogReady && changingPage) pageHost.captureEmbeddedSettingsBackdrop() else null
                 val outgoing = snapshot?.let { backdrop ->
                     ImageView(activity).apply {
                         setImageDrawable(backdrop)
@@ -1135,7 +1135,7 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
 ) {
     val settings = currentSettings()
     val sourceOrder = ModuleSettings.normalizeAutomaticLyricsSourceOrder(settings.automaticLyricsSourceOrder)
-    val nativeIndex = sourceOrder.indexOf(CustomLyricsSources.AM_NATIVE)
+    var nativeIndex = sourceOrder.indexOf(CustomLyricsSources.AM_NATIVE)
     val visibleSources = if (settings.automaticLyricsPreferNative) {
         sourceOrder.filterNot { it == CustomLyricsSources.AM_NATIVE }
     } else {
@@ -1154,10 +1154,10 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
     }
 
     fun saveSourceOrder() {
+        val nextOrder = ModuleSettings.normalizeAutomaticLyricsSourceOrder(sourceOrderWithNative(visibleSources))
+        nativeIndex = nextOrder.indexOf(CustomLyricsSources.AM_NATIVE)
         onSettingsChanged(currentSettings().copy(
-            automaticLyricsSourceOrder = ModuleSettings.normalizeAutomaticLyricsSourceOrder(
-                sourceOrderWithNative(visibleSources),
-            ),
+            automaticLyricsSourceOrder = nextOrder,
         ))
     }
 
@@ -1233,7 +1233,6 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
     lateinit var sourceAdapter: RecyclerView.Adapter<RecyclerView.ViewHolder>
     lateinit var dragHelper: ItemTouchHelper
     var dragStartOrder: List<String>? = null
-    var refreshAfterDrop = false
 
     fun canMoveSource(from: Int, to: Int): Boolean {
         if (from !in visibleSources.indices || to !in visibleSources.indices || from == to) return false
@@ -1280,7 +1279,6 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
                     sourceAdapter.notifyDataSetChanged()
                 } else if (visibleSources != initialOrder) {
                     // Persist before drop animation or a following control can change this page.
-                    refreshAfterDrop = true
                     saveSourceOrder()
                 }
             }
@@ -1303,7 +1301,6 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
                 sourceAdapter.notifyDataSetChanged()
             }
             dragStartOrder = null
-            refreshAfterDrop = false
             dragHelper.attachToRecyclerView(null)
             super.onDetachedFromWindow()
         }
@@ -1404,7 +1401,6 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
                     val index = holder.bindingAdapterPosition
                     if (!moveSource(index, index + offset)) return false
                     saveSourceOrder()
-                    pageRefresh?.invoke()
                     return true
                 }
             }
@@ -1427,7 +1423,6 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
             super.onSelectedChanged(holder, actionState)
             if (holder != null && actionState == ItemTouchHelper.ACTION_STATE_DRAG) {
                 dragStartOrder = visibleSources.toList()
-                refreshAfterDrop = false
                 holder.itemView.elevation = dp(activity, 8).toFloat()
                 holder.itemView.alpha = 0.96f
             }
@@ -1437,10 +1432,6 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
             super.clearView(list, holder)
             holder.itemView.elevation = 0f
             holder.itemView.alpha = 1f
-            if (refreshAfterDrop) {
-                refreshAfterDrop = false
-                list.post { if (list.isAttachedToWindow) pageRefresh?.invoke() }
-            }
         }
     })
     sourceGroup.addView(sourceList, matchWidthWrapContent())
