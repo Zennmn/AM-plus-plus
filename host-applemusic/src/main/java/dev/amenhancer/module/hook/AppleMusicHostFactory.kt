@@ -74,11 +74,13 @@ object AppleMusicHostFactory {
             val alignment = installLineLyricAgentAlignment(profile, classLoader, application.resources) {
                 config.settings().lyricEffectsOptimizationEnabled
             }
+            val terminal = AppleMusicCjkTerminalGradientTarget(profile, classLoader).install()
+            val repairs = listOf(parser) + listOf(alignment, terminal).filterNot { it is TargetCapabilityInstall.Unsupported }
+            val message = listOf(parser, alignment, terminal).joinToString("; ") { it.message }
             when {
-                alignment is TargetCapabilityInstall.Unsupported -> parser
-                parser is TargetCapabilityInstall.Active && alignment is TargetCapabilityInstall.Active ->
-                    TargetCapabilityInstall.Active("${parser.message}; ${alignment.message}")
-                else -> TargetCapabilityInstall.Degraded("${parser.message}; ${alignment.message}")
+                repairs.all { it is TargetCapabilityInstall.Active } -> TargetCapabilityInstall.Active(message)
+                repairs.all { it is TargetCapabilityInstall.Unsupported } -> TargetCapabilityInstall.Unsupported(message)
+                else -> TargetCapabilityInstall.Degraded(message)
             }
         }
         return TargetAdaptation(
@@ -112,7 +114,6 @@ object AppleMusicHostFactory {
                 symbols = resolver,
                 foregroundTextField = profile.document.optJSONObject("cjk")
                     ?.optString("foregroundTextField", "U") ?: "U",
-                terminalGradient = AppleMusicCjkTerminalGradientTarget(profile, classLoader),
                 maxSpanGlowCharacters = profile.document.optJSONObject("cjk")
                     ?.optInt("maxSpanGlowCharacters", 1) ?: 1,
             ),
