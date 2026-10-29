@@ -615,6 +615,8 @@ Fragment 手机/平板共用 `FragmentMiniStartup`，在 `FragmentSurfaceBinding
 
 封面约束只用当前档案已恢复的字段映射，区分 physical left/right 与 relative start/end，不能靠相对锚掩盖左右反向，也不能拿宿主字段操作模块视觉树。资源与反射在安装/绑定时缓存，视图/配置重建重新解析。
 
+**歌词 View 重建。** 独立右栏须核对 Fragment 保留、View 重建时的 adapter 创建、结果观察及安装去重。如果原生创建新 adapter，却保留以歌词指针身份去重的旧安装字段，可在 `fragmentLyricsRuntime.fields.installedPointer` 声明该构建的精确字段。预检确认字段属于歌词 Fragment、类型对应当前档案的 `SONG_INFO_PTR` 且可写；未声明的构建不启用此修复，也不推测字段。`BetaLyricsPaneRuntime` 仅在独立右栏 `onCreateView` 原生方法执行前清除旧安装标记，使新 View 的原生观察者能按既有结果通道填充当前歌词。保留 ViewModel 结果及指针所有权，不重入安装、不强制重新请求；普通 resume 或逐帧刷新不得清除此标记。人工验收须包含原生设置返回后的同曲原生/补全歌词，以及关闭自定义歌词后的原生显示。
+
 #### 通用维护：响应式视觉与原生交互
 
 共享左栏由真实原生 View 构成，core 的 [TabletArtworkLayoutPolicy](../core/src/main/kotlin/dev/amenhancer/module/hook/TabletArtworkLayoutPolicy.kt) 计算参考 grid/flex，宿主 [TabletSongColumnLayout](../host-applemusic/src/main/java/dev/amenhancer/module/hook/tabletmedia/TabletSongColumnLayout.kt) 接入。左栏保留父链、binding、动作、selector、字体和无损/杜比/卡拉 OK 标识，只按策略布局；音量、输出与模式等补充控件沿既有组件，不另建替代原生左栏的树。
