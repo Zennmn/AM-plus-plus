@@ -3,7 +3,7 @@ package dev.amenhancer.module.hook
 import dev.amenhancer.module.ModuleConstants
 
 /**
- * Installs CJK glow animation and the supported host's terminal sweep compensation together.
+ * Installs CJK glow animation; terminal feather compensation belongs to lyric effects optimization.
  *
  * The target adapter owns all version and symbol checks; unsupported hosts
  * therefore report a degraded health result without touching existing lyric

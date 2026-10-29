@@ -20,7 +20,6 @@ import java.util.WeakHashMap
 internal class AppleMusicCjkKaraokeAnimationTarget(
     private val symbols: TargetSymbolResolver,
     private val foregroundTextField: String = "U",
-    private val terminalGradient: AppleMusicCjkTerminalGradientTarget? = null,
     private val maxSpanGlowCharacters: Int = 1,
 ) : CjkKaraokeAnimationTarget {
     private val a0Depth: ThreadLocal<Int> = ThreadLocal.withInitial { 0 }
@@ -130,14 +129,7 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
 
         val glowMessage = "Installed unmerged-CJK glow end cleanup " +
             "(max span characters=${maxSpanGlowCharacters.coerceIn(1, 3)}): ${a0.toGenericString()}"
-        val terminalResult = terminalGradient?.install()
-        return when (terminalResult) {
-            is TargetCapabilityInstall.Degraded -> TargetCapabilityInstall.Degraded(
-                "$glowMessage; ${terminalResult.message}",
-            )
-            null -> TargetCapabilityInstall.Active(glowMessage)
-            else -> TargetCapabilityInstall.Active("$glowMessage; ${terminalResult.message}")
-        }
+        return TargetCapabilityInstall.Active(glowMessage)
     }
 
     /**

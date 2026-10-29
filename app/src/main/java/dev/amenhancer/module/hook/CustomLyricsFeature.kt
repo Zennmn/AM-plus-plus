@@ -14,7 +14,7 @@ internal class CustomLyricsFeature : FeatureHook {
     }
 }
 
-/** Native background repair shares the existing lyric effects optimization setting. */
+/** Native background, line layout and terminal feather repairs share lyric effects optimization. */
 internal class LyricsParserFeature : FeatureHook {
     override val key: String = ModuleConstants.FEATURE_LYRICS_PARSER
 

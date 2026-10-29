@@ -49,7 +49,7 @@
 
 ### 2.2 功能覆盖表
 
-按此表逐域填写。自动来源/LLM虽然共用提交，模糊与CJK各有适用结论；简体替换和声修复、跨行扫光与活动行高亮共用“歌词效果优化”开关，但仍分别填写安装、降级与失败结论。
+按此表逐域填写。自动来源/LLM虽然共用提交，模糊与CJK辉光各有适用结论；简体替换和声修复、逐行双声部对齐、CJK末词补偿、跨行扫光与活动行高亮共用“歌词效果优化”开关，但仍分别填写安装、降级与失败结论。
 
 | 功能域 | 资料 / 接入依据 | 源码与包证据 | 安装 / 降级状态 | 人工结果入口 |
 |---|---|---|---|---|
@@ -58,9 +58,11 @@
 | 简体替换和声修复 | 共享lyric_effects_optimization_enabled、LyricsParserFeature/LyricsParserTarget、单installParserRepair与replacement x-bg | 待填写 | 待填写 | 待填写 |
 | LLM翻译 | 精确原文观察、模块解析排除、共用通道 | 待填写 | 待填写 | 待填写 |
 | 模糊 | lyricBlur、显示提交、行词动画、效果所有权 | 待填写 | 待填写 | 待填写 |
-| CJK辉光与末词 | cjk、可选terminalGradient、原生动画 | 待填写 | 待填写 | 待填写 |
+| CJK辉光 | cjk、原生动画 | 待填写 | 待填写 | 待填写 |
+| 歌词效果优化：CJK末词补偿 | 共享lyric_effects_optimization_enabled、terminalGradient、lyricRepairs三项诊断/状态汇总 | 待填写 | 待填写 | 歌词效果优化矩阵 |
 | 歌词效果优化：跨行扫光 | 共享lyric_effects_optimization_enabled、独立lyricWrapSweep、视觉行/媒体时间/退役 | 待填写 | 待填写 | 待填写 |
 | 歌词效果优化：活动行高亮 | 共享lyric_effects_optimization_enabled、独立lyricBackgroundHighlight、活动行/词ID/焦点 | 待填写 | 待填写 | 待填写 |
+| 歌词效果优化：逐行双声部对齐 | 共享lyric_effects_optimization_enabled、capabilities.lineLyricAgentAlignment、普通行绑定后处理、复用lyricBlur行角色 | 待填写 | 待填写 | 歌词效果优化矩阵 |
 | 字体与歌词面板 | 生命周期、binding/adapter、资源/度量 | 待填写 | 待填写 | 待填写 |
 | 手机/平板玻璃、mini | chrome/fragmentChrome、导航与sheet | 待填写 | 待填写 | 待填写 |
 | 底栏收缩 | 独立资格、滚动/触摸、共享几何与渲染 | 待填写 | 待填写 | 待填写 |
@@ -196,9 +198,9 @@
 
 - [ ] 辉光前景绑定与原生门槛有据；精确 profile 的 `cjk.maxSpanGlowCharacters` 缺省为 `1`。显式启用时，`2..min(值, 3)` 字的单个原始未合并 CJK span 须 `trim` 后全属既有六区块，累计时长/文本长度与原生 span 一致，`splitBindingCount` 在 `0..字数`。
 - [ ] 多字 span 按总时长/字数 ≥1000ms 放行，不得按宿主合并的多个原始 span 总时长放行；仅单字分支调整回落子动画延迟，多字保留宿主错峰，原生时长/文本/分组/长度 g 与末词补偿不变。新构建须独立确认元数据与绑定语义，默认不继承。
-- [ ] 可选terminalGradient按代码必需角色完整解析。
+- [ ] 可选`terminalGradient`按代码必需角色完整解析，profile路径不变；CJK开关只门禁辉光，“歌词效果优化”默认关闭并重启生效后，`AppleMusicHostFactory` 的 `lyricRepairs` 组在 `LyricsParserFeature` 门禁下独立调用末词`install`，并保留解析修复、逐行对齐、末词补偿三项完整诊断。
 - [ ] 原文/发音尾词、时间/ID、余量调用与延迟补亮标签语义一致。
-- [ ] 开关/独立scope、缺契约不支持及失败保留辉光的状态正确。
+- [ ] 整体状态按 parser 与已声明可选项计算：全为 `Active` 时为 `Active`，仅全为 `Unsupported` 时为 `Unsupported`，否则为 `Degraded`；缺契约的 `Unsupported` 保留在诊断中。单项失败或不可用时，辉光、解析修复、逐行对齐已安装项不互相撤销。
 
 <a id="lyric-wrap-sweep-checks"></a>
 
@@ -206,7 +208,7 @@
 
 [维护规则](host-adaptation-guide.md#lyric-wrap-sweep) · [人工场景](feature-preservation.md#lyric-wrap-sweep)
 
-- [ ] 与简体替换和声修复、活动行高亮共用“歌词效果优化”开关；默认/缺键关闭且更改后重启生效。关闭时本 Feature 返回 `DISABLED`、不调用 `target.install`，CJK 辉光开关不控制本项。
+- [ ] 与简体替换和声修复、逐行双声部对齐、CJK末词补偿、活动行高亮共用“歌词效果优化”开关；默认/缺键关闭且更改后重启生效。关闭时本 Feature 返回 `DISABLED`、不调用 `target.install`，CJK 辉光开关不控制本项。
 - [ ] 独立 `lyricWrapSweep` 契约/资格/作用域明确；设置开启只作门禁，不因共用开关或其他能力成功而授予支持。
 - [ ] 视觉行键、child范围、原文/发音bank与四路模型关系有当前证据。
 - [ ] 时间单位、原生动画、静态/暗色/渐暗/后继写入的真实路径已核对。
@@ -218,7 +220,7 @@
 
 [维护规则](host-adaptation-guide.md#lyric-background-highlight) · [人工场景](feature-preservation.md#lyric-background-highlight)
 
-- [ ] 与简体替换和声修复、跨行扫光共用“歌词效果优化”开关；默认/缺键关闭且更改后重启生效。关闭时本 Feature 返回 `DISABLED`、不调用 `target.install`。
+- [ ] 与简体替换和声修复、逐行双声部对齐、CJK末词补偿、跨行扫光共用“歌词效果优化”开关；默认/缺键关闭且更改后重启生效。关闭时本 Feature 返回 `DISABLED`、不调用 `target.install`。
 - [ ] 精确 profile 的 `lyricBackgroundHighlight` 分区声明独立契约，代码必需成员/关系校验、调用方去优化和注册均成功；未声明与安装失败的状态及 scope 清理正确。与 `lyricWrapSweep` 分别报告支持、降级或失败，一方不可用不阻止另一方。
 - [ ] 当前构建活动行的内部过滤路径有据；原始输入仍含父行时也能识别未结束背景句，候选覆盖当前、输入与已保留行。
 - [ ] `lineSubset` 仅处理同次提交、同一当前集合的首次过滤结果及真子集变化；模块保留与释放不影响其他原生成员或调用。
@@ -227,6 +229,19 @@
 - [ ] 窗口以父句起点及原文/发音背景词最终结束点为界；媒体时钟、行调度偏移、到期与补交载荷语义已分别确认，TTML/媒体时钟未改。
 - [ ] 暂停停止到期轮询，恢复继续；Seek、换文档、脱离和视图销毁的释放路径完整，reader 与各 adapter 会话隔离，旧回调不写入新绑定。
 - [ ] 能力状态如实区分安装与运行失败；异常释放/清理、后续会话重建及非主线程透传有据，正常逐句路径无排查日志。
+
+<a id="line-lyric-agent-alignment-checks"></a>
+
+#### 4.6.2 歌词效果优化：逐行双声部对齐
+
+[维护规则](host-adaptation-guide.md#line-lyric-agent-alignment) · 人工结果沿用歌词效果优化矩阵
+
+- [ ] 共享“歌词效果优化”开关、默认关闭与重启门禁；精确 profile 显式授予 `capabilities.lineLyricAgentAlignment=true`，相邻构建不自动继承。
+- [ ] 随现有 `LyricsParserFeature` 门禁下的 `lyricRepairs` 组处理，缺资格保留原 parser并计入完整诊断；整体状态按 4.5 的汇总规则，任一子项失败不撤销其他已安装项，不依赖模糊开关或其他模糊成员的解析。
+- [ ] 所选 `lyricBlur` 行角色、普通行筛选、位置换算、三个文本资源和稳定 native agent ABI 均已核对。
+- [ ] 只为 Line 文档的两个有效 `Person`/`Other`（至少一 `Person`）分侧；首个实际 `Person` 原文决定主侧，Group 行、未知/单声部、更大阵容及 Word 文档恢复原生布局。
+- [ ] 每次绑定重算主文、译文、音译的物理侧与 pivot，保留 `textDirection`、尺寸、边距及时间；一次性布局回调只读当前 view，不保留 native 指针或跨歌曲侧别缓存。
+- [ ] 内容 payload 回到完整绑定，其他 payload 不改对齐或 pivot；滚动复用、混合脚本、翻译/音译切换及开关重启须按人工场景核对。
 
 <a id="lyrics-typeface-checks"></a>
 
@@ -361,8 +376,8 @@
 | 来源/LLM | 资格/优先级、格式校验、客户端共享编码、独立缓存、取消/迟到及失败恢复 | [规则](host-adaptation-guide.md#llm-lyrics-fallback)；矩阵结果链接 |
 | 简体替换和声修复 | 共享歌词效果优化开关/重启门禁、单 parser Hook 两处安装入口、语言门禁、原文快照、专项修复完整性与失败透传 | [规则](host-adaptation-guide.md#simplified-replacement-backgrounds)；矩阵结果链接 |
 | 模糊 | 显示提交与四路动画保护、代际、帧驱动、效果/裁剪所有权 | [规则](host-adaptation-guide.md#lyrics-blur)；矩阵结果链接 |
-| CJK辉光与末词 | 独立 `cjk` 配置/作用域、原生时序、末词释放与补偿一致性 | [CJK](host-adaptation-guide.md#cjk-animation)；矩阵结果链接 |
-| 歌词效果优化 | 共用配置键与重启门禁；替换和声修复使用单解析 Hook，跨行扫光与活动行高亮各按独立契约安装、报告和验收 | [替换和声](host-adaptation-guide.md#simplified-replacement-backgrounds) / [跨行](host-adaptation-guide.md#lyric-wrap-sweep) / [活动行](host-adaptation-guide.md#lyric-background-highlight)；矩阵结果链接 |
+| CJK辉光 | 独立 `cjk` 配置/作用域、原生时序与共享高亮一致性 | [CJK](host-adaptation-guide.md#cjk-animation)；矩阵结果链接 |
+| 歌词效果优化 | 共用配置键与重启门禁；替换和声修复、逐行双声部对齐与CJK末词补偿使用现有 `lyricRepairs`，保留三项完整诊断并按 parser 与已声明可选项汇总整体状态；跨行扫光与活动行高亮各按独立契约安装、报告和验收 | [替换和声](host-adaptation-guide.md#simplified-replacement-backgrounds) / [逐行双声部](host-adaptation-guide.md#line-lyric-agent-alignment) / [CJK末词](host-adaptation-guide.md#cjk-animation) / [跨行](host-adaptation-guide.md#lyric-wrap-sweep) / [活动行](host-adaptation-guide.md#lyric-background-highlight)；矩阵结果链接 |
 | 玻璃输入/动画 | 单一owner、起点归属、方向/边界、共享几何、原生触摸及展开恢复 | [规则](host-adaptation-guide.md#glass-collapse-rendering)；矩阵结果链接 |
 | 玻璃材质/上游 | 默认门禁、前缀/承载复用、帧阶段、隐藏资源与当前窗口失效 | [规则](host-adaptation-guide.md#glass-collapse-rendering)；来源pin与人工结果 |
 | 预热 | 隐藏事务/同步副作用归属、有界任务与日志阶段，不改导航状态 | [规则](host-adaptation-guide.md#startup-page-prewarm)；矩阵结果链接 |
