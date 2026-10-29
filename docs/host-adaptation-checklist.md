@@ -61,6 +61,7 @@
 | CJK辉光与末词 | cjk、可选terminalGradient、原生动画 | 待填写 | 待填写 | 待填写 |
 | 歌词效果优化：跨行扫光 | 共享lyric_effects_optimization_enabled、独立lyricWrapSweep、视觉行/媒体时间/退役 | 待填写 | 待填写 | 待填写 |
 | 歌词效果优化：活动行高亮 | 共享lyric_effects_optimization_enabled、独立lyricBackgroundHighlight、活动行/词ID/焦点 | 待填写 | 待填写 | 待填写 |
+| 歌词效果优化：逐行双声部对齐 | 共享lyric_effects_optimization_enabled、capabilities.lineLyricAgentAlignment、普通行绑定后处理、复用lyricBlur行角色 | 待填写 | 待填写 | 歌词效果优化矩阵 |
 | 字体与歌词面板 | 生命周期、binding/adapter、资源/度量 | 待填写 | 待填写 | 待填写 |
 | 手机/平板玻璃、mini | chrome/fragmentChrome、导航与sheet | 待填写 | 待填写 | 待填写 |
 | 底栏收缩 | 独立资格、滚动/触摸、共享几何与渲染 | 待填写 | 待填写 | 待填写 |
@@ -228,6 +229,19 @@
 - [ ] 暂停停止到期轮询，恢复继续；Seek、换文档、脱离和视图销毁的释放路径完整，reader 与各 adapter 会话隔离，旧回调不写入新绑定。
 - [ ] 能力状态如实区分安装与运行失败；异常释放/清理、后续会话重建及非主线程透传有据，正常逐句路径无排查日志。
 
+<a id="line-lyric-agent-alignment-checks"></a>
+
+#### 4.6.2 歌词效果优化：逐行双声部对齐
+
+[维护规则](host-adaptation-guide.md#line-lyric-agent-alignment) · 人工结果沿用歌词效果优化矩阵
+
+- [ ] 共享“歌词效果优化”开关、默认关闭与重启门禁；精确 profile 显式授予 `capabilities.lineLyricAgentAlignment=true`，相邻构建不自动继承。
+- [ ] 随现有 `LyricsParserFeature` 安装组处理，缺资格保留原 parser，任一注册失败不撤销另一项；不依赖模糊开关或其他模糊成员的解析。
+- [ ] 所选 `lyricBlur` 行角色、普通行筛选、位置换算、三个文本资源和稳定 native agent ABI 均已核对。
+- [ ] 只为 Line 文档的两个有效 `Person`/`Other`（至少一 `Person`）分侧；首个实际 `Person` 原文决定主侧，Group 行、未知/单声部、更大阵容及 Word 文档恢复原生布局。
+- [ ] 每次绑定重算主文、译文、音译的物理侧与 pivot，保留 `textDirection`、尺寸、边距及时间；一次性布局回调只读当前 view，不保留 native 指针或跨歌曲侧别缓存。
+- [ ] 内容 payload 回到完整绑定，其他 payload 不改对齐或 pivot；滚动复用、混合脚本、翻译/音译切换及开关重启已按人工场景核对。
+
 <a id="lyrics-typeface-checks"></a>
 
 ### 4.7 字体与歌词面板
@@ -362,7 +376,7 @@
 | 简体替换和声修复 | 共享歌词效果优化开关/重启门禁、单 parser Hook 两处安装入口、语言门禁、原文快照、专项修复完整性与失败透传 | [规则](host-adaptation-guide.md#simplified-replacement-backgrounds)；矩阵结果链接 |
 | 模糊 | 显示提交与四路动画保护、代际、帧驱动、效果/裁剪所有权 | [规则](host-adaptation-guide.md#lyrics-blur)；矩阵结果链接 |
 | CJK辉光与末词 | 独立 `cjk` 配置/作用域、原生时序、末词释放与补偿一致性 | [CJK](host-adaptation-guide.md#cjk-animation)；矩阵结果链接 |
-| 歌词效果优化 | 共用配置键与重启门禁；替换和声修复使用单解析 Hook，跨行扫光与活动行高亮各按独立契约安装、报告和验收 | [替换和声](host-adaptation-guide.md#simplified-replacement-backgrounds) / [跨行](host-adaptation-guide.md#lyric-wrap-sweep) / [活动行](host-adaptation-guide.md#lyric-background-highlight)；矩阵结果链接 |
+| 歌词效果优化 | 共用配置键与重启门禁；替换和声修复与逐行双声部对齐使用同一现有安装组，跨行扫光与活动行高亮各按独立契约安装、报告和验收 | [替换和声](host-adaptation-guide.md#simplified-replacement-backgrounds) / [逐行双声部](host-adaptation-guide.md#line-lyric-agent-alignment) / [跨行](host-adaptation-guide.md#lyric-wrap-sweep) / [活动行](host-adaptation-guide.md#lyric-background-highlight)；矩阵结果链接 |
 | 玻璃输入/动画 | 单一owner、起点归属、方向/边界、共享几何、原生触摸及展开恢复 | [规则](host-adaptation-guide.md#glass-collapse-rendering)；矩阵结果链接 |
 | 玻璃材质/上游 | 默认门禁、前缀/承载复用、帧阶段、隐藏资源与当前窗口失效 | [规则](host-adaptation-guide.md#glass-collapse-rendering)；来源pin与人工结果 |
 | 预热 | 隐藏事务/同步副作用归属、有界任务与日志阶段，不改导航状态 | [规则](host-adaptation-guide.md#startup-page-prewarm)；矩阵结果链接 |

@@ -111,7 +111,8 @@
     "cellular": true,
     "staticCollapsedIntercept": false,
     "playerRecovery": true,
-    "startupPagePrewarm": true
+    "startupPagePrewarm": true,
+    "lineLyricAgentAlignment": true
   },
   "evidence": {
     "status": "descriptor-verified-user-testing",

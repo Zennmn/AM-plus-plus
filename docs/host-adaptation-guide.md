@@ -164,7 +164,7 @@ Fragment view 重建、配置变化与 controller 销毁分别关闭会话。状
 | [共用歌词结果提交](#lyrics-result-submission) | `indexed`、`lyricResultSubmission`、原生安装与 item 更新 | [结果提交](feature-preservation.md#lyrics-result-submission) |
 | [歌词来源](#lyrics-sources)、[简体替换和声修复](#simplified-replacement-backgrounds)、[LLM](#llm-lyrics-fallback) | 原生 TTML 观察、共享歌词效果优化门禁的单解析器修复、指针/歌曲身份及共用结果通道 | [来源](feature-preservation.md#lyrics-sources)、[LLM](feature-preservation.md#llm-lyrics-fallback) |
 | [模糊](#lyrics-blur)、[CJK](#cjk-animation)、[字体](#lyrics-typeface) | 各自契约、显示状态、绑定与资源 | [模糊](feature-preservation.md#lyrics-blur)、[CJK](feature-preservation.md#cjk-animation)、[字体](feature-preservation.md#lyrics-typeface) |
-| [歌词效果优化](#lyric-background-highlight)：[简体替换和声修复](#simplified-replacement-backgrounds)、[跨行扫光](#lyric-wrap-sweep)与活动行高亮 | 共享设置门禁；单解析器接缝，以及 `lyricWrapSweep` / `lyricBackgroundHighlight` 独立契约、安装状态和验收 | [跨行](feature-preservation.md#lyric-wrap-sweep)、[活动行](feature-preservation.md#lyric-background-highlight) |
+| [歌词效果优化](#lyric-background-highlight)：[简体替换和声修复](#simplified-replacement-backgrounds)、[逐行双声部对齐](#line-lyric-agent-alignment)、[跨行扫光](#lyric-wrap-sweep)与活动行高亮 | 共享设置门禁；单解析器安装组、行绑定接缝，以及 `lyricWrapSweep` / `lyricBackgroundHighlight` 独立契约、安装状态和验收 | [跨行](feature-preservation.md#lyric-wrap-sweep)、[活动行](feature-preservation.md#lyric-background-highlight) |
 | [玻璃导航](#chrome-glass)、[收缩](#glass-collapse-rendering) | `chrome` / `fragmentChrome`、独立能力位、滚动与 sheet 端口 | [玻璃](feature-preservation.md#chrome-glass)、[收缩](feature-preservation.md#glass-collapse-rendering) |
 | [启动预热](#startup-page-prewarm) | 独立能力、`startupPagePrewarm` 与形态导航资源 | [预热](feature-preservation.md#startup-page-prewarm) |
 | [平板布局、视频与恢复](#tablet-layout) | 双栏、binding、资源、视频/恢复与布局变体 | [平板](feature-preservation.md#tablet-layout) |
@@ -409,7 +409,7 @@ Native vector/pointer 在 Hook 当次同步解码，只把复制数值送主线�
 
 ### 5.6 跨行歌词扫光
 
-**生效与接缝。** 设置 `ModuleSettings.lyricEffectsOptimizationEnabled`（配置键 `lyric_effects_optimization_enabled`）是简体替换和声修复、跨行扫光与活动行高亮共用的现有开关，默认及缺键均为关闭，更改后重启宿主生效。关闭时 `LyricsParserFeature`、`LyricWrapSweepFeature` 与 `LyricBackgroundHighlightFeature` 都返回 `DISABLED`，且不调用各自 `target.install`；自定义歌词开启时仍可安装同一解析 Hook 供观察，但 before 不执行修复。开启后，解析修复经单解析 Hook 生效，跨行扫光与活动行高亮仍分别按精确 profile 的 `lyricWrapSweep` 与 `lyricBackgroundHighlight` 契约安装和核对，各自报告支持、降级或失败；任一能力不可用不阻止其他能力。跨行扫光的 `LyricWrapSweepTarget` 使用能力键 `FEATURE_LYRIC_WRAP_SWEEP`，不新增独立设置。CJK 辉光开关不控制这三个 Feature。
+**生效与接缝。** 设置 `ModuleSettings.lyricEffectsOptimizationEnabled`（配置键 `lyric_effects_optimization_enabled`）是简体替换和声修复、逐行双声部对齐、跨行扫光与活动行高亮共用的现有开关，默认及缺键均为关闭，更改后重启宿主生效。关闭时 `LyricsParserFeature`、`LyricWrapSweepFeature` 与 `LyricBackgroundHighlightFeature` 都返回 `DISABLED`，且不调用各自 `target.install`；自定义歌词开启时仍可安装同一解析 Hook 供观察，但 before 不执行修复。开启后，解析修复和逐行双声部对齐共用既有安装组，跨行扫光与活动行高亮仍分别按精确 profile 的 `lyricWrapSweep` 与 `lyricBackgroundHighlight` 契约安装和核对，各自报告支持、降级或失败；任一能力不可用不阻止其他能力。跨行扫光的 `LyricWrapSweepTarget` 使用能力键 `FEATURE_LYRIC_WRAP_SWEEP`，不新增独立设置。CJK 辉光开关不控制这些 Feature。
 
 入口为 [LyricWrapSweepContract](../host-applemusic/src/main/java/dev/amenhancer/module/hook/LyricWrapSweepContract.kt)、[Geometry](../host-applemusic/src/main/java/dev/amenhancer/module/hook/LyricWrapSweepGeometry.kt)、[AppleMusicLyricWrapSweepTarget](../host-applemusic/src/main/java/dev/amenhancer/module/hook/AppleMusicLyricWrapSweepTarget.kt) 和 core 的 [LyricWrapSweepPolicy](../core/src/main/kotlin/dev/amenhancer/module/hook/LyricWrapSweepPolicy.kt)。Contract 的必需清单与关系校验是协议依据，不另写混淆名或支持版本表。
 
@@ -472,6 +472,16 @@ staticMask 同时用于未来行初始化和已唱恢复，不能因它被调用
 **状态与维护。** 安装健康状态由 Feature 统一报告；首次非主线程提交透传并报告降级。运行异常记录原因、尝试释放保留行并清理会话，后续提交可重新建立会话。正常逐句提交不输出诊断，异常日志不含歌词正文。新构建须重新确认过滤调用、词 ID 消费、焦点/显示快照、媒体与行调度时钟及生命周期语义；所需成员清单由代码契约维护，不能照搬相邻构建的混淆名。
 
 [证据清单](host-adaptation-checklist.md#lyric-background-highlight-checks) · [人工场景](feature-preservation.md#lyric-background-highlight)
+
+<a id="line-lyric-agent-alignment"></a>
+
+#### 5.6.2 歌词效果优化：逐行双声部对齐
+
+**生效与接缝。** [逐行对齐补丁](../host-applemusic/src/main/java/dev/amenhancer/module/hook/LineLyricAgentAlignment.kt) 由精确 profile 的 `capabilities.lineLyricAgentAlignment=true` 授权，复用 `LyricsParserFeature` 的开关和安装组，不增加独立设置、Feature 或 Target。成员从 `lyricBlur` 中只选取 `lineBind`、`lineType`、`lineMap`、`lineReader`、`lineToken`、`readerCount`、`readerLine`、`lineGet`、`holderView`，不依赖其他模糊成员或模糊功能的安装。native `getAgent` 等方法按稳定 JavaCPP ABI 解析。缺少能力位时保留原 parser 结果；两项合并报告安装状态，任一失败不撤销另一项。
+
+**适用边界与行绑定。** 仅处理原生 `timing=Line`：排除 `Group` 后，`Person`/`Other` 有效声部恰为两个，且至少一个为 `Person`。首个实际出现的 `Person` 按原歌词的首字母方向确定主侧，另一声部使用对侧；`Group` 行、未知声部、单声部、更多声部及逐字文档恢复原生布局。普通行绑定后，每次为主文、译文、音译重算同一物理侧或原生对齐，并同步缩放中心；保留文字方向、尺寸、边距和时间数据，不缓存跨歌曲映射。延迟布局回调读取当前 view 状态，不保留 native 指针；无需独立 payload、recycle Hook 或常驻布局监听。
+
+**维护触发。** 新版本授予能力位前，核对普通行筛选、位置换算、agent ABI、原生首字母方向判定、内容 payload 回到完整绑定及一次性布局回调顺序。人工场景覆盖双声部、原生回落、滚动复用、翻译/音译切换、混合脚本和开关重启；不能依据相邻版本自动继承资格。
 
 <a id="lyrics-typeface"></a>
 

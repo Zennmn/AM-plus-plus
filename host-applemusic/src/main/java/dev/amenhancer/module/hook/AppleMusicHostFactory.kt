@@ -69,6 +69,18 @@ object AppleMusicHostFactory {
             currentSong = currentSong,
             autoLyricsRuntime = autoLyricsRuntime,
         )
+        val lyricRepairs by lazy {
+            val parser = customLyrics.installParserRepair()
+            val alignment = installLineLyricAgentAlignment(profile, classLoader, application.resources) {
+                config.settings().lyricEffectsOptimizationEnabled
+            }
+            when {
+                alignment is TargetCapabilityInstall.Unsupported -> parser
+                parser is TargetCapabilityInstall.Active && alignment is TargetCapabilityInstall.Active ->
+                    TargetCapabilityInstall.Active("${parser.message}; ${alignment.message}")
+                else -> TargetCapabilityInstall.Degraded("${parser.message}; ${alignment.message}")
+            }
+        }
         return TargetAdaptation(
             identity = build.displayName,
             build = build,
@@ -116,7 +128,7 @@ object AppleMusicHostFactory {
                 session = lyricsTypefaceSession as LyricsTypefaceSession,
             ),
             customLyrics = customLyrics,
-            lyricsParser = LyricsParserTarget(customLyrics::installParserRepair),
+            lyricsParser = LyricsParserTarget { lyricRepairs },
             currentSongIdentity = AppleMusicCurrentSongIdentityTarget(
                 resolver,
                 currentSong,
