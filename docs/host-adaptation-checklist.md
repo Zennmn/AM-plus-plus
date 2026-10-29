@@ -291,6 +291,8 @@
 
 - [ ] 精确构建与开关符合资格；Activity的is_tablet/横屏、Fragment的宽度至少600dp/宽大于高/原生drawer分别有据，实际窗口/inset/DPI输入正确。
 - [ ] 原生角色和SONG/QUEUE两种父链符合资源/binding证据，未用错误参数类型。
+- [ ] 独立歌词 Fragment 保留而 View 重建时，adapter 创建、LiveData 观察及同指针安装去重有当前构建证据；若声明 `fragmentLyricsRuntime.fields.installedPointer`，owner、类型、可写性与读写语义闭合，仅在独立右栏原生 onCreateView 前使旧安装标记失效，未在普通 resume/逐帧刷新清除，也未猜用其他构建字段。
+- [ ] 原生设置返回后不切歌即可恢复同曲原生/补全歌词；关闭自定义歌词、连续往返设置及正常切歌分别验收，保留既有结果通道和指针所有权，未通过重复请求或直接重入安装补偿。
 - [ ] 共享布局使用当前CSS视口策略，封面基准与实际调用一致，原生scale/动作保持。
 - [ ] 当前页面族的音量/输出、原生footer、模式契约/右下代理范围明确，收起命中分别按CSS尺寸、dp下限与可用空间判定，几何失效和恢复归属完整。
 - [ ] 视频外框、静态基准、目标及resize先后有证据，零尺寸与迟到owner分别处理。

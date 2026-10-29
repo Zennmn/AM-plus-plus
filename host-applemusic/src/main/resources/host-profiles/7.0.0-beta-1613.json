@@ -4363,6 +4363,11 @@
         "owner": "com.apple.android.music.player.fragment.PlayerLyricsViewFragment$x",
         "name": "c",
         "type": "int"
+      },
+      "installedPointer": {
+        "owner": "com.apple.android.music.player.fragment.PlayerLyricsViewFragment",
+        "name": "f1",
+        "type": "com.apple.android.music.ttml.javanative.model.SongInfo$SongInfoPtr"
       }
     }
   },

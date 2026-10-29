@@ -30,6 +30,14 @@ internal class BetaLyricsPaneRuntime(private val lyricsClass: Class<*>,
             check(ModernXposedRuntime.hookMethod(method, callback, registration))
         }
         hook(create, object : ModernMethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                val installedPointer = native.installedPointer ?: return
+                val fragment = param.thisObject ?: return
+                if (!dedicated(fragment)) return
+                // Native view creation replaces the adapters but retains the old installation
+                // pointer. Invalidate that guard before the new observer replays the same lyrics.
+                guarded { installedPointer.set(fragment, null) }
+            }
             override fun afterHookedMethod(param: MethodHookParam) {
                 if (param.throwable != null) return
                 val fragment = param.thisObject ?: return

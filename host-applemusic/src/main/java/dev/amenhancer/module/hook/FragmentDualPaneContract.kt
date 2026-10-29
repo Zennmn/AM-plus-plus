@@ -102,6 +102,9 @@ internal class FragmentLyricsRuntimeContract(profile: AppleMusicHostProfile, pri
     val getView = members.method("getView")
     val fragmentId = members.method("fragmentId")
     val bindingField = members.field("binding")
+    /** Declared only for builds whose new adapters retain an obsolete installation guard. */
+    val installedPointer = names.getJSONObject("fields").takeIf { it.has("installedPointer") }
+        ?.let { members.field("installedPointer") }
     val container = members.field("container")
     val recycler = members.field("recycler")
     val gradients = members.field("gradients")
@@ -113,6 +116,11 @@ internal class FragmentLyricsRuntimeContract(profile: AppleMusicHostProfile, pri
     init {
         check(listener.isInterface && registerListener.parameterTypes.contentEquals(arrayOf(listener)))
         check(bindingField.type == binding)
+        installedPointer?.let { field ->
+            val pointerClass = profile.document.getJSONObject("indexed").getJSONObject("classes").getString("SONG_INFO_PTR")
+            check(field.declaringClass == createView.declaringClass && field.type == members.type(pointerClass) &&
+                !Modifier.isFinal(field.modifiers)) { "Invalid lyrics view installation pointer: $field" }
+        }
         listOf(container, recycler, gradients).forEach { check(it.declaringClass == binding) }
         auxiliary.forEach { check(it.declaringClass == binding) }
         synchronizedMetrics.forEach { check(it.type == metricOffset.declaringClass) }
