@@ -132,6 +132,7 @@ class OrdinarySettingsWritePolicyTest {
                 "llm_lyrics_api_key" to "",
                 "llm_lyrics_model" to "",
                 "llm_lyrics_thinking_enabled" to false,
+                "llm_lyrics_thinking_effort" to "default",
                 "schema_version" to ModuleConstants.CONFIG_SCHEMA_VERSION,
             ),
             encoded,

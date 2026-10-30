@@ -1,5 +1,6 @@
 package dev.amenhancer.module.lyrics
 
+import dev.amenhancer.module.model.LlmLyricsThinkingEffort
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.file.AtomicMoveNotSupportedException
@@ -99,6 +100,7 @@ class FileLlmLyricsCache(
             endpoint = endpoint,
             model = model,
             thinkingEnabled = config.thinkingEnabled,
+            thinkingEffort = config.effectiveThinkingEffort,
             promptVersion = LlmLyricsClient.PROMPT_VERSION,
             originalSha256 = CustomLyricsFilePolicy.sha256(originalBytes),
         )
@@ -110,6 +112,7 @@ class FileLlmLyricsCache(
         .put("endpoint", identity.endpoint)
         .put("model", identity.model)
         .put("thinkingEnabled", identity.thinkingEnabled)
+        .put("thinkingEffort", identity.thinkingEffort.storageValue)
         .put("promptVersion", identity.promptVersion)
         .put("originalSha256", identity.originalSha256)
         .put("ttml", translatedTtml)
@@ -119,7 +122,15 @@ class FileLlmLyricsCache(
     private fun readEntry(file: File): Entry? = runCatching {
         if (!file.isFile || file.length() !in 1L..MAX_ENTRY_BYTES) return@runCatching null
         val raw = JSONObject(file.readText(Charsets.UTF_8))
-        if (raw.optInt("version", 0) != ENTRY_VERSION) return@runCatching null
+        val thinkingEffort = when (raw.optInt("version", 0)) {
+            LEGACY_ENTRY_VERSION -> LlmLyricsThinkingEffort.DEFAULT
+            ENTRY_VERSION -> {
+                val stored = raw.optString("thinkingEffort")
+                LlmLyricsThinkingEffort.values().firstOrNull { it.storageValue == stored }
+                    ?: return@runCatching null
+            }
+            else -> return@runCatching null
+        }
         val ttml = raw.optString("ttml")
         if (!isAcceptableTranslation(ttml)) return@runCatching null
         val originalSha256 = raw.optString("originalSha256")
@@ -130,6 +141,7 @@ class FileLlmLyricsCache(
             model = raw.optString("model"),
             // Keep entries without this field eligible only for the default mode.
             thinkingEnabled = raw.optBoolean("thinkingEnabled", false),
+            thinkingEffort = thinkingEffort,
             promptVersion = raw.optInt("promptVersion", 0),
             originalSha256 = originalSha256,
             ttml = ttml,
@@ -263,6 +275,7 @@ class FileLlmLyricsCache(
         val endpoint: String,
         val model: String,
         val thinkingEnabled: Boolean,
+        val thinkingEffort: LlmLyricsThinkingEffort,
         val promptVersion: Int,
         val originalSha256: String,
         val ttml: String,
@@ -272,6 +285,7 @@ class FileLlmLyricsCache(
                 endpoint == identity.endpoint &&
                 model == identity.model &&
                 thinkingEnabled == identity.thinkingEnabled &&
+                thinkingEffort == identity.thinkingEffort &&
                 promptVersion == identity.promptVersion &&
                 originalSha256.equals(identity.originalSha256, ignoreCase = true)
     }
@@ -280,7 +294,9 @@ class FileLlmLyricsCache(
         const val ENTRY_PREFIX = "llm_"
         const val ENTRY_SUFFIX = ".json"
         const val INDEX_FILE_NAME = "index.json"
-        const val ENTRY_VERSION = 1
+        // Old clients must reject entries whose identity includes an explicit effort.
+        const val ENTRY_VERSION = 2
+        const val LEGACY_ENTRY_VERSION = 1
         const val MAX_ENTRIES = 100
         const val SHA256_LENGTH = 64
         const val MAX_INDEX_BYTES = 8 * 1024L
@@ -297,6 +313,7 @@ private data class EntryIdentity(
     val endpoint: String,
     val model: String,
     val thinkingEnabled: Boolean,
+    val thinkingEffort: LlmLyricsThinkingEffort,
     val promptVersion: Int,
     val originalSha256: String,
 )

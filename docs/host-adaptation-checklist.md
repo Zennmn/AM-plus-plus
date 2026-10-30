@@ -179,6 +179,10 @@
 - [ ] 翻译提示词覆盖上下文/语气/意象、信达雅润色、按语境处理重复及完整和声，中文译文不使用逗号和句号；无冲突的旧规则或示例，风格调整不改变返回格式与行序约束，可继续复用现有缓存。
 - [ ] 纯和声段落、多个和声、和声先于主唱及不同声部语言均有对应关系；正文缺 key 时仅补一次；声部分组或输出约定变化已提升现有提示词/缓存版本。
 - [ ] 无独立猜测式宿主映射，结果继续通过共用通道；原文入口缺失能明确停用。
+- [ ] 请求继续使用现有 OpenAI Compatible Chat Completions，并在顶层使用 `thinking.type`；翻译与连接检查共用同一参数映射，开启思考时按强度发送 `reasoning_effort=low/high/max`，强度 `default` 不发送该字段，关闭思考也不发送，未增加供应商或按地址/模型分叉。
+- [ ] 思考强度使用 `default/low/high/max` 强类型枚举，普通设置键 `llm_lyrics_thinking_effort` 已纳入编解码、键集合及 schema 升级；缺键/未知值按 `default`。关闭思考保留设置中的 UI 值，但后台请求和缓存有效强度归 `default`，思考开关仍单独参与匹配。
+- [ ] 所有新缓存写入格式 2；新版接受格式 1 但只按 `default` 解释，格式 2 强度缺失或未知时拒绝。旧客户端拒绝格式 2，安装包降级不能把显式强度结果当作默认复用或写回；显式 `low/high/max` 之间也互不复用。
+- [ ] 思考开关或有效强度变更沿用旧请求取消；翻译与连接检查不混用旧参数、旧缓存或迟到结果。
 - [ ] 若改客户端/设置/缓存，已登记第5节维护结论与相应矩阵场景。
 
 <a id="lyrics-blur-checks"></a>
@@ -367,6 +371,7 @@
 - [ ] 偏好列表回调或 Compose 参数变化已声明 `settings.members` v1 的 `preferenceItems` / `compose` 完整契约；方法归属、返回、参数和必需角色在注册前解析，旧档案未声明时仍使用已审核签名。
 - [ ] 设置入口与 DPI 的组件过滤使用实际宿主；宿主类、方法和资源继续使用现有原包常量。
 - [ ] 蜂窝独立资格与原生登录/availability、DPI宿主范围及失败边界正确。
+- [ ] LLM 二级页保留思考开关并提供默认/低/高/最高四档，经 `llm_lyrics_thinking_effort` 保存，重开和返回保持当前值；关闭思考时禁用强度行并保留已选值，重新开启恢复；正式翻译与连接检查读取同一组开关及强度参数。
 - [ ] 配置/资产/缓存/迁移与ZIP兼容范围明确，格式变化有独立迁移/回退。
 - [ ] 普通宿主设置跳过独立及旧内联歌词索引；歌词消费者走独立后台索引，完整解码保留导入/迁移语义。
 - [ ] 公共SDK/插件生命周期及通用Hook注册记录保持，业务未带入宿主私有接口。
@@ -378,7 +383,7 @@
 | 修改域 | 必须登记的维护结论 | 规则与人工结果 |
 |---|---|---|
 | 歌词结果桥 | 请求/文档/owner边界、索引异常对齐、原生异步合并、安装前附加与空安装抑制、实际容器值驱动的选择/安装确认和去重 | [规则](host-adaptation-guide.md#lyrics-result-submission)；矩阵结果链接 |
-| 来源/LLM | 资格/优先级、格式校验、客户端共享编码、独立缓存、取消/迟到及失败恢复 | [规则](host-adaptation-guide.md#llm-lyrics-fallback)；矩阵结果链接 |
+| 来源/LLM | 资格/优先级、格式校验、客户端共享编码、思考开关/强度、默认省略与缓存身份、取消/迟到及失败恢复 | [规则](host-adaptation-guide.md#llm-lyrics-fallback)；矩阵结果链接 |
 | 简体替换和声修复 | 共享歌词效果优化开关/重启门禁、单 parser Hook 两处安装入口、语言门禁、原文快照、专项修复完整性与失败透传 | [规则](host-adaptation-guide.md#simplified-replacement-backgrounds)；矩阵结果链接 |
 | 模糊 | 显示提交与四路动画保护、代际、帧驱动、效果/裁剪所有权 | [规则](host-adaptation-guide.md#lyrics-blur)；矩阵结果链接 |
 | CJK辉光 | 独立 `cjk` 配置/作用域、原生时序与共享高亮一致性 | [CJK](host-adaptation-guide.md#cjk-animation)；矩阵结果链接 |
@@ -387,7 +392,7 @@
 | 玻璃材质/上游 | 默认门禁、前缀/承载复用、帧阶段、隐藏资源与当前窗口失效 | [规则](host-adaptation-guide.md#glass-collapse-rendering)；来源pin与人工结果 |
 | 预热 | 隐藏事务/同步副作用归属、有界任务与日志阶段，不改导航状态 | [规则](host-adaptation-guide.md#startup-page-prewarm)；矩阵结果链接 |
 | 平板布局/视频 | CSS策略、原生角色/模式、QUEUE渐变、首帧失效、尺寸写入者与恢复 | [规则](host-adaptation-guide.md#tablet-layout)；矩阵结果链接 |
-| 设置/数据/SDK | 最新草稿保存、返回/失败/取消、schema键与资产兼容、注册记录/公共协议 | [规则](host-adaptation-guide.md#settings-data-plugins)；矩阵结果链接 |
+| 设置/数据/SDK | 最新草稿保存、返回/失败/取消、LLM思考开关/强度与共享请求参数、`llm_lyrics_thinking_effort`/schema 19与资产兼容、注册记录/公共协议 | [规则](host-adaptation-guide.md#settings-data-plugins)；矩阵结果链接 |
 
 ## 6. 安装、生命周期与失败
 

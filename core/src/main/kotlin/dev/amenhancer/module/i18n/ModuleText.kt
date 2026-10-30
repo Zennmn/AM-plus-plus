@@ -430,6 +430,15 @@ enum class ModuleText(internal val english: String, internal val chinese: String
     LLM_LYRICS_MODEL("Model", "模型"),
     LLM_LYRICS_THINKING("Model thinking", "模型思考"),
     LLM_LYRICS_THINKING_SUMMARY("Allow reasoning before translation", "允许模型先思考再翻译"),
+    LLM_LYRICS_THINKING_EFFORT("Thinking effort", "思考强度"),
+    LLM_LYRICS_THINKING_EFFORT_SUMMARY(
+        "Default uses the API default. Available levels depend on the model and API.",
+        "默认沿用接口默认强度，可用档位取决于模型和接口。",
+    ),
+    LLM_LYRICS_THINKING_EFFORT_DEFAULT("Default (API default)", "默认（接口默认）"),
+    LLM_LYRICS_THINKING_EFFORT_LOW("Low", "低"),
+    LLM_LYRICS_THINKING_EFFORT_HIGH("High", "高"),
+    LLM_LYRICS_THINKING_EFFORT_MAX("Maximum", "最高"),
     LLM_LYRICS_MODEL_SUMMARY(
         "Use the model name from your API provider",
         "填写接口提供的模型名称",

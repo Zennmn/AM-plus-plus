@@ -90,6 +90,8 @@ data class ModuleSettings(
     val llmLyricsModel: String = "",
     /** Send the user-selected thinking mode to the configured compatible endpoint. */
     val llmLyricsThinkingEnabled: Boolean = false,
+    /** Retained while thinking is disabled; DEFAULT leaves the endpoint's effort unchanged. */
+    val llmLyricsThinkingEffort: LlmLyricsThinkingEffort = LlmLyricsThinkingEffort.DEFAULT,
     val fontManifest: LyricsFontManifest = LyricsFontManifest.disabled(),
     val customLyricsManifest: CustomLyricsManifest = CustomLyricsManifest.empty(),
     val schemaVersion: Int = ModuleConstants.CONFIG_SCHEMA_VERSION,
@@ -184,6 +186,19 @@ data class ModuleSettings(
                 MIN_PHONE_LIQUID_GLASS_MINI_SINK_BOUNCE_DP,
                 MAX_PHONE_LIQUID_GLASS_MINI_SINK_BOUNCE_DP,
             )
+    }
+}
+
+/** Stable request values shared by settings, translation and its independent cache. */
+enum class LlmLyricsThinkingEffort(val storageValue: String) {
+    DEFAULT("default"),
+    LOW("low"),
+    HIGH("high"),
+    MAX("max");
+
+    companion object {
+        fun decode(value: String?): LlmLyricsThinkingEffort =
+            values().firstOrNull { it.storageValue == value } ?: DEFAULT
     }
 }
 

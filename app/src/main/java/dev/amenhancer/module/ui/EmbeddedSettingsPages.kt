@@ -46,6 +46,7 @@ import dev.amenhancer.module.CurrentSongDetails
 import dev.amenhancer.module.lyrics.LlmLyricsClient
 import dev.amenhancer.module.lyrics.LlmLyricsConfig
 import dev.amenhancer.module.model.CustomLyricsSources
+import dev.amenhancer.module.model.LlmLyricsThinkingEffort
 import dev.amenhancer.module.model.ModuleSettings
 import java.lang.ref.WeakReference
 import java.util.concurrent.atomic.AtomicBoolean
@@ -882,6 +883,7 @@ private fun EmbeddedSettingsHost.showEmbeddedPageDetails(activity: Activity, pag
             ModuleText.LLM_LYRICS_API_KEY to ModuleText.LLM_LYRICS_API_KEY_SUMMARY,
             ModuleText.LLM_LYRICS_MODEL to ModuleText.LLM_LYRICS_MODEL_SUMMARY,
             ModuleText.LLM_LYRICS_THINKING to ModuleText.LLM_LYRICS_THINKING_SUMMARY,
+            ModuleText.LLM_LYRICS_THINKING_EFFORT to ModuleText.LLM_LYRICS_THINKING_EFFORT_SUMMARY,
         )
         EmbeddedSettingsPage.BOTTOM_BAR_ANIMATION -> listOf(
             ModuleText.BOTTOM_BAR_COLLAPSE_REBOUND to ModuleText.BOTTOM_BAR_COLLAPSE_REBOUND_SUMMARY,
@@ -1451,6 +1453,33 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
 }
 
 
+private fun EmbeddedSettingsHost.llmThinkingEffortLabel(effort: LlmLyricsThinkingEffort): String =
+    localizedText(when (effort) {
+        LlmLyricsThinkingEffort.DEFAULT -> ModuleText.LLM_LYRICS_THINKING_EFFORT_DEFAULT
+        LlmLyricsThinkingEffort.LOW -> ModuleText.LLM_LYRICS_THINKING_EFFORT_LOW
+        LlmLyricsThinkingEffort.HIGH -> ModuleText.LLM_LYRICS_THINKING_EFFORT_HIGH
+        LlmLyricsThinkingEffort.MAX -> ModuleText.LLM_LYRICS_THINKING_EFFORT_MAX
+    })
+
+
+private fun EmbeddedSettingsHost.showLlmThinkingEffortPicker(
+    activity: Activity,
+    current: LlmLyricsThinkingEffort,
+    onSelected: (LlmLyricsThinkingEffort) -> Unit,
+) {
+    val efforts = LlmLyricsThinkingEffort.values()
+    val labels = efforts.map { llmThinkingEffortLabel(it) }.toTypedArray()
+    embeddedDialogBuilder(activity)
+        .setTitle(localizedText(ModuleText.LLM_LYRICS_THINKING_EFFORT))
+        .setSingleChoiceItems(labels, efforts.indexOf(current)) { dialog, which ->
+            efforts.getOrNull(which)?.let(onSelected)
+            dialog.dismiss()
+        }
+        .setNegativeButton(localizedText(ModuleText.CANCEL), null)
+        .show()
+}
+
+
 private fun EmbeddedSettingsHost.renderEmbeddedLlmLyricsPage(
     activity: Activity,
     parent: LinearLayout,
@@ -1529,12 +1558,32 @@ private fun EmbeddedSettingsHost.renderEmbeddedLlmLyricsPage(
         pageRefresh?.invoke()
     })
     settingsGroup.addView(embeddedSpacer(activity, if (isEmbeddedPhone(activity)) 10 else 14))
+    val effortRow = embeddedNavigationRow(
+        activity = activity,
+        title = localizedText(ModuleText.LLM_LYRICS_THINKING_EFFORT),
+        summary = llmThinkingEffortLabel(settings.llmLyricsThinkingEffort),
+        clickable = settings.llmLyricsThinkingEnabled,
+        compactWidePadding = true,
+        onClick = {
+            showLlmThinkingEffortPicker(activity, settings.llmLyricsThinkingEffort) { selected ->
+                onSettingsChanged(settings.copy(llmLyricsThinkingEffort = selected))
+                pageRefresh?.invoke()
+            }
+        },
+    )
+    if (!settings.llmLyricsThinkingEnabled) {
+        effortRow.isEnabled = false
+        effortRow.alpha = 0.55f
+    }
+    settingsGroup.addView(effortRow)
+    settingsGroup.addView(embeddedSpacer(activity, if (isEmbeddedPhone(activity)) 10 else 14))
     // Page edits replace this config snapshot; detaching the old page cancels its check.
     addLlmConnectionTestButton(activity, settingsGroup, LlmLyricsConfig(
         baseUrl = settings.llmLyricsBaseUrl,
         apiKey = settings.llmLyricsApiKey,
         model = settings.llmLyricsModel,
         thinkingEnabled = settings.llmLyricsThinkingEnabled,
+        thinkingEffort = settings.llmLyricsThinkingEffort,
     ))
 }
 

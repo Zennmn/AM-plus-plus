@@ -2,6 +2,7 @@ package dev.amenhancer.module.config
 
 import dev.amenhancer.module.ModuleConstants
 import dev.amenhancer.module.model.CustomLyricsManifest
+import dev.amenhancer.module.model.LlmLyricsThinkingEffort
 import dev.amenhancer.module.model.ModuleSettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -126,6 +127,7 @@ class ModuleSettingsSchemaTest {
                 "llm_lyrics_api_key" to "",
                 "llm_lyrics_model" to "",
                 "llm_lyrics_thinking_enabled" to false,
+                "llm_lyrics_thinking_effort" to "default",
                 "lyrics_font_enabled" to false,
                 "lyrics_font_file_id" to "",
                 "lyrics_font_display_name" to "",
@@ -181,6 +183,7 @@ class ModuleSettingsSchemaTest {
                 "llm_lyrics_api_key" to "",
                 "llm_lyrics_model" to "",
                 "llm_lyrics_thinking_enabled" to false,
+                "llm_lyrics_thinking_effort" to "default",
                 "lyrics_font_enabled" to false,
                 "lyrics_font_file_id" to "",
                 "lyrics_font_display_name" to "",
@@ -221,6 +224,53 @@ class ModuleSettingsSchemaTest {
     }
 
     @Test
+    fun `schema 18 upgrades to 19 with saved LLM configuration and default effort`() {
+        val upgraded = ModuleSettingsSchema.upgrade(
+            storedValues = mapOf(
+                "schema_version" to 18,
+                "dual_pane_enabled" to false,
+                "lyric_effects_optimization_enabled" to true,
+                "llm_lyrics_enabled" to true,
+                "llm_lyrics_base_url" to "https://example.test/v1",
+                "llm_lyrics_api_key" to "test-api-key",
+                "llm_lyrics_model" to "reasoning-model",
+                "llm_lyrics_thinking_enabled" to true,
+            ),
+            legacyValues = mapOf(
+                "llm_lyrics_enabled" to false,
+                "llm_lyrics_thinking_enabled" to false,
+            ),
+        )!!
+
+        assertEquals(ModuleConstants.CONFIG_SCHEMA_VERSION, upgraded["schema_version"])
+        assertEquals(false, upgraded["dual_pane_enabled"])
+        assertEquals(true, upgraded["lyric_effects_optimization_enabled"])
+        assertEquals(true, upgraded["llm_lyrics_enabled"])
+        assertEquals("https://example.test/v1", upgraded["llm_lyrics_base_url"])
+        assertEquals("test-api-key", upgraded["llm_lyrics_api_key"])
+        assertEquals("reasoning-model", upgraded["llm_lyrics_model"])
+        assertEquals(true, upgraded["llm_lyrics_thinking_enabled"])
+        assertEquals("default", upgraded["llm_lyrics_thinking_effort"])
+    }
+
+    @Test
+    fun `schema 18 upgrade retains an explicitly saved LLM thinking effort`() {
+        val upgraded = ModuleSettingsSchema.upgrade(
+            storedValues = mapOf(
+                "schema_version" to 18,
+                "llm_lyrics_thinking_enabled" to false,
+                "llm_lyrics_thinking_effort" to "max",
+            ),
+            legacyValues = emptyMap<String, Any?>(),
+        )!!
+        val decoded = ModuleSettingsSchema.decode(upgraded)
+
+        assertEquals("max", upgraded["llm_lyrics_thinking_effort"])
+        assertEquals(LlmLyricsThinkingEffort.MAX, decoded.llmLyricsThinkingEffort)
+        assertEquals(false, decoded.llmLyricsThinkingEnabled)
+    }
+
+    @Test
     fun `malformed values safely fall back without changing valid values`() {
         val decoded = ModuleSettingsSchema.decode(
             mapOf(
@@ -250,9 +300,14 @@ class ModuleSettingsSchemaTest {
     }
 
     @Test
-    fun `a future schema is never downgraded`() {
+    fun `a future schema with saved LLM effort is never downgraded or rewritten`() {
         val upgraded = ModuleSettingsSchema.upgrade(
-            storedValues = mapOf("schema_version" to ModuleConstants.CONFIG_SCHEMA_VERSION + 1),
+            storedValues = mapOf(
+                "schema_version" to ModuleConstants.CONFIG_SCHEMA_VERSION + 1,
+                "llm_lyrics_enabled" to true,
+                "llm_lyrics_thinking_enabled" to true,
+                "llm_lyrics_thinking_effort" to "high",
+            ),
             legacyValues = mapOf("dual_pane_enabled" to false),
         )
 
@@ -388,6 +443,47 @@ class ModuleSettingsSchemaTest {
             false,
             ModuleSettingsSchema.decode(encoded).automaticLyricsEnabled,
         )
+    }
+
+    @Test
+    fun `LLM thinking effort persists every saved choice while thinking is disabled`() {
+        val choices = listOf(
+            LlmLyricsThinkingEffort.DEFAULT to "default",
+            LlmLyricsThinkingEffort.LOW to "low",
+            LlmLyricsThinkingEffort.HIGH to "high",
+            LlmLyricsThinkingEffort.MAX to "max",
+        )
+
+        for ((effort, storageValue) in choices) {
+            val values = ModuleSettingsSchema.encodeOrdinarySettings(
+                ModuleSettings(
+                    llmLyricsThinkingEnabled = false,
+                    llmLyricsThinkingEffort = effort,
+                ),
+            )
+            val decoded = ModuleSettingsSchema.decode(values)
+
+            assertEquals(storageValue, values["llm_lyrics_thinking_effort"])
+            assertEquals(effort, decoded.llmLyricsThinkingEffort)
+            assertEquals(false, decoded.llmLyricsThinkingEnabled)
+        }
+    }
+
+    @Test
+    fun `missing malformed and unknown LLM thinking efforts safely default`() {
+        assertEquals(
+            LlmLyricsThinkingEffort.DEFAULT,
+            ModuleSettingsSchema.decode(emptyMap<String, Any?>()).llmLyricsThinkingEffort,
+        )
+
+        for (invalid in listOf<Any?>(true, 4, "medium")) {
+            assertEquals(
+                LlmLyricsThinkingEffort.DEFAULT,
+                ModuleSettingsSchema.decode(
+                    mapOf("llm_lyrics_thinking_effort" to invalid),
+                ).llmLyricsThinkingEffort,
+            )
+        }
     }
 
     @Test
