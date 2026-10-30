@@ -2730,7 +2730,7 @@
     }
   },
   "knownDegradations": [],
-  "profileRevision": 7,
+  "profileRevision": 8,
   "chrome": {
     "resources": {
       "NAVIGATION_HOST_GROUP": {
@@ -2878,6 +2878,7 @@
   "ambiguityPolicy": "reject-ambiguous",
   "legacyFirstMatchExceptions": [],
   "cjk": {
+    "splitWordGlow": true,
     "foregroundTextField": "X",
     "maxSpanGlowCharacters": 3,
     "bindingOwners": [

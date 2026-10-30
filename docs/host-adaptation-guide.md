@@ -382,9 +382,9 @@ Native vector/pointer 在 Hook 当次同步解码，只把复制数值送主线�
 
 <a id="cjk-animation"></a>
 
-### 5.5 CJK 辉光与末词补偿
+### 5.5 歌词辉光与末词补偿
 
-**生效与接缝。** `cjkKaraokeAnimationEnabled` 只控制 CJK 辉光，按原安装方式重启宿主生效，关闭时不安装辉光。末词羽化补偿由“歌词效果优化”的 `ModuleSettings.lyricEffectsOptimizationEnabled`（配置键 `lyric_effects_optimization_enabled`）门禁并重启生效。[AppleMusicHostFactory](../host-applemusic/src/main/java/dev/amenhancer/module/hook/AppleMusicHostFactory.kt) 的现有 `lyricRepairs` lazy 组在 `LyricsParserFeature` 门禁下独立调用 [AppleMusicCjkTerminalGradientTarget](../host-applemusic/src/main/java/dev/amenhancer/module/hook/AppleMusicCjkTerminalGradientTarget.kt) 的 `install`，并合并解析修复、逐行双声部对齐与末词补偿的结果，保留三项完整诊断消息；不另建 Feature、Target、设置或算法。`cjk.terminalGradient` 只登记补偿契约，与辉光设置独立。辉光资格由 profile 的 `cjk.maxSpanGlowCharacters` 限定：缺省 `1`，只放行单个未合并 CJK 词；精确 profile 显式设为 `3` 时，另放行 2～3 字的单个原始未合并 CJK span。前景绑定与结束清理、`cjk.foregroundTextField` 和 bindingOwners 独立核对。`terminalGradient` 的角色仍由 Contract 解析，以代码为准，描述符只维护在精确 profile。
+**生效与接缝。** `cjkKaraokeAnimationEnabled` 只控制 CJK 辉光，按原安装方式重启宿主生效，关闭时不安装 CJK 辉光。末词羽化补偿和英语拆词辉光由“歌词效果优化”的 `ModuleSettings.lyricEffectsOptimizationEnabled`（配置键 `lyric_effects_optimization_enabled`）门禁并重启生效。[AppleMusicHostFactory](../host-applemusic/src/main/java/dev/amenhancer/module/hook/AppleMusicHostFactory.kt) 的现有 `lyricRepairs` lazy 组在 `LyricsParserFeature` 门禁下独立安装，并合并解析修复、逐行双声部对齐、末词补偿与英语拆词辉光的结果，保留各项完整诊断消息；复用现有 Target 和设置。`cjk.terminalGradient` 只登记补偿契约，与 CJK 辉光设置独立。CJK 辉光资格由 profile 的 `cjk.maxSpanGlowCharacters` 限定：缺省 `1`，只放行单个未合并 CJK 词；精确 profile 显式设为 `3` 时，另放行 2～3 字的单个原始未合并 CJK span。前景绑定与结束清理、`cjk.foregroundTextField` 和 bindingOwners 独立核对。`terminalGradient` 的角色仍由 Contract 解析，以代码为准，描述符只维护在精确 profile。
 
 | 角色组 | 新构建复核的含义 |
 |---|---|
@@ -395,13 +395,15 @@ Native vector/pointer 在 Hook 当次同步解码，只把复制数值送主线�
 
 **多字 span。** 放行前须 `trim` 后全部属于现有六个 CJK 区块，字数为 `2..min(cjk.maxSpanGlowCharacters, 3)`，原生 span 总时长至少为字数 × 1000ms（即平均每字 ≥1000ms）。累计时长须等于原生 span 时长，累计文本长度须等于字数，`splitBindingCount` 须在 `0..字数`，且只接受前景。不得把宿主合并的多个原始 span 当作一个 span 按时长放行；原生时长、文本、词分组和长度 g 均保持不变。单字回落子动画延迟修正只作用于原单字分支，多字保留宿主错峰。
 
+**英语拆词辉光。** 复用 `AppleMusicCjkKaraokeAnimationTarget.installSplitWordGlow`，精确 profile 须显式声明 `cjk.splitWordGlow=true`，缺省关闭。保留原生整词判定；只为长度超过 7 的前景 Latin 拆词组补充“任一原始 span 时长 ≥1000ms 且 trim 后长度为 2～7”的资格，标点计入长度。同组至少两个成员，须同属原生行 `a` 和非空组 ID `l`，各段文本 `c` 与时长 `e` 累计须对应原生 `g`、`f`，不可跨空格或混入其他文字脚本。仅在当前原生动画调用内临时令 `g=7`，正常、提前返回及异常退出均恢复。各片段以整词中心为共同横向 pivot，原生辉光上升同时开始、回落统一在上升时长后开始；屏蔽该组 `TimeAnimator` 的片段拉扯，原文、binding 及 TTML 分词扫光时间保持。无有效布局或词组已跨视觉行时不额外放行。新构建须核对回落 listener 的 `c` 视图和 `d` 辉光函数、上升 listener 的 `a` 函数及其 `a` 视图，以及原生回落结束的 pivot 恢复；该作用域内的 `TimeAnimator` 须只负责辉光片段间距。另须确认 `g` 的门槛语义及间接读取在原值与 7 下分支相同，不得影响扫光几何；不合并 TTML 或词模型。
+
 **通用维护。** [CjkTerminalGradientPolicy](../core/src/main/kotlin/dev/amenhancer/module/hook/CjkTerminalGradientPolicy.kt) 对合法 CJK 尾词取 `max(original, feather)`，只接受有限值与 `0 < feather <= 1`。原余量更大时保留，无效几何透传；尾词不额外要求触发长尾辉光。
 
 当前 reader 的原文与发音向量分别选合法 end 最大的词 ID，同 end 取后出现词。向量大小须在 2..4096，时间 begin 非负且 end 大于 begin；两路结果按 reader 弱身份与行 ID 缓存。补偿只影响当前扫光对应 CJK 词；现有协议的build第八参（零基索引7）为true时走原生分支，Latin文本也保持原生。margin词对象须与当前扫光词一致，嵌套/异常退出恢复线程作用域。
 
 有效补偿后从原生返回动画列表移除 `KARAOKE_SPLIT_ON_CHARS_LANGUAGES_RUSH_GRADIENT_TAG` 延迟补亮，其他动画、时长、分组、滚动及位移保留；未补偿时原列表不变。它不承担换绑保护或跨行遮罩修复；[跨行能力](#lyric-wrap-sweep)与末词补偿均由“歌词效果优化”门禁，CJK 辉光开关只控制辉光，不控制它们。
 
-**变更与降级。** CJK 辉光与末词补偿分别安装、分别报告，任一失败不撤销另一项。`CjkKaraokeAnimationFeature` 及其 `AppleMusicCjkKaraokeAnimationTarget` 只负责辉光的安装和状态；末词契约缺失、解析或注册失败只使补偿不支持或降级。`lyricRepairs` 保留解析修复、逐行双声部对齐与末词补偿三项完整诊断消息，缺契约的 `Unsupported` 也原样保留；整体状态按 parser 与已声明可选项计算：全为 `Active` 时为 `Active`，仅全为 `Unsupported` 时为 `Unsupported`，否则为 `Degraded`。子项失败或不可用不撤销其他已安装项。新增宿主构建须独立确认原生 span 元数据、前后景绑定和 split binding 语义后，才能在精确 profile 显式启用多字放行；默认值不继承前版本。时间、分组、标签或原生特殊分支语义变化时重新分析；若新宿主复用同一reader并原地改写词数据，须补相应缓存失效入口，不能只复制成员名。
+**变更与降级。** CJK 辉光、英语拆词辉光与末词补偿分别安装、分别报告，任一失败不撤销其他项。`CjkKaraokeAnimationFeature` 只负责 CJK 辉光的安装和状态；末词契约缺失、解析或注册失败只使补偿不支持或降级。`lyricRepairs` 保留各项完整诊断消息，未声明能力的 `Unsupported` 也原样保留；整体状态按 parser 与已声明可选项计算：全为 `Active` 时为 `Active`，仅全为 `Unsupported` 时为 `Unsupported`，否则为 `Degraded`。子项失败或不可用不撤销其他已安装项。新增宿主构建须独立确认原生 span 元数据、前后景绑定和 split binding 语义后，才能在精确 profile 显式启用多字放行或英语拆词资格；默认值不继承前版本。时间、分组、标签或原生特殊分支语义变化时重新分析；若新宿主复用同一reader并原地改写词数据，须补相应缓存失效入口，不能只复制成员名。
 
 [证据清单](host-adaptation-checklist.md#cjk-animation-checks) · [人工场景](feature-preservation.md#cjk-animation)
 

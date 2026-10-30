@@ -49,7 +49,7 @@
 
 ### 2.2 功能覆盖表
 
-按此表逐域填写。自动来源/LLM虽然共用提交，模糊与CJK辉光各有适用结论；简体替换和声修复、逐行双声部对齐、CJK末词补偿、跨行扫光与活动行高亮共用“歌词效果优化”开关，但仍分别填写安装、降级与失败结论。
+按此表逐域填写。自动来源/LLM虽然共用提交，模糊与CJK辉光各有适用结论；简体替换和声修复、逐行双声部对齐、英语拆词辉光、CJK末词补偿、跨行扫光与活动行高亮共用“歌词效果优化”开关，但仍分别填写安装、降级与失败结论。
 
 | 功能域 | 资料 / 接入依据 | 源码与包证据 | 安装 / 降级状态 | 人工结果入口 |
 |---|---|---|---|---|
@@ -59,7 +59,7 @@
 | LLM翻译 | 精确原文观察、模块解析排除、共用通道 | 待填写 | 待填写 | 待填写 |
 | 模糊 | lyricBlur、显示提交、行词动画、效果所有权 | 待填写 | 待填写 | 待填写 |
 | CJK辉光 | cjk、原生动画 | 待填写 | 待填写 | 待填写 |
-| 歌词效果优化：CJK末词补偿 | 共享lyric_effects_optimization_enabled、terminalGradient、lyricRepairs三项诊断/状态汇总 | 待填写 | 待填写 | 歌词效果优化矩阵 |
+| 歌词效果优化：CJK末词补偿 / 英语拆词辉光 | 共享lyric_effects_optimization_enabled、terminalGradient / splitWordGlow、lyricRepairs各项诊断/状态汇总 | 待填写 | 待填写 | 歌词效果优化矩阵 |
 | 歌词效果优化：跨行扫光 | 共享lyric_effects_optimization_enabled、独立lyricWrapSweep、视觉行/媒体时间/退役 | 待填写 | 待填写 | 待填写 |
 | 歌词效果优化：活动行高亮 | 共享lyric_effects_optimization_enabled、独立lyricBackgroundHighlight、活动行/词ID/焦点 | 待填写 | 待填写 | 待填写 |
 | 歌词效果优化：逐行双声部对齐 | 共享lyric_effects_optimization_enabled、capabilities.lineLyricAgentAlignment、普通行绑定后处理、复用lyricBlur行角色 | 待填写 | 待填写 | 歌词效果优化矩阵 |
@@ -192,13 +192,16 @@
 
 <a id="cjk-animation-checks"></a>
 
-### 4.5 CJK辉光与末词补偿
+### 4.5 歌词辉光与末词补偿
 
 [维护规则](host-adaptation-guide.md#cjk-animation) · [人工场景](feature-preservation.md#cjk-animation)
 
 - [ ] 辉光前景绑定与原生门槛有据；精确 profile 的 `cjk.maxSpanGlowCharacters` 缺省为 `1`。显式启用时，`2..min(值, 3)` 字的单个原始未合并 CJK span 须 `trim` 后全属既有六区块，累计时长/文本长度与原生 span 一致，`splitBindingCount` 在 `0..字数`。
 - [ ] 多字 span 按总时长/字数 ≥1000ms 放行，不得按宿主合并的多个原始 span 总时长放行；仅单字分支调整回落子动画延迟，多字保留宿主错峰，原生时长/文本/分组/长度 g 与末词补偿不变。新构建须独立确认元数据与绑定语义，默认不继承。
-- [ ] 可选`terminalGradient`按代码必需角色完整解析，profile路径不变；CJK开关只门禁辉光，“歌词效果优化”默认关闭并重启生效后，`AppleMusicHostFactory` 的 `lyricRepairs` 组在 `LyricsParserFeature` 门禁下独立调用末词`install`，并保留解析修复、逐行对齐、末词补偿三项完整诊断。
+- [ ] 英语拆词辉光仅在精确 profile 显式声明 `cjk.splitWordGlow=true` 时启用；同一前景行/组至少两个 Latin span，某段原始时长 ≥1000ms、trim 后长度为 2～7（含标点），累计文本/时长与原生 `g`/`f` 对应。单个超长 span、跨空格、混合脚本及背景词不放宽。
+- [ ] 英语资格只在当前原生动画调用临时令 `g=7`，正常/提前/异常退出恢复；`g` 的其他读取在原值与 7 下分支相同，分组、binding、扫光几何与时长不变。字段或调用语义变化须重新分析，默认不继承启用。
+- [ ] 英语辉光片段使用整词中心的共同横向 pivot，原生上升同时开始、回落统一在上升时长后开始；只屏蔽该组的片段间距 `TimeAnimator`。核对上升/回落 listener 与辉光函数的视图字段、原生结束 pivot 恢复、嵌套/异常作用域退出；布局无效或已跨视觉行时不放宽，TTML 分词和扫光保持。
+- [ ] 可选`terminalGradient`按代码必需角色完整解析，profile路径不变；CJK开关只门禁 CJK 辉光。“歌词效果优化”默认关闭并重启生效后，`AppleMusicHostFactory` 的 `lyricRepairs` 组在 `LyricsParserFeature` 门禁下独立安装末词补偿及英语拆词资格，并保留各项完整诊断。
 - [ ] 原文/发音尾词、时间/ID、余量调用与延迟补亮标签语义一致。
 - [ ] 整体状态按 parser 与已声明可选项计算：全为 `Active` 时为 `Active`，仅全为 `Unsupported` 时为 `Unsupported`，否则为 `Degraded`；缺契约的 `Unsupported` 保留在诊断中。单项失败或不可用时，辉光、解析修复、逐行对齐已安装项不互相撤销。
 
