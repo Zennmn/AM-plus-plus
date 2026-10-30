@@ -19,6 +19,7 @@
   <a href="https://github.com/Zennmn/AM-plus-plus/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Zennmn/AM-plus-plus" alt="GNU GPL v3.0"></a>
   <img src="https://img.shields.io/badge/Android-API%2026%2B-3DDC84?logo=android&logoColor=white" alt="Android API 26+">
   <img src="https://img.shields.io/badge/libxposed-API%20102-7F52FF" alt="libxposed API 102">
+  <a href="#支持项目"><img src="https://img.shields.io/badge/支持项目-微信赞赏-E3B341?logo=wechat&amp;logoColor=white" alt="微信赞赏支持项目"></a>
 </p>
 
 <p align="center">
@@ -39,6 +40,8 @@
 9. [贡献](#贡献)
 10. [隐私与权限](#隐私与权限)
 11. [许可证与致谢](#许可证与致谢)
+12. [Star History](#star-history)
+13. [支持项目](#支持项目)
 
 </details>
 
@@ -55,13 +58,13 @@
 | 平板双栏播放器 | 开启 | 横屏时并排显示播放控件与实时歌词。 |
 | 强制显示蜂窝数据入口 | 关闭 | 在设置中显示原生蜂窝数据选项。 |
 | 双向歌词模糊 | 开启 | 当前歌词保持清晰，前后歌词渐变模糊，支持调节强度（Android 12+）。 |
-| CJK 长尾歌词动画 | 开启 | 为中日韩歌词加入长音扫光动画。 |
+| CJK 长尾歌词动画 | 开启 | 为中日韩歌词加入辉光动画。 |
 | 歌曲名显示修正 | 关闭 | 按歌曲原地区、中国大陆或日本显示歌曲名与相关信息。 |
-| 自定义歌词 | 关闭 | 导入、编辑 TTML 歌词，支持在线获取与 ZIP 备份恢复。 |
+| 自定义歌词 | 关闭 | 导入、编辑 TTML 歌词，支持在线获取。 |
 | 自动实时补全 | 开启 | 启用自定义歌词后，为缺词、非逐字或缺翻译的歌曲自动查找歌词。 |
 | 歌词字体 | 关闭 | 导入 TTF/OTF 字体，随时恢复原字体。 |
 | 液态玻璃底栏 | 关闭 | 为导航栏和迷你播放器加入液态玻璃效果（Android 13+）。 |
-| 随滚动收缩 | 开启 | 手机端随页面滚动收缩或展开玻璃底栏，实时生效。 |
+| ios底栏动画 | 开启 | 手机端随启用ios同款底栏动画，实时生效。 |
 
 ## 效果展示
 
@@ -72,7 +75,7 @@
   <img src="docs/images/918d640313475d68cf66fff0e63f4e19.jpg" alt="自定义歌词注入示例二" width="48%">
 </p>
 
-### MiSans 字体替换
+### 字体替换
 
 <p align="center">
   <img src="docs/images/537369a74adc232f855165263c9ff1cc.jpg" alt="MiSans 字体替换前后对比" width="900">
@@ -132,7 +135,7 @@
 
 打开“液态玻璃底栏”，强制停止并重新打开 Apple Music，即可为导航栏和迷你播放器应用玻璃效果。
 
-可调节背景模糊强度；手机端还可开启“随滚动收缩”，让底栏随页面滚动自动收起、展开。
+可调节背景模糊强度；手机端还可开启“ios底栏动画”，让底栏随页面滚动自动收起、展开。
 
 ### 歌曲名显示修正
 
@@ -207,5 +210,27 @@ scripts/                  开发辅助脚本
 
 - [AMLyricBlur](https://github.com/a23bc/amlyricblur)：歌词模糊。
 - [AndroidLiquidGlass / Backdrop](https://github.com/Kyant0/AndroidLiquidGlass)：液态玻璃效果与交互。
+
+## Star History
+
+<p align="center">
+  <a href="https://www.star-history.com/?repos=Zennmn%2FAM-plus-plus&amp;type=date">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Zennmn/AM-plus-plus&amp;type=date&amp;theme=dark">
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Zennmn/AM-plus-plus&amp;type=date">
+      <img src="https://api.star-history.com/chart?repos=Zennmn/AM-plus-plus&amp;type=date" alt="AM++ 的 GitHub Star 历史曲线" width="800">
+    </picture>
+  </a>
+</p>
+
+## 支持项目
+
+AM++ 免费开源。如果这个项目对你有所帮助，欢迎请作者喝杯咖啡。赞赏完全自愿，不影响任何功能的使用。
+
+<p align="center">
+  <a href="docs/images/wechat-appreciation.png">
+    <img src="docs/images/wechat-appreciation.png" alt="Zen 的微信赞赏码" width="360">
+  </a>
+</p>
 
 <p align="right">(<a href="#top">返回顶部</a>)</p>

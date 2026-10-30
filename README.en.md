@@ -19,6 +19,7 @@
   <a href="https://github.com/Zennmn/AM-plus-plus/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Zennmn/AM-plus-plus" alt="GNU GPL v3.0"></a>
   <img src="https://img.shields.io/badge/Android-API%2026%2B-3DDC84?logo=android&logoColor=white" alt="Android API 26+">
   <img src="https://img.shields.io/badge/libxposed-API%20102-7F52FF" alt="libxposed API 102">
+  <a href="#support-the-project"><img src="https://img.shields.io/badge/Support-WeChat-E3B341?logo=wechat&amp;logoColor=white" alt="Support the project via WeChat"></a>
 </p>
 
 <p align="center">
@@ -39,6 +40,8 @@
 9. [Contributing](#contributing)
 10. [Privacy and permissions](#privacy-and-permissions)
 11. [License and acknowledgments](#license-and-acknowledgments)
+12. [Star History](#star-history)
+13. [Support the project](#support-the-project)
 
 </details>
 
@@ -207,5 +210,27 @@ Licensed under the [GNU General Public License v3.0](LICENSE). See [THIRD_PARTY_
 
 - [AMLyricBlur](https://github.com/a23bc/amlyricblur): lyric blur.
 - [AndroidLiquidGlass / Backdrop](https://github.com/Kyant0/AndroidLiquidGlass): Liquid Glass effects and interactions.
+
+## Star History
+
+<p align="center">
+  <a href="https://www.star-history.com/?repos=Zennmn%2FAM-plus-plus&amp;type=date">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Zennmn/AM-plus-plus&amp;type=date&amp;theme=dark">
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Zennmn/AM-plus-plus&amp;type=date">
+      <img src="https://api.star-history.com/chart?repos=Zennmn/AM-plus-plus&amp;type=date" alt="AM++ GitHub star history chart" width="800">
+    </picture>
+  </a>
+</p>
+
+## Support the project
+
+AM++ is free and open source. If you find it useful, you are welcome to buy the author a coffee. Support is entirely voluntary and does not affect access to any feature.
+
+<p align="center">
+  <a href="docs/images/wechat-appreciation.png">
+    <img src="docs/images/wechat-appreciation.png" alt="Zen's WeChat appreciation code" width="360">
+  </a>
+</p>
 
 <p align="right">(<a href="#top">Back to top</a>)</p>
