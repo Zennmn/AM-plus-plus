@@ -38,6 +38,8 @@
 - [ ] 新依赖已同步profile、代码Inventory/Contract、verification和适用离线覆盖。
 - [ ] 新档案拒绝歧义；历史首匹配/旧HLE候选语义没有无依据扩大或替换。
 - [ ] productionEnabled与runtimeVerified按阶段分开，evidence/knownDegradations与实际证据一致。
+- [ ] 适配器新增方法导致混淆名移动时，旧名即使仍存在且签名相同，也按当前包的声明、调用与状态语义重核；空实现等无法由方法体或完整签名区分的候选，沿原生状态分支与父类声明追踪，未按同名或首个候选复用。
+- [ ] 从相邻构建复制 evidence 时，各独立区域沿用现有字段并按目标实际包核对/更新 sourceBuild、sourceIdentity、memberSource 与 layoutReview，区分上游方案来源和宿主证据，未复制旧 runtimeVerified。
 
 ### 2.1 逐接缝证据模板
 
