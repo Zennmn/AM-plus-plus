@@ -2,7 +2,11 @@ package dev.amenhancer.module.hook
 
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
+import android.animation.TimeAnimator
 import android.animation.ValueAnimator
+import android.graphics.Rect
+import android.view.View
+import android.view.ViewGroup
 import java.lang.reflect.Executable
 import java.util.concurrent.atomic.AtomicInteger
 import java.lang.ref.WeakReference
@@ -13,9 +17,8 @@ import java.util.Map as JavaMap
 import java.util.WeakHashMap
 
 /**
- * Narrow Apple Music 6.5.2/1586 adapter for the native karaoke rush-gradient
- * path. The host owns all duration/length trigger conditions; AM++ only
- * allows its CJK classifier override for one unmerged native CJK word.
+ * Adapts native glow for profile-approved CJK spans and split Latin words.
+ * Apple retains ownership of TTML grouping and per-fragment sweep timing.
  */
 internal class AppleMusicCjkKaraokeAnimationTarget(
     private val symbols: TargetSymbolResolver,
@@ -49,11 +52,114 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     @Volatile
     private var hooksReady = false
 
+    private var splitWordGlowInstalled = false
+    private val splitWordGlowPivots = ThreadLocal<kotlin.collections.Map<View, Float>>()
+
+    /** Keeps TTML sweeps intact and gives eligible split Latin words one visual glow envelope. */
+    fun installSplitWordGlow(enabled: Boolean): TargetCapabilityInstall {
+        if (!enabled) return TargetCapabilityInstall.Unsupported("Split-word glow has no exact profile opt-in")
+        if (splitWordGlowInstalled) return TargetCapabilityInstall.Active("Split-word glow already installed")
+        val resolution = symbols.resolve(AppleMusicSymbols.CjkKaraokeAnimationMethod)
+        val transition = resolution.valueOrNull()
+            ?: return TargetCapabilityInstall.Degraded("Split-word glow: ${resolution.summary}")
+        return runCatching {
+            glowTimingHookInstalled = glowTimingHookInstalled || installGlowTimingHook(transition)
+            check(glowTimingHookInstalled) { "Split-word glow timing hook was rejected" }
+            check(ModernXposedRuntime.hookMethod(
+                TimeAnimator::class.java.getDeclaredMethod("setTimeListener", TimeAnimator.TimeListener::class.java),
+                object : ModernMethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        // This listener spreads fragments apart; one word has no internal spreading.
+                        if (splitWordGlowPivots.get() != null) param.result = null
+                    }
+                },
+            )) { "Split-word glow spreading hook was rejected" }
+            check(ModernXposedRuntime.hookMethod(transition, object : ModernMethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    param.extras[SPLIT_WORD_GLOW_PREVIOUS] = splitWordGlowPivots.get()
+                    splitWordGlowPivots.remove()
+                    runCatching {
+                        val original = splitWordGlowOverride(param) ?: return
+                        param.extras[SPLIT_WORD_GLOW_LENGTH] = original
+                        splitWordGlowPivots.set(original.third)
+                        // Only this transition sees an admitted length. Text and duration stay native.
+                        cachedFields(original.first.javaClass).getValue("g").setInt(original.first, 7)
+                    }.onFailure { ModernXposedRuntime.log("Split-word glow gate kept native behavior", it) }
+                }
+
+                @Suppress("UNCHECKED_CAST")
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    try {
+                        val original = param.extras.remove(SPLIT_WORD_GLOW_LENGTH) as? Triple<*, *, *> ?: return
+                        val entry = original.first ?: return
+                        val length = original.second as? Int ?: return
+                        // Also restore when the native transition throws or returns early.
+                        runCatching { cachedFields(entry.javaClass).getValue("g").setInt(entry, length) }
+                            .onFailure { ModernXposedRuntime.log("Split-word glow length restore failed", it) }
+                    } finally {
+                        val previous = param.extras.remove(SPLIT_WORD_GLOW_PREVIOUS)
+                            as? kotlin.collections.Map<View, Float>
+                        if (previous == null) splitWordGlowPivots.remove() else splitWordGlowPivots.set(previous)
+                    }
+                }
+            })) { "Split-word glow hook was rejected" }
+            splitWordGlowInstalled = true
+            TargetCapabilityInstall.Active("Installed split-word Latin glow eligibility")
+        }.getOrElse { error ->
+            ModernXposedRuntime.log("Split-word glow hook unavailable", error)
+            TargetCapabilityInstall.Degraded("Split-word glow: ${error.message ?: error.javaClass.simpleName}")
+        }
+    }
+
+    private fun splitWordGlowOverride(
+        param: ModernMethodHook.MethodHookParam,
+    ): Triple<Any, Int, kotlin.collections.Map<View, Float>>? {
+        if (param.args.getOrNull(4) != false) return null
+        val holder = param.args.getOrNull(0) ?: return null
+        val wordId = param.args.getOrNull(2) as? Int ?: return null
+        val words = readNamedField(holder, "G") as? kotlin.collections.Map<*, *> ?: return null
+        val entry = words[wordId] ?: return null
+        val length = readNamedField(entry, "g") as? Int ?: return null
+        val duration = readNamedField(entry, "f") as? Int ?: return null
+        if (length <= 7 || duration < 1_000) return null
+        val groupId = readNamedField(entry, "l") as? Int ?: return null
+        val lineId = readNamedField(entry, "a") as? Int ?: return null
+        val group = words.values.filterNotNull().filter {
+            readNamedField(it, "l") == groupId && readNamedField(it, "a") == lineId
+        }
+        if (group.size < 2) return null
+        val spans = group.map {
+            val text = (readNamedField(it, "c") as? CharSequence)?.toString()?.trim() ?: return null
+            val spanDuration = readNamedField(it, "e") as? Int ?: return null
+            if (text.isEmpty() || text.any(Char::isWhitespace) || spanDuration <= 0) return null
+            text to spanDuration
+        }
+        if (spans.sumOf { it.first.length } != length ||
+            spans.sumOf { it.second.toLong() } != duration.toLong()) return null
+        val text = spans.joinToString("") { it.first }
+        if (!text.any(Char::isLetter) || text.any {
+                it.isLetter() && Character.UnicodeScript.of(it.code) != Character.UnicodeScript.LATIN
+            }) return null
+        if (spans.none { (span, spanDuration) -> spanDuration >= 1_000 && span.length in 2..7 }) return null
+        val views = group.flatMap(::foregroundEntryViews).filterIsInstance<View>().distinct()
+        if (views.isEmpty() || views.any { it.width <= 0 || it.height <= 0 }) return null
+        val parent = generateSequence(views.first().parent) { it.parent }
+            .filterIsInstance<ViewGroup>().firstOrNull { ancestor ->
+                views.all { view -> generateSequence(view.parent) { it.parent }.any { it === ancestor } }
+            } ?: return null
+        val bounds = views.associateWith { view ->
+            Rect(0, 0, view.width, view.height).also { parent.offsetDescendantRectToMyCoords(view, it) }
+        }
+        // A wrapped word cannot share a single visual origin across different rows.
+        if (bounds.values.maxOf { it.top } - bounds.values.minOf { it.top } > views.maxOf { it.height } / 2) return null
+        val center = (bounds.values.minOf { it.left } + bounds.values.maxOf { it.right }) / 2f
+        return Triple(entry, length, bounds.mapValues { (_, rect) -> center - rect.left })
+    }
+
     override fun install(): TargetCapabilityInstall {
         hooksReady = false
         glowEndHookInstalled = false
         glowViewEndHookInstalled = false
-        glowTimingHookInstalled = false
         val a0Resolution = symbols.resolve(AppleMusicSymbols.CjkKaraokeAnimationMethod)
         val helperResolution = symbols.resolve(AppleMusicSymbols.CjkUnicodeBlockPredicateMethod)
         val a0 = a0Resolution.valueOrNull()
@@ -114,7 +220,7 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         // and was shown to disturb all lyric animations on device.
         glowEndHookInstalled = installGlowAnimatorEndHook(a0)
         glowViewEndHookInstalled = installGlowViewEndHook(a0)
-        glowTimingHookInstalled = installGlowTimingHook(a0)
+        glowTimingHookInstalled = glowTimingHookInstalled || installGlowTimingHook(a0)
 
         val hooksInstalled = a0Installed && helperInstalled && glowEndHookInstalled &&
             glowViewEndHookInstalled && glowTimingHookInstalled
@@ -173,6 +279,8 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
      * Shorten only that exact z$f child to begin after the rise duration.
      */
     private fun installGlowTimingHook(a0: Executable): Boolean = runCatching {
+        val returnType = Class.forName("${a0.declaringClass.name}\$f", false, a0.declaringClass.classLoader)
+        val glowFunctionType = runCatching { returnType.getDeclaredField("d").type }.getOrNull()
         val addUpdateListener = ValueAnimator::class.java.getDeclaredMethod(
             "addUpdateListener",
             ValueAnimator.AnimatorUpdateListener::class.java,
@@ -183,6 +291,24 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
                 override fun afterHookedMethod(param: MethodHookParam) {
                     val animator = param.thisObject as? ValueAnimator ?: return
                     val listener = param.args.getOrNull(0) ?: return
+                    val pivots = splitWordGlowPivots.get()
+                    if (pivots != null) {
+                        val returning = returnType.isInstance(listener)
+                        val glowFunction = if (returning) null else readNamedField(listener, "a")
+                        val view = when {
+                            returning -> readNamedField(listener, "c") as? View
+                            glowFunctionType?.isInstance(glowFunction) == true ->
+                                readNamedField(checkNotNull(glowFunction), "a") as? View
+                            else -> null
+                        }
+                        val pivot = view?.let(pivots::get)
+                        if (view != null && pivot != null) {
+                            // A common origin and envelope make the native fragments one visual word.
+                            view.pivotX = pivot
+                            animator.startDelay = if (returning) animator.duration else 0L
+                            return
+                        }
+                    }
                     if (!isEligibleWordScope() || a0Stack().lastOrNull()?.singleWord != true) return
                     if (listener.javaClass.name != "${a0.declaringClass.name}\$f") return
                     runCatching {
@@ -575,6 +701,8 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
     )
 
     private companion object {
+        const val SPLIT_WORD_GLOW_LENGTH = "splitWordGlow.originalLength"
+        const val SPLIT_WORD_GLOW_PREVIOUS = "splitWordGlow.previousPivots"
         const val MAX_REWRITE_LOGS = 3
         const val MAX_TIMING_REWRITE_LOGS = 3
     }
