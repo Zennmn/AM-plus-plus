@@ -1,5 +1,6 @@
 package dev.amenhancer.module.hook
 
+import dev.amenhancer.module.ModuleConstants
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -150,9 +151,8 @@ class TabletLiquidGlassStructuralRegressionTest {
     }
 
     @Test
-    fun `keeps the glass configuration keys under schema 18`() {
+    fun `keeps existing glass configuration keys across schema upgrades`() {
         val schema = source("dev/amenhancer/module/config/ModuleSettingsSchema.kt")
-        val constants = source("dev/amenhancer/module/ModuleConstants.kt")
 
         // Keep the serialized glass keys, including the inactive tablet-collapse compatibility key.
         // Tablet forms use the glass toggle, gap and blur but never opt into scroll collapse.
@@ -172,7 +172,7 @@ class TabletLiquidGlassStructuralRegressionTest {
             ),
             glassKeys,
         )
-        // Schema 18 adds lyric effects optimization; glass still reuses its original keys.
-        assertTrue(constants.contains("const val CONFIG_SCHEMA_VERSION = 18"))
+        // Schema 18 is the compatibility baseline; later settings may advance it without changing glass keys.
+        assertTrue(ModuleConstants.CONFIG_SCHEMA_VERSION >= 18)
     }
 }

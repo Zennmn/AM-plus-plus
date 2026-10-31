@@ -332,11 +332,11 @@ AMLL 转换器及 `scripts/amll_to_apple_ttml.py` 的译文/音译和声节点�
 
 #### 通用维护：客户端、缓存与取消
 
-接口使用配置的 OpenAI Compatible Chat Completions，Bearer、非流式、有界响应与 60 秒期限共用客户端，不隐式切换服务。翻译和手动连通测试共用 `encodeRequest`，按“模型思考”布尔在顶层发送 `thinking.type=enabled/disabled`，`stream=false` 单独控制非流式。思考默认及旧配置缺键均关闭，模式进入不可变请求配置和缓存身份；该字段是服务端扩展，拒绝时按失败处理，不移除参数重试、不按地址/模型维护分叉。
+接口继续使用配置的 OpenAI Compatible Chat Completions，Bearer、非流式、有界响应与 60 秒期限共用客户端，不隐式切换服务，也不因思考强度引入供应商或传输分支。翻译和手动连通测试共用 `encodeRequest` 及同一组请求参数映射：`thinking.type=enabled/disabled` 按思考开关发送；开关开启且强度为 `low`/`high`/`max` 时，另在顶层发送 `reasoning_effort`，强度 `default` 不发送该字段，关闭思考时也不发送。`stream=false` 单独控制非流式。思考默认关闭；强度是只接受 `default`/`low`/`high`/`max` 的强类型枚举，默认 `default`，保存于普通设置键 `llm_lyrics_thinking_effort`，缺键或未知值按 `default` 解码。关闭思考时保留 UI 中已选的强度值，但后台请求和缓存的有效强度统一归一为 `default`，开关仍单独参与缓存身份；开关开启时，显式 `low`/`high`/`max` 分别进入不可变请求配置和缓存身份。`thinking` 是服务端扩展，参数支持与强度含义取决于接口和模型；拒绝时按失败处理，不移除参数重试、不按地址/模型维护分叉。连接成功只说明请求可用，不能证明网关实际采纳了强度。
 
-缓存为宿主私有 `files/ampp-llm-lyrics`，最多 100 首，命中更新 LRU，每首只保留一项。原文、规范化接口、模型、思考模式或提示词版本变化使旧项失效，旧缓存缺思考字段按关闭匹配；仅成功并被原生解析接受的结果可持久化，密钥不写缓存。不调用 `AutoLyricsPublisher`，不生成自定义条目，不参与自定义歌词备份或在线更新。
+缓存为宿主私有 `files/ampp-llm-lyrics`，最多 100 首，命中更新 LRU，每首只保留一项。原文、规范化接口、模型、思考开关、有效思考强度或提示词版本变化使旧项失效。所有新写入统一使用格式 2，并记录完整思考身份；新版只按 `default` 解释格式 1，格式 2 中的强度字段缺失或未知时拒绝该缓存。旧客户端只接受格式 1，因此会拒绝格式 2 的新缓存，降级安装不能把显式强度结果当作默认复用或写回。显式 `low`/`high`/`max` 之间也不得互相复用。仅成功并被原生解析接受的结果可持久化，密钥不写缓存。不调用 `AutoLyricsPublisher`，不生成自定义条目，不参与自定义歌词备份或在线更新。
 
-主唱/和声提取或输出结构变化影响缓存兼容性时，提升现有 `LlmLyricsClient.PROMPT_VERSION`，使旧格式在下一次合格查询时失效；单纯调整翻译风格时可保留版本并继续复用已有缓存。不增加缓存目录或配置 schema，也不批量改写自定义歌词。
+主唱/和声提取或输出结构变化影响缓存兼容性时，提升现有 `LlmLyricsClient.PROMPT_VERSION`，使旧格式在下一次合格查询时失效；单纯调整翻译风格时可保留版本并继续复用已有缓存。缓存身份或读取兼容规则变化时单独维护缓存格式，不增加第二缓存目录，也不批量改写自定义歌词。
 
 网络/XML 在后台，单播放失败不循环重试。切歌、原文/配置变化、高优先级结果或关闭撤销旧任务，迟到完成仍通过共用通道校验。正常资格跳过保持安静，不保留逐阶段诊断集合、耗时统计或原因回调；原生 TTML 观察属于功能输入，不能随临时日志删除。连通错误通过[设置页](#settings-data-plugins)的手动测试展示。
 
@@ -388,7 +388,9 @@ Native vector/pointer 在 Hook 当次同步解码，只把复制数值送主线�
 
 ### 5.5 歌词辉光与末词补偿
 
-**生效与接缝。** `cjkKaraokeAnimationEnabled` 只控制 CJK 辉光，按原安装方式重启宿主生效，关闭时不安装 CJK 辉光。末词羽化补偿和英语拆词辉光由“歌词效果优化”的 `ModuleSettings.lyricEffectsOptimizationEnabled`（配置键 `lyric_effects_optimization_enabled`）门禁并重启生效。[AppleMusicHostFactory](../host-applemusic/src/main/java/dev/amenhancer/module/hook/AppleMusicHostFactory.kt) 的现有 `lyricRepairs` lazy 组在 `LyricsParserFeature` 门禁下独立安装，并合并解析修复、逐行双声部对齐、末词补偿与英语拆词辉光的结果，保留各项完整诊断消息；复用现有 Target 和设置。`cjk.terminalGradient` 只登记补偿契约，与 CJK 辉光设置独立。CJK 辉光资格由 profile 的 `cjk.maxSpanGlowCharacters` 限定：缺省 `1`，只放行单个未合并 CJK 词；精确 profile 显式设为 `3` 时，另放行 2～3 字的单个原始未合并 CJK span。前景绑定与结束清理、`cjk.foregroundTextField` 和 bindingOwners 独立核对。`terminalGradient` 的角色仍由 Contract 解析，以代码为准，描述符只维护在精确 profile。
+**生效与接缝。** `cjkKaraokeAnimationEnabled` 只控制 CJK 辉光，按原安装方式重启宿主生效，关闭时不安装 CJK 辉光。末词羽化补偿和英语拆词辉光由“歌词效果优化”的 `ModuleSettings.lyricEffectsOptimizationEnabled`（配置键 `lyric_effects_optimization_enabled`）门禁并重启生效。[AppleMusicHostFactory](../host-applemusic/src/main/java/dev/amenhancer/module/hook/AppleMusicHostFactory.kt) 的现有 `lyricRepairs` lazy 组在 `LyricsParserFeature` 门禁下独立安装，并合并解析修复、逐行双声部对齐、末词补偿与英语拆词辉光的结果，保留各项完整诊断消息；复用现有 Target 和设置。`cjk.terminalGradient` 只登记补偿契约，与 CJK 辉光设置独立。CJK 辉光资格由 profile 的 `cjk.maxSpanGlowCharacters` 限定：缺省 `1`，只放行单个未合并 CJK 词；精确 profile 显式启用多字资格时，另放行 2～3 字的单个原始未合并 CJK span。前景绑定与结束清理、`cjk.foregroundTextField` 和 bindingOwners 独立核对。`terminalGradient` 的角色仍由 Contract 解析，以代码为准，描述符只维护在精确 profile。
+
+CJK 辉光使用 `trim` 原文去除 Unicode 标点 `\p{P}` 后的副本判断脚本、正文字数及平均时长；纯标点、混入 Latin/数字/emoji/内部空白的正文不放行。正文码点仍须属于既有六个 CJK 区块。分类改写仅作用于已验证的 `a0` 候选作用域，不全局改写 `j0`/`k0` 集合，不替代 Apple 原生触发，也不推广到英语拆词或末字渐变。原文、显示标点、native duration、分组和长度 `g` 保持原值。
 
 | 角色组 | 新构建复核的含义 |
 |---|---|
@@ -397,7 +399,7 @@ Native vector/pointer 在 Hook 当次同步解码，只把复制数值送主线�
 | 词 ID / 文本 / 时间 | 尾词判定所用对象与当前扫光词一致 |
 | animationTag | 接口 getter 和原生延迟补亮标签的语义，接口仅按 invocationOnly 调用 |
 
-**多字 span。** 放行前须 `trim` 后全部属于现有六个 CJK 区块，字数为 `2..min(cjk.maxSpanGlowCharacters, 3)`，原生 span 总时长至少为字数 × 1000ms（即平均每字 ≥1000ms）。累计时长须等于原生 span 时长，累计文本长度须等于字数，`splitBindingCount` 须在 `0..字数`，且只接受前景。不得把宿主合并的多个原始 span 当作一个 span 按时长放行；原生时长、文本、词分组和长度 g 均保持不变。单字回落子动画延迟修正只作用于原单字分支，多字保留宿主错峰。
+**单字与短 span。** 单字正文恰有 1 个 CJK 码点；短 span 正文为 `2..min(cjk.maxSpanGlowCharacters, 3)` 个 CJK 码点，且原生总时长至少为正文码点数 × 1000ms。两类均只接受前景，累计时长 `f` 须等于 native duration，累计长度 `g` 须等于含标点 `trim` 原文的 UTF-16 length，`splitBindingCount` 须在 `0..nativeCharacterCount`，其中 `nativeCharacterCount` 为未过滤原文的码点数。标点可有独立原生绑定，但不得超过原文码点数；无标点时与既有边界一致。不得把宿主合并的多个原始 span 按总时长放行。单字回落子动画延迟修正仍只作用于单字分支，多字保留宿主错峰。
 
 **英语拆词辉光。** 复用 `AppleMusicCjkKaraokeAnimationTarget.installSplitWordGlow`，精确 profile 须显式声明 `cjk.splitWordGlow=true`，缺省关闭。保留原生整词判定；只为长度超过 7 的前景 Latin 拆词组补充“任一原始 span 时长 ≥1000ms 且 trim 后长度为 2～7”的资格，标点计入长度。同组至少两个成员，须同属原生行 `a` 和非空组 ID `l`，各段文本 `c` 与时长 `e` 累计须对应原生 `g`、`f`，不可跨空格或混入其他文字脚本。仅在当前原生动画调用内临时令 `g=7`，正常、提前返回及异常退出均恢复。各片段以整词中心为共同横向 pivot，原生辉光上升同时开始、回落统一在上升时长后开始；屏蔽该组 `TimeAnimator` 的片段拉扯，原文、binding 及 TTML 分词扫光时间保持。无有效布局或词组已跨视觉行时不额外放行。新构建须核对回落 listener 的 `c` 视图和 `d` 辉光函数、上升 listener 的 `a` 函数及其 `a` 视图，以及原生回落结束的 pivot 恢复；该作用域内的 `TimeAnimator` 须只负责辉光片段间距。另须确认 `g` 的门槛语义及间接读取在原值与 7 下分支相同，不得影响扫光几何；不合并 TTML 或词模型。
 
@@ -730,13 +732,13 @@ GenericProfileViewModel 发布不可变Success状态，复用 `AppleArtistSurfac
 
 普通参数通过共享EmbeddedSettingsDraft合并最新草稿并持久化，无全局“保存”；输入弹窗和歌词编辑器保留确认保存。失败提示并保留当前草稿，后续仍走同一保存链。子页共用对话框/草稿/主题，不另建Activity或配置管线；维护页面枚举时核对渲染、标题、尺寸、返回和销毁清理，子页编辑刷新停留原页。
 
-LLM设置在自定义歌词页进入二级页，开关/API地址/密钥/模型/思考/测试集中管理；配置和测试不随翻译关闭隐藏，启用仍受上级开关约束。长字段标题与值上下分行、值单行省略、密钥遮蔽。图标使用EmbeddedSettingsSvgAssets各自viewport/描边与主题：已有填充资产保留1254 viewport，新轮廓使用24 viewport及圆角描边，避免改全局缩放。底栏动画二级页复用原四项配置/defaults，入口受宿主/玻璃/收缩资格，恢复单项/返回不能覆盖其他参数。
+LLM设置在自定义歌词页进入二级页，开关/API地址/密钥/模型/思考开关/思考强度/测试集中管理；思考强度提供默认/低/高/最高四档，关闭思考时禁用强度选择并保留已选值。配置和测试不随翻译关闭隐藏，启用仍受上级开关约束。长字段标题与值上下分行、值单行省略、密钥遮蔽。图标使用EmbeddedSettingsSvgAssets各自viewport/描边与主题：已有填充资产保留1254 viewport，新轮廓使用24 viewport及圆角描边，避免改全局缩放。底栏动画二级页复用原四项配置/defaults，入口受宿主/玻璃/收缩资格，恢复单项/返回不能覆盖其他参数。
 
-手动“测试连接”只显式点击时读取当前API/模型/密钥快照，在后台通过共享客户端发简短Chat Completions，验证非空模型内容；不读写歌词/缓存、不改开关、不代替整首翻译资格验证。在途单次、离页/关对话框取消并丢迟到结果；固定本地化原因区分缺配置、认证、404、429、其他HTTP、超时、DNS/TLS/连接及响应错误，不显示密钥、原异常或服务正文。
+手动“测试连接”只显式点击时读取当前API/模型/密钥、思考开关及强度快照，在后台通过共享客户端发简短Chat Completions，并采用与正式翻译相同的请求参数映射，验证非空模型内容；不读写歌词/缓存、不改开关、不代替整首翻译资格验证。在途单次、离页/关对话框取消并丢迟到结果；固定本地化原因区分缺配置、认证、404、429、其他HTTP、超时、DNS/TLS/连接及响应错误，不显示密钥、原异常或服务正文。
 
 #### 通用维护：数据和公共协议
 
-配置schema/键、文件ID/目录、迁移marker、SQLite/cache namespace及ZIP格式有明确归属，普通设置保存不覆盖字体/歌词等资产。继续使用既有原子发布、事务恢复、只读迁移重试、导入冲突与取消路径；格式变更单独设计迁移/回退。
+配置schema/键、文件ID/目录、迁移marker、SQLite/cache namespace及ZIP格式有明确归属，普通设置保存不覆盖字体/歌词等资产。LLM思考强度使用普通设置键 `llm_lyrics_thinking_effort`，纳入普通设置编解码、键集合与既有 schema 升级，不创建独立存储、迁移目录或宿主 profile 契约。继续使用既有原子发布、事务恢复、只读迁移重试、导入冲突与取消路径；格式变更单独设计迁移/回退。
 
 宿主普通设置通过 `decodeOrdinarySettings` 解码，跳过独立歌词索引及旧内联歌词 JSON；显示/动画与资格检查不能因读取开关而反复解析歌词资产。歌词查询继续通过 `customLyricsManifest()` 的独立后台读取与缓存，完整 `decode` 保留导入/迁移语义。调整读取路径时核对消费者是否需要资产字段，不能用普通设置快照代替歌词索引。
 

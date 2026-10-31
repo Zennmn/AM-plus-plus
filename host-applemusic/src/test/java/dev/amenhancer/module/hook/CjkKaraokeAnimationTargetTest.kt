@@ -123,6 +123,110 @@ class CjkKaraokeAnimationTargetTest {
     }
 
     @Test
+    fun `unicode punctuation is removed from eligibility text`() {
+        assertEquals("你", cjkKaraokeTextWithoutPunctuation("？你，"))
+        assertEquals("你", cjkKaraokeTextWithoutPunctuation("「你」—…"))
+        assertEquals("你a 2🙂", cjkKaraokeTextWithoutPunctuation("？你a， 2🙂！"))
+        assertEquals("", cjkKaraokeTextWithoutPunctuation("・？！…"))
+    }
+
+    @Test
+    fun `single CJK words ignore punctuation while preserving native text length`() {
+        val single = CjkKaraokeWordTiming(
+            text = "你？",
+            nativeDurationMs = 200,
+            cumulativeDurationMs = 200,
+            cumulativeTextLength = 2,
+            splitBindingCount = 1,
+            isBackground = false,
+        )
+
+        listOf("你？", "？你", "「你」", "你，—…?").forEach { text ->
+            assertTrue(isSingleUnmergedCjkWord(single.copy(
+                text = text,
+                cumulativeTextLength = text.length,
+            )))
+        }
+
+        assertEquals("你？", single.text)
+        assertFalse(isSingleUnmergedCjkWord(single.copy(text = "你好？", cumulativeTextLength = 3)))
+        assertTrue(isSingleUnmergedCjkWord(single.copy(splitBindingCount = 2)))
+        assertFalse(isSingleUnmergedCjkWord(single.copy(splitBindingCount = 3)))
+        assertFalse(isSingleUnmergedCjkWord(single.copy(cumulativeTextLength = 1)))
+        assertFalse(isSingleUnmergedCjkWord(single.copy(isBackground = true)))
+    }
+
+    @Test
+    fun `short CJK spans ignore punctuation in codepoint and duration gates`() {
+        val twoCharacters = CjkKaraokeWordTiming(
+            text = "你好？",
+            nativeDurationMs = 2_000,
+            cumulativeDurationMs = 2_000,
+            cumulativeTextLength = 3,
+            splitBindingCount = 0,
+            isBackground = false,
+        )
+        val threeCharacters = twoCharacters.copy(
+            text = "你好吗？",
+            nativeDurationMs = 3_000,
+            cumulativeDurationMs = 3_000,
+            cumulativeTextLength = 4,
+            splitBindingCount = 4,
+        )
+
+        assertTrue(isUnmergedCjkSpan(twoCharacters, maxCharacters = 3))
+        assertTrue(isUnmergedCjkSpan(threeCharacters, maxCharacters = 3))
+        assertFalse(isUnmergedCjkSpan(twoCharacters, maxCharacters = 1))
+        assertFalse(isUnmergedCjkSpan(
+            twoCharacters.copy(nativeDurationMs = 1_999, cumulativeDurationMs = 1_999),
+            maxCharacters = 3,
+        ))
+        assertFalse(isUnmergedCjkSpan(twoCharacters.copy(cumulativeDurationMs = 1_999), maxCharacters = 3))
+        assertFalse(isUnmergedCjkSpan(twoCharacters.copy(cumulativeTextLength = 2), maxCharacters = 3))
+        assertFalse(isUnmergedCjkSpan(threeCharacters.copy(splitBindingCount = 5), maxCharacters = 3))
+        assertFalse(isUnmergedCjkSpan(threeCharacters.copy(isBackground = true), maxCharacters = 3))
+    }
+
+    @Test
+    fun `short CJK spans reject oversized or mixed non-CJK text`() {
+        val fourCharacters = CjkKaraokeWordTiming(
+            text = "你好吗呀？",
+            nativeDurationMs = 4_000,
+            cumulativeDurationMs = 4_000,
+            cumulativeTextLength = 5,
+            splitBindingCount = 0,
+            isBackground = false,
+        )
+        assertFalse(isUnmergedCjkSpan(fourCharacters, maxCharacters = 3))
+        assertFalse(isUnmergedCjkSpan(fourCharacters, maxCharacters = 4))
+
+        listOf("你a？", "你2？", "你🙂？", "你 好？").forEach { text ->
+            val timing = CjkKaraokeWordTiming(
+                text = text,
+                nativeDurationMs = 3_000,
+                cumulativeDurationMs = 3_000,
+                cumulativeTextLength = text.length,
+                splitBindingCount = 0,
+                isBackground = false,
+            )
+            assertFalse(text, isSingleUnmergedCjkWord(timing))
+            assertFalse(text, isUnmergedCjkSpan(timing, maxCharacters = 3))
+        }
+
+        val punctuationOnly = "・？！…"
+        val punctuationTiming = CjkKaraokeWordTiming(
+            text = punctuationOnly,
+            nativeDurationMs = 4_000,
+            cumulativeDurationMs = 4_000,
+            cumulativeTextLength = punctuationOnly.length,
+            splitBindingCount = 0,
+            isBackground = false,
+        )
+        assertFalse(isSingleUnmergedCjkWord(punctuationTiming))
+        assertFalse(isUnmergedCjkSpan(punctuationTiming, maxCharacters = 3))
+    }
+
+    @Test
     fun `karaoke symbols are exact profile only and reject 650 and unknown builds`() {
         val source = FixtureTargetClassSource(
             classes = mapOf(

@@ -4,6 +4,7 @@ import dev.amenhancer.module.model.EnhancementDefaults
 import dev.amenhancer.module.ModuleConstants
 import dev.amenhancer.module.model.CustomLyricsManifest
 import dev.amenhancer.module.model.LyricsFontManifest
+import dev.amenhancer.module.model.LlmLyricsThinkingEffort
 import dev.amenhancer.module.model.ModuleSettings
 
 object ModuleSettingsSchema {
@@ -102,6 +103,7 @@ object ModuleSettingsSchema {
         llmLyricsApiKey = ModuleSettings.normalizeLlmLyricsApiKey(values.string(KEY_LLM_LYRICS_API_KEY)),
         llmLyricsModel = ModuleSettings.normalizeLlmLyricsModel(values.string(KEY_LLM_LYRICS_MODEL)),
         llmLyricsThinkingEnabled = values.boolean(KEY_LLM_LYRICS_THINKING_ENABLED, default = false),
+        llmLyricsThinkingEffort = LlmLyricsThinkingEffort.decode(values.string(KEY_LLM_LYRICS_THINKING_EFFORT)),
         fontManifest = values.fontManifest(),
         customLyricsManifest = customLyricsManifest,
         schemaVersion = values.number(KEY_SCHEMA_VERSION)
@@ -180,6 +182,7 @@ object ModuleSettingsSchema {
             KEY_LLM_LYRICS_MODEL to
                 ModuleSettings.normalizeLlmLyricsModel(settings.llmLyricsModel),
             KEY_LLM_LYRICS_THINKING_ENABLED to settings.llmLyricsThinkingEnabled,
+            KEY_LLM_LYRICS_THINKING_EFFORT to settings.llmLyricsThinkingEffort.storageValue,
         )
         values[KEY_SCHEMA_VERSION] = ModuleConstants.CONFIG_SCHEMA_VERSION
         return values
@@ -356,6 +359,7 @@ object ModuleSettingsSchema {
         KEY_LLM_LYRICS_API_KEY,
         KEY_LLM_LYRICS_MODEL,
         KEY_LLM_LYRICS_THINKING_ENABLED,
+        KEY_LLM_LYRICS_THINKING_EFFORT,
         KEY_LEGACY_ONLINE_LYRIC_REPLACEMENT,
         KEY_FONT_ENABLED,
         KEY_FONT_FILE_ID,
@@ -409,6 +413,7 @@ object ModuleSettingsSchema {
     private const val KEY_LLM_LYRICS_API_KEY = "llm_lyrics_api_key"
     private const val KEY_LLM_LYRICS_MODEL = "llm_lyrics_model"
     private const val KEY_LLM_LYRICS_THINKING_ENABLED = "llm_lyrics_thinking_enabled"
+    private const val KEY_LLM_LYRICS_THINKING_EFFORT = "llm_lyrics_thinking_effort"
     private const val KEY_LEGACY_ONLINE_LYRIC_REPLACEMENT = "online_lyric_replacement_enabled"
     private const val KEY_FONT_ENABLED = "lyrics_font_enabled"
     private const val KEY_FONT_FILE_ID = "lyrics_font_file_id"

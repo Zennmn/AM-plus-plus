@@ -5,6 +5,7 @@ package dev.amenhancer.module.lyrics
 // Upstream declares AGPL-3.0-only; the ported prompt text and request/validation
 // behaviour keep that provenance for THIRD_PARTY_NOTICES purposes.
 
+import dev.amenhancer.module.model.LlmLyricsThinkingEffort
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URI
@@ -24,11 +25,16 @@ data class LlmLyricsConfig(
     val apiKey: String = "",
     val model: String = "",
     val thinkingEnabled: Boolean = false,
+    val thinkingEffort: LlmLyricsThinkingEffort = LlmLyricsThinkingEffort.DEFAULT,
 ) {
     /** Normalized `.../chat/completions` target, or null when the address is unusable. */
     val endpoint: String? get() = LlmLyricsEndpoint.normalize(baseUrl)
 
     val normalizedModel: String get() = model.trim()
+
+    /** A saved effort has no request or cache effect while thinking is disabled. */
+    val effectiveThinkingEffort: LlmLyricsThinkingEffort
+        get() = if (thinkingEnabled) thinkingEffort else LlmLyricsThinkingEffort.DEFAULT
 
     val isConfigured: Boolean get() = endpoint != null && normalizedModel.isNotEmpty()
 }
@@ -298,6 +304,12 @@ class LlmLyricsClient(
             .put("stream", false)
             .put("thinking", JSONObject().put("type", if (config.thinkingEnabled) "enabled" else "disabled"))
             .put("messages", messages)
+            .apply {
+                val effort = config.effectiveThinkingEffort
+                if (effort != LlmLyricsThinkingEffort.DEFAULT) {
+                    put("reasoning_effort", effort.storageValue)
+                }
+            }
             .toString()
             .toByteArray(Charsets.UTF_8)
         bytes.takeIf { it.size <= MAX_REQUEST_BYTES }
