@@ -388,7 +388,9 @@ Native vector/pointer 在 Hook 当次同步解码，只把复制数值送主线�
 
 ### 5.5 歌词辉光与末词补偿
 
-**生效与接缝。** `cjkKaraokeAnimationEnabled` 只控制 CJK 辉光，按原安装方式重启宿主生效，关闭时不安装 CJK 辉光。末词羽化补偿和英语拆词辉光由“歌词效果优化”的 `ModuleSettings.lyricEffectsOptimizationEnabled`（配置键 `lyric_effects_optimization_enabled`）门禁并重启生效。[AppleMusicHostFactory](../host-applemusic/src/main/java/dev/amenhancer/module/hook/AppleMusicHostFactory.kt) 的现有 `lyricRepairs` lazy 组在 `LyricsParserFeature` 门禁下独立安装，并合并解析修复、逐行双声部对齐、末词补偿与英语拆词辉光的结果，保留各项完整诊断消息；复用现有 Target 和设置。`cjk.terminalGradient` 只登记补偿契约，与 CJK 辉光设置独立。CJK 辉光资格由 profile 的 `cjk.maxSpanGlowCharacters` 限定：缺省 `1`，只放行单个未合并 CJK 词；精确 profile 显式设为 `3` 时，另放行 2～3 字的单个原始未合并 CJK span。前景绑定与结束清理、`cjk.foregroundTextField` 和 bindingOwners 独立核对。`terminalGradient` 的角色仍由 Contract 解析，以代码为准，描述符只维护在精确 profile。
+**生效与接缝。** `cjkKaraokeAnimationEnabled` 只控制 CJK 辉光，按原安装方式重启宿主生效，关闭时不安装 CJK 辉光。末词羽化补偿和英语拆词辉光由“歌词效果优化”的 `ModuleSettings.lyricEffectsOptimizationEnabled`（配置键 `lyric_effects_optimization_enabled`）门禁并重启生效。[AppleMusicHostFactory](../host-applemusic/src/main/java/dev/amenhancer/module/hook/AppleMusicHostFactory.kt) 的现有 `lyricRepairs` lazy 组在 `LyricsParserFeature` 门禁下独立安装，并合并解析修复、逐行双声部对齐、末词补偿与英语拆词辉光的结果，保留各项完整诊断消息；复用现有 Target 和设置。`cjk.terminalGradient` 只登记补偿契约，与 CJK 辉光设置独立。CJK 辉光资格由 profile 的 `cjk.maxSpanGlowCharacters` 限定：缺省 `1`，只放行单个未合并 CJK 词；精确 profile 显式启用多字资格时，另放行 2～3 字的单个原始未合并 CJK span。前景绑定与结束清理、`cjk.foregroundTextField` 和 bindingOwners 独立核对。`terminalGradient` 的角色仍由 Contract 解析，以代码为准，描述符只维护在精确 profile。
+
+CJK 辉光使用 `trim` 原文去除 Unicode 标点 `\p{P}` 后的副本判断脚本、正文字数及平均时长；纯标点、混入 Latin/数字/emoji/内部空白的正文不放行。正文码点仍须属于既有六个 CJK 区块。分类改写仅作用于已验证的 `a0` 候选作用域，不全局改写 `j0`/`k0` 集合，不替代 Apple 原生触发，也不推广到英语拆词或末字渐变。原文、显示标点、native duration、分组和长度 `g` 保持原值。
 
 | 角色组 | 新构建复核的含义 |
 |---|---|
@@ -397,7 +399,7 @@ Native vector/pointer 在 Hook 当次同步解码，只把复制数值送主线�
 | 词 ID / 文本 / 时间 | 尾词判定所用对象与当前扫光词一致 |
 | animationTag | 接口 getter 和原生延迟补亮标签的语义，接口仅按 invocationOnly 调用 |
 
-**多字 span。** 放行前须 `trim` 后全部属于现有六个 CJK 区块，字数为 `2..min(cjk.maxSpanGlowCharacters, 3)`，原生 span 总时长至少为字数 × 1000ms（即平均每字 ≥1000ms）。累计时长须等于原生 span 时长，累计文本长度须等于字数，`splitBindingCount` 须在 `0..字数`，且只接受前景。不得把宿主合并的多个原始 span 当作一个 span 按时长放行；原生时长、文本、词分组和长度 g 均保持不变。单字回落子动画延迟修正只作用于原单字分支，多字保留宿主错峰。
+**单字与短 span。** 单字正文恰有 1 个 CJK 码点；短 span 正文为 `2..min(cjk.maxSpanGlowCharacters, 3)` 个 CJK 码点，且原生总时长至少为正文码点数 × 1000ms。两类均只接受前景，累计时长 `f` 须等于 native duration，累计长度 `g` 须等于含标点 `trim` 原文的 UTF-16 length，`splitBindingCount` 须在 `0..nativeCharacterCount`，其中 `nativeCharacterCount` 为未过滤原文的码点数。标点可有独立原生绑定，但不得超过原文码点数；无标点时与既有边界一致。不得把宿主合并的多个原始 span 按总时长放行。单字回落子动画延迟修正仍只作用于单字分支，多字保留宿主错峰。
 
 **英语拆词辉光。** 复用 `AppleMusicCjkKaraokeAnimationTarget.installSplitWordGlow`，精确 profile 须显式声明 `cjk.splitWordGlow=true`，缺省关闭。保留原生整词判定；只为长度超过 7 的前景 Latin 拆词组补充“任一原始 span 时长 ≥1000ms 且 trim 后长度为 2～7”的资格，标点计入长度。同组至少两个成员，须同属原生行 `a` 和非空组 ID `l`，各段文本 `c` 与时长 `e` 累计须对应原生 `g`、`f`，不可跨空格或混入其他文字脚本。仅在当前原生动画调用内临时令 `g=7`，正常、提前返回及异常退出均恢复。各片段以整词中心为共同横向 pivot，原生辉光上升同时开始、回落统一在上升时长后开始；屏蔽该组 `TimeAnimator` 的片段拉扯，原文、binding 及 TTML 分词扫光时间保持。无有效布局或词组已跨视觉行时不额外放行。新构建须核对回落 listener 的 `c` 视图和 `d` 辉光函数、上升 listener 的 `a` 函数及其 `a` 视图，以及原生回落结束的 pivot 恢复；该作用域内的 `TimeAnimator` 须只负责辉光片段间距。另须确认 `g` 的门槛语义及间接读取在原值与 7 下分支相同，不得影响扫光几何；不合并 TTML 或词模型。
 

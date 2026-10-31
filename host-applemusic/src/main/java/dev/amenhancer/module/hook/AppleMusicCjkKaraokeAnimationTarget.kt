@@ -485,7 +485,11 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
         text: CharSequence,
         languageSet: Set<*>,
     ) {
-        if (!containsCjkKaraokeScript(text)) return
+        val normalized = text.toString().trim()
+        val cjkText = cjkKaraokeTextWithoutPunctuation(normalized)
+        if (!containsCjkKaraokeScript(cjkText)) return
+        val hasAttachedPunctuation = cjkText.length != normalized.length &&
+            cjkText.all { containsCjkKaraokeScript(it.toString()) }
         when {
             isK0Set(languageSet) && param.result == true -> {
                 // CJK is normally classified into k0, which blocks the
@@ -494,10 +498,10 @@ internal class AppleMusicCjkKaraokeAnimationTarget(
                 param.result = false
                 logRewrite(text, "k0 true -> false")
             }
-            isJ0Set(languageSet) && containsHangul(text) && param.result != true -> {
+            isJ0Set(languageSet) && (containsHangul(cjkText) || hasAttachedPunctuation) && param.result != true -> {
                 // i0 receives the j0 hit as its split/rush eligibility bit.
-                // Hangul belongs to k0 but not j0, so opt it into the same
-                // Apple animation only inside a0; g0 remains untouched.
+                // Admit Hangul and punctuation-bearing CJK bodies only inside
+                // the verified a0 scope; native text, timings and g0 stay untouched.
                 param.result = true
                 logRewrite(text, "j0 false -> true")
             }
