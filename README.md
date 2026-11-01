@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  无需 LSPosed 的<a href="https://github.com/Zennmn/AM-plus-plus/releases/tag/embedded">npatch 嵌入版</a>也可直接安装。
+  没有lsposed和root？不妨试试<a href="https://github.com/Zennmn/AM-plus-plus/releases/tag/embedded">npatch 嵌入版</a>
 </p>
 
 <details>
