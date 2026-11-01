@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  The <a href="https://github.com/Zennmn/AM-plus-plus/releases/tag/embedded-2026.08.10-r1">npatch embedded edition</a> can be installed directly without LSPosed.
+  The <a href="https://github.com/Zennmn/AM-plus-plus/releases/tag/embedded">npatch embedded edition</a> can be installed directly without LSPosed.
 </p>
 
 <details>
@@ -107,7 +107,9 @@ Requires Apple Music and an Xposed framework supporting libxposed API 102.
 
 ### npatch embedded edition
 
-Install the [npatch embedded edition](https://github.com/Zennmn/AM-plus-plus/releases/tag/embedded-2026.08.10-r1) directly without LSPosed. It cannot be installed alongside the official app.
+Install the [npatch embedded edition](https://github.com/Zennmn/AM-plus-plus/releases/tag/embedded) directly without LSPosed. It cannot be installed alongside the official app.
+
+Package filenames include the AM++ version, Apple Music version, and build number.
 
 ## Usage
 

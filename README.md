@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  无需 LSPosed 的<a href="https://github.com/Zennmn/AM-plus-plus/releases/tag/embedded-2026.08.10-r1">npatch 嵌入版</a>也可直接安装。
+  无需 LSPosed 的<a href="https://github.com/Zennmn/AM-plus-plus/releases/tag/embedded">npatch 嵌入版</a>也可直接安装。
 </p>
 
 <details>
@@ -107,7 +107,9 @@
 
 ### npatch 嵌入版
 
-直接安装 [npatch 嵌入版](https://github.com/Zennmn/AM-plus-plus/releases/tag/embedded-2026.08.10-r1)，无需 LSPosed，无法与官方版共存。
+直接安装 [npatch 嵌入版](https://github.com/Zennmn/AM-plus-plus/releases/tag/embedded)，无需 LSPosed，无法与官方版共存。
+
+安装包文件名包含 AM++ 版本、Apple Music 版本和构建号，按需选择即可。
 
 ## 使用
 
