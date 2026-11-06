@@ -162,13 +162,16 @@ internal class EmbeddedConfigurationSession(
 
     /**
      * Existing host-private stores may already be marked initialized, which
-     * intentionally bypasses remote migration.  Convert the legacy title
-     * correction value locally before deleting its old key; if publication
-     * fails, leave the legacy key intact so the next process can retry.
+     * intentionally bypasses remote migration. Convert legacy values locally
+     * before deleting old keys; if publication fails, leave them intact so the
+     * next process can retry.
      */
     private fun migrateLegacyValuesBeforeCleanup() {
         val values = runCatching { storage.values() }.getOrNull() ?: return
-        val migration = ModuleSettingsSchema.legacyTitleCorrectionMigrationValues(values)
+        val migration = linkedMapOf<String, Any>().apply {
+            putAll(ModuleSettingsSchema.legacyTitleCorrectionMigrationValues(values))
+            putAll(ModuleSettingsSchema.legacyLlmThinkingFormatMigrationValues(values))
+        }
         if (migration.isNotEmpty() && !runCatching {
                 storage.writeValues(migration, synchronous = true)
             }.getOrDefault(false)

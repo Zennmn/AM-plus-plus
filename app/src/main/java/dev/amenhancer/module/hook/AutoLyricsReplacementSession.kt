@@ -19,7 +19,6 @@ import dev.amenhancer.module.lyrics.TtmlInputPolicy
 import dev.amenhancer.module.lyrics.CustomLyricsUpdateResult
 import dev.amenhancer.module.lyrics.CustomLyricsUpdateSources
 import dev.amenhancer.module.model.CustomLyricsSources
-import dev.amenhancer.module.model.LlmLyricsThinkingEffort
 import dev.amenhancer.module.model.ModuleSettings
 import dev.amenhancer.module.lyrics.FileLlmLyricsCache
 import dev.amenhancer.module.lyrics.LlmLyricsClient
@@ -169,15 +168,7 @@ internal fun createAutoLyricsRuntime(
         configuration = {
             configuration().let { settings ->
                 if (settings.customLyricsEnabled && settings.automaticLyricsEnabled && settings.llmLyricsEnabled) {
-                    LlmLyricsConfig(
-                        baseUrl = settings.llmLyricsBaseUrl,
-                        apiKey = settings.llmLyricsApiKey,
-                        model = settings.llmLyricsModel,
-                        thinkingEnabled = settings.llmLyricsThinkingEnabled,
-                        thinkingEffort = if (settings.llmLyricsThinkingEnabled) {
-                            settings.llmLyricsThinkingEffort
-                        } else LlmLyricsThinkingEffort.DEFAULT,
-                    )
+                    LlmLyricsConfig.fromSettings(settings)
                 } else null
             }
         },
@@ -191,11 +182,10 @@ internal fun createAutoLyricsRuntime(
             }
             val translations = llmClient.translate(
                 config = request.config,
-                texts = document.texts,
+                lines = document.translationLines,
                 title = request.title,
                 artist = request.artist,
                 sourceLanguage = document.sourceLanguage,
-                backgroundIndices = document.backgroundIndices,
                 isCancelled = isCancelled,
             ) ?: return@translate null
             if (isCancelled()) return@translate null

@@ -3,6 +3,7 @@ package dev.amenhancer.module.config
 import dev.amenhancer.module.ModuleConstants
 import dev.amenhancer.module.model.CustomLyricsManifest
 import dev.amenhancer.module.model.LlmLyricsThinkingEffort
+import dev.amenhancer.module.model.LlmLyricsThinkingFormat
 import dev.amenhancer.module.model.ModuleSettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -127,6 +128,7 @@ class ModuleSettingsSchemaTest {
                 "llm_lyrics_api_key" to "",
                 "llm_lyrics_model" to "",
                 "llm_lyrics_thinking_enabled" to false,
+                "llm_lyrics_thinking_format" to "none",
                 "llm_lyrics_thinking_effort" to "default",
                 "lyrics_font_enabled" to false,
                 "lyrics_font_file_id" to "",
@@ -183,6 +185,7 @@ class ModuleSettingsSchemaTest {
                 "llm_lyrics_api_key" to "",
                 "llm_lyrics_model" to "",
                 "llm_lyrics_thinking_enabled" to false,
+                "llm_lyrics_thinking_format" to "none",
                 "llm_lyrics_thinking_effort" to "default",
                 "lyrics_font_enabled" to false,
                 "lyrics_font_file_id" to "",
@@ -224,7 +227,7 @@ class ModuleSettingsSchemaTest {
     }
 
     @Test
-    fun `schema 18 upgrades to 19 with saved LLM configuration and default effort`() {
+    fun `schema 18 upgrades with saved LLM configuration and preserves thinking type`() {
         val upgraded = ModuleSettingsSchema.upgrade(
             storedValues = mapOf(
                 "schema_version" to 18,
@@ -250,6 +253,7 @@ class ModuleSettingsSchemaTest {
         assertEquals("test-api-key", upgraded["llm_lyrics_api_key"])
         assertEquals("reasoning-model", upgraded["llm_lyrics_model"])
         assertEquals(true, upgraded["llm_lyrics_thinking_enabled"])
+        assertEquals("thinking_type", upgraded["llm_lyrics_thinking_format"])
         assertEquals("default", upgraded["llm_lyrics_thinking_effort"])
     }
 
@@ -268,6 +272,36 @@ class ModuleSettingsSchemaTest {
         assertEquals("max", upgraded["llm_lyrics_thinking_effort"])
         assertEquals(LlmLyricsThinkingEffort.MAX, decoded.llmLyricsThinkingEffort)
         assertEquals(false, decoded.llmLyricsThinkingEnabled)
+    }
+
+    @Test
+    fun `legacy format migration preserves only configured stores with no saved choice`() {
+        val configured = mapOf("llm_lyrics_base_url" to "https://example.test/v1")
+        val cases = listOf(
+            configured to "thinking_type",
+            mapOf("llm_lyrics_thinking_effort" to "max") to "none",
+            configured + ("llm_lyrics_thinking_format" to "reasoning_effort") to "reasoning_effort",
+            configured + ("llm_lyrics_thinking_format" to "unknown") to "none",
+        )
+        for ((stored, expected) in cases) {
+            val upgraded = ModuleSettingsSchema.upgrade(
+                storedValues = mapOf("schema_version" to 19) + stored,
+                legacyValues = emptyMap<String, Any?>(),
+            )!!
+            assertEquals(expected, upgraded["llm_lyrics_thinking_format"])
+        }
+        val current = ModuleSettingsSchema.decode(
+            configured + ("schema_version" to ModuleConstants.CONFIG_SCHEMA_VERSION),
+        )
+        assertEquals(LlmLyricsThinkingFormat.NONE, current.llmLyricsThinkingFormat)
+    }
+
+    @Test
+    fun `ordinary settings round trip the selected thinking format`() {
+        for (format in LlmLyricsThinkingFormat.values()) {
+            val values = ModuleSettingsSchema.encodeOrdinarySettings(ModuleSettings(llmLyricsThinkingFormat = format))
+            assertEquals(format, ModuleSettingsSchema.decode(values).llmLyricsThinkingFormat)
+        }
     }
 
     @Test

@@ -90,6 +90,8 @@ data class ModuleSettings(
     val llmLyricsModel: String = "",
     /** Send the user-selected thinking mode to the configured compatible endpoint. */
     val llmLyricsThinkingEnabled: Boolean = false,
+    /** Selects the request shape used for thinking; [LlmLyricsThinkingFormat.NONE] sends none. */
+    val llmLyricsThinkingFormat: LlmLyricsThinkingFormat = LlmLyricsThinkingFormat.NONE,
     /** Retained while thinking is disabled; DEFAULT leaves the endpoint's effort unchanged. */
     val llmLyricsThinkingEffort: LlmLyricsThinkingEffort = LlmLyricsThinkingEffort.DEFAULT,
     val fontManifest: LyricsFontManifest = LyricsFontManifest.disabled(),
@@ -186,6 +188,26 @@ data class ModuleSettings(
                 MIN_PHONE_LIQUID_GLASS_MINI_SINK_BOUNCE_DP,
                 MAX_PHONE_LIQUID_GLASS_MINI_SINK_BOUNCE_DP,
             )
+    }
+}
+
+/** Request shapes for endpoint-specific thinking controls; selection is never inferred from a URL. */
+enum class LlmLyricsThinkingFormat(val storageValue: String) {
+    NONE("none"),
+    THINKING_TYPE("thinking_type"),
+    REASONING_EFFORT("reasoning_effort");
+
+    fun supportsEffort(effort: LlmLyricsThinkingEffort): Boolean = when (this) {
+        NONE -> effort == LlmLyricsThinkingEffort.DEFAULT
+        THINKING_TYPE -> true
+        REASONING_EFFORT -> effort == LlmLyricsThinkingEffort.DEFAULT ||
+            effort == LlmLyricsThinkingEffort.LOW ||
+            effort == LlmLyricsThinkingEffort.HIGH
+    }
+
+    companion object {
+        fun decode(value: String?): LlmLyricsThinkingFormat =
+            values().firstOrNull { it.storageValue == value } ?: NONE
     }
 }
 

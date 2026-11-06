@@ -47,6 +47,7 @@ import dev.amenhancer.module.lyrics.LlmLyricsClient
 import dev.amenhancer.module.lyrics.LlmLyricsConfig
 import dev.amenhancer.module.model.CustomLyricsSources
 import dev.amenhancer.module.model.LlmLyricsThinkingEffort
+import dev.amenhancer.module.model.LlmLyricsThinkingFormat
 import dev.amenhancer.module.model.ModuleSettings
 import java.lang.ref.WeakReference
 import java.util.concurrent.atomic.AtomicBoolean
@@ -882,6 +883,7 @@ private fun EmbeddedSettingsHost.showEmbeddedPageDetails(activity: Activity, pag
             ModuleText.LLM_LYRICS_BASE_URL to ModuleText.LLM_LYRICS_BASE_URL_SUMMARY,
             ModuleText.LLM_LYRICS_API_KEY to ModuleText.LLM_LYRICS_API_KEY_SUMMARY,
             ModuleText.LLM_LYRICS_MODEL to ModuleText.LLM_LYRICS_MODEL_SUMMARY,
+            ModuleText.LLM_LYRICS_THINKING_FORMAT to ModuleText.LLM_LYRICS_THINKING_FORMAT_SUMMARY,
             ModuleText.LLM_LYRICS_THINKING to ModuleText.LLM_LYRICS_THINKING_SUMMARY,
             ModuleText.LLM_LYRICS_THINKING_EFFORT to ModuleText.LLM_LYRICS_THINKING_EFFORT_SUMMARY,
         )
@@ -1453,6 +1455,14 @@ private fun EmbeddedSettingsHost.renderEmbeddedAutomaticLyricsPage(
 }
 
 
+private fun EmbeddedSettingsHost.llmThinkingFormatLabel(format: LlmLyricsThinkingFormat): String =
+    when (format) {
+        LlmLyricsThinkingFormat.NONE -> localizedText(ModuleText.LLM_LYRICS_THINKING_FORMAT_NONE)
+        LlmLyricsThinkingFormat.THINKING_TYPE -> "thinking.type"
+        LlmLyricsThinkingFormat.REASONING_EFFORT -> "reasoning_effort"
+    }
+
+
 private fun EmbeddedSettingsHost.llmThinkingEffortLabel(effort: LlmLyricsThinkingEffort): String =
     localizedText(when (effort) {
         LlmLyricsThinkingEffort.DEFAULT -> ModuleText.LLM_LYRICS_THINKING_EFFORT_DEFAULT
@@ -1462,17 +1472,18 @@ private fun EmbeddedSettingsHost.llmThinkingEffortLabel(effort: LlmLyricsThinkin
     })
 
 
-private fun EmbeddedSettingsHost.showLlmThinkingEffortPicker(
+private fun <T> EmbeddedSettingsHost.showLlmThinkingPicker(
     activity: Activity,
-    current: LlmLyricsThinkingEffort,
-    onSelected: (LlmLyricsThinkingEffort) -> Unit,
+    title: ModuleText,
+    choices: List<T>,
+    current: T,
+    label: (T) -> String,
+    onSelected: (T) -> Unit,
 ) {
-    val efforts = LlmLyricsThinkingEffort.values()
-    val labels = efforts.map { llmThinkingEffortLabel(it) }.toTypedArray()
     embeddedDialogBuilder(activity)
-        .setTitle(localizedText(ModuleText.LLM_LYRICS_THINKING_EFFORT))
-        .setSingleChoiceItems(labels, efforts.indexOf(current)) { dialog, which ->
-            efforts.getOrNull(which)?.let(onSelected)
+        .setTitle(localizedText(title))
+        .setSingleChoiceItems(choices.map(label).toTypedArray(), choices.indexOf(current)) { dialog, which ->
+            choices.getOrNull(which)?.let(onSelected)
             dialog.dismiss()
         }
         .setNegativeButton(localizedText(ModuleText.CANCEL), null)
@@ -1547,44 +1558,80 @@ private fun EmbeddedSettingsHost.renderEmbeddedLlmLyricsPage(
         pageRefresh?.invoke()
     })
     settingsGroup.addView(embeddedSpacer(activity, if (isEmbeddedPhone(activity)) 10 else 14))
-    settingsGroup.addView(embeddedSettingRow(
-        activity,
-        localizedText(ModuleText.LLM_LYRICS_THINKING),
-        localizedText(ModuleText.LLM_LYRICS_THINKING_SUMMARY),
-        settings.llmLyricsThinkingEnabled,
-        compactWidePadding = true,
-    ) {
-        onSettingsChanged(settings.copy(llmLyricsThinkingEnabled = it))
-        pageRefresh?.invoke()
-    })
-    settingsGroup.addView(embeddedSpacer(activity, if (isEmbeddedPhone(activity)) 10 else 14))
-    val effortRow = embeddedNavigationRow(
+    val thinkingFormat = settings.llmLyricsThinkingFormat
+    settingsGroup.addView(embeddedNavigationRow(
         activity = activity,
-        title = localizedText(ModuleText.LLM_LYRICS_THINKING_EFFORT),
-        summary = llmThinkingEffortLabel(settings.llmLyricsThinkingEffort),
-        clickable = settings.llmLyricsThinkingEnabled,
+        title = localizedText(ModuleText.LLM_LYRICS_THINKING_FORMAT),
+        summary = llmThinkingFormatLabel(thinkingFormat),
+        clickable = true,
         compactWidePadding = true,
         onClick = {
-            showLlmThinkingEffortPicker(activity, settings.llmLyricsThinkingEffort) { selected ->
-                onSettingsChanged(settings.copy(llmLyricsThinkingEffort = selected))
+            showLlmThinkingPicker(
+                activity,
+                title = ModuleText.LLM_LYRICS_THINKING_FORMAT,
+                choices = LlmLyricsThinkingFormat.values().toList(),
+                current = thinkingFormat,
+                label = { choice ->
+                    val hint = when (choice) {
+                        LlmLyricsThinkingFormat.NONE -> ModuleText.LLM_LYRICS_THINKING_EFFORT_DEFAULT
+                        LlmLyricsThinkingFormat.THINKING_TYPE -> ModuleText.LLM_LYRICS_THINKING_FORMAT_TYPE_HINT
+                        LlmLyricsThinkingFormat.REASONING_EFFORT -> ModuleText.LLM_LYRICS_THINKING_FORMAT_EFFORT_HINT
+                    }
+                    "${llmThinkingFormatLabel(choice)} · ${localizedText(hint)}"
+                },
+            ) { selected ->
+                onSettingsChanged(settings.copy(llmLyricsThinkingFormat = selected))
                 pageRefresh?.invoke()
             }
         },
-    )
-    if (!settings.llmLyricsThinkingEnabled) {
-        effortRow.isEnabled = false
-        effortRow.alpha = 0.55f
+    ))
+    val hasThinkingSwitch = thinkingFormat == LlmLyricsThinkingFormat.THINKING_TYPE
+    if (hasThinkingSwitch) {
+        settingsGroup.addView(embeddedSpacer(activity, if (isEmbeddedPhone(activity)) 10 else 14))
+        settingsGroup.addView(embeddedSettingRow(
+            activity,
+            localizedText(ModuleText.LLM_LYRICS_THINKING),
+            localizedText(ModuleText.LLM_LYRICS_THINKING_SUMMARY),
+            settings.llmLyricsThinkingEnabled,
+            compactWidePadding = true,
+        ) {
+            onSettingsChanged(settings.copy(llmLyricsThinkingEnabled = it))
+            pageRefresh?.invoke()
+        })
     }
-    settingsGroup.addView(effortRow)
+    if (thinkingFormat != LlmLyricsThinkingFormat.NONE) {
+        val currentEffort = settings.llmLyricsThinkingEffort.takeIf(thinkingFormat::supportsEffort)
+            ?: LlmLyricsThinkingEffort.DEFAULT
+        val effortEnabled = !hasThinkingSwitch || settings.llmLyricsThinkingEnabled
+        settingsGroup.addView(embeddedSpacer(activity, if (isEmbeddedPhone(activity)) 10 else 14))
+        val effortRow = embeddedNavigationRow(
+            activity = activity,
+            title = localizedText(ModuleText.LLM_LYRICS_THINKING_EFFORT),
+            summary = llmThinkingEffortLabel(currentEffort),
+            clickable = effortEnabled,
+            compactWidePadding = true,
+            onClick = {
+                showLlmThinkingPicker(
+                    activity,
+                    title = ModuleText.LLM_LYRICS_THINKING_EFFORT,
+                    choices = LlmLyricsThinkingEffort.values().filter(thinkingFormat::supportsEffort),
+                    current = currentEffort,
+                    label = { llmThinkingEffortLabel(it) },
+                ) { selected ->
+                    onSettingsChanged(settings.copy(llmLyricsThinkingEffort = selected))
+                    pageRefresh?.invoke()
+                }
+            },
+        )
+        if (!effortEnabled) {
+            effortRow.isEnabled = false
+            effortRow.alpha = 0.55f
+        }
+        settingsGroup.addView(effortRow)
+    }
     settingsGroup.addView(embeddedSpacer(activity, if (isEmbeddedPhone(activity)) 10 else 14))
     // Page edits replace this config snapshot; detaching the old page cancels its check.
-    addLlmConnectionTestButton(activity, settingsGroup, LlmLyricsConfig(
-        baseUrl = settings.llmLyricsBaseUrl,
-        apiKey = settings.llmLyricsApiKey,
-        model = settings.llmLyricsModel,
-        thinkingEnabled = settings.llmLyricsThinkingEnabled,
-        thinkingEffort = settings.llmLyricsThinkingEffort,
-    ))
+    addLlmConnectionTestButton(activity, settingsGroup, LlmLyricsConfig.fromSettings(settings))
 }
 
 

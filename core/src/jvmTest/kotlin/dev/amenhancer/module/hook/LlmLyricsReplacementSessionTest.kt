@@ -2,6 +2,7 @@ package dev.amenhancer.module.hook
 
 import dev.amenhancer.module.lyrics.LlmLyricsConfig
 import dev.amenhancer.module.model.LlmLyricsThinkingEffort
+import dev.amenhancer.module.model.LlmLyricsThinkingFormat
 import java.util.ArrayDeque
 import java.util.concurrent.Executor
 import org.junit.Assert.assertEquals
@@ -295,6 +296,7 @@ class LlmLyricsReplacementSessionTest {
             model = "test-model",
             thinkingEnabled = true,
             thinkingEffort = effort,
+            thinkingFormat = LlmLyricsThinkingFormat.THINKING_TYPE,
         )
     }
 }

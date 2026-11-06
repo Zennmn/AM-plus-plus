@@ -18,6 +18,28 @@ import org.junit.Test
 
 class EmbeddedConfigurationSessionTest {
     @Test
+    fun `legacy LLM configuration persists thinking type with the current schema`() {
+        val storage = InMemoryEmbeddedStorage(
+            initialValues = mapOf(
+                "schema_version" to 19,
+                "llm_lyrics_base_url" to "https://example.test/v1",
+                "llm_lyrics_model" to "reasoning-model",
+                "llm_lyrics_enabled" to false,
+                "llm_lyrics_thinking_enabled" to false,
+            ),
+        )
+
+        val session = EmbeddedConfigurationSession(storage)
+
+        assertEquals("thinking_type", storage.values()["llm_lyrics_thinking_format"])
+        assertEquals(ModuleConstants.CONFIG_SCHEMA_VERSION, storage.values()["schema_version"])
+        assertEquals(
+            dev.amenhancer.module.model.LlmLyricsThinkingFormat.THINKING_TYPE,
+            session.settings().llmLyricsThinkingFormat,
+        )
+    }
+
+    @Test
     fun `legacy title correction mode is published before obsolete key cleanup`() {
         listOf(
             "zh-CN" to TitleCorrectionMode.MAINLAND_CHINA,

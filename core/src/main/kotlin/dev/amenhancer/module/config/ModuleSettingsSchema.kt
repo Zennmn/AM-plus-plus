@@ -5,6 +5,7 @@ import dev.amenhancer.module.ModuleConstants
 import dev.amenhancer.module.model.CustomLyricsManifest
 import dev.amenhancer.module.model.LyricsFontManifest
 import dev.amenhancer.module.model.LlmLyricsThinkingEffort
+import dev.amenhancer.module.model.LlmLyricsThinkingFormat
 import dev.amenhancer.module.model.ModuleSettings
 
 object ModuleSettingsSchema {
@@ -103,6 +104,7 @@ object ModuleSettingsSchema {
         llmLyricsApiKey = ModuleSettings.normalizeLlmLyricsApiKey(values.string(KEY_LLM_LYRICS_API_KEY)),
         llmLyricsModel = ModuleSettings.normalizeLlmLyricsModel(values.string(KEY_LLM_LYRICS_MODEL)),
         llmLyricsThinkingEnabled = values.boolean(KEY_LLM_LYRICS_THINKING_ENABLED, default = false),
+        llmLyricsThinkingFormat = values.llmLyricsThinkingFormat(),
         llmLyricsThinkingEffort = LlmLyricsThinkingEffort.decode(values.string(KEY_LLM_LYRICS_THINKING_EFFORT)),
         fontManifest = values.fontManifest(),
         customLyricsManifest = customLyricsManifest,
@@ -182,6 +184,7 @@ object ModuleSettingsSchema {
             KEY_LLM_LYRICS_MODEL to
                 ModuleSettings.normalizeLlmLyricsModel(settings.llmLyricsModel),
             KEY_LLM_LYRICS_THINKING_ENABLED to settings.llmLyricsThinkingEnabled,
+            KEY_LLM_LYRICS_THINKING_FORMAT to settings.llmLyricsThinkingFormat.storageValue,
             KEY_LLM_LYRICS_THINKING_EFFORT to settings.llmLyricsThinkingEffort.storageValue,
         )
         values[KEY_SCHEMA_VERSION] = ModuleConstants.CONFIG_SCHEMA_VERSION
@@ -297,6 +300,15 @@ object ModuleSettingsSchema {
         )
     }
 
+    /** Persists the format for an old configured store without rewriting file metadata. */
+    fun legacyLlmThinkingFormatMigrationValues(values: Map<String, *>): Map<String, Any> {
+        if (!values.usesLegacyLlmThinkingFormat()) return emptyMap()
+        return linkedMapOf(
+            KEY_LLM_LYRICS_THINKING_FORMAT to LlmLyricsThinkingFormat.THINKING_TYPE.storageValue,
+            KEY_SCHEMA_VERSION to ModuleConstants.CONFIG_SCHEMA_VERSION,
+        )
+    }
+
     private fun Map<String, *>.string(key: String): String = this[key] as? String ?: ""
 
     private fun Map<String, *>.long(key: String): Long? = when (val value = this[key]) {
@@ -318,6 +330,22 @@ object ModuleSettingsSchema {
         val source = if (storedValues.hasSettingValue()) storedValues else legacyValues
         return encode(decode(source))
     }
+
+    /** The old writer always sent thinking.type, even when its switch was off. */
+    private fun Map<String, *>.usesLegacyLlmThinkingFormat(): Boolean =
+        !containsKey(KEY_LLM_LYRICS_THINKING_FORMAT) &&
+            (number(KEY_SCHEMA_VERSION) ?: 0) < LLM_LYRICS_THINKING_FORMAT_SCHEMA_VERSION &&
+            (string(KEY_LLM_LYRICS_BASE_URL).isNotBlank() ||
+                string(KEY_LLM_LYRICS_MODEL).isNotBlank() ||
+                boolean(KEY_LLM_LYRICS_ENABLED, default = false) ||
+                boolean(KEY_LLM_LYRICS_THINKING_ENABLED, default = false))
+
+    private fun Map<String, *>.llmLyricsThinkingFormat(): LlmLyricsThinkingFormat =
+        if (usesLegacyLlmThinkingFormat()) {
+            LlmLyricsThinkingFormat.THINKING_TYPE
+        } else {
+            LlmLyricsThinkingFormat.decode(string(KEY_LLM_LYRICS_THINKING_FORMAT))
+        }
 
     private fun Map<String, *>.boolean(key: String, default: Boolean): Boolean =
         this[key] as? Boolean ?: default
@@ -359,6 +387,7 @@ object ModuleSettingsSchema {
         KEY_LLM_LYRICS_API_KEY,
         KEY_LLM_LYRICS_MODEL,
         KEY_LLM_LYRICS_THINKING_ENABLED,
+        KEY_LLM_LYRICS_THINKING_FORMAT,
         KEY_LLM_LYRICS_THINKING_EFFORT,
         KEY_LEGACY_ONLINE_LYRIC_REPLACEMENT,
         KEY_FONT_ENABLED,
@@ -413,7 +442,9 @@ object ModuleSettingsSchema {
     private const val KEY_LLM_LYRICS_API_KEY = "llm_lyrics_api_key"
     private const val KEY_LLM_LYRICS_MODEL = "llm_lyrics_model"
     private const val KEY_LLM_LYRICS_THINKING_ENABLED = "llm_lyrics_thinking_enabled"
+    private const val KEY_LLM_LYRICS_THINKING_FORMAT = "llm_lyrics_thinking_format"
     private const val KEY_LLM_LYRICS_THINKING_EFFORT = "llm_lyrics_thinking_effort"
+    private const val LLM_LYRICS_THINKING_FORMAT_SCHEMA_VERSION = 20
     private const val KEY_LEGACY_ONLINE_LYRIC_REPLACEMENT = "online_lyric_replacement_enabled"
     private const val KEY_FONT_ENABLED = "lyrics_font_enabled"
     private const val KEY_FONT_FILE_ID = "lyrics_font_file_id"
