@@ -3,7 +3,6 @@ package dev.amenhancer.module.ui
 import dev.amenhancer.module.i18n.ModuleText
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.app.Application
 import android.app.Dialog
 import android.content.Intent
@@ -40,11 +39,11 @@ internal class EmbeddedSettingsHost private constructor(
     internal var dialogReference: WeakReference<Dialog>? = null
     internal var pageRefresh: (() -> Unit)? = null
     internal var plugins: dev.amenhancer.plugin.runtime.PluginManager? = null
-    internal val pluginDialogs = mutableListOf<WeakReference<Dialog>>()
-    internal val themedDialogs = mutableListOf<WeakReference<AlertDialog>>()
+    internal val auxiliaryDialogs = mutableListOf<WeakReference<Dialog>>()
     internal val customLyricsListState = CustomLyricsListState()
     internal var customLyricsSearchQuery = ""
-    internal var pendingTtmlImport: ((String) -> Unit)? = null
+    internal var pendingTtmlImport: ((String?) -> Unit)? = null
+    internal var pendingSafDialog: WeakReference<Dialog>? = null
     internal var buttonReference: WeakReference<View>? = null
     internal var settingsOptionReference: WeakReference<View>? = null
     internal var activeActivityId: String? = null
@@ -131,10 +130,15 @@ internal class EmbeddedSettingsHost private constructor(
         data: Intent?,
     ): Boolean {
         if (activityReference?.get() !== activity || activeActivityRole == null) return false
-        return when (val route = safRouter.route(requestCode, resultCode, data?.dataString)) {
+        val route = safRouter.route(requestCode, resultCode, data?.dataString)
+        if (route == EmbeddedSafRoute.Ignored) return false
+        val owner = pendingSafDialog
+        pendingSafDialog = null
+        if (owner !== dialogReference || owner?.get()?.isShowing != true) return true
+        return when (route) {
             EmbeddedSafRoute.Ignored -> false
             is EmbeddedSafRoute.Canceled -> {
-                if (route.operation == EmbeddedSafOperation.Ttml) pendingTtmlImport = null
+                if (route.operation == EmbeddedSafOperation.EditorTtml) pendingTtmlImport = null
                 currentActivity()?.let { activity ->
                     Toast.makeText(activity, localizedText(ModuleText.NO_FILE_SELECTED), Toast.LENGTH_SHORT).show()
                 }
@@ -559,14 +563,18 @@ internal class EmbeddedSettingsHost private constructor(
     }
 
     internal fun dismissDialog() {
-        themedDialogs.toList().forEach { it.get()?.dismiss() }
-        themedDialogs.clear()
-        pluginDialogs.toList().forEach { it.get()?.dismiss() }
-        pluginDialogs.clear()
-        pendingTtmlImport = null
-        dialogReference?.get()?.dismiss()
+        val dialog = dialogReference?.get()
         dialogReference = null
         pageRefresh = null
+        dismissAuxiliarySettingsDialogs()
+        dialog?.dismiss()
+    }
+
+    internal fun dismissAuxiliarySettingsDialogs() {
+        auxiliaryDialogs.toList().asReversed().forEach { it.get()?.dismiss() }
+        auxiliaryDialogs.clear()
+        pendingTtmlImport = null
+        pendingSafDialog = null
     }
 
     internal fun currentActivity(): Activity? = activityReference?.get()

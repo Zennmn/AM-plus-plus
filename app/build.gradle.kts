@@ -89,7 +89,8 @@ dependencies {
     compileOnly("io.github.libxposed:service:102.0.0")
     testCompileOnly("io.github.libxposed:service:102.0.0")
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.4.10")
-    implementation("androidx.recyclerview:recyclerview:1.4.0")
+    implementation("androidx.activity:activity:1.13.0")
+    implementation("top.yukonga.miuix.kmp:miuix-preference:0.9.4")
     // HLE's exact Apple Music profile resolver uses DexKit only as a
     // compatibility fallback when a profiled class/member is absent.
     implementation("org.luckypray:dexkit:2.2.0")

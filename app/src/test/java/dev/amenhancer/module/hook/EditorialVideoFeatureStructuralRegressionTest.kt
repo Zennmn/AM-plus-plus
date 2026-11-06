@@ -41,7 +41,7 @@ class EditorialVideoFeatureStructuralRegressionTest {
         val schema = source("dev/amenhancer/module/config/ModuleSettingsSchema.kt")
         val client = source("dev/amenhancer/module/config/TargetConfigClient.kt")
         val storage = source("dev/amenhancer/module/config/HostPrivateEmbeddedStorage.kt")
-        val settings = source("dev/amenhancer/module/ui/EmbeddedSettingsHost.kt")
+        val settings = source("dev/amenhancer/module/ui/EmbeddedSettingsPages.kt")
 
         assertTrue(models.contains("val disableEditorialVideoOnTablet: Boolean = true"))
         assertTrue(schema.contains("\"disable_editorial_video_on_tablet\""))
@@ -59,7 +59,8 @@ class EditorialVideoFeatureStructuralRegressionTest {
         assertTrue(client.contains("valuesProvider"))
         assertFalse(settings.contains("平板隐藏编辑视频"))
         // Copy is independent of the legacy key; the visible row controls dual pane.
-        assertTrue(settings.contains("currentSettings().copy(dualPaneEnabled = it)"))
+        assertTrue(settings.contains("ModuleText.TABLET_DUAL_PANE"))
+        assertTrue(settings.contains("it.copy(dualPaneEnabled = value)"))
     }
 
     @Test

@@ -15,13 +15,14 @@ class CustomLyricsListPageStructuralRegressionTest {
 
     @Test
     fun `renders only the revealed window from the shared list state`() {
-        val host = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsHost.kt")
+        val page = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedLyricsSettingsPages.kt")
         val state = projectFile("app/src/main/java/dev/amenhancer/module/ui/CustomLyricsListState.kt")
 
-        assertTrue(host.contains("CustomLyricsListState"))
-        assertTrue(host.contains("customLyricsListState.update(entries, customLyricsSearchQuery)"))
-        assertTrue(host.contains("val visibleGroups = state.visibleGroups"))
-        assertTrue(host.contains("embeddedCustomLyricsEntryRow(activity, group, song)"))
+        assertTrue(page.contains("val lyricsState = customLyricsListState"))
+        assertTrue(page.contains("lyricsState.update(entries, searchText)"))
+        assertTrue(page.contains("lyricsState.visibleGroups"))
+        assertTrue(page.contains("visibleGroups.forEachIndexed"))
+        assertTrue(page.contains("CustomLyricsEntryRow("))
         assertTrue(state.contains("DEFAULT_PAGE_SIZE = 50"))
         assertTrue(state.contains("visibleEntries"))
         assertTrue(state.contains("hasMore"))
@@ -30,74 +31,76 @@ class CustomLyricsListPageStructuralRegressionTest {
 
     @Test
     fun `paginates with search, load more and a shown total counter`() {
-        val host = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsHost.kt")
+        val page = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedLyricsSettingsPages.kt")
 
-        assertTrue(host.contains("ModuleText.SEARCH_LYRICS"))
-        assertTrue(host.contains("addTextChangedListener"))
-        assertTrue(host.contains("afterTextChanged"))
-        assertTrue(host.contains("customLyricsSearchQuery"))
-        assertTrue(host.contains("ModuleText.LOAD_MORE"))
-        assertTrue(host.contains("customLyricsListState.loadMore()"))
-        assertTrue(
-            host.contains(
-                "localizedText(ModuleText.LYRICS_VISIBLE_COUNT, state.visibleCount, state.totalCount)",
-            ),
-        )
+        assertTrue(page.contains("label = localizedText(ModuleText.SEARCH_LYRICS)"))
+        assertTrue(page.contains("mutableStateOf(customLyricsSearchQuery)"))
+        assertTrue(page.contains("customLyricsSearchQuery = value"))
+        assertTrue(page.contains("lyricsState.setQuery(value)"))
+        assertTrue(page.contains("ModuleText.LOAD_MORE"))
+        assertTrue(page.contains("lyricsState.loadMore()"))
+        assertTrue(page.contains("ModuleText.LYRICS_VISIBLE_COUNT"))
+        assertTrue(page.contains("lyricsState.visibleCount"))
+        assertTrue(page.contains("lyricsState.totalCount"))
     }
 
     @Test
     fun `places add and backup actions above the search input`() {
-        val host = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsHost.kt")
-        val page = host.substringAfter("private fun renderEmbeddedCustomLyricsPage(")
-            .substringBefore("private fun embeddedCustomLyricsEntryRow(")
+        val page = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedLyricsSettingsPages.kt")
 
-        val actionBar = page.indexOf("embeddedCompactLyricsActionBar(")
-        val search = page.indexOf("val search = EditText(activity)")
+        val actionBar = page.indexOf("LyricsActionBar(")
+        val search = page.indexOf("TextField(")
         assertTrue("action bar must exist", actionBar >= 0)
         assertTrue("search input must exist", search >= 0)
         assertTrue("actions must precede search", actionBar < search)
-        listOf("onAdd", "onTtml", "onBackup").forEach { action ->
-            assertTrue("$action must remain in the embedded action bar", page.contains(action))
+        val actionBarSource = page.substring(actionBar, search)
+        listOf(
+            "onAdd = { showLyricsEditor(",
+            "onTtml = {",
+            "onUpdate = { updateEmbeddedLyrics(activity) }",
+            "onBackup = { showBackupRestoreDialog(activity) }",
+        ).forEach { action ->
+            assertTrue("$action must remain in the embedded action bar", actionBarSource.contains(action))
         }
+        assertTrue(actionBarSource.contains("launchSafPicker("))
+        assertTrue(actionBarSource.contains("EmbeddedSafOperation.Ttml"))
     }
 
     @Test
     fun `keeps embedded empty and no match states`() {
-        val host = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsHost.kt")
+        val page = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedLyricsSettingsPages.kt")
 
-        assertTrue(host.contains("ModuleText.NO_CUSTOM_LYRICS"))
-        assertTrue(host.contains("ModuleText.NO_SEARCH_RESULTS"))
-        assertTrue(host.contains("ModuleText.ADD_LYRICS_EMPTY_HINT"))
-        assertTrue(host.contains("ModuleText.SEARCH_LYRICS_EMPTY_HINT"))
+        assertTrue(page.contains("ModuleText.NO_CUSTOM_LYRICS"))
+        assertTrue(page.contains("ModuleText.NO_SEARCH_RESULTS"))
+        assertTrue(page.contains("ModuleText.ADD_LYRICS_EMPTY_HINT"))
+        assertTrue(page.contains("ModuleText.SEARCH_LYRICS_EMPTY_HINT"))
     }
 
     @Test
     fun `configures the embedded custom lyrics search field for text IME input`() {
-        val embeddedHost = projectFile(
-            "app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsHost.kt",
-        )
-        val embeddedSearch = embeddedHost
-            .substringAfter("private fun renderEmbeddedCustomLyricsPage(")
-            .substringBefore("private fun embeddedCustomLyricsEntryRow(")
+        val page = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedLyricsSettingsPages.kt")
+        val window = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsComposeWindow.kt")
+        val embeddedSearch = page.substringAfter("TextField(")
+            .substringBefore("EmbeddedSettingsSection(")
 
-        assertTrue(embeddedSearch.contains("inputType = InputType.TYPE_CLASS_TEXT"))
-        assertTrue(embeddedSearch.contains("imeOptions = EditorInfo.IME_ACTION_SEARCH"))
-        assertTrue(embeddedSearch.contains("showSoftInputOnFocus = true"))
-        assertTrue(embeddedHost.contains("clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)"))
-        assertTrue(embeddedHost.contains("setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)"))
+        assertTrue(embeddedSearch.contains("ImeAction.Search"))
+        assertTrue(embeddedSearch.contains("singleLine = true"))
+        assertTrue(window.contains("clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM"))
+        assertTrue(window.contains("setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)"))
     }
 
     @Test
     fun `embedded custom lyrics page exposes update instead of github bulk sync`() {
-        val embeddedHost = projectFile(
-            "app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsHost.kt",
-        )
+        val page = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedLyricsSettingsPages.kt")
+        val operations = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsOperations.kt")
 
-        assertTrue(embeddedHost.contains("onUpdate = { updateEmbeddedLyrics(activity) }"))
-        assertTrue(embeddedHost.contains("label = localizedText(ModuleText.UPDATE)"))
-        assertTrue(embeddedHost.contains("description = localizedText(ModuleText.LYRICS_UPDATE)"))
-        assertTrue(embeddedHost.contains("internal fun EmbeddedSettingsHost.updateEmbeddedLyrics(activity: Activity)"))
-        assertFalse(embeddedHost.contains("syncEmbeddedGitHub"))
-        assertFalse(embeddedHost.contains("syncFromGitHub"))
+        assertTrue(page.contains("onUpdate = { updateEmbeddedLyrics(activity) }"))
+        assertTrue(page.contains("label = localizedText(ModuleText.UPDATE)"))
+        assertTrue(page.contains("description = ModuleText.LYRICS_UPDATE"))
+        assertTrue(operations.contains("internal fun EmbeddedSettingsHost.updateEmbeddedLyrics(activity: Activity)"))
+        assertFalse(page.contains("syncEmbeddedGitHub"))
+        assertFalse(page.contains("syncFromGitHub"))
+        assertFalse(operations.contains("syncEmbeddedGitHub"))
+        assertFalse(operations.contains("syncFromGitHub"))
     }
 }

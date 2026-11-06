@@ -14,6 +14,7 @@ internal val EMBEDDED_FONT_MIME_TYPES = arrayOf(
 internal enum class EmbeddedSafOperation {
     Font,
     Ttml,
+    EditorTtml,
     Backup,
     RestoreOverwrite,
     RestoreKeepExisting,
@@ -54,6 +55,7 @@ internal class EmbeddedSafResultRouter {
         val requestCode = when (operation) {
             EmbeddedSafOperation.Font -> REQUEST_PICK_FONT
             EmbeddedSafOperation.Ttml -> REQUEST_PICK_TTML
+            EmbeddedSafOperation.EditorTtml -> REQUEST_PICK_EDITOR_TTML
             EmbeddedSafOperation.Backup -> REQUEST_CREATE_BACKUP
             EmbeddedSafOperation.RestoreOverwrite -> REQUEST_RESTORE_BACKUP
             EmbeddedSafOperation.RestoreKeepExisting -> REQUEST_RESTORE_BACKUP_KEEP
@@ -88,6 +90,7 @@ internal class EmbeddedSafResultRouter {
         const val REQUEST_RESTORE_BACKUP = 6514
         const val REQUEST_RESTORE_BACKUP_KEEP = 6515
         const val REQUEST_PICK_PLUGIN = 6516
+        const val REQUEST_PICK_EDITOR_TTML = 6517
         val OWN_REQUEST_CODES: Set<Int> = setOf(
             REQUEST_PICK_FONT,
             REQUEST_PICK_TTML,
@@ -95,6 +98,7 @@ internal class EmbeddedSafResultRouter {
             REQUEST_RESTORE_BACKUP,
             REQUEST_RESTORE_BACKUP_KEEP,
             REQUEST_PICK_PLUGIN,
+            REQUEST_PICK_EDITOR_TTML,
         )
     }
 }

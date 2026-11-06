@@ -3,182 +3,346 @@ package dev.amenhancer.module.ui
 import dev.amenhancer.module.i18n.ModuleText
 
 import android.app.Activity
-import android.app.AlertDialog
-import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
-import android.view.Gravity
-import android.view.View
-import android.view.ViewGroup
-import android.widget.ImageView
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
 import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import dev.amenhancer.plugin.runtime.PluginRunState
-import java.lang.ref.WeakReference
+import dev.amenhancer.plugin.runtime.PluginStatus
 import java.util.concurrent.atomic.AtomicBoolean
 
-internal fun EmbeddedSettingsHost.renderEmbeddedPluginManagementPage(
+@Composable
+internal fun EmbeddedSettingsHost.EmbeddedPluginManagementPage(
     activity: Activity,
-    parent: LinearLayout,
-    scroll: ScrollView,
-    onInitialContentReady: () -> Unit,
-): () -> Unit {
-    parent.removeAllViews()
+    revision: Int,
+) {
     val manager = plugins
+    val state = remember(manager) { EmbeddedPluginManagementState() }
     if (manager == null) {
-        parent.addView(
-            embeddedInfoCard(activity, localizedText(ModuleText.PLUGIN_RUNTIME_UNAVAILABLE)),
-            matchWidthWrapContent(),
-        )
-        onInitialContentReady()
-        return {}
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            EmbeddedSettingsNotice(localizedText(ModuleText.PLUGIN_RUNTIME_UNAVAILABLE))
+        }
+        return
     }
 
-    val active = AtomicBoolean(true)
-    val refreshing = AtomicBoolean()
-    var initialContentReady = false
-    fun action(block: () -> Unit) {
+    fun canShowDialog(): Boolean =
+        state.active && !activity.isFinishing && !activity.isDestroyed && currentActivity() === activity
+
+    fun action(pluginId: String, block: () -> Unit) {
+        if (!state.active || state.busyPluginId != null) return
+        state.busyPluginId = pluginId
         manager.execute {
             val result = runCatching(block)
             mainHandler.post {
-                if (!active.get() || activity.isFinishing || activity.isDestroyed) return@post
-                currentActivity()?.let { Toast.makeText(it, result.exceptionOrNull()?.message ?: localizedText(ModuleText.SAVED_RESTART), Toast.LENGTH_LONG).show() }
-            }
-        }
-    }
-    val refresh = object : Runnable {
-        override fun run() {
-            if (!active.get() || !refreshing.compareAndSet(false, true)) return
-            manager.execute {
-                val statuses = runCatching { manager.statuses() }
-                mainHandler.post {
-                    if (!active.get() || activity.isFinishing || activity.isDestroyed) return@post
-                    refreshing.set(false)
-                    val scrollPosition = scroll.scrollY
-                    parent.removeAllViews()
-                    parent.addView(
-                        embeddedInfoCard(activity, localizedText(ModuleText.PLUGIN_RESTART_NOTICE)),
-                        matchWidthWrapContent(),
-                    )
-                    manager.startupError?.let {
-                        parent.addView(embeddedSpacer(activity, 12))
-                        parent.addView(
-                            embeddedInfoCard(activity, localizedText(ModuleText.LOAD_ERROR, it)),
-                            matchWidthWrapContent(),
-                        )
-                    }
-                    statuses.onFailure {
-                        parent.addView(embeddedSpacer(activity, 12))
-                        parent.addView(
-                            embeddedInfoCard(activity, localizedText(ModuleText.PLUGINS_READ_FAILED, it.message)),
-                            matchWidthWrapContent(),
-                        )
-                    }
-                    if (statuses.getOrNull()?.isEmpty() == true) {
-                        parent.addView(embeddedSpacer(activity, 12))
-                        parent.addView(
-                            embeddedInfoCard(activity, localizedText(ModuleText.NO_PLUGINS)),
-                            matchWidthWrapContent(),
-                        )
-                    }
-                    statuses.getOrDefault(emptyList()).forEach { status ->
-                        val manifest = status.installed.manifest
-                        val state = when (status.state) {
-                            PluginRunState.ACTIVE -> localizedText(ModuleText.PLUGIN_ACTIVE)
-                            PluginRunState.DISABLED -> localizedText(ModuleText.PLUGIN_DISABLED)
-                            PluginRunState.LOADING -> localizedText(ModuleText.PLUGIN_LOADING)
-                            PluginRunState.BLOCKED -> localizedText(ModuleText.PLUGIN_BLOCKED)
-                            PluginRunState.UNSUPPORTED -> localizedText(ModuleText.PLUGIN_UNSUPPORTED)
-                            PluginRunState.FAILED -> localizedText(ModuleText.PLUGIN_FAILED)
+                if (!state.active) return@post
+                state.busyPluginId = null
+                state.enabledOverrides = state.enabledOverrides - pluginId
+                state.refreshKey++
+                val current = currentActivity()
+                if (current === activity && !activity.isFinishing && !activity.isDestroyed) {
+                    val failure = result.exceptionOrNull()
+                    val message = if (failure == null) {
+                        localizedText(ModuleText.SAVED_RESTART)
+                    } else {
+                        failure.message.orEmpty().ifBlank {
+                            localizedText(ModuleText.OPERATION_FAILED)
                         }
-                        parent.addView(embeddedSpacer(activity, 12))
-                        parent.addView(embeddedCard(activity, manifest.name) {
-                            addView(TextView(activity).apply {
-                                text = localizedText(ModuleText.PLUGIN_STATUS_DETAILS, manifest.author, manifest.versionName, manifest.id, state, status.runningVersion?.let { localizedText(ModuleText.PLUGIN_RUNNING_VERSION, it) }.orEmpty(), status.message)
-                                textSize = 12f
-                                setEmbeddedTextColor(activity) { it.secondary }
-                                setSingleLine(false)
-                                setPadding(0, 0, 0, dp(activity, 12))
-                            }, matchWidthWrapContent())
-                            addView(embeddedSettingRow(activity, localizedText(ModuleText.ENABLE_NEXT_START), if (status.pendingRestart) localizedText(ModuleText.RESTART_PENDING) else "", status.installed.enabled) { enabled ->
-                                action { manager.store.setEnabled(manifest.id, enabled) }
-                            })
-                            if (status.conflicts.isNotEmpty()) addView(embeddedNavigationRow(activity, localizedText(ModuleText.CONFLICT_DETAILS), localizedText(ModuleText.ITEM_COUNT, status.conflicts.size)) {
-                                val details = status.conflicts.joinToString("\n\n") {
-                                    localizedText(ModuleText.PLUGIN_CONFLICT_DETAILS,
-                                        localizedText(if (it.blocking) ModuleText.CONFLICT_BLOCKING else ModuleText.CONFLICT_WARNING),
-                                        it.reason, it.target, it.owners.joinToString(" / "))
-                                }
-                                val info = embeddedDialogBuilder(activity).setTitle(localizedText(ModuleText.CONFLICT_DETAILS)).setMessage(details).setPositiveButton(localizedText(ModuleText.CLOSE), null).create()
-                                pluginDialogs += WeakReference(info); info.show()
-                            })
-                            if (status.state == PluginRunState.ACTIVE) addView(embeddedNavigationRow(activity, localizedText(ModuleText.PLUGIN_SETTINGS), "") { openPluginSettings(activity, manifest.id) })
-                            addView(embeddedSpacer(activity, 8))
-                            addView(embeddedActionButton(activity, localizedText(ModuleText.DELETE)) {
-                                val confirm = embeddedDialogBuilder(activity).setTitle(localizedText(ModuleText.DELETE_NAMED_ITEM, manifest.name))
-                                    .setMessage(localizedText(ModuleText.PLUGIN_DELETE_NOTICE))
-                                    .setPositiveButton(localizedText(ModuleText.DELETE)) { _, _ -> action { manager.store.delete(manifest.id) } }.setNegativeButton(localizedText(ModuleText.CANCEL), null).create()
-                                pluginDialogs += WeakReference(confirm); confirm.show()
-                            }, matchWidthWrapContent())
-                        }, matchWidthWrapContent())
                     }
-                    if (!initialContentReady) {
-                        initialContentReady = true
-                        onInitialContentReady()
-                    } else scroll.post { if (active.get()) scroll.scrollTo(0, scrollPosition) }
-                    mainHandler.postDelayed(this, 1500)
+                    Toast.makeText(current, message, Toast.LENGTH_LONG).show()
                 }
             }
         }
     }
-    mainHandler.post(refresh)
-    return {
-        if (active.compareAndSet(true, false)) {
-            mainHandler.removeCallbacks(refresh)
-            refreshing.set(false)
+
+    fun statusLabel(runState: PluginRunState): String = when (runState) {
+        PluginRunState.ACTIVE -> localizedText(ModuleText.PLUGIN_ACTIVE)
+        PluginRunState.DISABLED -> localizedText(ModuleText.PLUGIN_DISABLED)
+        PluginRunState.LOADING -> localizedText(ModuleText.PLUGIN_LOADING)
+        PluginRunState.BLOCKED -> localizedText(ModuleText.PLUGIN_BLOCKED)
+        PluginRunState.UNSUPPORTED -> localizedText(ModuleText.PLUGIN_UNSUPPORTED)
+        PluginRunState.FAILED -> localizedText(ModuleText.PLUGIN_FAILED)
+    }
+
+    fun statusDetails(status: PluginStatus): String {
+        val manifest = status.installed.manifest
+        return localizedText(
+            ModuleText.PLUGIN_STATUS_DETAILS,
+            manifest.author,
+            manifest.versionName,
+            manifest.id,
+            statusLabel(status.state),
+            status.runningVersion?.let { localizedText(ModuleText.PLUGIN_RUNNING_VERSION, it) }.orEmpty(),
+            status.message,
+        )
+    }
+
+    fun showConflicts(status: PluginStatus) {
+        if (!canShowDialog()) return
+        val details = status.conflicts.joinToString("\n\n") {
+            localizedText(
+                ModuleText.PLUGIN_CONFLICT_DETAILS,
+                localizedText(if (it.blocking) ModuleText.CONFLICT_BLOCKING else ModuleText.CONFLICT_WARNING),
+                it.reason,
+                it.target,
+                it.owners.joinToString(" / "),
+            )
+        }
+        showEmbeddedMiuixDialog(activity, localizedText(ModuleText.CONFLICT_DETAILS)) { dismiss ->
+            EmbeddedSettingsNotice(details)
+            EmbeddedDialogActions(
+                dismissText = localizedText(ModuleText.CLOSE),
+                onDismiss = dismiss,
+            )
+        }
+    }
+
+    fun showDeleteConfirmation(status: PluginStatus) {
+        if (!canShowDialog()) return
+        val manifest = status.installed.manifest
+        showEmbeddedMiuixDialog(
+            activity = activity,
+            title = localizedText(ModuleText.DELETE_NAMED_ITEM, manifest.name),
+        ) { dismiss ->
+            EmbeddedSettingsNotice(localizedText(ModuleText.PLUGIN_DELETE_NOTICE))
+            EmbeddedDialogActions(
+                dismissText = localizedText(ModuleText.CANCEL),
+                onDismiss = dismiss,
+                confirmText = localizedText(ModuleText.DELETE),
+                onConfirm = {
+                    dismiss()
+                    action(manifest.id) { manager.store.delete(manifest.id) }
+                },
+            )
+        }
+    }
+
+    DisposableEffect(manager, activity, revision, state.refreshKey) {
+        state.active = true
+        state.startupError = manager.startupError
+        val live = AtomicBoolean(true)
+        val refreshing = AtomicBoolean()
+        if (state.statuses == null) state.loading = true
+
+        val poll = object : Runnable {
+            override fun run() {
+                if (!live.get() || !refreshing.compareAndSet(false, true)) return
+                val next = this
+                manager.execute {
+                    val statuses = runCatching { manager.statuses() }
+                    mainHandler.post {
+                        if (!live.get()) {
+                            refreshing.set(false)
+                            return@post
+                        }
+                        refreshing.set(false)
+                        if (currentActivity() !== activity || activity.isFinishing || activity.isDestroyed) {
+                            return@post
+                        }
+                        state.loading = false
+                        state.startupError = manager.startupError
+                        statuses.onSuccess {
+                            state.statuses = it
+                            state.readError = null
+                        }.onFailure { error ->
+                            state.readError = localizedText(ModuleText.PLUGINS_READ_FAILED, error.message)
+                        }
+                        mainHandler.postDelayed(next, 1_500L)
+                    }
+                }
+            }
+        }
+        mainHandler.post(poll)
+        onDispose {
+            live.set(false)
+            state.active = false
+            mainHandler.removeCallbacks(poll)
+        }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        EmbeddedSettingsNotice(localizedText(ModuleText.PLUGIN_RESTART_NOTICE))
+        state.startupError?.let {
+            EmbeddedSettingsNotice(localizedText(ModuleText.LOAD_ERROR, it))
+        }
+        state.readError?.let { EmbeddedSettingsNotice(it) }
+        if (state.statuses == null && state.loading) {
+            EmbeddedSettingsNotice(localizedText(ModuleText.PROCESSING))
+        }
+        state.statuses?.let { statuses ->
+            if (statuses.isEmpty()) {
+                EmbeddedSettingsNotice(localizedText(ModuleText.NO_PLUGINS))
+            }
+            statuses.forEach { status ->
+                val manifest = status.installed.manifest
+                val controlsEnabled = state.busyPluginId == null
+                EmbeddedSettingsSection(
+                    title = manifest.name,
+                    summary = statusDetails(status),
+                )
+                EmbeddedSettingsGroup {
+                    EmbeddedSettingSwitch(
+                        title = localizedText(ModuleText.ENABLE_NEXT_START),
+                        summary = if (status.pendingRestart) {
+                            localizedText(ModuleText.RESTART_PENDING)
+                        } else {
+                            null
+                        },
+                        checked = state.enabledOverrides[manifest.id] ?: status.installed.enabled,
+                        enabled = controlsEnabled,
+                        onCheckedChange = { enabled ->
+                            if (state.active && state.busyPluginId == null) {
+                                state.enabledOverrides = state.enabledOverrides + (manifest.id to enabled)
+                                action(manifest.id) { manager.store.setEnabled(manifest.id, enabled) }
+                            }
+                        },
+                    )
+                    if (status.conflicts.isNotEmpty()) {
+                        EmbeddedSettingLink(
+                            title = localizedText(ModuleText.CONFLICT_DETAILS),
+                            summary = localizedText(ModuleText.ITEM_COUNT, status.conflicts.size),
+                            icon = EmbeddedSvgIcon.Conflict,
+                            onClick = { showConflicts(status) },
+                        )
+                    }
+                    if (status.state == PluginRunState.ACTIVE) {
+                        EmbeddedSettingLink(
+                            title = localizedText(ModuleText.PLUGIN_SETTINGS),
+                            icon = EmbeddedSvgIcon.Settings,
+                            enabled = controlsEnabled,
+                            onClick = { openPluginSettings(activity, manifest.id) },
+                        )
+                    }
+                    EmbeddedSettingLink(
+                        title = localizedText(ModuleText.DELETE),
+                        icon = EmbeddedSvgIcon.Delete,
+                        enabled = controlsEnabled,
+                        onClick = { showDeleteConfirmation(status) },
+                    )
+                }
+            }
         }
     }
 }
 
 internal fun EmbeddedSettingsHost.importPluginZip(uri: Uri) {
     val manager = plugins ?: return
+    val activity = currentActivity() ?: return
+    val settingsDialog = dialogReference?.takeIf { it.get()?.isShowing == true } ?: return
+    fun ownsImport() = currentActivity() === activity && settingsDialog === dialogReference &&
+        settingsDialog.get()?.isShowing == true && !activity.isFinishing && !activity.isDestroyed
     manager.execute {
         val result = runCatching {
-            val input = application.contentResolver.openInputStream(uri) ?: error(localizedText(ModuleText.FILE_UNREADABLE))
+            val input = application.contentResolver.openInputStream(uri)
+                ?: error(localizedText(ModuleText.FILE_UNREADABLE))
             manager.store.prepare(input, Build.VERSION.SDK_INT)
         }
-        mainHandler.post {
-            val activity = currentActivity()
-            if (activity == null || activity.isDestroyed) { manager.execute { result.getOrNull()?.close() }; return@post }
-            result.onFailure { Toast.makeText(activity, localizedText(ModuleText.IMPORT_FAILED, it.message), Toast.LENGTH_LONG).show() }
-            val prepared = result.getOrNull() ?: return@post
+        mainHandler.post result@{
+            if (!ownsImport()) {
+                result.getOrNull()?.let { prepared -> manager.execute { runCatching { prepared.close() } } }
+                return@result
+            }
+            result.onFailure {
+                Toast.makeText(activity, localizedText(ModuleText.IMPORT_FAILED, it.message), Toast.LENGTH_LONG).show()
+            }
+            val prepared = result.getOrNull() ?: return@result
             // Read the installed version off the UI thread before showing replacement details.
             manager.execute {
-                val oldResult = runCatching { manager.store.installed().firstOrNull { it.manifest.id == prepared.manifest.id } }
+                val oldResult = runCatching {
+                    manager.store.installed().firstOrNull { it.manifest.id == prepared.manifest.id }
+                }
                 mainHandler.post confirm@{
-                    val current = currentActivity()
-                    if (current == null || current.isDestroyed || oldResult.isFailure) {
-                        if (current != null && oldResult.isFailure) Toast.makeText(current, localizedText(ModuleText.INSTALLED_PLUGIN_READ_FAILED, oldResult.exceptionOrNull()?.message), Toast.LENGTH_LONG).show()
-                        manager.execute { prepared.close() }; return@confirm
+                    val owned = ownsImport()
+                    if (!owned || oldResult.isFailure) {
+                        if (owned && oldResult.isFailure) {
+                            Toast.makeText(
+                                activity,
+                                localizedText(
+                                    ModuleText.INSTALLED_PLUGIN_READ_FAILED,
+                                    oldResult.exceptionOrNull()?.message,
+                                ),
+                                Toast.LENGTH_LONG,
+                            ).show()
+                        }
+                        manager.execute { runCatching { prepared.close() } }
+                        return@confirm
                     }
+
                     val old = oldResult.getOrNull()
                     val committed = AtomicBoolean()
-                    val dialog = embeddedDialogBuilder(current).setTitle(if (old == null) localizedText(ModuleText.IMPORT_PLUGIN) else localizedText(ModuleText.REPLACE_PLUGIN))
-                        .setMessage(localizedText(ModuleText.PLUGIN_AUTHOR_DETAILS, prepared.manifest.name, prepared.manifest.author) +
-                            (old?.let { "${it.manifest.versionName} → " } ?: "") + prepared.manifest.versionName +
-                            "\n${prepared.manifest.description}\n" + if (old == null) localizedText(ModuleText.PLUGIN_IMPORTED_DISABLED) else localizedText(ModuleText.PLUGIN_REPLACEMENT_NOTICE))
-                        .setPositiveButton(if (old == null) localizedText(ModuleText.IMPORT) else localizedText(ModuleText.REPLACE)) { _, _ ->
-                            committed.set(true)
-                            manager.execute {
-                                val saved = runCatching { manager.store.commit(prepared) }
-                                prepared.close()
-                                mainHandler.post { currentActivity()?.let { Toast.makeText(it, saved.exceptionOrNull()?.message ?: localizedText(ModuleText.PLUGIN_IMPORTED), Toast.LENGTH_LONG).show() } }
-                            }
-                        }.setNegativeButton(localizedText(ModuleText.CANCEL), null).create()
-                    dialog.setOnDismissListener { if (!committed.get()) manager.execute { prepared.close() } }
-                    pluginDialogs += WeakReference(dialog); dialog.show()
+                    val released = AtomicBoolean()
+                    fun releasePrepared() {
+                        if (released.compareAndSet(false, true)) {
+                            manager.execute { runCatching { prepared.close() } }
+                        }
+                    }
+                    val title = localizedText(if (old == null) ModuleText.IMPORT_PLUGIN else ModuleText.REPLACE_PLUGIN)
+                    val details = localizedText(
+                        ModuleText.PLUGIN_AUTHOR_DETAILS,
+                        prepared.manifest.name,
+                        prepared.manifest.author,
+                    ) + (old?.let { "${it.manifest.versionName} → " } ?: "") +
+                        prepared.manifest.versionName + "\n" + prepared.manifest.description + "\n" +
+                        if (old == null) {
+                            localizedText(ModuleText.PLUGIN_IMPORTED_DISABLED)
+                        } else {
+                            localizedText(ModuleText.PLUGIN_REPLACEMENT_NOTICE)
+                        }
+                    try {
+                        showEmbeddedMiuixDialog(
+                            activity = activity,
+                            title = title,
+                            onDismiss = { if (!committed.get()) releasePrepared() },
+                        ) { dismiss ->
+                            EmbeddedSettingsNotice(details)
+                            EmbeddedDialogActions(
+                                dismissText = localizedText(ModuleText.CANCEL),
+                                onDismiss = dismiss,
+                                confirmText = localizedText(if (old == null) ModuleText.IMPORT else ModuleText.REPLACE),
+                                onConfirm = {
+                                    if (committed.compareAndSet(false, true)) {
+                                        dismiss()
+                                        manager.execute {
+                                            val saved = runCatching { manager.store.commit(prepared) }
+                                            runCatching { prepared.close() }
+                                            mainHandler.post {
+                                                if (!ownsImport()) return@post
+                                                val failure = saved.exceptionOrNull()
+                                                val message = if (failure == null) {
+                                                    localizedText(ModuleText.PLUGIN_IMPORTED)
+                                                } else {
+                                                    failure.message.orEmpty().ifBlank {
+                                                        localizedText(ModuleText.OPERATION_FAILED)
+                                                    }
+                                                }
+                                                Toast.makeText(activity, message, Toast.LENGTH_LONG).show()
+                                                if (failure == null) pageRefresh?.invoke()
+                                            }
+                                        }
+                                    }
+                                },
+                            )
+                        }
+                    } catch (_: Throwable) {
+                        releasePrepared()
+                    }
                 }
             }
         }
@@ -186,51 +350,52 @@ internal fun EmbeddedSettingsHost.importPluginZip(uri: Uri) {
 }
 
 internal fun EmbeddedSettingsHost.openPluginSettings(activity: Activity, id: String) {
-    val session = plugins?.openSettings(id, embeddedThemedContext(activity)) ?: return Toast.makeText(activity, localizedText(ModuleText.PLUGIN_NO_SETTINGS), Toast.LENGTH_SHORT).show()
+    if (activity.isFinishing || activity.isDestroyed || currentActivity() !== activity) return
+    val session = plugins?.openSettings(id, embeddedThemedContext(activity))
+        ?: return Toast.makeText(
+            activity,
+            localizedText(ModuleText.PLUGIN_NO_SETTINGS),
+            Toast.LENGTH_SHORT,
+        ).show()
+    val closed = AtomicBoolean()
+    fun closeSession() {
+        if (closed.compareAndSet(false, true)) runCatching { session.close() }
+    }
     try {
-        excludeEmbeddedTheme(session.view)
-        lateinit var dialog: AlertDialog
-        val panel = embeddedPluginPageContent(activity, localizedText(ModuleText.PLUGIN_SETTINGS), session.view) { dialog.dismiss() }
-        dialog = embeddedDialogBuilder(activity).setPositiveButton(localizedText(ModuleText.CLOSE), null).create()
-            .apply { setView(panel, 0, 0, 0, 0) }
-        dialog.setOnDismissListener { session.close() }
-        pluginDialogs += WeakReference(dialog); dialog.show()
+        val pluginView = session.view
+        check(pluginView.parent == null) { localizedText(ModuleText.SETTINGS_OPEN_FAILED, id) }
+        showEmbeddedMiuixDialog(
+            activity = activity,
+            title = localizedText(ModuleText.PLUGIN_SETTINGS),
+            scrollContent = false,
+            onDismiss = ::closeSession,
+            footer = { dismiss ->
+                EmbeddedDialogActions(
+                    dismissText = localizedText(ModuleText.CLOSE),
+                    onDismiss = dismiss,
+                )
+            },
+        ) {
+            AndroidView(factory = { pluginView }, modifier = Modifier.fillMaxWidth())
+        }
     } catch (error: Throwable) {
-        session.close(); Toast.makeText(activity, localizedText(ModuleText.SETTINGS_OPEN_FAILED, error.message), Toast.LENGTH_LONG).show()
+        closeSession()
+        Toast.makeText(
+            activity,
+            localizedText(ModuleText.SETTINGS_OPEN_FAILED, error.message),
+            Toast.LENGTH_LONG,
+        ).show()
     }
 }
 
-private fun EmbeddedSettingsHost.embeddedPluginPageContent(
-    activity: Activity,
-    title: String,
-    content: View,
-    onBack: () -> Unit,
-): LinearLayout = LinearLayout(activity).apply {
-    orientation = LinearLayout.VERTICAL
-    val hostInset = dp(activity, if (isEmbeddedPhone(activity)) 0 else 8)
-    setPadding(hostInset, 0, hostInset, 0)
-    addView(LinearLayout(activity).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        val headerInset = dp(activity, if (isEmbeddedPhone(activity)) 8 else 0)
-        setPadding(headerInset, 0, headerInset, 0)
-        addView(ImageView(activity).apply {
-            setEmbeddedImageDrawable(activity, embeddedSvgDrawable(EmbeddedSvgIcon.Back, activity) ?: loadEmbeddedArrowIcon(activity))
-            scaleType = ImageView.ScaleType.CENTER_INSIDE
-            contentDescription = localizedText(ModuleText.BACK)
-            isClickable = true
-            isFocusable = true
-            setPadding(dp(activity, 8), dp(activity, 8), dp(activity, 8), dp(activity, 8))
-            bindEmbeddedClickFeedback(activity, cornerRadiusDp = 12)
-            setOnClickListener { onBack() }
-        }, LinearLayout.LayoutParams(dp(activity, 44), embeddedTopBarHeight(activity)))
-        addView(TextView(activity).apply {
-            text = title
-            textSize = embeddedTextSize(activity, 19f, 18f)
-            setEmbeddedTextColor(activity) { colors -> colors.onSurface }
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            maxLines = 2
-        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-    }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, embeddedTopBarHeight(activity)))
-    addView(content, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+@Stable
+private class EmbeddedPluginManagementState {
+    var active by mutableStateOf(false)
+    var loading by mutableStateOf(true)
+    var statuses by mutableStateOf<List<PluginStatus>?>(null)
+    var startupError by mutableStateOf<String?>(null)
+    var readError by mutableStateOf<String?>(null)
+    var busyPluginId by mutableStateOf<String?>(null)
+    var enabledOverrides by mutableStateOf<Map<String, Boolean>>(emptyMap())
+    var refreshKey by mutableStateOf(0)
 }

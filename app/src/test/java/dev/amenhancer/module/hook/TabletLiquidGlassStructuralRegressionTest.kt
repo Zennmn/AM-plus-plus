@@ -127,14 +127,19 @@ class TabletLiquidGlassStructuralRegressionTest {
     @Test
     fun `hides the compensation row while the glass toggle is on`() {
         val settings = source("dev/amenhancer/module/ui/EmbeddedSettingsPages.kt")
+        val interfacePage = settings.substringAfter("EmbeddedSettingsPage.INTERFACE -> {")
+            .substringBefore("EmbeddedSettingsPage.TITLE_REGION ->")
         // The compensation toggle is native-bar-only; showing it while glass
         // owns the geometry would read as a live switch that does nothing.
-        val glassGateAt = settings.indexOf("if (settings.phoneLiquidGlassEnabled)")
-        val disabledBranchAt = settings.indexOf("} else {", glassGateAt)
-        val compensationAt = settings.indexOf("ModuleText.TABLET_BOTTOM_BAR_FIX", disabledBranchAt)
+        val disabledGlassAt = interfacePage.indexOf("if (!settings.phoneLiquidGlassEnabled)")
+        val compensationAt = interfacePage.indexOf("ModuleText.TABLET_BOTTOM_BAR_FIX", disabledGlassAt)
+        val disabledBranchEnd = interfacePage.indexOf(
+            "} else if (nativeBridge.supportsGlassScrollCollapse(activity))",
+            disabledGlassAt,
+        )
         assertTrue(
             "the tablet compensation row must remain in the glass-disabled branch",
-            glassGateAt in 1 until disabledBranchAt && disabledBranchAt in 1 until compensationAt,
+            disabledGlassAt in 1 until compensationAt && compensationAt < disabledBranchEnd,
         )
     }
 
