@@ -61,7 +61,7 @@
 | LLM翻译 | 精确原文观察、模块解析排除、共用通道 | 待填写 | 待填写 | 待填写 |
 | 模糊 | lyricBlur、显示提交、行词动画、效果所有权 | 待填写 | 待填写 | 待填写 |
 | CJK辉光 | cjk、原生动画 | 待填写 | 待填写 | 待填写 |
-| 歌词效果优化：CJK末词补偿 / 英语拆词辉光 | 共享lyric_effects_optimization_enabled、terminalGradient / splitWordGlow、lyricRepairs各项诊断/状态汇总 | 待填写 | 待填写 | 歌词效果优化矩阵 |
+| 歌词效果优化：CJK末词补偿 / 英语拆词辉光 | 共享lyric_effects_optimization_enabled、terminalGradient / 可选 splitWordGlow 对象（native binding-builder、trim）、lyricRepairs各项诊断/状态汇总 | 待填写 | 待填写 | 歌词效果优化矩阵 |
 | 歌词效果优化：跨行扫光 | 共享lyric_effects_optimization_enabled、独立lyricWrapSweep、视觉行/媒体时间/退役 | 待填写 | 待填写 | 待填写 |
 | 歌词效果优化：活动行高亮 | 共享lyric_effects_optimization_enabled、独立lyricBackgroundHighlight、活动行/词ID/焦点 | 待填写 | 待填写 | 待填写 |
 | 歌词效果优化：逐行双声部对齐 | 共享lyric_effects_optimization_enabled、capabilities.lineLyricAgentAlignment、普通行绑定后处理、复用lyricBlur行角色 | 待填写 | 待填写 | 歌词效果优化矩阵 |
@@ -205,9 +205,10 @@
 - [ ] 辉光前景绑定与原生门槛有据；`cjk.maxSpanGlowCharacters` 缺省为 `1`。`trim` 后删除 `\p{P}` 的正文须为 1 个或 profile 放行的 `2..min(值, 3)` 个 CJK 码点；短 span 时长 ≥正文码点数 × 1000ms。纯标点及混入 Latin、数字、emoji、内部空白拒绝。
 - [ ] 仅接受原始未合并的前景绑定：`f` 等于 native duration，`g` 等于含标点 `trim` 原文的 UTF-16 length；`splitBindingCount` 上界为未过滤原文码点数，允许标点自身的视图绑定，越界仍拒绝。无标点时边界不变。
 - [ ] 去标点正文只在原 `a0` 已通过候选验证的作用域内参与脚本资格分类，不全局改写 `j0`/`k0` 集合，不替代 Apple 原生长度或动画触发。原文、显示标点、native duration、分组和 `g` 不改；不得按宿主合并的多个原始 span 总时长放行。仅单字分支调整回落子动画延迟，多字保留宿主错峰，背景限制、profile 多字开关和末词补偿保持。新构建须独立确认元数据与绑定语义，默认不继承。
-- [ ] 英语拆词辉光仅在精确 profile 显式声明 `cjk.splitWordGlow=true` 时启用；同一前景行/组至少两个 Latin span，某段原始时长 ≥1000ms、trim 后长度为 2～7（含标点），累计文本/时长与原生 `g`/`f` 对应。单个超长 span、跨空格、混合脚本及背景词不放宽。
-- [ ] 英语资格只在当前原生动画调用临时令 `g=7`，正常/提前/异常退出恢复；`g` 的其他读取在原值与 7 下分支相同，分组、binding、扫光几何与时长不变。字段或调用语义变化须重新分析，默认不继承启用。
-- [ ] 英语辉光片段使用整词中心的共同横向 pivot，原生上升同时开始、回落统一在上升时长后开始；只屏蔽该组的片段间距 `TimeAnimator`。核对上升/回落 listener 与辉光函数的视图字段、原生结束 pivot 恢复、嵌套/异常作用域退出；布局无效或已跨视觉行时不放宽，TTML 分词和扫光保持。
+- [ ] `cjk.splitWordGlow` 使用精确 profile 对象；确认前景布局 ID、原生 builder/trim 的完整签名及 `aggregateTrimLine`。该位置只消费 trim 结果的长度，真实文本仍由宿主渲染；其他调用位置不得改写。
+- [ ] 同一前景 Latin 词组超过 7 字符、至少两个连续 span，且某段原始时长 ≥1000ms、trim 后长度 2～7（含标点）；词向量中无法唯一匹配的文本、单个超长 span、内部空白及混合脚本不放宽。
+- [ ] 核对 builder 返回键为原生词 ID，发布前恢复所有获准条目的 `g`，嵌套或异常退出清理绑定作用域。核对 `i`/`k` 原生字母绑定、`a`/`l` 分组和 `c`/`e`/`f`/`g`；动画仅对同一视觉行的有效绑定临时令 `g=7` 并在退出时恢复。真实长度与 7 在其余读取点行为相同。
+- [ ] 核对 `riseFunction`/`riseView` 指向原生上升监听器的函数及目标字母；仅调整当前合格组的上升插值进度，回缩、错峰和动画时长保留原值。核对各 span 的扫光时序、整词触发、取消、结束和循环；缺失契约时不启用，不借用邻近 profile。
 - [ ] 可选`terminalGradient`按代码必需角色完整解析，profile路径不变；CJK开关只门禁 CJK 辉光。“歌词效果优化”默认关闭并重启生效后，`AppleMusicHostFactory` 的 `lyricRepairs` 组在 `LyricsParserFeature` 门禁下独立安装末词补偿及英语拆词资格，并保留各项完整诊断。
 - [ ] 原文/发音尾词、时间/ID、余量调用与延迟补亮标签语义一致。
 - [ ] 整体状态按 parser 与已声明可选项计算：全为 `Active` 时为 `Active`，仅全为 `Unsupported` 时为 `Unsupported`，否则为 `Degraded`；缺契约的 `Unsupported` 保留在诊断中。单项失败或不可用时，辉光、解析修复、逐行对齐已安装项不互相撤销。
@@ -388,7 +389,7 @@
 | 简体替换和声修复 | 共享歌词效果优化开关/重启门禁、单 parser Hook 两处安装入口、语言门禁、原文快照、专项修复完整性与失败透传 | [规则](host-adaptation-guide.md#simplified-replacement-backgrounds)；矩阵结果链接 |
 | 模糊 | 显示提交与四路动画保护、代际、帧驱动、效果/裁剪所有权 | [规则](host-adaptation-guide.md#lyrics-blur)；矩阵结果链接 |
 | CJK辉光 | 独立 `cjk` 配置/作用域、原生时序与共享高亮一致性 | [CJK](host-adaptation-guide.md#cjk-animation)；矩阵结果链接 |
-| 歌词效果优化 | 共用配置键与重启门禁；替换和声修复、逐行双声部对齐与CJK末词补偿使用现有 `lyricRepairs`，保留三项完整诊断并按 parser 与已声明可选项汇总整体状态；跨行扫光与活动行高亮各按独立契约安装、报告和验收 | [替换和声](host-adaptation-guide.md#simplified-replacement-backgrounds) / [逐行双声部](host-adaptation-guide.md#line-lyric-agent-alignment) / [CJK末词](host-adaptation-guide.md#cjk-animation) / [跨行](host-adaptation-guide.md#lyric-wrap-sweep) / [活动行](host-adaptation-guide.md#lyric-background-highlight)；矩阵结果链接 |
+| 歌词效果优化 | 共用配置键与重启门禁；替换和声修复、逐行双声部对齐、CJK末词补偿与英语拆词资格使用现有 `lyricRepairs`，保留各项完整诊断并按 parser 与已声明可选项汇总整体状态；英语对象、跨行扫光与活动行高亮各按独立契约安装、报告和验收 | [替换和声](host-adaptation-guide.md#simplified-replacement-backgrounds) / [逐行双声部](host-adaptation-guide.md#line-lyric-agent-alignment) / [CJK末词与英语拆词](host-adaptation-guide.md#cjk-animation) / [跨行](host-adaptation-guide.md#lyric-wrap-sweep) / [活动行](host-adaptation-guide.md#lyric-background-highlight)；矩阵结果链接 |
 | 玻璃输入/动画 | 单一owner、起点归属、方向/边界、共享几何、原生触摸及展开恢复 | [规则](host-adaptation-guide.md#glass-collapse-rendering)；矩阵结果链接 |
 | 玻璃材质/上游 | 默认门禁、前缀/承载复用、帧阶段、隐藏资源与当前窗口失效 | [规则](host-adaptation-guide.md#glass-collapse-rendering)；来源pin与人工结果 |
 | 预热 | 隐藏事务/同步副作用归属、有界任务与日志阶段，不改导航状态 | [规则](host-adaptation-guide.md#startup-page-prewarm)；矩阵结果链接 |

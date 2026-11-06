@@ -73,7 +73,7 @@
 | `indexed` | 符号映射及适用的 `methodContracts` / `fieldContracts` |
 | `hookTargets` / `catalogQueryRenames` | HLE 入口、签名/调用方约束、`runtimeMemberNames`、目录查询映射 |
 | `settings` / `chrome` | 设置模型、入口、导航、播放器资源及旧族成员；`settings.members` 保存变化后的完整偏好列表和 Compose 方法契约 |
-| `layoutVariants` / `cjk` | binding、渐变变体、前景文本与可选 `terminalGradient` 契约 |
+| `layoutVariants` / `cjk` | binding、渐变变体、前景文本、`maxSpanGlowCharacters` 与可选 `terminalGradient` / `splitWordGlow` 契约 |
 | `lyricResultSubmission` / `lyricBlur` / `lyricWrapSweep` / `lyricBackgroundHighlight` | 歌词结果、显示模糊、跨行扫光及活动行背景高亮优化的独立角色与契约 |
 | Fragment 专用区域 | `fragmentDualPane`、`fragmentLyricsRuntime`、`fragmentKaraokeWidth`、`fragmentTabletVideoHandoff`、`fragmentChrome`、`playerRecovery` |
 | `startupPagePrewarm` / `artistComposeProfile` | 独立预热、Compose 艺人表面的成员、构造器与语义参数 |
@@ -168,7 +168,7 @@ Fragment view 重建、配置变化与 controller 销毁分别关闭会话。状
 | [共用歌词结果提交](#lyrics-result-submission) | `indexed`、`lyricResultSubmission`、原生安装与 item 更新 | [结果提交](feature-preservation.md#lyrics-result-submission) |
 | [歌词来源](#lyrics-sources)、[简体替换和声修复](#simplified-replacement-backgrounds)、[LLM](#llm-lyrics-fallback) | 原生 TTML 观察、共享歌词效果优化门禁的单解析器修复、指针/歌曲身份及共用结果通道 | [来源](feature-preservation.md#lyrics-sources)、[LLM](feature-preservation.md#llm-lyrics-fallback) |
 | [模糊](#lyrics-blur)、[CJK](#cjk-animation)、[字体](#lyrics-typeface) | 各自契约、显示状态、绑定与资源 | [模糊](feature-preservation.md#lyrics-blur)、[CJK](feature-preservation.md#cjk-animation)、[字体](feature-preservation.md#lyrics-typeface) |
-| [歌词效果优化](#lyric-background-highlight)：[简体替换和声修复](#simplified-replacement-backgrounds)、[逐行双声部对齐](#line-lyric-agent-alignment)、[CJK 末词补偿](#cjk-animation)、[跨行扫光](#lyric-wrap-sweep)与活动行高亮 | 共享设置门禁；解析修复、逐行对齐与末词补偿保留三项完整诊断并按 parser 与已声明可选项汇总状态，`terminalGradient` / `lyricWrapSweep` / `lyricBackgroundHighlight` 分别核对契约、降级和失败 | [末词](feature-preservation.md#cjk-animation)、[跨行](feature-preservation.md#lyric-wrap-sweep)、[活动行](feature-preservation.md#lyric-background-highlight) |
+| [歌词效果优化](#lyric-background-highlight)：[简体替换和声修复](#simplified-replacement-backgrounds)、[逐行双声部对齐](#line-lyric-agent-alignment)、[CJK 末词补偿与英语拆词辉光](#cjk-animation)、[跨行扫光](#lyric-wrap-sweep)与活动行高亮 | 共享设置门禁；`lyricRepairs` 保留各项诊断并按 parser 与已声明可选项汇总状态，`terminalGradient` / `splitWordGlow` / `lyricWrapSweep` / `lyricBackgroundHighlight` 分别核对契约、降级和失败 | [辉光与末词](feature-preservation.md#cjk-animation)、[跨行](feature-preservation.md#lyric-wrap-sweep)、[活动行](feature-preservation.md#lyric-background-highlight) |
 | [玻璃导航](#chrome-glass)、[收缩](#glass-collapse-rendering) | `chrome` / `fragmentChrome`、独立能力位、滚动与 sheet 端口 | [玻璃](feature-preservation.md#chrome-glass)、[收缩](feature-preservation.md#glass-collapse-rendering) |
 | [启动预热](#startup-page-prewarm) | 独立能力、`startupPagePrewarm` 与形态导航资源 | [预热](feature-preservation.md#startup-page-prewarm) |
 | [平板布局、视频与恢复](#tablet-layout) | 双栏、binding、资源、视频/恢复与布局变体 | [平板](feature-preservation.md#tablet-layout) |
@@ -388,7 +388,7 @@ Native vector/pointer 在 Hook 当次同步解码，只把复制数值送主线�
 
 ### 5.5 歌词辉光与末词补偿
 
-**生效与接缝。** `cjkKaraokeAnimationEnabled` 只控制 CJK 辉光，按原安装方式重启宿主生效，关闭时不安装 CJK 辉光。末词羽化补偿和英语拆词辉光由“歌词效果优化”的 `ModuleSettings.lyricEffectsOptimizationEnabled`（配置键 `lyric_effects_optimization_enabled`）门禁并重启生效。[AppleMusicHostFactory](../host-applemusic/src/main/java/dev/amenhancer/module/hook/AppleMusicHostFactory.kt) 的现有 `lyricRepairs` lazy 组在 `LyricsParserFeature` 门禁下独立安装，并合并解析修复、逐行双声部对齐、末词补偿与英语拆词辉光的结果，保留各项完整诊断消息；复用现有 Target 和设置。`cjk.terminalGradient` 只登记补偿契约，与 CJK 辉光设置独立。CJK 辉光资格由 profile 的 `cjk.maxSpanGlowCharacters` 限定：缺省 `1`，只放行单个未合并 CJK 词；精确 profile 显式启用多字资格时，另放行 2～3 字的单个原始未合并 CJK span。前景绑定与结束清理、`cjk.foregroundTextField` 和 bindingOwners 独立核对。`terminalGradient` 的角色仍由 Contract 解析，以代码为准，描述符只维护在精确 profile。
+**生效与接缝。** `cjkKaraokeAnimationEnabled` 只控制 CJK 辉光，按原安装方式重启宿主生效，关闭时不安装 CJK 辉光。末词羽化补偿和英语拆词辉光由“歌词效果优化”的 `ModuleSettings.lyricEffectsOptimizationEnabled`（配置键 `lyric_effects_optimization_enabled`）门禁并重启生效。[AppleMusicHostFactory](../host-applemusic/src/main/java/dev/amenhancer/module/hook/AppleMusicHostFactory.kt) 的现有 `lyricRepairs` lazy 组在 `LyricsParserFeature` 门禁下独立安装，并合并解析修复、逐行双声部对齐、末词补偿与英语拆词辉光的结果，保留各项完整诊断消息；复用现有 Target 和设置。`cjk.terminalGradient` 只登记补偿契约，与 CJK 辉光设置独立。CJK 辉光资格由 profile 的 `cjk.maxSpanGlowCharacters` 限定：缺省 `1`，只放行单个未合并 CJK 词；精确 profile 显式启用多字资格时，另放行 2～3 字的单个原始未合并 CJK span。前景绑定与结束清理、`cjk.foregroundTextField` 和 bindingOwners 独立核对。`terminalGradient` 的角色仍由 Contract 解析，以代码为准，描述符只维护在精确 profile。`cjk.splitWordGlow` 是可选精确 profile 对象，只登记英语拆词资格所需的原生 binding-builder 与 trim 契约；它与 `cjkKaraokeAnimationEnabled`、`cjk.maxSpanGlowCharacters` 及 CJK 资格相互独立，不新增功能或设置。
 
 CJK 辉光使用 `trim` 原文去除 Unicode 标点 `\p{P}` 后的副本判断脚本、正文字数及平均时长；纯标点、混入 Latin/数字/emoji/内部空白的正文不放行。正文码点仍须属于既有六个 CJK 区块。分类改写仅作用于已验证的 `a0` 候选作用域，不全局改写 `j0`/`k0` 集合，不替代 Apple 原生触发，也不推广到英语拆词或末字渐变。原文、显示标点、native duration、分组和长度 `g` 保持原值。
 
@@ -401,7 +401,11 @@ CJK 辉光使用 `trim` 原文去除 Unicode 标点 `\p{P}` 后的副本判断�
 
 **单字与短 span。** 单字正文恰有 1 个 CJK 码点；短 span 正文为 `2..min(cjk.maxSpanGlowCharacters, 3)` 个 CJK 码点，且原生总时长至少为正文码点数 × 1000ms。两类均只接受前景，累计时长 `f` 须等于 native duration，累计长度 `g` 须等于含标点 `trim` 原文的 UTF-16 length，`splitBindingCount` 须在 `0..nativeCharacterCount`，其中 `nativeCharacterCount` 为未过滤原文的码点数。标点可有独立原生绑定，但不得超过原文码点数；无标点时与既有边界一致。不得把宿主合并的多个原始 span 按总时长放行。单字回落子动画延迟修正仍只作用于单字分支，多字保留宿主错峰。
 
-**英语拆词辉光。** 复用 `AppleMusicCjkKaraokeAnimationTarget.installSplitWordGlow`，精确 profile 须显式声明 `cjk.splitWordGlow=true`，缺省关闭。保留原生整词判定；只为长度超过 7 的前景 Latin 拆词组补充“任一原始 span 时长 ≥1000ms 且 trim 后长度为 2～7”的资格，标点计入长度。同组至少两个成员，须同属原生行 `a` 和非空组 ID `l`，各段文本 `c` 与时长 `e` 累计须对应原生 `g`、`f`，不可跨空格或混入其他文字脚本。仅在当前原生动画调用内临时令 `g=7`，正常、提前返回及异常退出均恢复。各片段以整词中心为共同横向 pivot，原生辉光上升同时开始、回落统一在上升时长后开始；屏蔽该组 `TimeAnimator` 的片段拉扯，原文、binding 及 TTML 分词扫光时间保持。无有效布局或词组已跨视觉行时不额外放行。新构建须核对回落 listener 的 `c` 视图和 `d` 辉光函数、上升 listener 的 `a` 函数及其 `a` 视图，以及原生回落结束的 pivot 恢复；该作用域内的 `TimeAnimator` 须只负责辉光片段间距。另须确认 `g` 的门槛语义及间接读取在原值与 7 下分支相同，不得影响扫光几何；不合并 TTML 或词模型。
+**英语拆词辉光。** 资格限定为同一前景 Latin 词组，整组超过 7 字符，至少两个连续的有时长 span，其中一段原始时长不少于 1000ms，去除首尾空白后长度为 2～7（含标点）。不跨词间空白，不放宽单个超长 span、混合脚本或无法唯一识别的组。保留 TTML 原文、分组和各 span 的扫光时序。
+
+绑定阶段用 `cjk.splitWordGlow` 的 `methods.bind`、`methods.trim`、`foregroundLayout` 和 `aggregateTrimLine` 限定前景布局与原生调用位置。仅对从原生词向量识别的唯一合格组，向仅计算整组长度的 trim 调用返回 7 字符结果，让宿主从原文创建字母视图。其他 trim 调用保留原值。核对原生 builder 返回表的键为原生词 ID，并用 `fields.wordLength` 在返回表交给宿主前恢复真实长度；绑定调用的嵌套与异常退出须清理临时作用域。
+
+动画阶段复用宿主原生入口。同一原生行 `a`、组 `l` 的文本 `c` 与各段时长 `e` 须分别对应整组 `g`、`f`。仅在同一视觉行的原生字母绑定（`k`，无主绑定 `i`）已布局后，在当前动画调用内临时令当前条目 `g=7`，退出时恢复。确认除辉光门槛外，期间所有 `g` 读取在两个值下行为一致。复用 `ValueAnimator` 监听器注册接缝，通过 `fields.riseFunction` 和 `fields.riseView` 核对原生上升监听器及其目标字母。只在该组动画构建期间，将成员字母的上升插值器输入进度乘 1.5，上限为 1。组触发、错峰、上浮、回缩时刻和字间位移仍由宿主决定。
 
 **通用维护。** [CjkTerminalGradientPolicy](../core/src/main/kotlin/dev/amenhancer/module/hook/CjkTerminalGradientPolicy.kt) 对合法 CJK 尾词取 `max(original, feather)`，只接受有限值与 `0 < feather <= 1`。原余量更大时保留，无效几何透传；尾词不额外要求触发长尾辉光。
 
@@ -409,7 +413,7 @@ CJK 辉光使用 `trim` 原文去除 Unicode 标点 `\p{P}` 后的副本判断�
 
 有效补偿后从原生返回动画列表移除 `KARAOKE_SPLIT_ON_CHARS_LANGUAGES_RUSH_GRADIENT_TAG` 延迟补亮，其他动画、时长、分组、滚动及位移保留；未补偿时原列表不变。它不承担换绑保护或跨行遮罩修复；[跨行能力](#lyric-wrap-sweep)与末词补偿均由“歌词效果优化”门禁，CJK 辉光开关只控制辉光，不控制它们。
 
-**变更与降级。** CJK 辉光、英语拆词辉光与末词补偿分别安装、分别报告，任一失败不撤销其他项。`CjkKaraokeAnimationFeature` 只负责 CJK 辉光的安装和状态；末词契约缺失、解析或注册失败只使补偿不支持或降级。`lyricRepairs` 保留各项完整诊断消息，未声明能力的 `Unsupported` 也原样保留；整体状态按 parser 与已声明可选项计算：全为 `Active` 时为 `Active`，仅全为 `Unsupported` 时为 `Unsupported`，否则为 `Degraded`。子项失败或不可用不撤销其他已安装项。新增宿主构建须独立确认原生 span 元数据、前后景绑定和 split binding 语义后，才能在精确 profile 显式启用多字放行或英语拆词资格；默认值不继承前版本。时间、分组、标签或原生特殊分支语义变化时重新分析；若新宿主复用同一reader并原地改写词数据，须补相应缓存失效入口，不能只复制成员名。
+**变更与降级。** CJK 辉光、英语拆词辉光与末词补偿分别安装、分别报告，任一失败不撤销其他项。`CjkKaraokeAnimationFeature` 只负责 CJK 辉光的安装和状态；末词契约缺失、解析或注册失败只使补偿不支持或降级。`lyricRepairs` 保留各项完整诊断消息，未声明能力的 `Unsupported` 也原样保留；整体状态按 parser 与已声明可选项计算：全为 `Active` 时为 `Active`，仅全为 `Unsupported` 时为 `Unsupported`，否则为 `Degraded`。`cjk.splitWordGlow` 对象缺失只使英语拆词辉光 `Unsupported`；对象存在但 binding-builder、trim 或成员解析失败使本项降级并保持原生，不能影响 CJK 辉光或末词补偿。子项失败或不可用不撤销其他已安装项。新增宿主构建须独立确认原生 span 元数据、前后景绑定、native binding-builder、trim 及 transition/return 语义后，才能在精确 profile 写入英语对象；默认值不继承前版本。时间、分组、标签或原生特殊分支语义变化时重新分析；若新宿主复用同一reader并原地改写词数据，须补相应缓存失效入口，不能只复制成员名。
 
 [证据清单](host-adaptation-checklist.md#cjk-animation-checks) · [人工场景](feature-preservation.md#cjk-animation)
 
