@@ -103,8 +103,9 @@ Compose Multiplatform 1.12.0 and io.github.kyant0:shapes:1.2.1 are Apache-2.0 de
 
 ## Miuix and AndroidX Activity
 
-The embedded settings UI uses `top.yukonga.miuix.kmp:miuix-preference:0.9.4`
-and its Miuix UI dependencies, by the [compose-miuix-ui contributors](https://github.com/compose-miuix-ui/miuix).
+The embedded settings UI uses `top.yukonga.miuix.kmp:miuix-preference:0.9.4`,
+`top.yukonga.miuix.kmp:miuix-nav:0.9.4` and their Miuix dependencies, by the
+[compose-miuix-ui contributors](https://github.com/compose-miuix-ui/miuix).
 Its dialog host uses `androidx.activity:activity`. Both are licensed under the
 [Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0).
 

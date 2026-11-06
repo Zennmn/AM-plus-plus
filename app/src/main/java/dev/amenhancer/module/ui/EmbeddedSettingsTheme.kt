@@ -11,8 +11,6 @@ import android.widget.Button
 import android.widget.TextView
 import dev.amenhancer.module.R
 
-internal const val EMBEDDED_DIALOG_DIM_AMOUNT = 0.4f
-
 internal fun embeddedPalette(activity: Activity): EmbeddedSettingsColors =
     EmbeddedSettingsPalette.forUiMode(activity.resources.configuration.uiMode)
 
@@ -82,13 +80,8 @@ internal fun Button.bindEmbeddedButtonTheme(activity: Activity, tintBackground: 
     }
 }
 
-internal fun embeddedThemedContext(activity: Activity, dialog: Boolean = false): ContextThemeWrapper {
-    val dark = embeddedPalette(activity).isDark
-    val theme = if (dialog) {
-        if (dark) android.R.style.Theme_Material_Dialog_Alert else android.R.style.Theme_Material_Light_Dialog_Alert
-    } else {
-        if (dark) android.R.style.Theme_Material else android.R.style.Theme_Material_Light
-    }
+internal fun embeddedThemedContext(activity: Activity): ContextThemeWrapper {
+    val theme = if (embeddedPalette(activity).isDark) android.R.style.Theme_Material else android.R.style.Theme_Material_Light
     return ContextThemeWrapper(activity, theme)
 }
 

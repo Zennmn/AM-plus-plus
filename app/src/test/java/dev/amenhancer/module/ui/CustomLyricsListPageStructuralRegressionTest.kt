@@ -45,25 +45,33 @@ class CustomLyricsListPageStructuralRegressionTest {
     }
 
     @Test
-    fun `places add and backup actions above the search input`() {
+    fun `routes add, import, update and backup actions above the search input`() {
         val page = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedLyricsSettingsPages.kt")
 
-        val actionBar = page.indexOf("LyricsActionBar(")
-        val search = page.indexOf("TextField(")
-        assertTrue("action bar must exist", actionBar >= 0)
+        val add = page.indexOf("title = localizedText(ModuleText.ADD_LYRICS)")
+        val importTtml = page.indexOf("title = localizedText(ModuleText.IMPORT_TTML)")
+        val update = page.indexOf("title = localizedText(ModuleText.LYRICS_UPDATE)")
+        val backup = page.indexOf("title = localizedText(ModuleText.BACKUP_AND_RESTORE)")
+        val search = page.indexOf("label = localizedText(ModuleText.SEARCH_LYRICS)")
+        assertTrue("add action must exist", add >= 0)
+        assertTrue("TTML import action must exist", importTtml >= 0)
+        assertTrue("update action must exist", update >= 0)
+        assertTrue("backup action must exist", backup >= 0)
         assertTrue("search input must exist", search >= 0)
-        assertTrue("actions must precede search", actionBar < search)
-        val actionBarSource = page.substring(actionBar, search)
+        assertTrue(
+            "actions must precede search",
+            add < search && importTtml < search && update < search && backup < search,
+        )
+        val actionSource = page.substring(add, search)
         listOf(
-            "onAdd = { showLyricsEditor(",
-            "onTtml = {",
-            "onUpdate = { updateEmbeddedLyrics(activity) }",
-            "onBackup = { showBackupRestoreDialog(activity) }",
+            "onClick = { showLyricsEditor(",
+            "launchSafPicker(",
+            "EmbeddedSafOperation.Ttml",
+            "onClick = { updateEmbeddedLyrics(activity) }",
+            "onClick = { showBackupRestoreDialog(activity) }",
         ).forEach { action ->
-            assertTrue("$action must remain in the embedded action bar", actionBarSource.contains(action))
+            assertTrue("$action must remain in the embedded action group", actionSource.contains(action))
         }
-        assertTrue(actionBarSource.contains("launchSafPicker("))
-        assertTrue(actionBarSource.contains("EmbeddedSafOperation.Ttml"))
     }
 
     @Test
@@ -85,7 +93,8 @@ class CustomLyricsListPageStructuralRegressionTest {
 
         assertTrue(embeddedSearch.contains("ImeAction.Search"))
         assertTrue(embeddedSearch.contains("singleLine = true"))
-        assertTrue(window.contains("clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM"))
+        val clearedFlags = window.substringAfter("clearFlags(").substringBefore(")")
+        assertTrue(clearedFlags.contains("WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM"))
         assertTrue(window.contains("setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)"))
     }
 
@@ -94,9 +103,8 @@ class CustomLyricsListPageStructuralRegressionTest {
         val page = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedLyricsSettingsPages.kt")
         val operations = projectFile("app/src/main/java/dev/amenhancer/module/ui/EmbeddedSettingsOperations.kt")
 
-        assertTrue(page.contains("onUpdate = { updateEmbeddedLyrics(activity) }"))
-        assertTrue(page.contains("label = localizedText(ModuleText.UPDATE)"))
-        assertTrue(page.contains("description = ModuleText.LYRICS_UPDATE"))
+        assertTrue(page.contains("title = localizedText(ModuleText.LYRICS_UPDATE)"))
+        assertTrue(page.contains("onClick = { updateEmbeddedLyrics(activity) }"))
         assertTrue(operations.contains("internal fun EmbeddedSettingsHost.updateEmbeddedLyrics(activity: Activity)"))
         assertFalse(page.contains("syncEmbeddedGitHub"))
         assertFalse(page.contains("syncFromGitHub"))

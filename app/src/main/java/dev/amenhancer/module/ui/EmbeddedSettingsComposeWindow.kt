@@ -14,42 +14,22 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import androidx.activity.ComponentDialog
 import androidx.activity.OnBackPressedCallback
-import androidx.compose.animation.animateContentSize
-import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.LayoutCoordinates
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -63,6 +43,7 @@ import androidx.core.view.WindowCompat
 import dev.amenhancer.module.hook.ModernXposedRuntime
 import java.lang.ref.WeakReference
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.ThemeController
@@ -74,8 +55,13 @@ internal fun createEmbeddedSettingsDialog(
     onDismiss: (() -> Unit)? = null,
     content: @Composable (dismiss: () -> Unit) -> Unit,
 ): Dialog {
+    val activityReference = WeakReference(activity)
     val dark = embeddedPalette(activity).isDark
-    val theme = if (dark) android.R.style.Theme_Material_Dialog else android.R.style.Theme_Material_Light_Dialog
+    val theme = if (dark) {
+        android.R.style.Theme_Material_NoActionBar
+    } else {
+        android.R.style.Theme_Material_Light_NoActionBar
+    }
     val dialog = ComponentDialog(embeddedComposeContext(activity), theme)
     dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
     dialog.setOwnerActivity(activity)
@@ -102,9 +88,10 @@ internal fun createEmbeddedSettingsDialog(
                 },
             ) {
                 MiuixTheme(controller = controller) {
+                    // Keep the default MiuixPopupHost so OverlayDialog uses this Scaffold as its root.
                     Scaffold(
                         modifier = Modifier.fillMaxSize(),
-                        containerColor = Color.Transparent,
+                        containerColor = MiuixTheme.colorScheme.surface,
                         contentWindowInsets = WindowInsets(0, 0, 0, 0),
                     ) {
                         content(dialog::dismiss)
@@ -116,21 +103,29 @@ internal fun createEmbeddedSettingsDialog(
     val root = object : FrameLayout(dialog.context) {
         @Suppress("DEPRECATION")
         override fun onConfigurationChanged(newConfig: Configuration) {
-            val effective = Configuration(activity.resources.configuration)
-            resources.updateConfiguration(effective, activity.resources.displayMetrics)
+            val currentActivity = activityReference.get()
+            val effective = currentActivity?.resources?.configuration?.let(::Configuration)
+                ?: Configuration(newConfig)
+            currentActivity?.let { source ->
+                resources.updateConfiguration(effective, source.resources.displayMetrics)
+            }
             configuration.value = effective
             super.onConfigurationChanged(newConfig)
         }
     }.apply {
-        addView(composeView, FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
-        ))
+        addView(
+            composeView,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
     }
     dialog.setContentView(
         root,
         ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
     )
-    configureEmbeddedComposeWindow(dialog)
+    configureEmbeddedComposeWindow(dialog, dark)
     dialog.setOnDismissListener {
         backCallback?.remove()
         composeView.disposeComposition()
@@ -140,19 +135,30 @@ internal fun createEmbeddedSettingsDialog(
 }
 
 @Suppress("DEPRECATION")
-private fun configureEmbeddedComposeWindow(dialog: Dialog) {
+private fun configureEmbeddedComposeWindow(dialog: Dialog, dark: Boolean) {
     dialog.window?.apply {
         setBackgroundDrawable(ColorDrawable(android.graphics.Color.TRANSPARENT))
         setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-        setWindowAnimations(0)
-        clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM or WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION)
-        addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND or WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
-        setDimAmount(EMBEDDED_DIALOG_DIM_AMOUNT)
+        clearFlags(
+            WindowManager.LayoutParams.FLAG_DIM_BEHIND or
+                WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM or
+                WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS or
+                WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION,
+        )
+        setDimAmount(0f)
+        addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
         setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         statusBarColor = android.graphics.Color.TRANSPARENT
         navigationBarColor = android.graphics.Color.TRANSPARENT
-        if (android.os.Build.VERSION.SDK_INT >= 29) isNavigationBarContrastEnforced = false
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            isStatusBarContrastEnforced = false
+            isNavigationBarContrastEnforced = false
+        }
         WindowCompat.setDecorFitsSystemWindows(this, false)
+        WindowCompat.getInsetsController(this, decorView).apply {
+            isAppearanceLightStatusBars = !dark
+            isAppearanceLightNavigationBars = !dark
+        }
     }
 }
 
@@ -168,6 +174,40 @@ private fun embeddedComposeContext(activity: Activity): Context {
     }
 }
 
+internal class EmbeddedMiuixDialogEntry(
+    internal val id: Long,
+    internal val title: String,
+    internal val maxWidth: Dp,
+    internal val scrollContent: Boolean,
+    internal val dismissOnOutside: Boolean,
+    internal val onDismiss: (() -> Unit)?,
+    internal val footer: (@Composable ColumnScope.(dismiss: () -> Unit) -> Unit)?,
+    internal val content: @Composable ColumnScope.(dismiss: () -> Unit) -> Unit,
+) {
+    internal val visible = mutableStateOf(true)
+    internal var contentShown = false
+    internal var closeRequested = false
+    internal var released = false
+    internal var onDismissDelivered = false
+
+    internal val isShowing: Boolean
+        get() = visible.value && !closeRequested && !released
+}
+
+internal class EmbeddedMiuixDialogHandle internal constructor(
+    private val host: EmbeddedSettingsHost?,
+    private val entry: EmbeddedMiuixDialogEntry?,
+) {
+    val isShowing: Boolean
+        get() = entry?.isShowing == true
+
+    fun dismiss() {
+        val host = host ?: return
+        val entry = entry ?: return
+        host.requestEmbeddedMiuixDialogDismiss(entry)
+    }
+}
+
 internal fun EmbeddedSettingsHost.showEmbeddedMiuixDialog(
     activity: Activity,
     title: String,
@@ -177,88 +217,67 @@ internal fun EmbeddedSettingsHost.showEmbeddedMiuixDialog(
     dismissOnOutside: Boolean = true,
     footer: (@Composable ColumnScope.(dismiss: () -> Unit) -> Unit)? = null,
     content: @Composable ColumnScope.(dismiss: () -> Unit) -> Unit,
-): Dialog {
-    val owner = dialogReference?.get()
-    lateinit var dialog: Dialog
-    dialog = createEmbeddedSettingsDialog(
-        activity = activity,
-        onDismiss = {
-            auxiliaryDialogs.removeAll { it.get() == null || it.get() === dialog }
-            onDismiss?.invoke()
-        },
-    ) { dismiss ->
-        EmbeddedSettingsPanel(maxWidth, dismiss.takeIf { dismissOnOutside }) {
-            EmbeddedSettingsHeader(title)
-            val scroll = if (scrollContent) Modifier.verticalScroll(rememberScrollState()) else Modifier
-            Column(
-                modifier = Modifier.weight(1f, fill = false).fillMaxWidth()
-                    .then(scroll).padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                content(dismiss)
-            }
-            if (footer != null) Column(
-                Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
-            ) { footer(dismiss) }
+): EmbeddedMiuixDialogHandle {
+    if (activeSettingsDialog(activity) == null) {
+        onDismiss?.invoke()
+        return EmbeddedMiuixDialogHandle(null, null)
+    }
+    val entry = EmbeddedMiuixDialogEntry(
+        id = ++auxiliaryDialogSequence,
+        title = title,
+        maxWidth = maxWidth,
+        scrollContent = scrollContent,
+        dismissOnOutside = dismissOnOutside,
+        onDismiss = onDismiss,
+        footer = footer,
+        content = content,
+    )
+    auxiliaryDialogs += entry
+    return EmbeddedMiuixDialogHandle(this, entry)
+}
+
+/** Render once in the root Scaffold, as a sibling after the page NavDisplay. */
+@Composable
+internal fun EmbeddedSettingsHost.EmbeddedSettingsOverlays() {
+    auxiliaryDialogs.toList().forEach { entry ->
+        key(entry.id) {
+            EmbeddedMiuixOverlay(entry)
         }
     }
-    if (owner?.isShowing != true || owner.ownerActivity !== activity || activity.isFinishing || activity.isDestroyed) {
-        onDismiss?.invoke()
-        return dialog
-    }
-    auxiliaryDialogs.removeAll { it.get() == null }
-    auxiliaryDialogs += WeakReference(dialog)
-    try {
-        dialog.show()
-    } catch (error: WindowManager.BadTokenException) {
-        auxiliaryDialogs.removeAll { it.get() == null || it.get() === dialog }
-        onDismiss?.invoke()
-    }
-    return dialog
 }
 
 @Composable
-internal fun EmbeddedSettingsPanel(
-    width: Dp,
-    onDismiss: (() -> Unit)?,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    var stage by remember { mutableStateOf<LayoutCoordinates?>(null) }
-    var panel by remember { mutableStateOf<LayoutCoordinates?>(null) }
-    val dismiss by rememberUpdatedState(onDismiss)
-    Box(
-        Modifier.fillMaxSize().onGloballyPositioned { stage = it }.pointerInput(Unit) {
-            awaitEachGesture {
-                val down = awaitFirstDown(requireUnconsumed = false)
-                val root = stage
-                val child = panel
-                if (dismiss != null && root != null && child != null && root.isAttached && child.isAttached &&
-                    !down.isConsumed && !root.localBoundingBoxOf(child).contains(down.position)
-                ) {
-                    down.consume()
-                    val up = waitForUpOrCancellation()
-                    if (up != null && root.isAttached && child.isAttached &&
-                        !root.localBoundingBoxOf(child).contains(up.position)
-                    ) {
-                        up.consume()
-                        dismiss?.invoke()
-                    }
+private fun EmbeddedSettingsHost.EmbeddedMiuixOverlay(entry: EmbeddedMiuixDialogEntry) {
+    val dismiss = remember(entry) {
+        { requestEmbeddedMiuixDialogDismiss(entry) }
+    }
+    DisposableEffect(entry) {
+        onDispose { releaseEmbeddedMiuixDialog(entry) }
+    }
+    OverlayDialog(
+        show = entry.visible.value,
+        title = entry.title,
+        enableWindowDim = true,
+        onDismissRequest = if (entry.dismissOnOutside) dismiss else null,
+        onDismissFinished = { releaseEmbeddedMiuixDialog(entry) },
+        renderInRootScaffold = true,
+        maxWidth = entry.maxWidth,
+    ) {
+        SideEffect { markEmbeddedMiuixDialogContentShown(entry) }
+        val scrollState = rememberScrollState()
+        Column(Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.weight(1f, fill = false).fillMaxWidth()
+                    .then(if (entry.scrollContent) Modifier.verticalScroll(scrollState) else Modifier),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                entry.content(this, dismiss)
+            }
+            entry.footer?.let { footer ->
+                Column(Modifier.fillMaxWidth()) {
+                    footer(dismiss)
                 }
             }
-        },
-    ) {
-        BoxWithConstraints(
-            modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            val shape = RoundedCornerShape(26.dp)
-            Column(
-                modifier = Modifier.widthIn(max = width).fillMaxWidth().heightIn(max = maxHeight)
-                    .animateContentSize().onGloballyPositioned { panel = it }
-                    .shadow(12.dp, shape).clip(shape).background(MiuixTheme.colorScheme.background),
-                content = content,
-            )
         }
     }
 }

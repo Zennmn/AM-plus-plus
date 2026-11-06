@@ -145,7 +145,7 @@ Enable **Song title correction**, choose a region mode, and reopen Apple Music. 
 
 ## Building from source
 
-Requires JDK 17, Android SDK 37, Build Tools 37.0.0, and the bundled Gradle Wrapper.
+Requires JDK 21, Android SDK 37, Build Tools 37.0.0, and the bundled Gradle Wrapper.
 
 Windows:
 

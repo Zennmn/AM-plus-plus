@@ -27,6 +27,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 internal fun EmbeddedSettingsHost.EmbeddedPluginManagementPage(
     activity: Activity,
     revision: Int,
+    active: Boolean,
 ) {
     val manager = plugins
     val state = remember(manager) { EmbeddedPluginManagementState() }
@@ -49,9 +50,9 @@ internal fun EmbeddedSettingsHost.EmbeddedPluginManagementPage(
         manager.execute {
             val result = runCatching(block)
             mainHandler.post {
-                if (!state.active) return@post
                 state.busyPluginId = null
                 state.enabledOverrides = state.enabledOverrides - pluginId
+                if (!state.active) return@post
                 state.refreshKey++
                 val current = currentActivity()
                 if (current === activity && !activity.isFinishing && !activity.isDestroyed) {
@@ -131,7 +132,8 @@ internal fun EmbeddedSettingsHost.EmbeddedPluginManagementPage(
         }
     }
 
-    DisposableEffect(manager, activity, revision, state.refreshKey) {
+    DisposableEffect(manager, activity, revision, state.refreshKey, active) {
+        if (!active) return@DisposableEffect onDispose {}
         state.active = true
         state.startupError = manager.startupError
         val live = AtomicBoolean(true)

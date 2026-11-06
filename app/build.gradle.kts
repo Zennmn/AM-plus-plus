@@ -66,8 +66,9 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        // miuix-nav's entry DSL inlines JVM 21 bytecode into the app.
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
 
     packaging {
@@ -91,6 +92,7 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.4.10")
     implementation("androidx.activity:activity:1.13.0")
     implementation("top.yukonga.miuix.kmp:miuix-preference:0.9.4")
+    implementation("top.yukonga.miuix.kmp:miuix-nav:0.9.4")
     // HLE's exact Apple Music profile resolver uses DexKit only as a
     // compatibility fallback when a profiled class/member is absent.
     implementation("org.luckypray:dexkit:2.2.0")

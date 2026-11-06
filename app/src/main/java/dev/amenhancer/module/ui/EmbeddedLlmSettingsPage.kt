@@ -4,6 +4,7 @@ import android.app.Activity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
@@ -32,8 +33,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import top.yukonga.miuix.kmp.basic.DropdownEntry
+import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
+import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 
 /** Miuix content for the OpenAI-compatible translation fallback settings page. */
 @Composable
@@ -41,10 +45,12 @@ internal fun EmbeddedSettingsHost.EmbeddedLlmLyricsPage(
     activity: Activity,
     settings: ModuleSettings,
     onSettingsChanged: (ModuleSettings) -> Unit,
+    active: Boolean = true,
 ) {
     val host = this
     val currentSettings by rememberUpdatedState(settings)
     val currentOnSettingsChanged by rememberUpdatedState(onSettingsChanged)
+    val currentActive by rememberUpdatedState(active)
     val llmFallbackActive = settings.customLyricsEnabled && settings.automaticLyricsEnabled
     val thinkingFormat = settings.llmLyricsThinkingFormat
     val hasThinkingSwitch = thinkingFormat == LlmLyricsThinkingFormat.THINKING_TYPE
@@ -64,7 +70,11 @@ internal fun EmbeddedSettingsHost.EmbeddedLlmLyricsPage(
     val scope = rememberCoroutineScope()
     var testingConnection by remember(request) { mutableStateOf(false) }
 
-    DisposableEffect(request) {
+    DisposableEffect(request, active) {
+        if (!active) {
+            request.cancel()
+            testingConnection = false
+        }
         onDispose { request.cancel() }
     }
 
@@ -96,7 +106,6 @@ internal fun EmbeddedSettingsHost.EmbeddedLlmLyricsPage(
                         else -> value
                     },
                     icon = field.icon,
-                    summaryMaxLines = 1,
                     onClick = {
                         host.showLlmFieldDialog(
                             activity = activity,
@@ -107,37 +116,37 @@ internal fun EmbeddedSettingsHost.EmbeddedLlmLyricsPage(
                     },
                 )
             }
-            EmbeddedSettingLink(
+            val thinkingFormats = LlmLyricsThinkingFormat.entries
+            OverlayDropdownPreference(
+                entry = DropdownEntry(
+                    items = thinkingFormats.map { choice ->
+                        DropdownItem(
+                            text = host.llmThinkingFormatLabel(choice),
+                            selected = choice == thinkingFormat,
+                            summary = localizedText(
+                                when (choice) {
+                                    LlmLyricsThinkingFormat.NONE ->
+                                        ModuleText.LLM_LYRICS_THINKING_EFFORT_DEFAULT
+                                    LlmLyricsThinkingFormat.THINKING_TYPE ->
+                                        ModuleText.LLM_LYRICS_THINKING_FORMAT_TYPE_HINT
+                                    LlmLyricsThinkingFormat.REASONING_EFFORT ->
+                                        ModuleText.LLM_LYRICS_THINKING_FORMAT_EFFORT_HINT
+                                },
+                            ),
+                            onClick = {
+                                currentOnSettingsChanged(
+                                    currentSettings.copy(llmLyricsThinkingFormat = choice),
+                                )
+                            },
+                        )
+                    },
+                ),
                 title = localizedText(ModuleText.LLM_LYRICS_THINKING_FORMAT),
                 summary = localizedText(llmThinkingFormatSummary(thinkingFormat)),
-                icon = EmbeddedSvgIcon.Thinking,
-                onClick = {
-                    val choices = LlmLyricsThinkingFormat.entries
-                    host.showLlmPickerDialog(
-                        activity = activity,
-                        title = localizedText(ModuleText.LLM_LYRICS_THINKING_FORMAT),
-                        options = choices.map { choice ->
-                            LlmPickerOption(
-                                title = host.llmThinkingFormatLabel(choice),
-                                summary = localizedText(
-                                    when (choice) {
-                                        LlmLyricsThinkingFormat.NONE ->
-                                            ModuleText.LLM_LYRICS_THINKING_EFFORT_DEFAULT
-                                        LlmLyricsThinkingFormat.THINKING_TYPE ->
-                                            ModuleText.LLM_LYRICS_THINKING_FORMAT_TYPE_HINT
-                                        LlmLyricsThinkingFormat.REASONING_EFFORT ->
-                                            ModuleText.LLM_LYRICS_THINKING_FORMAT_EFFORT_HINT
-                                    },
-                                ),
-                            )
-                        },
-                        selectedIndex = choices.indexOf(thinkingFormat),
-                    ) { index ->
-                        currentOnSettingsChanged(
-                            currentSettings.copy(llmLyricsThinkingFormat = choices[index]),
-                        )
-                    }
+                startAction = {
+                    EmbeddedSettingsIcon(EmbeddedSvgIcon.Thinking, modifier = Modifier.size(22.dp))
                 },
+                insideMargin = EmbeddedPreferencePadding,
             )
             if (hasThinkingSwitch) {
                 EmbeddedSettingSwitch(
@@ -155,25 +164,26 @@ internal fun EmbeddedSettingsHost.EmbeddedLlmLyricsPage(
             if (thinkingFormat != LlmLyricsThinkingFormat.NONE) {
                 val choices = LlmLyricsThinkingEffort.entries
                     .filter(thinkingFormat::supportsEffort)
-                EmbeddedSettingLink(
-                    title = localizedText(ModuleText.LLM_LYRICS_THINKING_EFFORT),
-                    summary = host.llmThinkingEffortLabel(currentEffort),
-                    icon = EmbeddedSvgIcon.Thinking,
-                    enabled = effortEnabled,
-                    onClick = {
-                        host.showLlmPickerDialog(
-                            activity = activity,
-                            title = localizedText(ModuleText.LLM_LYRICS_THINKING_EFFORT),
-                            options = choices.map { effort ->
-                                LlmPickerOption(host.llmThinkingEffortLabel(effort))
-                            },
-                            selectedIndex = choices.indexOf(currentEffort),
-                        ) { index ->
-                            currentOnSettingsChanged(
-                                currentSettings.copy(llmLyricsThinkingEffort = choices[index]),
+                OverlayDropdownPreference(
+                    entry = DropdownEntry(
+                        items = choices.map { effort ->
+                            DropdownItem(
+                                text = host.llmThinkingEffortLabel(effort),
+                                selected = effort == currentEffort,
+                                onClick = {
+                                    currentOnSettingsChanged(
+                                        currentSettings.copy(llmLyricsThinkingEffort = effort),
+                                    )
+                                },
                             )
-                        }
+                        },
+                    ),
+                    title = localizedText(ModuleText.LLM_LYRICS_THINKING_EFFORT),
+                    startAction = {
+                        EmbeddedSettingsIcon(EmbeddedSvgIcon.Thinking, modifier = Modifier.size(22.dp))
                     },
+                    insideMargin = EmbeddedPreferencePadding,
+                    enabled = effortEnabled,
                 )
             }
         }
@@ -185,7 +195,7 @@ internal fun EmbeddedSettingsHost.EmbeddedLlmLyricsPage(
                     else ModuleText.LLM_LYRICS_TEST_CONNECTION,
                 ),
                 onClick = {
-                    if (!testingConnection) {
+                    if (currentActive && !testingConnection) {
                         testingConnection = true
                         val requestId = request.begin()
                         scope.launch {
@@ -204,7 +214,8 @@ internal fun EmbeddedSettingsHost.EmbeddedLlmLyricsPage(
                             } catch (_: Throwable) {
                                 LlmLyricsClient.ConnectionResult("transport")
                             }
-                            if (!request.isCurrent(requestId) ||
+                            if (!currentActive ||
+                                !request.isCurrent(requestId) ||
                                 activity.isFinishing ||
                                 activity.isDestroyed ||
                                 host.currentActivity() !== activity
@@ -230,7 +241,7 @@ internal fun EmbeddedSettingsHost.EmbeddedLlmLyricsPage(
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = !testingConnection,
+                enabled = currentActive && !testingConnection,
             )
         }
     }
@@ -271,11 +282,6 @@ private enum class LlmEditableField(
         keyboardType = KeyboardType.Text,
     ),
 }
-
-private data class LlmPickerOption(
-    val title: String,
-    val summary: String? = null,
-)
 
 private class LlmConnectionRequest {
     private val cancelled = AtomicBoolean(false)
@@ -382,36 +388,6 @@ private fun EmbeddedSettingsHost.showLlmFieldDialog(
             onDismiss = dismiss,
             confirmText = localizedText(ModuleText.SAVE),
             onConfirm = { save() },
-        )
-    }
-}
-
-private fun EmbeddedSettingsHost.showLlmPickerDialog(
-    activity: Activity,
-    title: String,
-    options: List<LlmPickerOption>,
-    selectedIndex: Int,
-    onSelected: (Int) -> Unit,
-) {
-    showEmbeddedMiuixDialog(
-        activity = activity,
-        title = title,
-    ) { dismiss ->
-        EmbeddedSettingsGroup {
-            options.forEachIndexed { index, option ->
-                EmbeddedSettingLink(
-                    title = if (index == selectedIndex) "✓ ${option.title}" else option.title,
-                    summary = option.summary,
-                    onClick = {
-                        onSelected(index)
-                        dismiss()
-                    },
-                )
-            }
-        }
-        EmbeddedDialogActions(
-            dismissText = localizedText(ModuleText.CANCEL),
-            onDismiss = dismiss,
         )
     }
 }

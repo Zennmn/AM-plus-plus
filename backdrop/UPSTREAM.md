@@ -8,7 +8,7 @@ AndroidLiquidGlass / Backdrop 2.0.1, by Kyant.
 - `src/commonMain` and the original `src/androidMain` files come from upstream. `DrawBackdropModifier.kt` has AM++ options for clip compositing and a minimum backdrop-layer size, plus scoped CPU trace markers. Rendering options retain the original defaults. `upstream-sha256.json` retains the original SHA256 values; `local-patches-sha256.json` pins the modified file. Both normalize CRLF to LF for cross-platform checkouts.
 - `src/androidMain/.../backdrops/ViewBackdrop.kt` is an AM++ addition for a hardware-recorded Android View source.
 - `ViewBackdrop` accepts an optional source renderer. A host adapter may draw its compatible, live content recording instead of traversing the View tree again, returning false without drawing until that recording is ready or when its geometry changes. The adapter owns all private-field and hierarchy checks. Source dirtiness, transforms, generation invalidation, window-background painting and the normal View fallback stay active; the host's RenderNode is never discarded by the module. This AM++ bridge change does not modify an upstream rendering source or shader.
-- Build configuration targets Android only and uses the application's Java 17 baseline. Desktop, browser, Apple targets and publication tasks are not included.
+- Build configuration targets Android only and keeps a Java 17 bytecode target. Desktop, browser, Apple targets and publication tasks are not included.
 
 Run `python scripts/verify-glass-reference.py` from the repository root to verify the original rendering sources and the declared local patch.
 

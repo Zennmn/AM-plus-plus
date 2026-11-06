@@ -12,8 +12,7 @@ import dev.amenhancer.module.lyrics.CustomLyricsUpdateResult
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal fun EmbeddedSettingsHost.updateEmbeddedLyrics(activity: Activity) {
-    val owner = dialogReference ?: return
-    if (owner.get()?.isShowing != true || activity.isFinishing || activity.isDestroyed) return
+    val owner = activeSettingsDialog(activity) ?: return
     val cancelled = AtomicBoolean(false)
     val progress = mutableStateOf(localizedText(ModuleText.CHECKING_LYRICS))
     val dialog = showEmbeddedMiuixDialog(
@@ -59,7 +58,11 @@ internal fun EmbeddedSettingsHost.updateEmbeddedLyrics(activity: Activity) {
         }
         mainHandler.post {
             if (dialog.isShowing) dialog.dismiss()
-            val current = currentActivity()?.takeIf { it === activity && owner === dialogReference } ?: return@post
+            val current = currentActivity()?.takeIf {
+                it === activity &&
+                    owner === dialogReference?.get() &&
+                    owner.isShowing
+            } ?: return@post
             when (result) {
                 is CustomLyricsUpdateResult.Updated -> Toast.makeText(
                     current,
@@ -95,9 +98,9 @@ internal fun EmbeddedSettingsHost.launchSafPicker(
     mimeType: String,
     extraMimeTypes: Array<String>? = null,
 ) {
-    val owner = dialogReference?.takeIf { it.get()?.isShowing == true } ?: return
+    activeSettingsDialog(activity) ?: return
     val requestCode = safRouter.begin(operation)
-    pendingSafDialog = owner
+    pendingSafDialog = dialogReference
     val intent = Intent(
         if (operation == EmbeddedSafOperation.Backup) {
             Intent.ACTION_CREATE_DOCUMENT
@@ -121,18 +124,24 @@ internal fun EmbeddedSettingsHost.launchSafPicker(
 }
 
 internal fun EmbeddedSettingsHost.handleSafSelection(operation: EmbeddedSafOperation, uri: Uri) {
-    val activity = currentActivity() ?: return
+    val activity = currentActivity()?.takeIf { activeSettingsDialog(it) != null } ?: return
     when (operation) {
         EmbeddedSafOperation.PluginZip -> importPluginZip(uri)
         EmbeddedSafOperation.Font -> runAsync(activity) { controller.importFont(uri) }
         EmbeddedSafOperation.EditorTtml -> {
             val editorImport = pendingTtmlImport ?: return
             pendingTtmlImport = null
-            val owner = dialogReference
+            val owner = activeSettingsDialog(activity) ?: return
             worker.execute {
                 val imported = runCatching { controller.readTtml(uri) }.getOrNull()
                 mainHandler.post {
-                    if (owner === dialogReference && currentActivity() === activity) editorImport(imported)
+                    if (
+                        owner.isShowing &&
+                        owner === dialogReference?.get() &&
+                        currentActivity() === activity
+                    ) {
+                        editorImport(imported)
+                    }
                 }
             }
         }
@@ -163,7 +172,7 @@ internal fun EmbeddedSettingsHost.handleSafSelection(operation: EmbeddedSafOpera
 }
 
 internal fun EmbeddedSettingsHost.confirmEmbeddedRestore(activity: Activity, uri: Uri) {
-    if (activity.isFinishing || activity.isDestroyed) return
+    if (activeSettingsDialog(activity) == null) return
     showEmbeddedMiuixDialog(
         activity = activity,
         title = localizedText(ModuleText.RESTORE_LYRICS_BACKUP),
@@ -196,7 +205,7 @@ internal fun EmbeddedSettingsHost.confirmEmbeddedRestore(activity: Activity, uri
 }
 
 internal fun EmbeddedSettingsHost.runAsync(activity: Activity, action: () -> EmbeddedActionResult) {
-    val owner = dialogReference?.takeIf { it.get()?.isShowing == true } ?: return
+    val owner = activeSettingsDialog(activity) ?: return
     Toast.makeText(activity, localizedText(ModuleText.PROCESSING), Toast.LENGTH_SHORT).show()
     worker.execute {
         val result = runCatching(action).getOrElse {
@@ -204,7 +213,9 @@ internal fun EmbeddedSettingsHost.runAsync(activity: Activity, action: () -> Emb
         }
         mainHandler.post {
             val current = currentActivity()?.takeIf {
-                it === activity && owner === dialogReference && owner.get()?.isShowing == true
+                it === activity &&
+                    owner === dialogReference?.get() &&
+                    owner.isShowing
             } ?: return@post
             val message = when (result) {
                 is EmbeddedActionResult.Done -> result.message

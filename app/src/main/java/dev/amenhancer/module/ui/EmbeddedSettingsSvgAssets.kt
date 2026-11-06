@@ -11,8 +11,7 @@ import androidx.core.graphics.PathParser
 /**
  * Resource-independent, 24 x 24 SVG glyphs for the embedded settings UI.
  *
- * Icons use a shared 1.75-unit rounded stroke. The application mark is owned by
- * [EmbeddedAmppBrandDrawable] and intentionally is not part of this catalogue.
+ * Icons use a shared 1.75-unit rounded stroke. The application mark is not part of this catalogue.
  */
 internal enum class EmbeddedSvgIcon {
     // Base actions and shared controls.

@@ -6,8 +6,14 @@ import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -16,18 +22,34 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import dev.amenhancer.glass.GlassPolicy
 import dev.amenhancer.module.config.TitleCorrectionMode
 import dev.amenhancer.module.i18n.ModuleText
 import dev.amenhancer.module.model.ModuleSettings
 import java.lang.ref.WeakReference
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
+import top.yukonga.miuix.kmp.basic.TopAppBar
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.Close
+import top.yukonga.miuix.kmp.nav.core.NavDisplay
+import top.yukonga.miuix.kmp.nav.core.navBackStackOf
+import top.yukonga.miuix.kmp.nav.transition.NavSwipeDirection
+import top.yukonga.miuix.kmp.nav.transition.NavTransitions
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -40,7 +62,7 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
     val draft = EmbeddedSettingsDraft(initial, controller::saveOrdinarySettings)
     var settings by mutableStateOf(initial)
     var revision by mutableIntStateOf(0)
-    var page by mutableStateOf(EmbeddedSettingsPage.MAIN)
+    val backStack = navBackStackOf(EmbeddedSettingsPage.MAIN)
     var dialog: Dialog? = null
 
     fun update(next: ModuleSettings) {
@@ -50,13 +72,18 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
     }
 
     fun back() {
-        when (page) {
-            EmbeddedSettingsPage.MAIN -> dialog?.dismiss()
-            EmbeddedSettingsPage.AUTOMATIC_LYRICS, EmbeddedSettingsPage.LLM_LYRICS ->
-                page = EmbeddedSettingsPage.CUSTOM_LYRICS
-            EmbeddedSettingsPage.BOTTOM_BAR_ANIMATION -> page = EmbeddedSettingsPage.INTERFACE
-            else -> page = EmbeddedSettingsPage.MAIN
+        // The root overlay host gets Back first. While a modal is exiting, keep its page in place.
+        if (auxiliaryDialogs.isNotEmpty()) return
+        if (backStack.size > 1) {
+            backStack.removeAt(backStack.lastIndex)
+        } else {
+            dialog?.dismiss()
         }
+    }
+
+    fun open(page: EmbeddedSettingsPage) {
+        // NavDisplay requires unique keys. A second click during a push must not add the same route.
+        if (auxiliaryDialogs.isEmpty() && page !in backStack) backStack.add(page)
     }
 
     runCatching {
@@ -66,63 +93,44 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                 pageRefresh = null
                 dismissAuxiliarySettingsDialogs()
             }
-        }) { dismiss ->
-            val selectedPage = page
-            val current = settings
-            val refresh = revision
-            val scrollStateHolder = rememberSaveableStateHolder()
-            EmbeddedSettingsPanel(width = 560.dp, onDismiss = dismiss) {
-                EmbeddedSettingsHeader(
-                    title = localizedText(selectedPage.title),
-                    start = {
-                        if (selectedPage == EmbeddedSettingsPage.MAIN) {
-                            EmbeddedSettingsBrand()
-                        } else {
-                            EmbeddedSettingsIconAction(EmbeddedSvgIcon.Back, localizedText(ModuleText.BACK), onClick = ::back)
-                        }
-                    },
-                    end = {
-                        if (selectedPage == EmbeddedSettingsPage.PLUGINS) {
-                            EmbeddedSettingsIconAction(
-                                EmbeddedSvgIcon.AddCircle, localizedText(ModuleText.IMPORT_ZIP), enabled = plugins != null,
-                            ) {
-                                launchSafPicker(activity, EmbeddedSafOperation.PluginZip, "*/*",
-                                    arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
+        }) {
+            val swipeDirection = if (LocalLayoutDirection.current == LayoutDirection.Rtl) {
+                NavSwipeDirection.RightToLeft
+            } else {
+                NavSwipeDirection.LeftToRight
+            }
+            Box(Modifier.fillMaxSize()) {
+                NavDisplay(
+                    backStack = backStack,
+                    modifier = Modifier.fillMaxSize(),
+                    onBack = ::back,
+                    transition = NavTransitions.MiuixDefault,
+                ) {
+                    entry<EmbeddedSettingsPage>(swipeDismiss = swipeDirection) { page ->
+                        val active = backStack.lastOrNull() == page
+                        val current = settings
+                        val refresh = revision
+                        EmbeddedSettingsScreen(activity, page, current, ::back) {
+                            when (page) {
+                                EmbeddedSettingsPage.MAIN -> EmbeddedSettingsHome(activity, current, refresh, ::open)
+                                EmbeddedSettingsPage.CUSTOM_LYRICS ->
+                                    EmbeddedCustomLyricsPage(activity, current, refresh, ::update, ::open)
+                                EmbeddedSettingsPage.AUTOMATIC_LYRICS -> EmbeddedAutomaticLyricsPage(current, ::update)
+                                EmbeddedSettingsPage.LLM_LYRICS ->
+                                    EmbeddedLlmLyricsPage(activity, current, ::update, active = active)
+                                EmbeddedSettingsPage.PLUGINS -> EmbeddedPluginManagementPage(activity, refresh, active)
+                                EmbeddedSettingsPage.BOTTOM_BAR_ANIMATION ->
+                                    EmbeddedAnimationSettingsPage(current) { edit -> update(edit(draft.settings)) }
+                                else -> EmbeddedSettingsCategory(
+                                    activity, page, current, refresh,
+                                    onEdit = { edit -> update(edit(draft.settings)) },
+                                    onOpenAnimationSettings = { open(EmbeddedSettingsPage.BOTTOM_BAR_ANIMATION) },
+                                )
                             }
-                        } else {
-                            EmbeddedSettingsIconAction(EmbeddedSvgIcon.Document, localizedText(ModuleText.SETTINGS_DETAILS_ACTION)) {
-                                showEmbeddedPageDetails(activity, selectedPage, settings)
-                            }
-                        }
-                    },
-                )
-                scrollStateHolder.SaveableStateProvider(selectedPage.name) {
-                    Column(
-                        modifier = Modifier.weight(1f, fill = false).fillMaxWidth()
-                            .verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        when (selectedPage) {
-                            EmbeddedSettingsPage.MAIN -> EmbeddedSettingsHome(activity, current, refresh) { page = it }
-                            EmbeddedSettingsPage.CUSTOM_LYRICS ->
-                                EmbeddedCustomLyricsPage(activity, current, refresh, ::update) { page = it }
-                            EmbeddedSettingsPage.AUTOMATIC_LYRICS -> EmbeddedAutomaticLyricsPage(current, ::update)
-                            EmbeddedSettingsPage.LLM_LYRICS -> EmbeddedLlmLyricsPage(activity, current, ::update)
-                            EmbeddedSettingsPage.PLUGINS -> EmbeddedPluginManagementPage(activity, refresh)
-                            EmbeddedSettingsPage.BOTTOM_BAR_ANIMATION ->
-                                EmbeddedAnimationSettingsPage(current) { edit -> update(edit(draft.settings)) }
-                            else -> EmbeddedSettingsCategory(activity, selectedPage, current, refresh,
-                                onEdit = { edit -> update(edit(draft.settings)) },
-                                onOpenAnimationSettings = { page = EmbeddedSettingsPage.BOTTOM_BAR_ANIMATION },
-                            )
                         }
                     }
                 }
-                if (selectedPage == EmbeddedSettingsPage.MAIN) {
-                    Box(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
-                        EmbeddedDialogActions(localizedText(ModuleText.CLOSE), dismiss)
-                    }
-                }
+                EmbeddedSettingsOverlays()
             }
         }
         dialog = opened
@@ -136,6 +144,85 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
             pageRefresh = null
         }
         Toast.makeText(activity, localizedText(ModuleText.SETTINGS_OPEN_FAILED, error.message.orEmpty()), Toast.LENGTH_LONG).show()
+    }
+}
+
+@Composable
+private fun EmbeddedSettingsHost.EmbeddedSettingsScreen(
+    activity: Activity,
+    page: EmbeddedSettingsPage,
+    settings: ModuleSettings,
+    onBack: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val title = localizedText(page.title)
+    val home = page == EmbeddedSettingsPage.MAIN
+    val wide = LocalConfiguration.current.screenWidthDp >= 600
+    val scrollBehavior = MiuixScrollBehavior()
+    val navigation: @Composable () -> Unit = {
+        if (home) {
+            IconButton(onClick = onBack) {
+                Icon(MiuixIcons.Basic.Close, contentDescription = localizedText(ModuleText.CLOSE_SETTINGS))
+            }
+        } else {
+            EmbeddedSettingsIconAction(EmbeddedSvgIcon.Back, localizedText(ModuleText.BACK), onClick = onBack)
+        }
+    }
+    val actions: @Composable RowScope.() -> Unit = {
+        if (page == EmbeddedSettingsPage.PLUGINS) {
+            EmbeddedSettingsIconAction(
+                EmbeddedSvgIcon.AddCircle,
+                localizedText(ModuleText.IMPORT_ZIP),
+                enabled = plugins != null,
+            ) {
+                launchSafPicker(
+                    activity, EmbeddedSafOperation.PluginZip, "*/*",
+                    arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"),
+                )
+            }
+        } else {
+            EmbeddedSettingsIconAction(EmbeddedSvgIcon.Document, localizedText(ModuleText.SETTINGS_DETAILS_ACTION)) {
+                showEmbeddedPageDetails(activity, page, settings)
+            }
+        }
+    }
+
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        topBar = {
+            if (wide) {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                    SmallTopAppBar(
+                        title = title,
+                        modifier = Modifier.widthIn(max = 720.dp),
+                        navigationIcon = navigation,
+                        actions = actions,
+                        scrollBehavior = scrollBehavior,
+                    )
+                }
+            } else {
+                TopAppBar(
+                    title = title,
+                    subtitle = if (home) localizedText(ModuleText.MODULE_SETTINGS_SUMMARY) else "",
+                    navigationIcon = navigation,
+                    actions = actions,
+                    scrollBehavior = scrollBehavior,
+                )
+            }
+        },
+    ) { padding ->
+        Box(
+            Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding),
+            contentAlignment = Alignment.TopCenter,
+        ) {
+            Column(
+                modifier = Modifier.widthIn(max = 720.dp).fillMaxSize()
+                    .nestedScroll(scrollBehavior.nestedScrollConnection)
+                    .verticalScroll(rememberScrollState()).padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                content = content,
+            )
+        }
     }
 }
 
@@ -193,6 +280,8 @@ private fun EmbeddedSettingsHost.EmbeddedSettingsHome(
                 localizedText(settings.titleCorrectionMode.displayText)),
             EmbeddedSvgIcon.TitleMode,
         ) { onOpen(EmbeddedSettingsPage.TITLE_REGION) }
+    }
+    EmbeddedSettingsGroup {
         EmbeddedSettingLink(
             localizedText(ModuleText.ADVANCED_SETTINGS),
             if (nativeBridge.supportsStartupPagePrewarm(activity)) {
@@ -305,6 +394,7 @@ private fun EmbeddedSettingsHost.EmbeddedSettingsCategory(
                 selectedIndex = modes.indexOf(settings.titleCorrectionMode),
                 title = localizedText(ModuleText.TITLE_CORRECTION_MODE),
                 summary = localizedText(ModuleText.VALUE_RESTART_REQUIRED, localizedText(settings.titleCorrectionMode.displayText)),
+                startAction = { EmbeddedSettingsIcon(EmbeddedSvgIcon.TitleMode, modifier = Modifier.size(22.dp)) },
                 insideMargin = EmbeddedPreferencePadding,
                 showValue = false,
                 onSelectedIndexChange = { index -> onEdit { it.copy(titleCorrectionMode = modes[index]) } },

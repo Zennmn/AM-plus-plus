@@ -5,27 +5,17 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -38,35 +28,29 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.CustomAccessibilityAction
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import dev.amenhancer.module.CurrentSongDetails
 import dev.amenhancer.module.i18n.ModuleText
 import dev.amenhancer.module.model.CustomLyricsSources
 import dev.amenhancer.module.model.ModuleSettings
 import top.yukonga.miuix.kmp.basic.BasicComponent
+import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.IconButton
-import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
@@ -92,6 +76,7 @@ internal fun EmbeddedSettingsHost.EmbeddedCustomLyricsPage(
     var listRevision by remember { mutableIntStateOf(0) }
     val currentSettings by rememberUpdatedState(settings)
     val settingsChanged by rememberUpdatedState(onSettingsChanged)
+    val focusManager = LocalFocusManager.current
     val visibleGroups = remember(entries, searchText, listRevision) {
         lyricsState.update(entries, searchText)
         lyricsState.visibleGroups
@@ -131,9 +116,16 @@ internal fun EmbeddedSettingsHost.EmbeddedCustomLyricsPage(
         EmbeddedSettingsGroup {
             CurrentSongRow(song)
             SettingsDivider()
-            LyricsActionBar(
-                onAdd = { showLyricsEditor(activity, null as CustomLyricsUiGroup?, song) },
-                onTtml = {
+            EmbeddedSettingLink(
+                title = localizedText(ModuleText.ADD_LYRICS),
+                icon = EmbeddedSvgIcon.AddLyrics,
+                onClick = { showLyricsEditor(activity, null as CustomLyricsUiGroup?, song) },
+            )
+            SettingsDivider()
+            EmbeddedSettingLink(
+                title = localizedText(ModuleText.IMPORT_TTML),
+                icon = EmbeddedSvgIcon.ImportTtml,
+                onClick = {
                     launchSafPicker(
                         activity,
                         EmbeddedSafOperation.Ttml,
@@ -141,8 +133,18 @@ internal fun EmbeddedSettingsHost.EmbeddedCustomLyricsPage(
                         arrayOf("application/ttml+xml", "application/xml", "text/xml", "text/plain"),
                     )
                 },
-                onUpdate = { updateEmbeddedLyrics(activity) },
-                onBackup = { showBackupRestoreDialog(activity) },
+            )
+            SettingsDivider()
+            EmbeddedSettingLink(
+                title = localizedText(ModuleText.LYRICS_UPDATE),
+                icon = EmbeddedSvgIcon.Refresh,
+                onClick = { updateEmbeddedLyrics(activity) },
+            )
+            SettingsDivider()
+            EmbeddedSettingLink(
+                title = localizedText(ModuleText.BACKUP_AND_RESTORE),
+                icon = EmbeddedSvgIcon.BackupRestore,
+                onClick = { showBackupRestoreDialog(activity) },
             )
         }
 
@@ -161,11 +163,11 @@ internal fun EmbeddedSettingsHost.EmbeddedCustomLyricsPage(
                         listRevision++
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    insideMargin = DpSize(12.dp, 11.dp),
                     label = localizedText(ModuleText.SEARCH_LYRICS),
                     useLabelAsPlaceholder = true,
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
                     leadingIcon = {
                         EmbeddedSettingsIcon(
                             icon = EmbeddedSvgIcon.Search,
@@ -217,7 +219,7 @@ internal fun EmbeddedSettingsHost.EmbeddedCustomLyricsPage(
                             lyricsState.visibleCount,
                             lyricsState.totalCount,
                         ),
-                        fontSize = 13.sp,
+                        style = MiuixTheme.textStyles.body2,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
                 }
@@ -444,7 +446,6 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
         }
 
         EmbeddedSettingsGroup {
-            Spacer(Modifier.height(4.dp))
             visibleSources.forEachIndexed { index, source ->
                 key(source) {
                     AutomaticLyricsSourceRow(
@@ -462,8 +463,8 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
                         onMoveForAccessibility = { offset -> moveForAccessibility(source, offset) },
                     )
                 }
+                if (index < visibleSources.lastIndex) SettingsDivider()
             }
-            Spacer(Modifier.height(4.dp))
         }
     }
 }
@@ -486,95 +487,11 @@ private fun EmbeddedSettingsHost.CurrentSongRow(song: CurrentSongDetails?) {
         startAction = {
             EmbeddedSettingsIcon(
                 icon = EmbeddedSvgIcon.Music,
-                modifier = Modifier.padding(end = 12.dp).size(24.dp),
-                tint = MiuixTheme.colorScheme.primary,
+                modifier = Modifier.size(24.dp),
             )
         },
-        insideMargin = PaddingValues(start = 16.dp, top = 10.dp, end = 16.dp, bottom = 10.dp),
+        insideMargin = EmbeddedPreferencePadding,
     )
-}
-
-@Composable
-private fun EmbeddedSettingsHost.LyricsActionBar(
-    onAdd: () -> Unit,
-    onTtml: () -> Unit,
-    onUpdate: () -> Unit,
-    onBackup: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 4.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        LyricsActionButton(
-            label = localizedText(ModuleText.ADD),
-            description = ModuleText.ADD_LYRICS,
-            icon = EmbeddedSvgIcon.AddLyrics,
-            onClick = onAdd,
-            modifier = Modifier.weight(1f),
-        )
-        LyricsActionButton(
-            label = "TTML",
-            description = ModuleText.IMPORT_TTML,
-            icon = EmbeddedSvgIcon.ImportTtml,
-            onClick = onTtml,
-            modifier = Modifier.weight(1f),
-        )
-        LyricsActionButton(
-            label = localizedText(ModuleText.UPDATE),
-            description = ModuleText.LYRICS_UPDATE,
-            icon = EmbeddedSvgIcon.Refresh,
-            onClick = onUpdate,
-            modifier = Modifier.weight(1f),
-        )
-        LyricsActionButton(
-            label = localizedText(ModuleText.BACKUP),
-            description = ModuleText.BACKUP_AND_RESTORE,
-            icon = EmbeddedSvgIcon.BackupRestore,
-            onClick = onBackup,
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
-
-@Composable
-private fun EmbeddedSettingsHost.LyricsActionButton(
-    label: String,
-    description: ModuleText,
-    icon: EmbeddedSvgIcon,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val accessibleLabel = localizedText(description)
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(role = Role.Button, onClick = onClick)
-            .semantics(mergeDescendants = true) {
-                contentDescription = accessibleLabel
-            }
-            .padding(horizontal = 2.dp, vertical = 9.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        EmbeddedSettingsIcon(
-            icon = icon,
-            modifier = Modifier.size(23.dp),
-            tint = MiuixTheme.colorScheme.primary,
-        )
-        Spacer(Modifier.height(5.dp))
-        Text(
-            text = label,
-            modifier = Modifier.fillMaxWidth(),
-            fontSize = 11.5.sp,
-            fontWeight = FontWeight.Medium,
-            color = MiuixTheme.colorScheme.primary,
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
 }
 
 @Composable
@@ -606,11 +523,12 @@ private fun EmbeddedSettingsHost.CustomLyricsEntryRow(
 
     BasicComponent(
         modifier = Modifier.fillMaxWidth(),
+        title = title,
+        summary = secondary,
         startAction = {
             EmbeddedSettingsIcon(
                 icon = EmbeddedSvgIcon.CustomLyrics,
-                modifier = Modifier.padding(end = 12.dp).size(24.dp),
-                tint = MiuixTheme.colorScheme.primary,
+                modifier = Modifier.size(24.dp),
             )
         },
         endActions = {
@@ -621,7 +539,6 @@ private fun EmbeddedSettingsHost.CustomLyricsEntryRow(
             )
             IconButton(
                 onClick = onOpenActions,
-                modifier = Modifier.size(44.dp),
             ) {
                 EmbeddedSettingsIcon(
                     icon = EmbeddedSvgIcon.MoreVertical,
@@ -631,60 +548,27 @@ private fun EmbeddedSettingsHost.CustomLyricsEntryRow(
                 )
             }
         },
-        insideMargin = PaddingValues(start = 16.dp, top = 8.dp, end = 8.dp, bottom = 8.dp),
-    ) {
-        Text(
-            text = title,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Medium,
-            color = MiuixTheme.colorScheme.onSurface,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Spacer(Modifier.height(3.dp))
-        Text(
-            text = secondary,
-            fontSize = 12.sp,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
+        insideMargin = EmbeddedPreferencePadding,
+    )
 }
 
 @Composable
 private fun EmbeddedSettingsHost.EmptyLyricsState(hasEntries: Boolean) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 34.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        EmbeddedSettingsIcon(
-            icon = if (hasEntries) EmbeddedSvgIcon.DocumentSearch else EmbeddedSvgIcon.CustomLyrics,
-            modifier = Modifier.size(48.dp),
-            tint = MiuixTheme.colorScheme.disabledOnSurface,
-        )
-        Spacer(Modifier.height(10.dp))
-        Text(
-            text = localizedText(
-                if (hasEntries) ModuleText.NO_SEARCH_RESULTS else ModuleText.NO_CUSTOM_LYRICS,
-            ),
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Medium,
-            color = MiuixTheme.colorScheme.onSurfaceSecondary,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text = localizedText(
-                if (hasEntries) ModuleText.SEARCH_LYRICS_EMPTY_HINT else ModuleText.ADD_LYRICS_EMPTY_HINT,
-            ),
-            fontSize = 12.5.sp,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            textAlign = TextAlign.Center,
-        )
-    }
+    BasicComponent(
+        title = localizedText(
+            if (hasEntries) ModuleText.NO_SEARCH_RESULTS else ModuleText.NO_CUSTOM_LYRICS,
+        ),
+        summary = localizedText(
+            if (hasEntries) ModuleText.SEARCH_LYRICS_EMPTY_HINT else ModuleText.ADD_LYRICS_EMPTY_HINT,
+        ),
+        startAction = {
+            EmbeddedSettingsIcon(
+                icon = if (hasEntries) EmbeddedSvgIcon.DocumentSearch else EmbeddedSvgIcon.CustomLyrics,
+                modifier = Modifier.size(24.dp),
+            )
+        },
+        insideMargin = EmbeddedPreferencePadding,
+    )
 }
 
 @Composable
@@ -718,60 +602,28 @@ private fun EmbeddedSettingsHost.AutomaticLyricsSourceRow(
         }
     }
 
-    Surface(
+    BasicComponent(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 3.dp)
             .onGloballyPositioned { onCenterPositioned(it.positionInRoot().y + it.size.height / 2f) }
-            .graphicsLayer {
-                alpha = if (dragging) 0.96f else 1f
-                scaleX = if (dragging) 1.01f else 1f
-                scaleY = if (dragging) 1.01f else 1f
-            },
-        shape = RoundedCornerShape(12.dp),
-        color = when {
-            dragging -> MiuixTheme.colorScheme.secondaryContainerVariant
-            dropTarget -> MiuixTheme.colorScheme.tertiaryContainer
-            else -> MiuixTheme.colorScheme.secondaryContainer
-        },
-        contentColor = MiuixTheme.colorScheme.onSecondaryContainerVariant,
-        border = BorderStroke(
-            1.dp,
-            if (dropTarget) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.dividerLine,
+            .graphicsLayer { alpha = if (dragging) 0.72f else 1f },
+        title = sourceName,
+        titleColor = BasicComponentDefaults.titleColor(
+            color = if (dropTarget) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onBackground,
         ),
-        shadowElevation = if (dragging) 4.dp else 0.dp,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 56.dp)
-                .padding(start = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Surface(
-                modifier = Modifier.size(24.dp),
-                shape = CircleShape,
-                color = MiuixTheme.colorScheme.primary.copy(alpha = 0.12f),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        text = (position + 1).toString(),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MiuixTheme.colorScheme.primary,
-                    )
-                }
-            }
-            Spacer(Modifier.width(10.dp))
+        startAction = {
             Text(
-                text = sourceName,
-                modifier = Modifier.weight(1f),
-                fontSize = 14.sp,
-                color = MiuixTheme.colorScheme.onSurface,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+                text = (position + 1).toString(),
+                modifier = Modifier.width(28.dp),
+                style = MiuixTheme.textStyles.body2,
+                color = if (dropTarget) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                textAlign = TextAlign.Center,
             )
-            Surface(
+        },
+        endActions = {
+            IconButton(
+                onClick = {},
+                enabled = false,
                 modifier = Modifier
                     .size(44.dp)
                     .semantics {
@@ -807,33 +659,22 @@ private fun EmbeddedSettingsHost.AutomaticLyricsSourceRow(
                             }
                         }
                     },
-                shape = CircleShape,
-                color = Color.Transparent,
             ) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    EmbeddedSettingsIcon(
-                        icon = EmbeddedSvgIcon.DragHandle,
-                        modifier = Modifier.size(24.dp),
-                        tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    )
-                }
+                EmbeddedSettingsIcon(
+                    icon = EmbeddedSvgIcon.DragHandle,
+                    modifier = Modifier.size(24.dp),
+                    tint = if (dropTarget) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
             }
-        }
-    }
+        },
+        insideMargin = EmbeddedPreferencePadding,
+        holdDownState = dragging,
+    )
 }
 
 @Composable
 private fun SettingsDivider() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .height(1.dp)
-            .background(MiuixTheme.colorScheme.dividerLine),
-    )
+    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 }
 
 private fun EmbeddedSettingsHost.showLyricsActionsDialog(

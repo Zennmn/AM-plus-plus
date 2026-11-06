@@ -3,13 +3,10 @@ package dev.amenhancer.module.ui
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorFilter
-import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PixelFormat
-import android.graphics.RadialGradient
 import android.graphics.RectF
-import android.graphics.Shader
 import android.graphics.drawable.Drawable
 import android.graphics.Outline
 import android.graphics.Rect
@@ -17,8 +14,9 @@ import android.os.Build
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
+import top.yukonga.miuix.kmp.nav.core.NavKey
 
-internal enum class EmbeddedSettingsPage {
+internal enum class EmbeddedSettingsPage : NavKey {
     MAIN,
     CUSTOM_LYRICS,
     AUTOMATIC_LYRICS,
@@ -201,155 +199,4 @@ internal class EmbeddedG3Drawable : Drawable() {
 
     @Suppress("DEPRECATION")
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
-}
-
-
-/**
- * Code-owned rendition of the actual AM++ application icon (ic_module.xml).
- *
- * It intentionally avoids loading the module drawable through Apple Music's
- * package Context, which is subject to package-visibility failures in the
- * injected process. The mark and gradients mirror the source icon; the tile
- * radius follows the settings UI rather than the launcher artwork.
- */
-internal class EmbeddedAmppBrandDrawable(
-    private val cornerRadiusPx: Float,
-) : android.graphics.drawable.Drawable() {
-    private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val primaryPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val accentPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private var alphaValue = 255
-    private var colorFilterValue: ColorFilter? = null
-    private val tilePath = Path()
-    private val tileBounds = RectF(0f, 0f, VIEWPORT, VIEWPORT)
-    private var tileRadius = Float.NaN
-
-    private val aPath = Path().apply {
-        moveTo(407f, 326f)
-        cubicTo(386f, 339f, 376f, 357f, 366f, 380f)
-        lineTo(161f, 844f)
-        cubicTo(149f, 871f, 158f, 899f, 181f, 915f)
-        cubicTo(207f, 934f, 240f, 922f, 254f, 892f)
-        lineTo(424f, 492f)
-        cubicTo(428f, 481f, 432f, 473f, 439f, 471f)
-        cubicTo(447f, 469f, 451f, 476f, 457f, 487f)
-        lineTo(672f, 903f)
-        cubicTo(684f, 926f, 711f, 932f, 735f, 920f)
-        cubicTo(759f, 908f, 771f, 883f, 759f, 856f)
-        lineTo(504f, 359f)
-        cubicTo(494f, 338f, 475f, 322f, 454f, 317f)
-        cubicTo(438f, 313f, 421f, 317f, 407f, 326f)
-        close()
-    }
-    private val notePath = Path().apply {
-        moveTo(509f, 638f)
-        lineTo(431f, 646f)
-        cubicTo(422f, 647f, 417f, 654f, 417f, 664f)
-        lineTo(420f, 801f)
-        cubicTo(406f, 794f, 391f, 790f, 374f, 790f)
-        cubicTo(334f, 790f, 303f, 819f, 303f, 857f)
-        cubicTo(303f, 898f, 334f, 929f, 373f, 929f)
-        cubicTo(417f, 929f, 451f, 899f, 451f, 857f)
-        lineTo(451f, 739f)
-        cubicTo(451f, 726f, 457f, 719f, 469f, 717f)
-        lineTo(512f, 712f)
-        cubicTo(526f, 710f, 534f, 700f, 532f, 687f)
-        lineTo(526f, 651f)
-        cubicTo(524f, 642f, 519f, 638f, 509f, 638f)
-        close()
-    }
-    private val mPath = Path().apply {
-        moveTo(635f, 463f)
-        cubicTo(618f, 478f, 610f, 500f, 614f, 522f)
-        cubicTo(616f, 534f, 620f, 543f, 626f, 555f)
-        lineTo(724f, 740f)
-        lineTo(724f, 670f)
-        cubicTo(724f, 660f, 728f, 651f, 734f, 650f)
-        cubicTo(741f, 650f, 746f, 657f, 752f, 666f)
-        lineTo(803f, 750f)
-        cubicTo(813f, 764f, 826f, 772f, 840f, 769f)
-        cubicTo(850f, 768f, 858f, 759f, 866f, 749f)
-        lineTo(927f, 668f)
-        cubicTo(934f, 659f, 938f, 656f, 942f, 661f)
-        cubicTo(944f, 665f, 943f, 673f, 943f, 679f)
-        lineTo(943f, 885f)
-        cubicTo(943f, 911f, 965f, 930f, 991f, 930f)
-        cubicTo(1020f, 930f, 1043f, 908f, 1043f, 880f)
-        lineTo(1043f, 525f)
-        cubicTo(1043f, 495f, 1020f, 473f, 990f, 473f)
-        cubicTo(972f, 473f, 958f, 480f, 946f, 494f)
-        lineTo(833f, 636f)
-        lineTo(713f, 472f)
-        cubicTo(694f, 447f, 658f, 445f, 635f, 463f)
-        close()
-    }
-
-    override fun draw(canvas: Canvas) {
-        val box = bounds
-        if (box.width() <= 0 || box.height() <= 0) return
-        val size = minOf(box.width(), box.height()).toFloat()
-        val left = box.left + (box.width() - size) / 2f
-        val top = box.top + (box.height() - size) / 2f
-        val scale = size / VIEWPORT
-        configurePaints()
-
-        canvas.save()
-        canvas.translate(left, top)
-        canvas.scale(scale, scale)
-        val radius = (cornerRadiusPx / scale).coerceIn(0f, VIEWPORT / 2f)
-        if (tileRadius != radius) {
-            tilePath.setEmbeddedG3Rect(tileBounds, radius)
-            tileRadius = radius
-        }
-        canvas.drawPath(tilePath, backgroundPaint)
-        canvas.drawPath(aPath, primaryPaint)
-        canvas.drawPath(notePath, primaryPaint)
-        canvas.drawPath(mPath, accentPaint)
-        canvas.drawRoundRect(RectF(794f, 307f, 823f, 440f), 14.5f, 14.5f, primaryPaint)
-        canvas.drawRoundRect(RectF(746f, 358f, 879f, 388f), 15f, 15f, primaryPaint)
-        canvas.drawRoundRect(RectF(963f, 307f, 992f, 440f), 14.5f, 14.5f, primaryPaint)
-        canvas.drawRoundRect(RectF(915f, 358f, 1047f, 388f), 15f, 15f, primaryPaint)
-        canvas.restore()
-    }
-
-    private fun configurePaints() {
-        backgroundPaint.shader = RadialGradient(
-            627f, 564f, 941f,
-            intArrayOf(Color.parseColor("#FDEEEE"), Color.parseColor("#FCEBEC")),
-            null,
-            Shader.TileMode.CLAMP,
-        )
-        primaryPaint.shader = LinearGradient(
-            0f, 0f, VIEWPORT, VIEWPORT,
-            Color.parseColor("#F45F6B"),
-            Color.parseColor("#F66A72"),
-            Shader.TileMode.CLAMP,
-        )
-        accentPaint.shader = LinearGradient(
-            0f, 0f, VIEWPORT, VIEWPORT,
-            Color.parseColor("#B05B91"),
-            Color.parseColor("#AC5A8E"),
-            Shader.TileMode.CLAMP,
-        )
-        listOf(backgroundPaint, primaryPaint, accentPaint).forEach { paint ->
-            paint.alpha = alphaValue
-            paint.colorFilter = colorFilterValue
-        }
-    }
-
-    override fun setAlpha(alpha: Int) {
-        alphaValue = alpha.coerceIn(0, 255)
-        invalidateSelf()
-    }
-
-    override fun setColorFilter(colorFilter: ColorFilter?) {
-        colorFilterValue = colorFilter
-        invalidateSelf()
-    }
-
-    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
-
-    private companion object {
-        const val VIEWPORT = 1254f
-    }
 }
