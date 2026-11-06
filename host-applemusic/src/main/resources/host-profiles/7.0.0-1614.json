@@ -2731,7 +2731,7 @@
     }
   },
   "knownDegradations": [],
-  "profileRevision": 1,
+  "profileRevision": 3,
   "chrome": {
     "resources": {
       "NAVIGATION_HOST_GROUP": {
@@ -2879,7 +2879,54 @@
   "ambiguityPolicy": "reject-ambiguous",
   "legacyFirstMatchExceptions": [],
   "cjk": {
-    "splitWordGlow": true,
+    "splitWordGlow": {
+      "contractVersion": 1,
+      "foregroundLayout": 2131559453,
+      "aggregateTrimLine": 88,
+      "methods": {
+        "bind": {
+          "owner": "com.apple.android.music.player.x",
+          "name": "c0",
+          "parameters": [
+            "com.apple.android.music.ttml.javanative.model.LyricsWordVector",
+            "android.util.ArrayMap",
+            "com.apple.android.music.common.views.FullWidthAlphaGradientFlexboxLayout",
+            "int",
+            "int",
+            "boolean",
+            "boolean"
+          ],
+          "returns": "android.util.ArrayMap",
+          "static": false
+        },
+        "trim": {
+          "owner": "Hj.y",
+          "name": "t0",
+          "parameters": [
+            "java.lang.CharSequence"
+          ],
+          "returns": "java.lang.CharSequence",
+          "static": true
+        }
+      },
+      "fields": {
+        "wordLength": {
+          "owner": "com.apple.android.music.player.viewmodel.PlayerLyricsViewModel$e",
+          "name": "g",
+          "type": "int"
+        },
+        "riseFunction": {
+          "owner": "com.apple.android.music.player.i",
+          "name": "a",
+          "type": "com.apple.android.music.player.h"
+        },
+        "riseView": {
+          "owner": "com.apple.android.music.player.h",
+          "name": "a",
+          "type": "com.apple.android.music.common.views.CustomTextView"
+        }
+      }
+    },
     "foregroundTextField": "X",
     "maxSpanGlowCharacters": 3,
     "bindingOwners": [

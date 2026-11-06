@@ -83,7 +83,7 @@ object AppleMusicHostFactory {
             }
             val terminal = AppleMusicCjkTerminalGradientTarget(profile, classLoader).install()
             val splitGlow = karaokeAnimation.installSplitWordGlow(
-                profile.document.optJSONObject("cjk")?.optBoolean("splitWordGlow", false) == true,
+                profile.document.optJSONObject("cjk")?.optJSONObject("splitWordGlow"),
             )
             val repairs = listOf(parser) + listOf(alignment, terminal, splitGlow)
                 .filterNot { it is TargetCapabilityInstall.Unsupported }
