@@ -7,10 +7,9 @@ import java.util.Locale
 /**
  * One OpenAI-compatible translation pass over a Line/Word TTML document.
  *
- * The model only ever sees [texts]. Everything else - body word timings,
- * agents, whitespace, romanization, background vocals - is copied verbatim, so
- * a translation can never restructure the lyric document. [withTranslations]
- * writes the answers back as Apple's native subtitle track
+ * The model only sees the source vocals and request IDs in [translationLines].
+ * Body word timings, agents, whitespace, romanization and vocals stay in place.
+ * [withTranslations] writes the answers as Apple's native subtitle track
  * (`<text for="itunes:key">` entries under `<translation type="subtitle"
  * xml:lang="zh-Hans">`), which is the shape Apple reads, instead of asking
  * the model for XML.
@@ -33,54 +32,55 @@ import java.util.Locale
  *   keeps Japanese lyrics out of the Chinese reading even though they carry
  *   Han characters.
  *
- * [texts] holds the lines worth translating: non-blank, carrying at least one
- * letter, and not Chinese once the declared language has had its say, which
- * keeps humming and symbol-only lines out. Duplicates are kept, because
- * answers are matched to lines by position. Every other line - Chinese lines
- * inside a foreign song, humming, blanks - keeps its own text in the track,
- * since a missing entry would shift every later translation onto the wrong
- * lyric.
+ * [translationLines] holds vocals worth translating: non-blank, carrying at
+ * least one letter, and not Chinese once the declared language has had its
+ * say. Answers match request IDs, so repeated lyrics remain distinct. Chinese
+ * lines inside a foreign song, humming and blanks retain their place in the track.
  */
 public class LlmLyricsDocument private constructor(
     private val ttml: String,
     private val lines: List<LlmLine>,
-    /** Indices into [lines] that [texts] answers, in the same order. */
-    private val targets: List<Int>,
     private val insertion: LlmInsertion,
-    /** Independent vocals in paragraph order: main first, then its backgrounds. */
-    public val texts: List<String>,
-    /** Zero-based positions in [texts] that belong to background vocals. */
-    public val backgroundIndices: Set<Int>,
+    /** Main request IDs in paragraph order, each with its own backing vocals. */
+    public val translationLines: Map<String, LlmLyricsLine>,
     /** The declared root `<tt>` language, or `null` when the header omits it. */
     public val sourceLanguage: String?,
 ) {
 
     /**
      * Returns the document with an Apple-native `zh-Hans` subtitle track added,
-     * or `null` when the answers do not survive validation - a different line
-     * count, a blank answer, or a result [TtmlInputPolicy] would refuse. The
-     * caller keeps the original lyrics in that case.
+     * or `null` when the IDs or answers do not match, or [TtmlInputPolicy]
+     * would refuse the result. The caller keeps the original lyrics in that case.
      */
-    public fun withTranslations(translations: List<String>): String? {
-        if (translations.size != texts.size) return null
-        val answers = translations.map { it.trim() }
-        if (answers.any { it.isEmpty() }) return null
-        val byLine = HashMap<Int, String>(targets.size)
-        targets.forEachIndexed { position, line -> byLine[line] = answers[position] }
+    public fun withTranslations(translations: Map<String, LlmLyricsLine>): String? {
+        if (translations.keys != translationLines.keys) return null
+        for ((id, source) in translationLines) {
+            val answer = translations.getValue(id)
+            if ((answer.main == null) != (source.main == null) || answer.main?.isBlank() == true) return null
+            if (answer.background.keys != source.background.keys) return null
+        }
         val track = buildString {
             append("<translation type=\"").append(TRANSLATION_TYPE)
             append("\" xml:lang=\"").append(TRANSLATION_LANGUAGE).append("\">")
+            var paragraphTranslation: LlmLyricsLine? = null
             lines.forEachIndexed { index, line ->
                 if (line.background) {
+                    val answer = paragraphTranslation?.background?.get(line.id)
+                    val text = if (answer != null) {
+                        formatBackgroundSubtitle(answer) ?: return null
+                    } else {
+                        formatBackgroundSubtitle(line.text) ?: line.text.ifBlank { ABSENT_TEXT }
+                    }
                     append(" <span xmlns=\"").append(TTML_NAMESPACE)
                     append("\" xmlns:ttm=\"").append(TTML_METADATA_NAMESPACE)
                     append("\" ttm:role=\"").append(ROLE_BACKGROUND).append("\">")
+                    append(escapeText(text)).append("</span>")
                 } else {
+                    paragraphTranslation = translations[line.id]
                     if (index > 0) append("</text>")
                     append("<text for=\"").append(escapeAttribute(line.key)).append("\">")
+                    append(escapeText(paragraphTranslation?.main?.trim() ?: line.text.ifBlank { ABSENT_TEXT }))
                 }
-                append(escapeText(byLine[index] ?: line.text.ifBlank { ABSENT_TEXT }))
-                if (line.background) append("</span>")
             }
             append("</text></translation>")
         }
@@ -168,21 +168,30 @@ public class LlmLyricsDocument private constructor(
                 }
             }
             if (language == null && isChineseText(lines.joinToString("\n") { it.text })) return null
-            val targets = lines.indices.filter {
-                isTranslatable(lines[it].text, lines[it].language, language)
+            val translationLines = buildMap {
+                var index = 0
+                while (index < lines.size) {
+                    val main = lines[index++]
+                    val mainText = main.text.takeIf { isTranslatable(it, main.language, language) }
+                    val background = buildMap {
+                        while (index < lines.size && lines[index].background) {
+                            val vocal = lines[index++]
+                            if (isTranslatable(vocal.text, vocal.language, language)) put(vocal.id, vocal.text)
+                        }
+                    }
+                    if (mainText != null || background.isNotEmpty()) {
+                        put(main.id, LlmLyricsLine(mainText, background))
+                    }
+                }
             }
-            if (targets.isEmpty()) return null
+            if (translationLines.isEmpty()) return null
             val head = TtmlScanner.element(ttml, "head", root.contentStart)
                 ?.takeIf { it.end <= root.end }
             return LlmLyricsDocument(
                 ttml = ttml,
                 lines = lines,
-                targets = targets,
                 insertion = insertionPoint(ttml, head, root),
-                texts = targets.map { lines[it].text },
-                backgroundIndices = targets.mapIndexedNotNull { position, line ->
-                    position.takeIf { lines[line].background }
-                }.toSet(),
+                translationLines = translationLines,
                 sourceLanguage = language,
             )
         }
@@ -301,8 +310,9 @@ private val BARE_ROLE_ATTRIBUTE = attributePattern("role")
 private val LANG_ATTRIBUTE = attributePattern("xml:lang")
 private val BARE_LANG_ATTRIBUTE = attributePattern("lang")
 
-/** One independent vocal; backgrounds share their paragraph's main entry key. */
+/** One vocal. [id] stays in the model protocol; [key] anchors the native subtitle. */
 private data class LlmLine(
+    val id: String,
     val key: String,
     val text: String,
     val language: String?,
@@ -337,6 +347,25 @@ private fun roleOf(attributes: String): String? =
 
 /** Word separation lives in literal whitespace, so runs collapse to one space. */
 private fun normalizeText(raw: String): String = WHITESPACE.replace(raw, " ").trim()
+
+/** Strip complete outer pairs, then wrap nonempty backing text once in ASCII parentheses. */
+private fun formatBackgroundSubtitle(value: String): String? {
+    var start = 0
+    var end = value.length
+    while (true) {
+        while (start < end && value[start].isWhitespace()) start++
+        while (start < end && value[end - 1].isWhitespace()) end--
+        if (start == end) return null
+        val first = value[start]
+        val last = value[end - 1]
+        if ((first != '(' || last != ')') && (first != '（' || last != '）')) break
+        start++
+        end--
+    }
+    val text = value.substring(start, end)
+    if (text.any { it in "()（）" }) return null
+    return "($text)"
+}
 
 /** A line's own xml:lang attribute, which outranks the document language. */
 private fun languageOf(attributes: String): String? =
@@ -533,13 +562,18 @@ private object TtmlScanner {
         var main: LlmFrame? = null
         var key: String? = null
         var keyInsertion = -1
+        var paragraphNumber = 0
 
         fun finishParagraph(frame: LlmFrame): Boolean {
             val paragraphKey = key ?: return false
-            lines += LlmLine(paragraphKey, normalizeText(frame.text?.toString().orEmpty()), frame.language, keyInsertion)
-            backgrounds.forEach { background ->
+            val id = "L${++paragraphNumber}"
+            lines += LlmLine(
+                id, paragraphKey, normalizeText(frame.text?.toString().orEmpty()), frame.language, keyInsertion,
+            )
+            backgrounds.forEachIndexed { index, background ->
                 lines += LlmLine(
-                    paragraphKey, normalizeText(background.text?.toString().orEmpty()), background.language,
+                    "$id.bg${index + 1}", paragraphKey,
+                    normalizeText(background.text?.toString().orEmpty()), background.language,
                     keyInsertion = -1, background = true,
                 )
             }

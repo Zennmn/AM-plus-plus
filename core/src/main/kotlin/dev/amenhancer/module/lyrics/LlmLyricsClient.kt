@@ -6,6 +6,8 @@ package dev.amenhancer.module.lyrics
 // behaviour keep that provenance for THIRD_PARTY_NOTICES purposes.
 
 import dev.amenhancer.module.model.LlmLyricsThinkingEffort
+import dev.amenhancer.module.model.LlmLyricsThinkingFormat
+import dev.amenhancer.module.model.ModuleSettings
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URI
@@ -26,18 +28,50 @@ data class LlmLyricsConfig(
     val model: String = "",
     val thinkingEnabled: Boolean = false,
     val thinkingEffort: LlmLyricsThinkingEffort = LlmLyricsThinkingEffort.DEFAULT,
+    val thinkingFormat: LlmLyricsThinkingFormat = LlmLyricsThinkingFormat.NONE,
 ) {
     /** Normalized `.../chat/completions` target, or null when the address is unusable. */
     val endpoint: String? get() = LlmLyricsEndpoint.normalize(baseUrl)
 
     val normalizedModel: String get() = model.trim()
 
-    /** A saved effort has no request or cache effect while thinking is disabled. */
+    /** Only the format that sends `thinking.type` uses the switch. */
+    val effectiveThinkingEnabled: Boolean
+        get() = thinkingFormat == LlmLyricsThinkingFormat.THINKING_TYPE && thinkingEnabled
+
+    /** The strength sent on the wire; unsupported or inactive saved choices stay in settings. */
     val effectiveThinkingEffort: LlmLyricsThinkingEffort
-        get() = if (thinkingEnabled) thinkingEffort else LlmLyricsThinkingEffort.DEFAULT
+        get() = thinkingEffort.takeIf {
+            thinkingFormat.supportsEffort(it) &&
+                (thinkingFormat != LlmLyricsThinkingFormat.THINKING_TYPE || effectiveThinkingEnabled)
+        } ?: LlmLyricsThinkingEffort.DEFAULT
 
     val isConfigured: Boolean get() = endpoint != null && normalizedModel.isNotEmpty()
+
+    companion object {
+        /** Keep request snapshots equal when only an inactive thinking setting changes. */
+        fun fromSettings(settings: ModuleSettings): LlmLyricsConfig {
+            val config = LlmLyricsConfig(
+                baseUrl = settings.llmLyricsBaseUrl,
+                apiKey = settings.llmLyricsApiKey,
+                model = settings.llmLyricsModel,
+                thinkingEnabled = settings.llmLyricsThinkingEnabled,
+                thinkingEffort = settings.llmLyricsThinkingEffort,
+                thinkingFormat = settings.llmLyricsThinkingFormat,
+            )
+            return config.copy(
+                thinkingEnabled = config.effectiveThinkingEnabled,
+                thinkingEffort = config.effectiveThinkingEffort,
+            )
+        }
+    }
 }
+
+/** Source or translated vocals for one request ID. Null main means only backing vocals are targeted. */
+data class LlmLyricsLine(
+    val main: String?,
+    val background: Map<String, String> = emptyMap(),
+)
 
 /** Address validation mirroring the upstream customLLMEndpoint helper. */
 object LlmLyricsEndpoint {
@@ -101,29 +135,27 @@ class LlmLyricsClient(
      * Translates [texts] line by line into [TARGET_LANGUAGE]. Returns one
      * translated string per input line, or null when the configuration is
      * unusable, the call failed, ran out of time, was cancelled, or the answer
-     * did not match the input line count.
+     * did not cover the requested main and background IDs.
      */
     fun translate(
         config: LlmLyricsConfig,
-        texts: List<String>,
+        lines: Map<String, LlmLyricsLine>,
         title: String? = null,
         artist: String? = null,
         sourceLanguage: String? = null,
-        backgroundIndices: Set<Int> = emptySet(),
         isCancelled: () -> Boolean = { false },
-    ): List<String>? {
-        if (texts.isEmpty()) return emptyList()
+    ): Map<String, LlmLyricsLine>? {
+        if (lines.isEmpty()) return emptyMap()
         val endpoint = config.endpoint ?: return null
         val model = config.normalizedModel
         if (model.isEmpty()) return null
         if (isCancelled()) return null
-        if (!isWithinInputBounds(texts)) return null
-        if (backgroundIndices.any { it !in texts.indices }) return null
-        val body = requestBody(config, texts, title, artist, sourceLanguage, backgroundIndices) ?: return null
+        if (!isWithinInputBounds(lines)) return null
+        val body = requestBody(config, lines, title, artist, sourceLanguage) ?: return null
         val response = post(endpoint, config.apiKey, body, isCancelled) ?: return null
         if (isCancelled()) return null
         val content = messageContent(response) ?: return null
-        return parseTranslation(content, texts)
+        return parseTranslation(content, lines)
     }
 
     /** Only fixed reason codes/statuses may cross into the settings UI. */
@@ -281,30 +313,32 @@ class LlmLyricsClient(
 
     private fun requestBody(
         config: LlmLyricsConfig,
-        texts: List<String>,
+        lines: Map<String, LlmLyricsLine>,
         title: String?,
         artist: String?,
         sourceLanguage: String?,
-        backgroundIndices: Set<Int>,
     ): ByteArray? = runCatching {
         val messages = JSONArray()
             .put(JSONObject().put("role", "system").put("content", SYSTEM_PROMPT))
             .put(
                 JSONObject()
                     .put("role", "user")
-                    .put("content", translationPrompt(texts, title, artist, sourceLanguage, backgroundIndices)),
+                    .put("content", translationPrompt(lines, title, artist, sourceLanguage)),
             )
         encodeRequest(config, messages)
     }.getOrNull()
 
-    /** Translation and the manual check share the selected thinking extension. */
+    /** Translation and the manual check use the same explicitly selected request fields. */
     private fun encodeRequest(config: LlmLyricsConfig, messages: JSONArray): ByteArray? = runCatching {
         val bytes = JSONObject()
             .put("model", config.normalizedModel)
             .put("stream", false)
-            .put("thinking", JSONObject().put("type", if (config.thinkingEnabled) "enabled" else "disabled"))
             .put("messages", messages)
             .apply {
+                if (config.thinkingFormat == LlmLyricsThinkingFormat.THINKING_TYPE) {
+                    val type = if (config.effectiveThinkingEnabled) "enabled" else "disabled"
+                    put("thinking", JSONObject().put("type", type))
+                }
                 val effort = config.effectiveThinkingEffort
                 if (effort != LlmLyricsThinkingEffort.DEFAULT) {
                     put("reasoning_effort", effort.storageValue)
@@ -315,18 +349,13 @@ class LlmLyricsClient(
         bytes.takeIf { it.size <= MAX_REQUEST_BYTES }
     }.getOrNull()
 
-    /**
-     * Fixed Simplified Chinese translation style with the existing custom-LLM
-     * input/output contract. This port exposes no prompt setting.
-     */
+    /** Fixed Simplified Chinese style and an ID-based main/background contract. */
     private fun translationPrompt(
-        texts: List<String>,
+        lines: Map<String, LlmLyricsLine>,
         title: String?,
         artist: String?,
         sourceLanguage: String?,
-        backgroundIndices: Set<Int>,
     ): String {
-        val targetLang = TARGET_LANGUAGE
         val songContext = if (!title.isNullOrBlank() && !artist.isNullOrBlank()) {
             "Song Metadata: Title=\"$title\", Artist=\"$artist\""
         } else {
@@ -335,8 +364,21 @@ class LlmLyricsClient(
         val sourceLangHint = sourceLanguage?.takeIf(String::isNotBlank)
             ?.let { "Source Languages Present: $it" }
             ?: "Source Languages: Mixed/Unknown"
-        val linesJson = JSONArray(texts).toString(2)
-        val base = """### ROLE
+        val input = JSONObject().put("lines", JSONArray().apply {
+            lines.forEach { (id, line) ->
+                val background = JSONArray()
+                line.background.forEach { (backgroundId, text) ->
+                    background.put(JSONObject().put("id", backgroundId).put("text", text))
+                }
+                put(
+                    JSONObject()
+                        .put("id", id)
+                        .put("text", line.main ?: JSONObject.NULL)
+                        .put("background", background),
+                )
+            }
+        })
+        return """### ROLE
 你是一位专业的歌词译者，请将提供的歌词翻译成简体中文。
 
 ### CONTEXT
@@ -354,67 +396,77 @@ ${sourceLangHint}
 - 和声也要翻译完整，不能遗漏；不要直接重复主唱译文充数。
 - 中文译文不要使用逗号和句号。
 
-### TASK
-Input Lyrics:
-${linesJson}
-
-IMPORTANT OUTPUT FORMAT:
-Respond with ONLY a valid JSON object matching the exact structure below. Do not wrap it in Markdown code blocks (```json). Just return the raw JSON string.
+### 输出格式
+只返回一个 JSON 对象，不要加 Markdown 或解释。逐字复制每个主句和和声的 ID，每个 ID 恰好出现一次。
+主唱和每条和声分别翻译。和声留在所属主句的 background 数组里，译文只写文字，不加外层括号。
+没有待译和声时返回 "background":[]。主句的 text 为 null 时，表示只翻译它的和声，主句返回 "translation":null。
+格式示例：
 {
-  "translated_lyrics": [
-    "translated line 1",
-    "translated line 2"
-  ],
-  "target_language": "${targetLang}",
-  "source_language": ["detected source language(s)"]
-}"""
-        return base +
-            "\n\nINPUT LINES:\n${JSONArray(texts).toString()}\n" +
-            "Background vocal positions (zero-based): ${JSONArray(backgroundIndices.sorted())}. " +
-            "Each array entry is an independent main or background vocal. " +
-            "Translate every entry separately; never merge a background with its main vocal. " +
-            "Return only JSON: {\"translated_lyrics\": [one translated string for each input line]}. " +
-            "Keep exactly ${texts.size} lines in order."
+  "lines": [
+    {"id":"L1","translation":"留在我身边","background":[{"id":"L1.bg1","translation":"别走"}]}
+  ]
+}
+
+### 原文
+$input"""
     }
 
-    /**
-     * Strictly accepts a bare JSON array or "translated_lyrics", requires one
-     * string per input line, and rejects an empty answer for a source line that
-     * carries text. Whitespace-only source lines may stay blank.
-     */
-    private fun parseTranslation(content: String, texts: List<String>): List<String>? {
+    /** Accepts a reordered reply only when every requested vocal is covered under the right main ID. */
+    private fun parseTranslation(
+        content: String,
+        lines: Map<String, LlmLyricsLine>,
+    ): Map<String, LlmLyricsLine>? {
         val cleaned = TRAILING_JSON_FENCE
             .replace(LEADING_JSON_FENCE.replace(content.trim(), ""), "")
             .trim()
-        if (cleaned.isEmpty()) return null
-        val parsed = runCatching {
-            if (cleaned.startsWith("[")) JSONArray(cleaned) else JSONObject(cleaned)
-        }.getOrNull() ?: return null
-        val lines = when (parsed) {
-            is JSONArray -> parsed
-            is JSONObject -> parsed.opt("translated_lyrics") as? JSONArray
-            else -> null
-        } ?: return null
-        if (lines.length() != texts.size) return null
-        return buildList(lines.length()) {
-            for (index in 0 until lines.length()) {
-                val value = lines.opt(index)
-                if (value !is String) return null
-                if (texts[index].isNotBlank() && value.isBlank()) return null
-                add(value)
+        val rows = runCatching { JSONObject(cleaned).optJSONArray("lines") }.getOrNull() ?: return null
+        return parseById(rows, lines.keys) { id, row ->
+            val source = lines.getValue(id)
+            val mainValue = row.opt("translation")
+            val main = if (source.main == null) {
+                if (mainValue !== JSONObject.NULL) return null
+                null
+            } else {
+                (mainValue as? String)?.takeIf(String::isNotBlank) ?: return null
             }
+            val background = parseById(row.optJSONArray("background"), source.background.keys) { _, vocal ->
+                (vocal.opt("translation") as? String)?.takeIf(String::isNotBlank)
+            } ?: return null
+            LlmLyricsLine(main, background)
         }
     }
 
-    private fun isWithinInputBounds(texts: List<String>): Boolean {
-        if (texts.size > MAX_LINES) return false
-        var totalChars = 0
-        texts.forEach { line ->
-            if (line.length > MAX_LINE_CHARS) return false
-            totalChars += line.length
-            if (totalChars > MAX_TOTAL_CHARS) return false
+    private inline fun <T : Any> parseById(
+        rows: JSONArray?,
+        expected: Set<String>,
+        valueOf: (String, JSONObject) -> T?,
+    ): Map<String, T>? {
+        if (rows == null || rows.length() != expected.size) return null
+        val values = HashMap<String, T>(expected.size)
+        for (index in 0 until rows.length()) {
+            val row = rows.optJSONObject(index) ?: return null
+            val id = row.opt("id") as? String ?: return null
+            if (id !in expected || id in values) return null
+            values[id] = valueOf(id, row) ?: return null
         }
-        return true
+        return values
+    }
+
+    private fun isWithinInputBounds(lines: Map<String, LlmLyricsLine>): Boolean {
+        if (lines.size > MAX_LINES) return false
+        var vocals = 0
+        var totalChars = 0
+        fun addText(text: String): Boolean {
+            vocals++
+            if (vocals > MAX_LINES || text.length > MAX_LINE_CHARS || text.isBlank()) return false
+            totalChars += text.length
+            return totalChars <= MAX_TOTAL_CHARS
+        }
+        return lines.all { (id, line) ->
+            id.isNotBlank() && (line.main != null || line.background.isNotEmpty()) &&
+                (line.main == null || addText(line.main)) &&
+                line.background.all { (backgroundId, text) -> backgroundId.isNotBlank() && addText(text) }
+        }
     }
 
     companion object {
@@ -422,7 +474,7 @@ Respond with ONLY a valid JSON object matching the exact structure below. Do not
         const val TARGET_LANGUAGE = "zh-Hans"
 
         /** Bump when prompt or answer changes require invalidating cached translations. */
-        const val PROMPT_VERSION = 2
+        const val PROMPT_VERSION = 3
 
         const val DEFAULT_CONNECT_TIMEOUT_MS = 10_000
         const val DEFAULT_READ_TIMEOUT_MS = 60_000
@@ -440,7 +492,7 @@ Respond with ONLY a valid JSON object matching the exact structure below. Do not
         private const val WATCHDOG_JOIN_MS = 1_000L
         private const val NANOS_PER_MILLI = 1_000_000L
         private const val SYSTEM_PROMPT =
-            "Translate song lyrics. Return only the requested JSON, with one string per input line."
+            "Translate song lyrics. Return only the requested JSON and copy every vocal ID exactly."
         private val LEADING_JSON_FENCE = Regex("^```(?:json)?\\s*", RegexOption.IGNORE_CASE)
         private val TRAILING_JSON_FENCE = Regex("\\s*```$", RegexOption.IGNORE_CASE)
     }
