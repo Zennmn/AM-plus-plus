@@ -39,8 +39,8 @@ private fun canMergeCustomLyricsEntries(
 /**
  * Android-free pagination and search seam behind the custom lyrics page.
  *
- * The page renders only [visibleEntries] (at most [pageSize] at first) and
- * reveals more through [loadMore]; a case-insensitive query narrows by
+ * The page renders only [visibleEntries] (at most [DEFAULT_INITIAL_PAGE_SIZE] at first) and
+ * reveals [pageSize] more through [loadMore]; a case-insensitive query narrows by
  * display name or Apple Music ID before pagination applies.
  *
  * Contract:
@@ -85,7 +85,9 @@ class CustomLyricsListState(
 
     private fun converge() {
         revealed = minOf(revealed, totalCount)
-        if (revealed == 0 && totalCount > 0) revealed = minOf(pageSize, totalCount)
+        if (revealed == 0 && totalCount > 0) {
+            revealed = minOf(DEFAULT_INITIAL_PAGE_SIZE, pageSize, totalCount)
+        }
     }
 
     private fun filtered(): List<CustomLyricsUiGroup> {
@@ -100,6 +102,7 @@ class CustomLyricsListState(
     }
 
     companion object {
+        const val DEFAULT_INITIAL_PAGE_SIZE = 20
         const val DEFAULT_PAGE_SIZE = 50
     }
 }

@@ -23,17 +23,17 @@ class CustomLyricsListStateTest {
         (0 until count).map { index -> entry(offset + index, "Song ${offset + index}") }
 
     @Test
-    fun `first update reveals only the default page size of a large dataset`() {
+    fun `first update reveals only the default initial window of a large dataset`() {
         val state = CustomLyricsListState()
         state.update(numbered(1000))
         assertEquals(1000, state.totalCount)
-        assertEquals(50, state.visibleCount)
-        assertEquals(50, state.visibleEntries.size)
+        assertEquals(20, state.visibleCount)
+        assertEquals(20, state.visibleEntries.size)
         assertTrue(state.hasMore)
     }
 
     @Test
-    fun `reveals everything when the dataset fits one page`() {
+    fun `reveals everything when the dataset fits the initial window`() {
         val state = CustomLyricsListState()
         state.update(numbered(3))
         assertEquals(3, state.visibleCount)
@@ -44,9 +44,9 @@ class CustomLyricsListStateTest {
     fun `loads more in page sized increments up to the total`() {
         val state = CustomLyricsListState()
         state.update(numbered(120))
-        assertEquals(50, state.visibleCount)
+        assertEquals(20, state.visibleCount)
         state.loadMore()
-        assertEquals(100, state.visibleCount)
+        assertEquals(70, state.visibleCount)
         state.loadMore()
         assertEquals(120, state.visibleCount)
         assertFalse(state.hasMore)
@@ -116,18 +116,18 @@ class CustomLyricsListStateTest {
     }
 
     @Test
-    fun `search empties and then recovers the window when cleared`() {
+    fun `search empties and then resets the initial window when cleared`() {
         val state = CustomLyricsListState()
         state.update(numbered(1000))
         state.loadMore()
-        assertEquals(100, state.visibleCount)
+        assertEquals(70, state.visibleCount)
         state.setQuery("no such song")
         assertEquals(0, state.totalCount)
         assertEquals(0, state.visibleCount)
         assertFalse(state.hasMore)
         state.setQuery("")
         assertEquals(1000, state.totalCount)
-        assertEquals(50, state.visibleCount)
+        assertEquals(20, state.visibleCount)
         assertTrue(state.hasMore)
     }
 
@@ -138,14 +138,14 @@ class CustomLyricsListStateTest {
         state.update(before)
         state.loadMore()
         state.loadMore()
-        assertEquals(150, state.visibleCount)
+        assertEquals(120, state.visibleCount)
 
         val after = before.filter { it.appleMusicId % 10L != 0L }
         state.update(after)
 
         assertEquals(900, state.totalCount)
-        assertEquals(150, state.visibleCount)
-        assertEquals(after.take(150), state.visibleEntries)
+        assertEquals(120, state.visibleCount)
+        assertEquals(after.take(120), state.visibleEntries)
         assertTrue(state.visibleEntries.none { it.appleMusicId % 10L == 0L })
     }
 

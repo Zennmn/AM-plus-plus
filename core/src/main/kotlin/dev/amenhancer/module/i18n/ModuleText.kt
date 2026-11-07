@@ -69,6 +69,7 @@ enum class ModuleText(internal val english: String, internal val chinese: String
     CLOSE("Close", "关闭"),
     SAVED_RESTART("Saved. Restart Apple Music to apply.", "已保存，重启 Apple Music 后生效"),
     PLUGIN_RESTART_NOTICE("Enabling, disabling, updating and deleting plugins take effect after restarting Apple Music.", "启用、停用、更新和删除均在重启 Apple Music 后生效。"),
+    PLUGIN_IMPORT_HINT("Tap “+” in the top-right corner to add a plugin.", "点击右上角“+”号添加插件。"),
     LOAD_ERROR("Loading error: %1\$s", "加载错误：%1\$s"),
     PLUGINS_READ_FAILED("Cannot read plugins: %1\$s", "无法读取插件：%1\$s"),
     NO_PLUGINS("No plugins imported yet", "尚未导入插件"),

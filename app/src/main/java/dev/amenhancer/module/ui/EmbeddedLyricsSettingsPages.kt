@@ -583,7 +583,6 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
                         position = index,
                         dragging = isDragging,
                         released = dragSettleJob != null,
-                        dropTarget = dragTargetIndex == index && !isDragging,
                         offsetY = if (isDragging) dragDistancePx else dragYieldOffset(index),
                         animateOffset = dragStartOrder != null && !isDragging,
                         showDivider = index < visibleSources.lastIndex,
@@ -753,7 +752,6 @@ private fun EmbeddedSettingsHost.AutomaticLyricsSourceRow(
     position: Int,
     dragging: Boolean,
     released: Boolean,
-    dropTarget: Boolean,
     offsetY: Float,
     animateOffset: Boolean,
     showDivider: Boolean,
@@ -828,22 +826,16 @@ private fun EmbeddedSettingsHost.AutomaticLyricsSourceRow(
                     },
                 title = sourceName,
                 titleColor = BasicComponentDefaults.titleColor(
-                    color = when {
-                        dropTarget -> MiuixTheme.colorScheme.primary
-                        lifted -> MiuixTheme.colorScheme.onSecondaryContainerVariant
-                        else -> MiuixTheme.colorScheme.onBackground
-                    },
+                    color = if (lifted) MiuixTheme.colorScheme.onSecondaryContainerVariant
+                        else MiuixTheme.colorScheme.onBackground,
                 ),
                 startAction = {
                     Text(
                         text = (position + 1).toString(),
                         modifier = Modifier.width(28.dp),
                         style = MiuixTheme.textStyles.body2,
-                        color = when {
-                            dropTarget -> MiuixTheme.colorScheme.primary
-                            lifted -> MiuixTheme.colorScheme.onSecondaryContainerVariant
-                            else -> MiuixTheme.colorScheme.onSurfaceVariantSummary
-                        },
+                        color = if (lifted) MiuixTheme.colorScheme.onSecondaryContainerVariant
+                            else MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         textAlign = TextAlign.Center,
                     )
                 },
@@ -873,11 +865,8 @@ private fun EmbeddedSettingsHost.AutomaticLyricsSourceRow(
                         EmbeddedSettingsIcon(
                             icon = EmbeddedSvgIcon.DragHandle,
                             modifier = Modifier.size(24.dp),
-                            tint = when {
-                                dropTarget -> MiuixTheme.colorScheme.primary
-                                lifted -> MiuixTheme.colorScheme.onSecondaryContainerVariant
-                                else -> MiuixTheme.colorScheme.onSurfaceVariantSummary
-                            },
+                            tint = if (lifted) MiuixTheme.colorScheme.onSecondaryContainerVariant
+                                else MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
                     }
                 },

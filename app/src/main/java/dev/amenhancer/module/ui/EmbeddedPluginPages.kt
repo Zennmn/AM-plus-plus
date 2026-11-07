@@ -177,7 +177,8 @@ internal fun EmbeddedSettingsHost.EmbeddedPluginManagementPage(
     ) {
         EmbeddedSettingsGroup {
             Text(
-                text = localizedText(ModuleText.PLUGIN_RESTART_NOTICE),
+                text = localizedText(ModuleText.PLUGIN_IMPORT_HINT) + "\n" +
+                    localizedText(ModuleText.PLUGIN_RESTART_NOTICE),
                 modifier = Modifier.fillMaxWidth().padding(EmbeddedPreferencePadding),
                 style = MiuixTheme.textStyles.body2,
                 fontWeight = FontWeight.Medium,
