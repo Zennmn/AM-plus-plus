@@ -3,7 +3,6 @@ package dev.amenhancer.module.ui
 import dev.amenhancer.module.i18n.ModuleText
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.app.Application
 import android.app.Dialog
 import android.content.Intent
@@ -22,6 +21,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.compose.runtime.mutableStateListOf
 import java.lang.ref.WeakReference
 import java.util.ArrayDeque
 import java.util.concurrent.Executors
@@ -40,11 +40,12 @@ internal class EmbeddedSettingsHost private constructor(
     internal var dialogReference: WeakReference<Dialog>? = null
     internal var pageRefresh: (() -> Unit)? = null
     internal var plugins: dev.amenhancer.plugin.runtime.PluginManager? = null
-    internal val pluginDialogs = mutableListOf<WeakReference<Dialog>>()
-    internal val themedDialogs = mutableListOf<WeakReference<AlertDialog>>()
+    internal val auxiliaryDialogs = mutableStateListOf<EmbeddedMiuixDialogEntry>()
+    internal var auxiliaryDialogSequence = 0L
     internal val customLyricsListState = CustomLyricsListState()
     internal var customLyricsSearchQuery = ""
-    internal var pendingTtmlImport: ((String) -> Unit)? = null
+    internal var pendingTtmlImport: ((String?) -> Unit)? = null
+    internal var pendingSafDialog: WeakReference<Dialog>? = null
     internal var buttonReference: WeakReference<View>? = null
     internal var settingsOptionReference: WeakReference<View>? = null
     internal var activeActivityId: String? = null
@@ -131,10 +132,16 @@ internal class EmbeddedSettingsHost private constructor(
         data: Intent?,
     ): Boolean {
         if (activityReference?.get() !== activity || activeActivityRole == null) return false
-        return when (val route = safRouter.route(requestCode, resultCode, data?.dataString)) {
+        val route = safRouter.route(requestCode, resultCode, data?.dataString)
+        if (route == EmbeddedSafRoute.Ignored) return false
+        val owner = pendingSafDialog?.get()
+        pendingSafDialog = null
+        val activeOwner = activeSettingsDialog(activity)
+        if (owner == null || owner !== activeOwner) return true
+        return when (route) {
             EmbeddedSafRoute.Ignored -> false
             is EmbeddedSafRoute.Canceled -> {
-                if (route.operation == EmbeddedSafOperation.Ttml) pendingTtmlImport = null
+                if (route.operation == EmbeddedSafOperation.EditorTtml) pendingTtmlImport = null
                 currentActivity()?.let { activity ->
                     Toast.makeText(activity, localizedText(ModuleText.NO_FILE_SELECTED), Toast.LENGTH_SHORT).show()
                 }
@@ -559,14 +566,50 @@ internal class EmbeddedSettingsHost private constructor(
     }
 
     internal fun dismissDialog() {
-        themedDialogs.toList().forEach { it.get()?.dismiss() }
-        themedDialogs.clear()
-        pluginDialogs.toList().forEach { it.get()?.dismiss() }
-        pluginDialogs.clear()
-        pendingTtmlImport = null
-        dialogReference?.get()?.dismiss()
+        val dialog = dialogReference?.get()
         dialogReference = null
         pageRefresh = null
+        dismissAuxiliarySettingsDialogs()
+        dialog?.dismiss()
+    }
+
+    internal fun dismissAuxiliarySettingsDialogs() {
+        pendingTtmlImport = null
+        pendingSafDialog = null
+        auxiliaryDialogs.toList().asReversed().forEach { entry ->
+            requestEmbeddedMiuixDialogDismiss(entry)
+            releaseEmbeddedMiuixDialog(entry)
+        }
+    }
+
+    internal fun activeSettingsDialog(activity: Activity): Dialog? {
+        if (!registered || activity.isFinishing || activity.isDestroyed) return null
+        if (activityReference?.get() !== activity) return null
+        return dialogReference?.get()?.takeIf {
+            it.isShowing && it.ownerActivity === activity
+        }
+    }
+
+    internal fun requestEmbeddedMiuixDialogDismiss(entry: EmbeddedMiuixDialogEntry) {
+        if (entry.released || entry.closeRequested) return
+        entry.closeRequested = true
+        entry.visible.value = false
+        if (!entry.contentShown) releaseEmbeddedMiuixDialog(entry)
+    }
+
+    internal fun markEmbeddedMiuixDialogContentShown(entry: EmbeddedMiuixDialogEntry) {
+        if (!entry.released) entry.contentShown = true
+    }
+
+    internal fun releaseEmbeddedMiuixDialog(entry: EmbeddedMiuixDialogEntry) {
+        if (entry.released) return
+        entry.released = true
+        entry.closeRequested = true
+        entry.visible.value = false
+        auxiliaryDialogs.removeAll { it === entry }
+        if (entry.onDismissDelivered) return
+        entry.onDismissDelivered = true
+        entry.onDismiss?.invoke()
     }
 
     internal fun currentActivity(): Activity? = activityReference?.get()

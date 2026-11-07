@@ -5,15 +5,13 @@ import android.graphics.ColorFilter
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PixelFormat
-import android.graphics.RectF
 import android.graphics.drawable.Drawable
 import androidx.core.graphics.PathParser
 
 /**
  * Resource-independent, 24 x 24 SVG glyphs for the embedded settings UI.
  *
- * Icons use a shared 1.75-unit rounded stroke. The application mark is owned by
- * [EmbeddedAmppBrandDrawable] and intentionally is not part of this catalogue.
+ * Icons use a shared 1.75-unit rounded stroke. The application mark is not part of this catalogue.
  */
 internal enum class EmbeddedSvgIcon {
     // Base actions and shared controls.
@@ -72,9 +70,6 @@ internal enum class EmbeddedSvgIcon {
     Conflict,
 }
 
-/** Marks drawables that own their SVG fill rather than inheriting ImageView tint. */
-internal interface EmbeddedOwnColorDrawable
-
 private data class EmbeddedSvgSpec(
     val pathData: String,
     val fillColor: Int = EmbeddedSettingsPalette.Light.primary,
@@ -92,13 +87,6 @@ private data class EmbeddedSvgSpec(
         strokeWidth = this@EmbeddedSvgSpec.strokeWidth
     }
 
-    val endInsetFraction: Float by lazy {
-        val stroke = Path()
-        strokePaint().getFillPath(path, stroke)
-        val bounds = RectF()
-        stroke.computeBounds(bounds, true)
-        ((viewport - bounds.right) / viewport).coerceIn(0f, 1f)
-    }
 }
 
 private const val DEFAULT_STROKE = 1.75f
@@ -340,77 +328,20 @@ internal object EmbeddedSettingsSvgAssets {
     fun drawable(
         icon: EmbeddedSvgIcon,
         fillColor: Int? = null,
-        followsPalette: Boolean = false,
     ): Drawable? = runCatching {
-        EmbeddedSvgPathDrawable(
-            icon = icon,
-            spec = specs.getValue(icon),
-            initialFillColor = fillColor,
-            tintOriginal = null,
-            followsPalette = followsPalette,
-        )
+        val spec = specs.getValue(icon)
+        EmbeddedSvgPathDrawable(spec, fillColor ?: spec.fillColor)
     }.getOrNull()
-
-    fun glyphDrawable(icon: EmbeddedSvgIcon, tintOriginal: Int): Drawable? = runCatching {
-        EmbeddedSvgPathDrawable(
-            icon = icon,
-            spec = specs.getValue(icon),
-            initialFillColor = null,
-            tintOriginal = tintOriginal,
-            followsPalette = false,
-        )
-    }.getOrNull()
-
-    /** Optical whitespace comes from the same stroked path used for drawing. */
-    fun endInset(icon: EmbeddedSvgIcon, iconSize: Int): Float =
-        specs.getValue(icon).endInsetFraction * iconSize
-}
-
-internal fun EmbeddedGlyphKind.toSvgIcon(): EmbeddedSvgIcon = when (this) {
-    EmbeddedGlyphKind.Music -> EmbeddedSvgIcon.Music
-    EmbeddedGlyphKind.Exchange -> EmbeddedSvgIcon.Exchange
-    EmbeddedGlyphKind.Github -> EmbeddedSvgIcon.GitHubSync
-    EmbeddedGlyphKind.CloudBackup -> EmbeddedSvgIcon.BackupRestore
-    EmbeddedGlyphKind.DocumentSearch -> EmbeddedSvgIcon.DocumentSearch
-    EmbeddedGlyphKind.TabletDualPane -> EmbeddedSvgIcon.TabletDualPane
-    EmbeddedGlyphKind.BottomBar -> EmbeddedSvgIcon.BottomBar
-    EmbeddedGlyphKind.VideoDisplay -> EmbeddedSvgIcon.VideoDisplay
-    EmbeddedGlyphKind.Glass -> EmbeddedSvgIcon.Glass
-    EmbeddedGlyphKind.LyricsBlur -> EmbeddedSvgIcon.LyricsBlur
-    EmbeddedGlyphKind.Document -> EmbeddedSvgIcon.Document
-    EmbeddedGlyphKind.Translate -> EmbeddedSvgIcon.Translation
-    EmbeddedGlyphKind.Refresh -> EmbeddedSvgIcon.Refresh
-    EmbeddedGlyphKind.AddCircle -> EmbeddedSvgIcon.AddCircle
-    EmbeddedGlyphKind.TtmlDocument -> EmbeddedSvgIcon.TtmlDocument
-    EmbeddedGlyphKind.Search -> EmbeddedSvgIcon.Search
-    EmbeddedGlyphKind.Edit -> EmbeddedSvgIcon.Edit
-    EmbeddedGlyphKind.Delete -> EmbeddedSvgIcon.Delete
-    EmbeddedGlyphKind.BackArrow -> EmbeddedSvgIcon.Back
-    EmbeddedGlyphKind.ChevronRight -> EmbeddedSvgIcon.ChevronRight
-    EmbeddedGlyphKind.MoreVertical -> EmbeddedSvgIcon.MoreVertical
 }
 
 private class EmbeddedSvgPathDrawable(
-    private val icon: EmbeddedSvgIcon,
     private val spec: EmbeddedSvgSpec,
-    initialFillColor: Int?,
-    private val tintOriginal: Int?,
-    private val followsPalette: Boolean,
-) : Drawable(), EmbeddedOwnColorDrawable, EmbeddedPaletteDrawable {
-    private var fillColor = initialFillColor ?: spec.fillColor
+    private val fillColor: Int,
+) : Drawable() {
     private val path = spec.path
     private val paint = spec.strokePaint()
     private var alphaValue = 255
     private var colorFilterValue: ColorFilter? = null
-
-    override fun applyPalette(colors: EmbeddedSettingsColors) {
-        fillColor = when {
-            tintOriginal != null -> colors.iconColor(tintOriginal)
-            followsPalette -> embeddedSvgColor(icon, colors)
-            else -> fillColor
-        }
-        invalidateSelf()
-    }
 
     override fun draw(canvas: Canvas) {
         val box = bounds
@@ -420,7 +351,7 @@ private class EmbeddedSvgPathDrawable(
         val top = box.top + (box.height() - size) / 2f
         val scale = size / spec.viewport
         paint.color = fillColor
-        paint.alpha = alphaValue
+        paint.alpha = android.graphics.Color.alpha(fillColor) * alphaValue / 255
         paint.colorFilter = colorFilterValue
 
         canvas.save()

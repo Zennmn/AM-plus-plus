@@ -145,7 +145,7 @@
 
 ## 从源码构建
 
-环境：JDK 17、Android SDK 37、Build Tools 37.0.0，使用项目自带的 Gradle Wrapper。
+环境：JDK 21、Android SDK 37、Build Tools 37.0.0，使用项目自带的 Gradle Wrapper。
 
 Windows：
 

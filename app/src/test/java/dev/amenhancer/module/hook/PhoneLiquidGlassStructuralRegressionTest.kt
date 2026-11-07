@@ -65,19 +65,20 @@ class PhoneLiquidGlassStructuralRegressionTest {
         assertTrue(storage.contains("ampp-embedded-settings"))
         assertTrue(client.contains("valuesProvider"))
         assertFalse(settings.contains("手机 Liquid Glass"))
-        assertTrue(settings.contains("phoneLiquidGlassEnabled = it"))
+        assertTrue(settings.contains("phoneLiquidGlassEnabled = value"))
         // The height/blur extras are add-ons of the liquid-glass toggle: their rows must
         // stay gated behind it and their values must live in the settings model.
         assertTrue(models.contains("val phoneLiquidGlassBottomGapDp: Int"))
         assertTrue(models.contains("val phoneLiquidGlassPanelBlurDp: Int"))
-        assertTrue(settings.contains("if (settings.phoneLiquidGlassEnabled)"))
-        assertTrue(settings.contains("ModuleText.BOTTOM_BAR_HEIGHT"))
-        assertTrue(settings.contains("ModuleText.BOTTOM_BAR_BLUR"))
+        val interfacePage = settings.substringAfter("EmbeddedSettingsPage.INTERFACE -> {")
+            .substringBefore("EmbeddedSettingsPage.TITLE_REGION ->")
+        val glassRangeBranch = interfacePage.substringAfter("if (settings.phoneLiquidGlassEnabled)")
+        assertTrue(glassRangeBranch.contains("ModuleText.BOTTOM_BAR_HEIGHT"))
+        assertTrue(glassRangeBranch.contains("ModuleText.BOTTOM_BAR_BLUR"))
         // The scroll collapse is the third add-on of the same toggle, so it lives in the same
         // gated block and its value lives in the settings model.
         assertTrue(models.contains("val phoneLiquidGlassCollapseEnabled: Boolean = true"))
-        assertTrue(settings.contains("ModuleText.BOTTOM_BAR_COLLAPSE"))
-        assertTrue(settings.contains("phoneLiquidGlassCollapseEnabled = it"))
+        assertTrue(settings.contains("phoneLiquidGlassCollapseEnabled = value"))
         // The collapse-animation amplitudes are tuning knobs for an animation that already has a
         // sensible default, so the liquid-glass controls link to their child page. The entry
         // remains gated on the feature and collapse support, and the child page shares the
@@ -86,33 +87,42 @@ class PhoneLiquidGlassStructuralRegressionTest {
         assertTrue(models.contains("val phoneLiquidGlassExpandReboundPercent: Int"))
         assertTrue(models.contains("val phoneLiquidGlassMiniReboundPercent: Int"))
         assertTrue(models.contains("val phoneLiquidGlassMiniSinkBounceDp: Int"))
-        val glassGateAt = settings.indexOf("if (settings.phoneLiquidGlassEnabled)")
-        val collapseGateAt = settings.indexOf("if (nativeBridge.supportsGlassScrollCollapse(activity))", glassGateAt)
-        val collapseRowAt = settings.indexOf("ModuleText.BOTTOM_BAR_COLLAPSE", collapseGateAt)
-        val animationGateAt = settings.indexOf("if (settings.phoneLiquidGlassCollapseEnabled)", collapseRowAt)
-        assertTrue(
-            "the collapse row must stay inside the glass, capability and collapse gates",
-            glassGateAt in 1 until collapseGateAt &&
-                collapseGateAt in 1 until collapseRowAt &&
-                collapseRowAt in 1 until animationGateAt,
+        val disabledGlassAt = interfacePage.indexOf("if (!settings.phoneLiquidGlassEnabled)")
+        val compensationAt = interfacePage.indexOf("ModuleText.TABLET_BOTTOM_BAR_FIX", disabledGlassAt)
+        val collapseGateAt = interfacePage.indexOf(
+            "} else if (nativeBridge.supportsGlassScrollCollapse(activity))",
+            disabledGlassAt,
         )
-        assertTrue(settings.contains("renderEmbeddedAnimationSettingsPage("))
-        assertTrue(settings.contains("currentSettings = { draft.settings }"))
+        val collapseRowAt = interfacePage.indexOf("ModuleText.BOTTOM_BAR_COLLAPSE", collapseGateAt)
+        val animationGateAt = interfacePage.indexOf("if (settings.phoneLiquidGlassCollapseEnabled)", collapseRowAt)
+        val animationEntryAt = interfacePage.indexOf("ModuleText.BOTTOM_BAR_ANIMATION_SETTINGS", animationGateAt)
+        assertTrue(
+            "the compensation row and collapse controls must stay in their exclusive glass branches",
+            disabledGlassAt in 1 until compensationAt &&
+                compensationAt < collapseGateAt &&
+                collapseGateAt in 1 until collapseRowAt &&
+                collapseRowAt in 1 until animationGateAt &&
+                animationGateAt in 1 until animationEntryAt,
+        )
+        assertTrue(settings.contains("EmbeddedAnimationSettingsPage(current)"))
+        assertTrue(settings.contains("update(edit(draft.settings))"))
         assertTrue(animationSettings.contains("ModuleText.BOTTOM_BAR_COLLAPSE_REBOUND"))
         assertTrue(animationSettings.contains("ModuleText.BOTTOM_BAR_EXPAND_REBOUND"))
         assertTrue(animationSettings.contains("ModuleText.BOTTOM_BAR_MINI_REBOUND"))
         assertTrue(animationSettings.contains("ModuleText.BOTTOM_BAR_MINI_SINK_BOUNCE"))
-        assertTrue(animationSettings.contains("currentSettings().copy(phoneLiquidGlassCollapseReboundPercent = it)"))
-        assertTrue(animationSettings.contains("currentSettings().copy(phoneLiquidGlassExpandReboundPercent = it)"))
-        assertTrue(animationSettings.contains("currentSettings().copy(phoneLiquidGlassMiniReboundPercent = it)"))
-        assertTrue(animationSettings.contains("currentSettings().copy(phoneLiquidGlassMiniSinkBounceDp = it)"))
+        assertTrue(animationSettings.contains("phoneLiquidGlassCollapseReboundPercent = value"))
+        assertTrue(animationSettings.contains("phoneLiquidGlassExpandReboundPercent = value"))
+        assertTrue(animationSettings.contains("phoneLiquidGlassMiniReboundPercent = value"))
+        assertTrue(animationSettings.contains("phoneLiquidGlassMiniSinkBounceDp = value"))
         // The child-page entry belongs to the liquid-glass controls after the collapse switch.
-        val liquidGlassAt = settings.indexOf("ModuleText.LIQUID_GLASS_NAVIGATION")
-        val animationEntryAt = settings.indexOf("localizedText(ModuleText.BOTTOM_BAR_ANIMATION_SETTINGS)", liquidGlassAt)
-        val titleRegionAt = settings.indexOf("EmbeddedSettingsPage.TITLE_REGION", liquidGlassAt)
+        val liquidGlassAt = interfacePage.indexOf("ModuleText.LIQUID_GLASS_NAVIGATION")
+        val animationSettingsAt = interfacePage.indexOf(
+            "localizedText(ModuleText.BOTTOM_BAR_ANIMATION_SETTINGS)",
+            liquidGlassAt,
+        )
         assertTrue(
             "the animation page entry must stay in the Interface glass block",
-            liquidGlassAt in 1 until animationEntryAt && animationEntryAt < titleRegionAt,
+            liquidGlassAt in 1 until animationSettingsAt,
         )
         // ...and in this order: the three collapse-direction knobs first, the single expand-direction
         // knob last. Grouping them keeps the one expand slider from splitting the collapse set.

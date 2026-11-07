@@ -18,7 +18,9 @@ internal fun File.readRefactorComponent(): String {
             "CatalogResponseSnapshotAccess.kt").map { catalog+it }
         "EmbeddedSettingsHost.kt" -> listOf("EmbeddedSettingsDesign.kt","EmbeddedSettingsState.kt","EmbeddedSafRouter.kt",
             "EmbeddedSettingsController.kt","EmbeddedSettingsHost.kt","EmbeddedSettingsPages.kt","EmbeddedSettingsWidgets.kt",
-            "EmbeddedLyricsEditor.kt","EmbeddedSettingsOperations.kt").map { ui+it }
+            "EmbeddedSettingsComposeWindow.kt","EmbeddedLyricsSettingsPages.kt","EmbeddedLlmSettingsPage.kt",
+            "EmbeddedPluginPages.kt","EmbeddedAnimationSettingsPage.kt","EmbeddedLyricsEditor.kt",
+            "EmbeddedSettingsOperations.kt").map { ui+it }
         else -> return readText()
     }
     return components.joinToString("\n") { File(root,it).readText() }

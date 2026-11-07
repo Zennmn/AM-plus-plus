@@ -1,7 +1,3 @@
 <resources>
     <item name="ampp_embedded_theme_binding" type="id" />
-    <item name="ampp_embedded_theme_excluded" type="id" />
-    <item name="ampp_embedded_page_reveal_motion" type="id" />
-    <item name="ampp_embedded_page_return_motion" type="id" />
-    <item name="ampp_embedded_popup_menu" type="id" />
 </resources>
