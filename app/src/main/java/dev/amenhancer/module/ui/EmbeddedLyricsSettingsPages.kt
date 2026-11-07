@@ -75,6 +75,7 @@ import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
+import top.yukonga.miuix.kmp.basic.TextFieldDefaults
 import top.yukonga.miuix.kmp.basic.VerticalDivider
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -98,6 +99,7 @@ internal fun EmbeddedSettingsHost.EmbeddedCustomLyricsPage(
     val currentSettings by rememberUpdatedState(settings)
     val settingsChanged by rememberUpdatedState(onSettingsChanged)
     val focusManager = LocalFocusManager.current
+    val lyricsControlPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
     val visibleGroups = remember(entries, searchText, listRevision) {
         lyricsState.update(entries, searchText)
         lyricsState.visibleGroups
@@ -193,7 +195,7 @@ internal fun EmbeddedSettingsHost.EmbeddedCustomLyricsPage(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                    .padding(lyricsControlPadding),
             ) {
                 TextField(
                     value = searchText,
@@ -242,10 +244,11 @@ internal fun EmbeddedSettingsHost.EmbeddedCustomLyricsPage(
                     if (index < visibleGroups.lastIndex) SettingsDivider()
                 }
 
-                Box(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                        .padding(lyricsControlPadding),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text(
                         text = localizedText(
@@ -253,19 +256,30 @@ internal fun EmbeddedSettingsHost.EmbeddedCustomLyricsPage(
                             lyricsState.visibleCount,
                             lyricsState.totalCount,
                         ),
+                        modifier = Modifier.padding(horizontal = 4.dp),
                         style = MiuixTheme.textStyles.body2,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
-                }
-                if (lyricsState.hasMore) {
-                    TextButton(
-                        text = localizedText(ModuleText.LOAD_MORE),
-                        onClick = {
-                            lyricsState.loadMore()
-                            listRevision++
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    if (lyricsState.hasMore) {
+                        TextButton(
+                            text = localizedText(ModuleText.LOAD_MORE),
+                            onClick = {
+                                lyricsState.loadMore()
+                                listRevision++
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            cornerRadius = TextFieldDefaults.CornerRadius,
+                            insideMargin = PaddingValues(
+                                horizontal = TextFieldDefaults.InsideMargin.width,
+                                vertical = TextFieldDefaults.InsideMargin.height,
+                            ),
+                            textStyle = MiuixTheme.textStyles.main,
+                            colors = ButtonDefaults.textButtonColors(
+                                color = MiuixTheme.colorScheme.secondaryContainer,
+                                textColor = MiuixTheme.colorScheme.onSurface,
+                            ),
+                        )
+                    }
                 }
             }
         }

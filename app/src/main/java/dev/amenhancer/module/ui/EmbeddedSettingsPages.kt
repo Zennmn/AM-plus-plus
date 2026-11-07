@@ -166,6 +166,7 @@ private fun EmbeddedSettingsHost.EmbeddedSettingsScreen(
     val title = localizedText(page.title)
     val home = page == EmbeddedSettingsPage.MAIN
     val wide = LocalConfiguration.current.screenWidthDp >= 600
+    val contentSpacing = if (home) 16.dp else 12.dp
     val scrollBehavior = MiuixScrollBehavior()
     val navigation: @Composable () -> Unit = {
         if (home) {
@@ -211,7 +212,6 @@ private fun EmbeddedSettingsHost.EmbeddedSettingsScreen(
             } else {
                 TopAppBar(
                     title = title,
-                    subtitle = if (home) localizedText(ModuleText.MODULE_SETTINGS_SUMMARY) else "",
                     navigationIcon = navigation,
                     actions = actions,
                     scrollBehavior = scrollBehavior,
@@ -234,8 +234,8 @@ private fun EmbeddedSettingsHost.EmbeddedSettingsScreen(
                     .nestedScroll(scrollBehavior.nestedScrollConnection)
                     .verticalScroll(rememberScrollState())
                     // Scroll behind the gesture area; keep only the final item clear of it.
-                    .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = 12.dp + padding.calculateBottomPadding()),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                    .padding(start = 12.dp, top = contentSpacing, end = 12.dp, bottom = 12.dp + padding.calculateBottomPadding()),
+                verticalArrangement = Arrangement.spacedBy(contentSpacing),
                 content = content,
             )
         }
