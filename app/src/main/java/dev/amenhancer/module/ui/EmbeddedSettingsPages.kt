@@ -40,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -181,9 +182,10 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                             }
                         }
                     }
-                    // Keep this NavDisplay at one stable call site when the window changes size.
+                    // Keep this NavDisplay stable across resize, and contain its covered pages'
+                    // parallax inside the content pane rather than drawing over the rail.
                     Box(
-                        Modifier.weight(1f).fillMaxSize().then(
+                        Modifier.weight(1f).fillMaxSize().clipToBounds().then(
                             if (wide) Modifier
                                 .consumeWindowInsets(WindowInsets.displayCutout.only(WindowInsetsSides.Start))
                                 .consumeWindowInsets(WindowInsets.navigationBars.only(WindowInsetsSides.Start))
