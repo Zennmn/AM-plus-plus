@@ -3,9 +3,13 @@ package dev.amenhancer.module.ui
 import android.app.Activity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.DisposableEffect
@@ -15,7 +19,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import dev.amenhancer.module.CurrentSongDetails
 import dev.amenhancer.module.i18n.ModuleText
@@ -24,12 +30,14 @@ import dev.amenhancer.module.lyrics.CustomLyricsOnlineImportResult
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImporter
 import dev.amenhancer.module.model.CustomLyricsEntry
 import dev.amenhancer.module.model.CustomLyricsSources
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.basic.DropdownArrowEndAction
 import top.yukonga.miuix.kmp.basic.DropdownEntry
 import top.yukonga.miuix.kmp.basic.DropdownItem
-import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
-import top.yukonga.miuix.kmp.menu.OverlayDropdownMenu
+import top.yukonga.miuix.kmp.menu.OverlayIconDropdownMenu
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 internal fun EmbeddedSettingsHost.showLyricsEditor(
@@ -77,7 +85,7 @@ internal fun EmbeddedSettingsHost.showLyricsEditor(
     }
 
     fun saveLyrics(dismiss: () -> Unit) {
-        if (saveSubmitted) return
+        if (!editorOpen || saveSubmitted) return
         val ids = CustomLyricsIdParser.parse(appleMusicIds)
         val lyrics = ttml
         if (ids == null) {
@@ -111,23 +119,39 @@ internal fun EmbeddedSettingsHost.showLyricsEditor(
         scrollContent = true,
         onDismiss = ::closeEditor,
         footer = { dismiss ->
-            Column(Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().padding(top = 12.dp)) {
                 feedback?.let { message ->
-                    EmbeddedSettingsNotice(
+                    Text(
                         text = message,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                        style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
                 }
-                EmbeddedDialogActions(
-                    dismissText = localizedText(ModuleText.CANCEL),
-                    onDismiss = {
-                        closeEditor()
-                        dismiss()
-                    },
-                    confirmText = localizedText(ModuleText.SAVE),
-                    confirmEnabled = !saveSubmitted,
-                    onConfirm = { saveLyrics(dismiss) },
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    TextButton(
+                        text = localizedText(ModuleText.CANCEL),
+                        onClick = {
+                            closeEditor()
+                            dismiss()
+                        },
+                        modifier = Modifier.weight(1f),
+                        minHeight = 48.dp,
+                        insideMargin = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                    )
+                    TextButton(
+                        text = localizedText(ModuleText.SAVE),
+                        onClick = { saveLyrics(dismiss) },
+                        modifier = Modifier.weight(1f),
+                        enabled = !saveSubmitted,
+                        minHeight = 48.dp,
+                        insideMargin = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                        colors = ButtonDefaults.textButtonColorsPrimary(),
+                    )
+                }
             }
         },
     ) { _ ->
@@ -140,6 +164,7 @@ internal fun EmbeddedSettingsHost.showLyricsEditor(
         }
 
         fun captureCurrentSong() {
+            if (!editorOpen) return
             val latest = host.controller.currentSongDetails()
             if (latest == null) {
                 feedback = localizedText(ModuleText.PLAY_SONG_FIRST)
@@ -251,191 +276,169 @@ internal fun EmbeddedSettingsHost.showLyricsEditor(
             )
         }
 
-        val songTitle = currentSong?.title?.takeIf(String::isNotBlank)
-            ?: if (currentSong == null) {
-                localizedText(ModuleText.NO_CURRENT_SONG)
-            } else {
-                localizedText(ModuleText.UNKNOWN_TITLE)
-            }
-        val songMeta = currentSong?.let { details ->
-            listOfNotNull(
+        val songSummary = currentSong?.let { details ->
+            val label = listOfNotNull(
+                details.title?.takeIf(String::isNotBlank),
                 details.artist?.takeIf(String::isNotBlank),
-                "#${details.appleMusicId}",
-            ).joinToString(" · ")
-        }.orEmpty().ifBlank { localizedText(ModuleText.MUSIC_ID_PLAY_HINT) }
+            ).joinToString(" · ").ifBlank { "#${details.appleMusicId}" }
+            localizedText(ModuleText.CURRENT_SONG_TITLE, label)
+        } ?: localizedText(ModuleText.NO_CURRENT_SONG)
+        val idHint = idError ?: parsedIds?.takeIf { it.size > 1 }?.let { ids ->
+            localizedText(ModuleText.LYRICS_ID_COUNT, ids.size).trimStart(' ', '·')
+        }
+        val onlineImportText = localizedText(ModuleText.IMPORT_ONLINE)
 
-        EmbeddedSettingsSection(title = localizedText(ModuleText.CURRENT_SONG))
-        EmbeddedSettingsGroup {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(EmbeddedPreferencePadding),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                EmbeddedSettingsIcon(EmbeddedSvgIcon.Music, modifier = Modifier.size(20.dp))
+                Text(
+                    text = songSummary,
+                    modifier = Modifier.weight(1f),
+                    style = MiuixTheme.textStyles.body2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                TextButton(
+                    text = localizedText(ModuleText.GET_ID),
+                    onClick = ::captureCurrentSong,
+                    enabled = !saveSubmitted,
+                    minHeight = 48.dp,
+                    insideMargin = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    textStyle = MiuixTheme.textStyles.body2,
+                    colors = ButtonDefaults.textButtonColors(
+                        color = Color.Transparent,
+                        textColor = MiuixTheme.colorScheme.primary,
+                    ),
+                )
+            }
+            TextField(
+                value = appleMusicIds,
+                onValueChange = {
+                    appleMusicIds = it
+                    idError = null
+                    feedback = null
+                    onlineImportRevision += 1
+                    ttmlImportRevision += 1
+                },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                insideMargin = DpSize(14.dp, 12.dp),
+                label = "Apple Music ID",
+                singleLine = true,
+            )
+            idHint?.let { message ->
+                Text(
+                    text = message,
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                    color = if (idError == null) {
+                        MiuixTheme.colorScheme.onSurfaceVariantSummary
+                    } else {
+                        MiuixTheme.colorScheme.error
+                    },
+                    style = MiuixTheme.textStyles.body2,
+                )
+            }
+            TextField(
+                value = displayName,
+                onValueChange = {
+                    displayName = it
+                    feedback = null
+                },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                insideMargin = DpSize(14.dp, 12.dp),
+                label = localizedText(ModuleText.DISPLAY_NAME),
+                singleLine = true,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(
+                    text = localizedText(ModuleText.IMPORT_TTML),
+                    onClick = ::importTtml,
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    enabled = !saveSubmitted,
+                    minHeight = 48.dp,
+                    insideMargin = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                    textStyle = MiuixTheme.textStyles.body2,
+                )
+                OverlayIconDropdownMenu(
+                    entry = DropdownEntry(
+                        items = listOf(
+                            DropdownItem(
+                                text = localizedText(ModuleText.IMPORT_FROM_AMLL),
+                                onClick = { importOnline(EmbeddedOnlineSource.AMLL) },
+                            ),
+                            DropdownItem(
+                                text = localizedText(ModuleText.IMPORT_FROM_LUNABEAT),
+                                onClick = { importOnline(EmbeddedOnlineSource.LUNABEAT) },
+                            ),
+                            DropdownItem(
+                                text = localizedText(ModuleText.IMPORT_FROM_AM_LYRICS),
+                                onClick = { importOnline(EmbeddedOnlineSource.AM_LYRICS) },
+                            ),
+                        ),
+                    ),
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    enabled = !saveSubmitted,
+                    backgroundColor = MiuixTheme.colorScheme.secondaryVariant,
+                    cornerRadius = ButtonDefaults.CornerRadius,
+                    minHeight = 48.dp,
+                    minWidth = 48.dp,
                 ) {
-                    EmbeddedSettingsIcon(
-                        icon = EmbeddedSvgIcon.Music,
-                        modifier = Modifier.size(28.dp),
-                        tint = MiuixTheme.colorScheme.primary,
-                    )
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    Row(
+                        modifier = Modifier.fillMaxWidth().fillMaxHeight()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = songTitle,
-                            style = MiuixTheme.textStyles.headline1,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            text = songMeta,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            text = onlineImportText,
                             style = MiuixTheme.textStyles.body2,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
+                            color = MiuixTheme.colorScheme.onSecondaryVariant,
                         )
+                        DropdownArrowEndAction(MiuixTheme.colorScheme.onSecondaryVariant)
                     }
                 }
             }
-            HorizontalDivider(Modifier.padding(horizontal = 16.dp))
-            EmbeddedSettingLink(
-                title = localizedText(ModuleText.GET_ID),
-                icon = EmbeddedSvgIcon.Refresh,
-                onClick = ::captureCurrentSong,
-            )
-        }
-
-        EmbeddedSettingsSection(title = "Apple Music ID")
-        EmbeddedSettingsGroup {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(EmbeddedPreferencePadding),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                TextField(
-                    value = appleMusicIds,
-                    onValueChange = {
-                        appleMusicIds = it
-                        idError = null
-                        feedback = null
-                        onlineImportRevision += 1
-                        ttmlImportRevision += 1
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = "Apple Music ID",
-                    useLabelAsPlaceholder = true,
-                    singleLine = true,
-                )
-                idError?.let { message ->
-                    Text(
-                        text = message,
-                        color = MiuixTheme.colorScheme.error,
-                        style = MiuixTheme.textStyles.body2,
-                    )
-                }
-                parsedIds?.takeIf { it.isNotEmpty() }?.let { ids ->
-                    Text(
-                        text = localizedText(ModuleText.LYRICS_ID_COUNT, ids.size)
-                            .trimStart(' ', '·'),
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        style = MiuixTheme.textStyles.body2,
-                    )
-                }
-                HorizontalDivider(Modifier.padding(vertical = 2.dp))
-                TextField(
-                    value = displayName,
-                    onValueChange = {
-                        displayName = it
-                        feedback = null
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = localizedText(ModuleText.DISPLAY_NAME),
-                    useLabelAsPlaceholder = true,
-                    singleLine = true,
-                )
-            }
-        }
-
-        EmbeddedSettingsSection(title = localizedText(ModuleText.IMPORT))
-        EmbeddedSettingsGroup {
-            EmbeddedSettingLink(
-                title = localizedText(ModuleText.IMPORT_TTML),
-                icon = EmbeddedSvgIcon.ImportTtml,
-                onClick = ::importTtml,
-            )
-            HorizontalDivider(Modifier.padding(horizontal = 16.dp))
-            OverlayDropdownMenu(
-                entry = DropdownEntry(
-                    items = listOf(
-                        DropdownItem(
-                            text = localizedText(ModuleText.IMPORT_FROM_AMLL),
-                            onClick = { importOnline(EmbeddedOnlineSource.AMLL) },
-                        ),
-                        DropdownItem(
-                            text = localizedText(ModuleText.IMPORT_FROM_LUNABEAT),
-                            onClick = { importOnline(EmbeddedOnlineSource.LUNABEAT) },
-                        ),
-                        DropdownItem(
-                            text = localizedText(ModuleText.IMPORT_FROM_AM_LYRICS),
-                            onClick = { importOnline(EmbeddedOnlineSource.AM_LYRICS) },
-                        ),
-                    ),
-                ),
-                title = localizedText(ModuleText.IMPORT),
-                summary = listOf(
-                    "AMLL",
-                    "Lunabeat",
-                    localizedText(ModuleText.AM_LYRICS_REPOSITORY),
-                ).joinToString(" · "),
-                startAction = {
-                    EmbeddedSettingsIcon(
-                        EmbeddedSvgIcon.DocumentSearch,
-                        modifier = Modifier.size(24.dp),
-                    )
+            TextField(
+                value = ttml,
+                onValueChange = {
+                    ttml = it
+                    ttmlError = null
+                    feedback = null
+                    onlineImportRevision += 1
+                    ttmlImportRevision += 1
                 },
-                insideMargin = EmbeddedPreferencePadding,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 148.dp),
+                insideMargin = DpSize(14.dp, 12.dp),
+                label = localizedText(ModuleText.TTML_CONTENT),
+                useLabelAsPlaceholder = true,
+                textStyle = MiuixTheme.textStyles.body2,
+                minLines = 4,
+                maxLines = Int.MAX_VALUE,
             )
-        }
-
-        EmbeddedSettingsSection(
-            title = localizedText(ModuleText.TTML_CONTENT),
-            summary = localizedText(
-                ModuleText.CURRENT_SOURCE,
-                host.embeddedLyricsSourceName(source),
-            ),
-        )
-        EmbeddedSettingsGroup {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(EmbeddedPreferencePadding),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                TextField(
-                    value = ttml,
-                    onValueChange = {
-                        ttml = it
-                        ttmlError = null
-                        feedback = null
-                        onlineImportRevision += 1
-                        ttmlImportRevision += 1
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(148.dp),
-                    label = localizedText(ModuleText.TTML_CONTENT),
-                    useLabelAsPlaceholder = true,
-                    minLines = 4,
-                    maxLines = Int.MAX_VALUE,
-                )
-                ttmlError?.let { message ->
-                    Text(
-                        text = message,
-                        color = MiuixTheme.colorScheme.error,
-                        style = MiuixTheme.textStyles.body2,
-                    )
-                }
-            }
+            Text(
+                text = ttmlError ?: localizedText(
+                    ModuleText.CURRENT_SOURCE,
+                    host.embeddedLyricsSourceName(source),
+                ),
+                modifier = Modifier.padding(horizontal = 14.dp),
+                color = if (ttmlError == null) {
+                    MiuixTheme.colorScheme.onSurfaceVariantSummary
+                } else {
+                    MiuixTheme.colorScheme.error
+                },
+                style = MiuixTheme.textStyles.body2,
+            )
         }
     }
 }

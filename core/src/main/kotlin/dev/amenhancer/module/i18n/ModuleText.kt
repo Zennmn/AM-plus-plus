@@ -38,6 +38,7 @@ enum class ModuleText(internal val english: String, internal val chinese: String
     TTML_CONTENT("TTML content", "TTML 内容"),
     CURRENT_SOURCE("Current source: %1\$s", "当前来源：%1\$s"),
     IMPORT_TTML("Import TTML", "导入 TTML"),
+    IMPORT_ONLINE("Online import", "在线导入"),
     GET_ID("Get ID", "获取 ID"),
     IMPORT_FROM_AMLL("Import from AMLL", "从 AMLL 导入"),
     AMLL_IMPORT("AMLL import", "AMLL 导入"),

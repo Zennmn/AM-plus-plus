@@ -9,7 +9,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
@@ -76,6 +76,8 @@ import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
+import top.yukonga.miuix.kmp.basic.VerticalDivider
+import top.yukonga.miuix.kmp.nav.runtime.NavProgrammaticEasing
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
@@ -140,9 +142,7 @@ internal fun EmbeddedSettingsHost.EmbeddedCustomLyricsPage(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(IntrinsicSize.Min)
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    .height(IntrinsicSize.Min),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 LyricsActionButton(
@@ -152,6 +152,7 @@ internal fun EmbeddedSettingsHost.EmbeddedCustomLyricsPage(
                     onClick = { showLyricsEditor(activity, null as CustomLyricsUiGroup?, song) },
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                 )
+                VerticalDivider(Modifier.height(28.dp))
                 LyricsActionButton(
                     title = localizedText(ModuleText.IMPORT_TTML),
                     shortLabel = "TTML",
@@ -166,6 +167,7 @@ internal fun EmbeddedSettingsHost.EmbeddedCustomLyricsPage(
                     },
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                 )
+                VerticalDivider(Modifier.height(28.dp))
                 LyricsActionButton(
                     title = localizedText(ModuleText.LYRICS_UPDATE),
                     shortLabel = localizedText(ModuleText.UPDATE),
@@ -173,6 +175,7 @@ internal fun EmbeddedSettingsHost.EmbeddedCustomLyricsPage(
                     onClick = { updateEmbeddedLyrics(activity) },
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                 )
+                VerticalDivider(Modifier.height(28.dp))
                 LyricsActionButton(
                     title = localizedText(ModuleText.BACKUP_AND_RESTORE),
                     shortLabel = localizedText(ModuleText.BACKUP),
@@ -296,6 +299,7 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
     var draggingSource by remember { mutableStateOf<String?>(null) }
     var dragDistancePx by remember { mutableFloatStateOf(0f) }
     var dragSettleJob by remember { mutableStateOf<Job?>(null) }
+    var dragReleaseTargetIndex by remember { mutableIntStateOf(-1) }
 
     val sourceCenters = remember { mutableStateMapOf<String, Float>() }
     val haptics = LocalHapticFeedback.current
@@ -420,13 +424,14 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
             0f
         }
         if (committedOrder != null) persistSourceOrder(committedOrder)
+        dragReleaseTargetIndex = if (committedOrder != null) targetIndex else from
 
         dragSettleJob = scope.launch {
             try {
                 animate(
                     initialValue = dragDistancePx,
                     targetValue = targetDistance,
-                    animationSpec = spring(dampingRatio = 0.78f, stiffness = 420f),
+                    animationSpec = tween(140, easing = NavProgrammaticEasing),
                 ) { value, _ ->
                     dragDistancePx = value
                 }
@@ -437,6 +442,7 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
                 dragStartCenters = emptyMap()
                 draggingSource = null
                 dragDistancePx = 0f
+                dragReleaseTargetIndex = -1
             }
         }
     }
@@ -471,6 +477,7 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
             dragStartCenters = emptyMap()
             draggingSource = null
             dragDistancePx = 0f
+            dragReleaseTargetIndex = -1
         }
     }
 
@@ -493,7 +500,9 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
     }
 
     val activeDragOrder = dragStartOrder
-    val dragTargetIndex = if (draggingSource != null && activeDragOrder != null) {
+    val dragTargetIndex = if (dragSettleJob != null) {
+        dragReleaseTargetIndex
+    } else if (draggingSource != null && activeDragOrder != null) {
         dropTargetIndex(
             draggingSource.orEmpty(),
             dragDistancePx,
@@ -510,7 +519,7 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
         if (targetIndex < 0) return 0f
         val from = activeDragOrder?.indexOf(source) ?: return 0f
         if (from < 0 || index !in visibleSources.indices || index == from) return 0f
-        val order = activeDragOrder ?: return 0f
+        val order = activeDragOrder
         return when {
             from < targetIndex && index in (from + 1)..targetIndex -> {
                 val previous = dragStartCenters[order[index - 1]] ?: return 0f
@@ -575,10 +584,11 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
                         sourceName = automaticLyricsSourceName(source),
                         position = index,
                         dragging = isDragging,
+                        released = dragSettleJob != null,
                         dropTarget = dragTargetIndex == index && !isDragging,
                         offsetY = if (isDragging) dragDistancePx else dragYieldOffset(index),
                         animateOffset = dragStartOrder != null && !isDragging,
-                        showDivider = !isDragging && index < visibleSources.lastIndex,
+                        showDivider = index < visibleSources.lastIndex,
                         canMoveUp = canMoveSource(index, index - 1),
                         canMoveDown = canMoveSource(index, index + 1),
                         onCenterPositioned = { center -> sourceCenters[source] = center },
@@ -632,10 +642,12 @@ private fun LyricsActionButton(
             contentDescription = title
         },
         minWidth = 0.dp,
-        minHeight = 64.dp,
-        insideMargin = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
+        minHeight = 68.dp,
+        cornerRadius = 0.dp,
+        insideMargin = PaddingValues(horizontal = 4.dp, vertical = 10.dp),
         colors = ButtonDefaults.buttonColors(
-            contentColor = MiuixTheme.colorScheme.onSecondaryVariant,
+            color = Color.Transparent,
+            contentColor = MiuixTheme.colorScheme.onBackground,
         ),
     ) {
         Column(
@@ -646,12 +658,12 @@ private fun LyricsActionButton(
             EmbeddedSettingsIcon(
                 icon = icon,
                 modifier = Modifier.size(22.dp),
-                tint = MiuixTheme.colorScheme.onSecondaryVariant,
+                tint = MiuixTheme.colorScheme.primary,
             )
             Text(
                 text = shortLabel,
                 style = MiuixTheme.textStyles.body2,
-                color = MiuixTheme.colorScheme.onSecondaryVariant,
+                color = MiuixTheme.colorScheme.onBackground,
                 maxLines = 2,
                 textAlign = TextAlign.Center,
             )
@@ -742,6 +754,7 @@ private fun EmbeddedSettingsHost.AutomaticLyricsSourceRow(
     sourceName: String,
     position: Int,
     dragging: Boolean,
+    released: Boolean,
     dropTarget: Boolean,
     offsetY: Float,
     animateOffset: Boolean,
@@ -769,10 +782,11 @@ private fun EmbeddedSettingsHost.AutomaticLyricsSourceRow(
             add(CustomAccessibilityAction(moveDown) { currentMoveForAccessibility(1) })
         }
     }
+    val lifted = dragging && !released
     val animatedOffset = if (animateOffset) {
         val offset by animateFloatAsState(
             targetValue = offsetY,
-            animationSpec = spring(dampingRatio = 0.82f, stiffness = 650f),
+            animationSpec = tween(140, easing = NavProgrammaticEasing),
             label = "lyrics-source-yield",
         )
         offset
@@ -780,18 +794,18 @@ private fun EmbeddedSettingsHost.AutomaticLyricsSourceRow(
         0f
     }
     val scale by animateFloatAsState(
-        targetValue = if (dragging) 1.015f else 1f,
-        animationSpec = spring(dampingRatio = 0.82f, stiffness = 600f),
+        targetValue = if (lifted) 1.015f else 1f,
+        animationSpec = tween(140, easing = NavProgrammaticEasing),
         label = "lyrics-source-scale",
     )
     val liftColor by animateColorAsState(
-        targetValue = if (dragging) MiuixTheme.colorScheme.secondaryContainerVariant else Color.Transparent,
-        animationSpec = spring(dampingRatio = 0.9f, stiffness = 700f),
+        targetValue = if (lifted) MiuixTheme.colorScheme.secondaryContainerVariant else Color.Transparent,
+        animationSpec = tween(140, easing = NavProgrammaticEasing),
         label = "lyrics-source-lift-color",
     )
     val liftElevation by animateDpAsState(
-        targetValue = if (dragging) 8.dp else 0.dp,
-        animationSpec = spring(dampingRatio = 0.82f, stiffness = 600f),
+        targetValue = if (lifted) 8.dp else 0.dp,
+        animationSpec = tween(140, easing = NavProgrammaticEasing),
         label = "lyrics-source-lift-elevation",
     )
 
@@ -822,7 +836,7 @@ private fun EmbeddedSettingsHost.AutomaticLyricsSourceRow(
                 titleColor = BasicComponentDefaults.titleColor(
                     color = when {
                         dropTarget -> MiuixTheme.colorScheme.primary
-                        dragging -> MiuixTheme.colorScheme.onSecondaryContainerVariant
+                        lifted -> MiuixTheme.colorScheme.onSecondaryContainerVariant
                         else -> MiuixTheme.colorScheme.onBackground
                     },
                 ),
@@ -833,7 +847,7 @@ private fun EmbeddedSettingsHost.AutomaticLyricsSourceRow(
                         style = MiuixTheme.textStyles.body2,
                         color = when {
                             dropTarget -> MiuixTheme.colorScheme.primary
-                            dragging -> MiuixTheme.colorScheme.onSecondaryContainerVariant
+                            lifted -> MiuixTheme.colorScheme.onSecondaryContainerVariant
                             else -> MiuixTheme.colorScheme.onSurfaceVariantSummary
                         },
                         textAlign = TextAlign.Center,
@@ -867,17 +881,20 @@ private fun EmbeddedSettingsHost.AutomaticLyricsSourceRow(
                             modifier = Modifier.size(24.dp),
                             tint = when {
                                 dropTarget -> MiuixTheme.colorScheme.primary
-                                dragging -> MiuixTheme.colorScheme.onSecondaryContainerVariant
+                                lifted -> MiuixTheme.colorScheme.onSecondaryContainerVariant
                                 else -> MiuixTheme.colorScheme.onSurfaceVariantSummary
                             },
                         )
                     }
                 },
                 insideMargin = EmbeddedPreferencePadding,
-                holdDownState = dragging,
+                holdDownState = lifted,
             )
         }
-        if (showDivider) SettingsDivider()
+        // Keep the row footprint stable while the lifted row temporarily hides its separator.
+        Box(Modifier.graphicsLayer { alpha = if (showDivider && !lifted) 1f else 0f }) {
+            SettingsDivider()
+        }
     }
 }
 
