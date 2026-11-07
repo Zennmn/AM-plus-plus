@@ -9,6 +9,7 @@ import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Stable
@@ -17,11 +18,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import dev.amenhancer.plugin.runtime.PluginRunState
 import dev.amenhancer.plugin.runtime.PluginStatus
 import java.util.concurrent.atomic.AtomicBoolean
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 internal fun EmbeddedSettingsHost.EmbeddedPluginManagementPage(
@@ -77,19 +85,6 @@ internal fun EmbeddedSettingsHost.EmbeddedPluginManagementPage(
         PluginRunState.BLOCKED -> localizedText(ModuleText.PLUGIN_BLOCKED)
         PluginRunState.UNSUPPORTED -> localizedText(ModuleText.PLUGIN_UNSUPPORTED)
         PluginRunState.FAILED -> localizedText(ModuleText.PLUGIN_FAILED)
-    }
-
-    fun statusDetails(status: PluginStatus): String {
-        val manifest = status.installed.manifest
-        return localizedText(
-            ModuleText.PLUGIN_STATUS_DETAILS,
-            manifest.author,
-            manifest.versionName,
-            manifest.id,
-            statusLabel(status.state),
-            status.runningVersion?.let { localizedText(ModuleText.PLUGIN_RUNNING_VERSION, it) }.orEmpty(),
-            status.message,
-        )
     }
 
     fun showConflicts(status: PluginStatus) {
@@ -180,7 +175,15 @@ internal fun EmbeddedSettingsHost.EmbeddedPluginManagementPage(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        EmbeddedSettingsNotice(localizedText(ModuleText.PLUGIN_RESTART_NOTICE))
+        EmbeddedSettingsGroup {
+            Text(
+                text = localizedText(ModuleText.PLUGIN_RESTART_NOTICE),
+                modifier = Modifier.fillMaxWidth().padding(EmbeddedPreferencePadding),
+                style = MiuixTheme.textStyles.body2,
+                fontWeight = FontWeight.Medium,
+                color = MiuixTheme.colorScheme.onSurfaceContainer,
+            )
+        }
         state.startupError?.let {
             EmbeddedSettingsNotice(localizedText(ModuleText.LOAD_ERROR, it))
         }
@@ -195,11 +198,64 @@ internal fun EmbeddedSettingsHost.EmbeddedPluginManagementPage(
             statuses.forEach { status ->
                 val manifest = status.installed.manifest
                 val controlsEnabled = state.busyPluginId == null
-                EmbeddedSettingsSection(
-                    title = manifest.name,
-                    summary = statusDetails(status),
-                )
+                val runtimeLabel = statusLabel(status.state)
+                val defaultMessage = when (status.state) {
+                    PluginRunState.DISABLED -> ModuleText.PLUGIN_DISABLED
+                    PluginRunState.LOADING -> ModuleText.PLUGIN_LOADING_MESSAGE
+                    PluginRunState.ACTIVE -> ModuleText.PLUGIN_RUNNING_MESSAGE
+                    else -> null
+                }
+                val diagnostic = status.message.trim().takeIf { message ->
+                    message.isNotEmpty() && message != runtimeLabel &&
+                        (defaultMessage == null ||
+                            (message != localizedText(defaultMessage) && message != defaultMessage.text()))
+                }
+                val statusColor = when (status.state) {
+                    PluginRunState.FAILED, PluginRunState.BLOCKED, PluginRunState.UNSUPPORTED ->
+                        MiuixTheme.colorScheme.error
+                    else -> MiuixTheme.colorScheme.onSurfaceContainer
+                }
                 EmbeddedSettingsGroup {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(EmbeddedPreferencePadding),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = manifest.name,
+                            modifier = Modifier.semantics { heading() },
+                            style = MiuixTheme.textStyles.title4,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MiuixTheme.colorScheme.onSurfaceContainer,
+                        )
+                        Text(
+                            text = listOf(manifest.author, manifest.versionName)
+                                .filter(String::isNotBlank).joinToString(" · "),
+                            style = MiuixTheme.textStyles.body2,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                        Text(
+                            text = manifest.id,
+                            style = MiuixTheme.textStyles.body2,
+                            fontFamily = FontFamily.Monospace,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                        Text(
+                            text = runtimeLabel + status.runningVersion?.let {
+                                localizedText(ModuleText.PLUGIN_RUNNING_VERSION, it)
+                            }.orEmpty(),
+                            modifier = Modifier.padding(top = 4.dp),
+                            style = MiuixTheme.textStyles.body2,
+                            color = statusColor,
+                        )
+                        diagnostic?.let { message ->
+                            Text(
+                                text = message,
+                                style = MiuixTheme.textStyles.body2,
+                                color = statusColor,
+                            )
+                        }
+                    }
+                    HorizontalDivider(Modifier.padding(horizontal = 16.dp))
                     EmbeddedSettingSwitch(
                         title = localizedText(ModuleText.ENABLE_NEXT_START),
                         summary = if (status.pendingRestart) {
@@ -217,6 +273,7 @@ internal fun EmbeddedSettingsHost.EmbeddedPluginManagementPage(
                         },
                     )
                     if (status.conflicts.isNotEmpty()) {
+                        HorizontalDivider(Modifier.padding(horizontal = 16.dp))
                         EmbeddedSettingLink(
                             title = localizedText(ModuleText.CONFLICT_DETAILS),
                             summary = localizedText(ModuleText.ITEM_COUNT, status.conflicts.size),
@@ -225,6 +282,7 @@ internal fun EmbeddedSettingsHost.EmbeddedPluginManagementPage(
                         )
                     }
                     if (status.state == PluginRunState.ACTIVE) {
+                        HorizontalDivider(Modifier.padding(horizontal = 16.dp))
                         EmbeddedSettingLink(
                             title = localizedText(ModuleText.PLUGIN_SETTINGS),
                             icon = EmbeddedSvgIcon.Settings,
@@ -232,6 +290,7 @@ internal fun EmbeddedSettingsHost.EmbeddedPluginManagementPage(
                             onClick = { openPluginSettings(activity, manifest.id) },
                         )
                     }
+                    HorizontalDivider(Modifier.padding(horizontal = 16.dp))
                     EmbeddedSettingLink(
                         title = localizedText(ModuleText.DELETE),
                         icon = EmbeddedSvgIcon.Delete,

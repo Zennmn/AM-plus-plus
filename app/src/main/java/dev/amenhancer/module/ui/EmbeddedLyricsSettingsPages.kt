@@ -7,7 +7,6 @@ import android.content.Context
 import android.widget.Toast
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animate
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.focusable
@@ -77,7 +76,6 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.basic.VerticalDivider
-import top.yukonga.miuix.kmp.nav.runtime.NavProgrammaticEasing
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
@@ -431,7 +429,7 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
                 animate(
                     initialValue = dragDistancePx,
                     targetValue = targetDistance,
-                    animationSpec = tween(140, easing = NavProgrammaticEasing),
+                    animationSpec = tween(160),
                 ) { value, _ ->
                     dragDistancePx = value
                 }
@@ -786,7 +784,7 @@ private fun EmbeddedSettingsHost.AutomaticLyricsSourceRow(
     val animatedOffset = if (animateOffset) {
         val offset by animateFloatAsState(
             targetValue = offsetY,
-            animationSpec = tween(140, easing = NavProgrammaticEasing),
+            animationSpec = tween(160),
             label = "lyrics-source-yield",
         )
         offset
@@ -795,18 +793,13 @@ private fun EmbeddedSettingsHost.AutomaticLyricsSourceRow(
     }
     val scale by animateFloatAsState(
         targetValue = if (lifted) 1.015f else 1f,
-        animationSpec = tween(140, easing = NavProgrammaticEasing),
+        animationSpec = tween(160),
         label = "lyrics-source-scale",
     )
     val liftColor by animateColorAsState(
-        targetValue = if (lifted) MiuixTheme.colorScheme.secondaryContainerVariant else Color.Transparent,
-        animationSpec = tween(140, easing = NavProgrammaticEasing),
+        targetValue = if (lifted) MiuixTheme.colorScheme.secondaryContainerVariant else MiuixTheme.colorScheme.surfaceContainer,
+        animationSpec = tween(160),
         label = "lyrics-source-lift-color",
-    )
-    val liftElevation by animateDpAsState(
-        targetValue = if (lifted) 8.dp else 0.dp,
-        animationSpec = tween(140, easing = NavProgrammaticEasing),
-        label = "lyrics-source-lift-elevation",
     )
 
     Column(
@@ -819,12 +812,13 @@ private fun EmbeddedSettingsHost.AutomaticLyricsSourceRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .graphicsLayer {
-                    scaleX = scale
                     scaleY = scale
                 },
             shape = RoundedCornerShape(CardDefaults.CornerRadius),
             color = liftColor,
-            shadowElevation = liftElevation,
+            // Match the reference's single colour/scale effect. A translucent surface
+            // with a fading shadow lets its own dark shadow show through during release.
+            shadowElevation = 0.dp,
         ) {
             BasicComponent(
                 modifier = Modifier
@@ -888,7 +882,6 @@ private fun EmbeddedSettingsHost.AutomaticLyricsSourceRow(
                     }
                 },
                 insideMargin = EmbeddedPreferencePadding,
-                holdDownState = lifted,
             )
         }
         // Keep the row footprint stable while the lifted row temporarily hides its separator.
