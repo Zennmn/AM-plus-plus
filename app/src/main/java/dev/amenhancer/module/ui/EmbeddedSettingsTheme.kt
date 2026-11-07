@@ -7,7 +7,6 @@ import android.graphics.drawable.RippleDrawable
 import android.view.ContextThemeWrapper
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
 import android.widget.TextView
 import dev.amenhancer.module.R
 
@@ -35,15 +34,9 @@ internal fun <T : View> T.bindEmbeddedTheme(
 
 internal fun TextView.setEmbeddedTextColor(activity: Activity, color: (EmbeddedSettingsColors) -> Int) {
     bindEmbeddedTheme(activity) { colors ->
-        val normal = color(colors)
-        val pressed = when (normal) {
-            colors.primary -> colors.primaryPressed
-            colors.accent -> colors.accentPressed
-            else -> normal
-        }
         setTextColor(ColorStateList(
-            arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf(android.R.attr.state_pressed), intArrayOf()),
-            intArrayOf(colors.disabledText, pressed, normal),
+            arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
+            intArrayOf(colors.disabledText, color(colors)),
         ))
     }
 }
@@ -64,19 +57,6 @@ internal fun View.bindEmbeddedClickFeedback(
     foreground = ripple
     bindEmbeddedTheme(activity) { colors ->
         ripple.setColor(ColorStateList.valueOf(if (colors.isDark) 0x24FFFFFF else 0x14000000))
-    }
-}
-
-internal fun embeddedControlColors(enabled: Int, disabled: Int): ColorStateList = ColorStateList(
-    arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
-    intArrayOf(disabled, enabled),
-)
-
-
-internal fun Button.bindEmbeddedButtonTheme(activity: Activity, tintBackground: Boolean = true) {
-    setEmbeddedTextColor(activity) { it.accent }
-    bindEmbeddedTheme(activity) { colors ->
-        backgroundTintList = if (tintBackground) embeddedControlColors(colors.softSurface, colors.disabledSurface) else null
     }
 }
 

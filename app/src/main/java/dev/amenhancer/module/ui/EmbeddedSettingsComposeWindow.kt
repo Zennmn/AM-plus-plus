@@ -245,7 +245,6 @@ internal class EmbeddedMiuixDialogEntry(
     internal var contentShown = false
     internal var closeRequested = false
     internal var released = false
-    internal var onDismissDelivered = false
 
     internal val isShowing: Boolean
         get() = visible.value && !closeRequested && !released

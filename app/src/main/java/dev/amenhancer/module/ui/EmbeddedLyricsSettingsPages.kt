@@ -149,7 +149,7 @@ internal fun EmbeddedSettingsHost.EmbeddedCustomLyricsPage(
                     title = localizedText(ModuleText.ADD_LYRICS),
                     shortLabel = localizedText(ModuleText.ADD),
                     icon = EmbeddedSvgIcon.AddLyrics,
-                    onClick = { showLyricsEditor(activity, null as CustomLyricsUiGroup?, song) },
+                    onClick = { showLyricsEditor(activity, null, song) },
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                 )
                 VerticalDivider(Modifier.height(28.dp))
