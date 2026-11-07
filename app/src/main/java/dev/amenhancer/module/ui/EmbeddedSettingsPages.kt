@@ -71,13 +71,13 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
         if (!saved) Toast.makeText(activity, localizedText(ModuleText.SETTINGS_SAVE_FAILED), Toast.LENGTH_SHORT).show()
     }
 
-    fun back() {
+    fun back(dismiss: () -> Unit) {
         // The root overlay host gets Back first. While a modal is exiting, keep its page in place.
         if (auxiliaryDialogs.isNotEmpty()) return
         if (backStack.size > 1) {
             backStack.removeAt(backStack.lastIndex)
         } else {
-            dialog?.dismiss()
+            dismiss()
         }
     }
 
@@ -93,7 +93,8 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                 pageRefresh = null
                 dismissAuxiliarySettingsDialogs()
             }
-        }) {
+        }) { dismiss ->
+            val goBack = { back(dismiss) }
             val swipeDirection = if (LocalLayoutDirection.current == LayoutDirection.Rtl) {
                 NavSwipeDirection.RightToLeft
             } else {
@@ -103,14 +104,14 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                 NavDisplay(
                     backStack = backStack,
                     modifier = Modifier.fillMaxSize(),
-                    onBack = ::back,
+                    onBack = goBack,
                     transition = NavTransitions.MiuixDefault,
                 ) {
                     entry<EmbeddedSettingsPage>(swipeDismiss = swipeDirection) { page ->
                         val active = backStack.lastOrNull() == page
                         val current = settings
                         val refresh = revision
-                        EmbeddedSettingsScreen(activity, page, current, ::back) {
+                        EmbeddedSettingsScreen(activity, page, current, goBack) {
                             when (page) {
                                 EmbeddedSettingsPage.MAIN -> EmbeddedSettingsHome(activity, current, refresh, ::open)
                                 EmbeddedSettingsPage.CUSTOM_LYRICS ->

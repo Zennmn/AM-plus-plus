@@ -5,20 +5,31 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
@@ -26,9 +37,12 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -43,14 +57,21 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import dev.amenhancer.module.CurrentSongDetails
 import dev.amenhancer.module.i18n.ModuleText
 import dev.amenhancer.module.model.CustomLyricsSources
 import dev.amenhancer.module.model.ModuleSettings
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
+import top.yukonga.miuix.kmp.basic.Button
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
@@ -116,43 +137,62 @@ internal fun EmbeddedSettingsHost.EmbeddedCustomLyricsPage(
         EmbeddedSettingsGroup {
             CurrentSongRow(song)
             SettingsDivider()
-            EmbeddedSettingLink(
-                title = localizedText(ModuleText.ADD_LYRICS),
-                icon = EmbeddedSvgIcon.AddLyrics,
-                onClick = { showLyricsEditor(activity, null as CustomLyricsUiGroup?, song) },
-            )
-            SettingsDivider()
-            EmbeddedSettingLink(
-                title = localizedText(ModuleText.IMPORT_TTML),
-                icon = EmbeddedSvgIcon.ImportTtml,
-                onClick = {
-                    launchSafPicker(
-                        activity,
-                        EmbeddedSafOperation.Ttml,
-                        "application/xml",
-                        arrayOf("application/ttml+xml", "application/xml", "text/xml", "text/plain"),
-                    )
-                },
-            )
-            SettingsDivider()
-            EmbeddedSettingLink(
-                title = localizedText(ModuleText.LYRICS_UPDATE),
-                icon = EmbeddedSvgIcon.Refresh,
-                onClick = { updateEmbeddedLyrics(activity) },
-            )
-            SettingsDivider()
-            EmbeddedSettingLink(
-                title = localizedText(ModuleText.BACKUP_AND_RESTORE),
-                icon = EmbeddedSvgIcon.BackupRestore,
-                onClick = { showBackupRestoreDialog(activity) },
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(IntrinsicSize.Min)
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                LyricsActionButton(
+                    title = localizedText(ModuleText.ADD_LYRICS),
+                    shortLabel = localizedText(ModuleText.ADD),
+                    icon = EmbeddedSvgIcon.AddLyrics,
+                    onClick = { showLyricsEditor(activity, null as CustomLyricsUiGroup?, song) },
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                )
+                LyricsActionButton(
+                    title = localizedText(ModuleText.IMPORT_TTML),
+                    shortLabel = "TTML",
+                    icon = EmbeddedSvgIcon.ImportTtml,
+                    onClick = {
+                        launchSafPicker(
+                            activity,
+                            EmbeddedSafOperation.Ttml,
+                            "application/xml",
+                            arrayOf("application/ttml+xml", "application/xml", "text/xml", "text/plain"),
+                        )
+                    },
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                )
+                LyricsActionButton(
+                    title = localizedText(ModuleText.LYRICS_UPDATE),
+                    shortLabel = localizedText(ModuleText.UPDATE),
+                    icon = EmbeddedSvgIcon.Refresh,
+                    onClick = { updateEmbeddedLyrics(activity) },
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                )
+                LyricsActionButton(
+                    title = localizedText(ModuleText.BACKUP_AND_RESTORE),
+                    shortLabel = localizedText(ModuleText.BACKUP),
+                    icon = EmbeddedSvgIcon.BackupRestore,
+                    onClick = { showBackupRestoreDialog(activity) },
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                )
+            }
         }
+
+        EmbeddedSettingsSection(
+            title = localizedText(ModuleText.CONFIGURED),
+            summary = localizedText(ModuleText.SONG_COUNT, entries.size),
+        )
 
         EmbeddedSettingsGroup {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
             ) {
                 TextField(
                     value = searchText,
@@ -177,14 +217,7 @@ internal fun EmbeddedSettingsHost.EmbeddedCustomLyricsPage(
                     },
                 )
             }
-        }
-
-        EmbeddedSettingsSection(
-            title = localizedText(ModuleText.CONFIGURED),
-            summary = localizedText(ModuleText.SONG_COUNT, entries.size),
-        )
-
-        EmbeddedSettingsGroup {
+            SettingsDivider()
             if (lyricsState.totalCount == 0) {
                 EmptyLyricsState(
                     hasEntries = entries.isNotEmpty(),
@@ -252,20 +285,30 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
             preferNative = settings.automaticLyricsPreferNative,
         )
     }
-    var visibleSources by remember(initialVisibleSources) {
+    var visibleSources by remember {
         mutableStateOf(initialVisibleSources)
     }
-    var nativeIndex by remember(normalizedOrder) {
+    var nativeIndex by remember {
         mutableIntStateOf(normalizedOrder.indexOf(CustomLyricsSources.AM_NATIVE))
     }
     var dragStartOrder by remember { mutableStateOf<List<String>?>(null) }
+    var dragStartCenters by remember { mutableStateOf<Map<String, Float>>(emptyMap()) }
     var draggingSource by remember { mutableStateOf<String?>(null) }
     var dragDistancePx by remember { mutableFloatStateOf(0f) }
+    var dragSettleJob by remember { mutableStateOf<Job?>(null) }
 
     val sourceCenters = remember { mutableStateMapOf<String, Float>() }
     val haptics = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
     val currentSettings by rememberUpdatedState(settings)
     val settingsChanged by rememberUpdatedState(onSettingsChanged)
+
+    LaunchedEffect(initialVisibleSources, normalizedOrder, dragStartOrder, dragSettleJob) {
+        if (dragStartOrder == null && dragSettleJob == null) {
+            visibleSources = initialVisibleSources
+            nativeIndex = normalizedOrder.indexOf(CustomLyricsSources.AM_NATIVE)
+        }
+    }
 
     fun orderWithNative(sources: List<String>, nativePosition: Int): List<String> {
         if (!currentSettings.automaticLyricsPreferNative) return sources.toList()
@@ -287,11 +330,13 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
 
     fun canMoveSource(from: Int, to: Int): Boolean = canMoveIn(visibleSources, from, to)
 
-    fun persistSourceOrder() {
+    fun persistSourceOrder(orderSources: List<String> = visibleSources) {
         val nextOrder = ModuleSettings.normalizeAutomaticLyricsSourceOrder(
-            orderWithNative(visibleSources, nativeIndex),
+            orderWithNative(orderSources, nativeIndex),
         )
-        nativeIndex = nextOrder.indexOf(CustomLyricsSources.AM_NATIVE)
+        if (dragStartOrder == null && dragSettleJob == null) {
+            nativeIndex = nextOrder.indexOf(CustomLyricsSources.AM_NATIVE)
+        }
         settingsChanged(currentSettings.copy(automaticLyricsSourceOrder = nextOrder))
     }
 
@@ -302,22 +347,36 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
     }
 
     fun startDrag(source: String) {
-        if (dragStartOrder != null) return
+        if (dragStartOrder != null || dragSettleJob != null) return
+        if (source !in visibleSources || visibleSources.any { sourceCenters[it] == null }) return
         dragStartOrder = visibleSources.toList()
+        dragStartCenters = visibleSources.associateWith { sourceCenters.getValue(it) }
         draggingSource = source
         dragDistancePx = 0f
         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
     }
 
     fun dragBy(source: String, deltaY: Float) {
-        if (draggingSource != source) return
-        dragDistancePx += deltaY
+        if (draggingSource != source || dragSettleJob != null) return
+        val order = dragStartOrder ?: return
+        val sourceCenter = dragStartCenters[source] ?: return
+        val centers = order.mapNotNull(dragStartCenters::get).sorted()
+        if (centers.isEmpty()) return
+        dragDistancePx = (dragDistancePx + deltaY).coerceIn(
+            minimumValue = centers.first() - sourceCenter,
+            maximumValue = centers.last() - sourceCenter,
+        )
     }
 
-    fun dropTargetIndex(source: String, distancePx: Float, order: List<String>): Int {
+    fun dropTargetIndex(
+        source: String,
+        distancePx: Float,
+        order: List<String>,
+        centers: Map<String, Float>,
+    ): Int {
         val from = order.indexOf(source)
         if (from < 0) return -1
-        val startCenter = sourceCenters[source] ?: return from
+        val startCenter = centers[source] ?: return from
         if (distancePx == 0f) return from
         val targetCenter = startCenter + distancePx
         val direction = if (distancePx > 0f) 1 else -1
@@ -326,8 +385,8 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
         while (true) {
             val next = position + direction
             if (next !in order.indices) break
-            val currentCenter = sourceCenters[order[position]] ?: break
-            val nextCenter = sourceCenters[order[next]] ?: break
+            val currentCenter = centers[order[position]] ?: break
+            val nextCenter = centers[order[next]] ?: break
             val midpoint = (currentCenter + nextCenter) / 2f
             if ((targetCenter - midpoint) * direction < 0 || !canMoveIn(workingOrder, position, next)) break
             workingOrder = workingOrder.toMutableList().apply { add(next, removeAt(position)) }
@@ -337,24 +396,53 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
     }
 
     fun finishDrag(commit: Boolean) {
+        if (dragSettleJob != null) return
         val initialOrder = dragStartOrder ?: return
-        val source = draggingSource
-        val targetIndex = source?.let { dropTargetIndex(it, dragDistancePx, initialOrder) }
-        dragStartOrder = null
-        draggingSource = null
-        dragDistancePx = 0f
-        if (commit && source != null && targetIndex != null) {
-            val from = initialOrder.indexOf(source)
-            if (from < 0 || targetIndex !in initialOrder.indices || from == targetIndex) return
-            visibleSources = initialOrder.toMutableList().apply {
-                add(targetIndex, removeAt(from))
+        val source = draggingSource ?: return
+        val centers = dragStartCenters
+        val targetIndex = dropTargetIndex(source, dragDistancePx, initialOrder, centers)
+        val from = initialOrder.indexOf(source)
+        val targetCenter = initialOrder.getOrNull(targetIndex)?.let(centers::get)
+        val sourceCenter = centers[source]
+        val committedOrder = if (commit &&
+            from >= 0 &&
+            targetIndex in initialOrder.indices &&
+            from != targetIndex &&
+            canMoveIn(initialOrder, from, targetIndex)
+        ) {
+            initialOrder.toMutableList().apply { add(targetIndex, removeAt(from)) }
+        } else {
+            null
+        }
+        val targetDistance = if (committedOrder != null && targetCenter != null && sourceCenter != null) {
+            targetCenter - sourceCenter
+        } else {
+            0f
+        }
+        if (committedOrder != null) persistSourceOrder(committedOrder)
+
+        dragSettleJob = scope.launch {
+            try {
+                animate(
+                    initialValue = dragDistancePx,
+                    targetValue = targetDistance,
+                    animationSpec = spring(dampingRatio = 0.78f, stiffness = 420f),
+                ) { value, _ ->
+                    dragDistancePx = value
+                }
+                if (committedOrder != null) visibleSources = committedOrder
+            } finally {
+                dragSettleJob = null
+                dragStartOrder = null
+                dragStartCenters = emptyMap()
+                draggingSource = null
+                dragDistancePx = 0f
             }
-            persistSourceOrder()
         }
     }
 
     fun moveForAccessibility(source: String, offset: Int): Boolean {
-        if (dragStartOrder != null) return false
+        if (dragStartOrder != null || dragSettleJob != null) return false
         val from = visibleSources.indexOf(source)
         if (from < 0 || !moveSource(from, from + offset)) return false
         persistSourceOrder()
@@ -362,7 +450,7 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
     }
 
     fun resetSourceOrder() {
-        if (dragStartOrder != null) return
+        if (dragStartOrder != null || dragSettleJob != null) return
         val nextOrder = ModuleSettings.normalizeAutomaticLyricsSourceOrder(
             ModuleSettings.DEFAULT_AUTOMATIC_LYRICS_SOURCE_ORDER,
         )
@@ -377,7 +465,10 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
 
     DisposableEffect(Unit) {
         onDispose {
+            dragSettleJob?.cancel()
+            dragSettleJob = null
             dragStartOrder = null
+            dragStartCenters = emptyMap()
             draggingSource = null
             dragDistancePx = 0f
         }
@@ -401,9 +492,39 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
         }
     }
 
-    val dragTargetIndex = draggingSource?.let { source ->
-        dropTargetIndex(source, dragDistancePx, dragStartOrder ?: visibleSources)
-    } ?: -1
+    val activeDragOrder = dragStartOrder
+    val dragTargetIndex = if (draggingSource != null && activeDragOrder != null) {
+        dropTargetIndex(
+            draggingSource.orEmpty(),
+            dragDistancePx,
+            activeDragOrder,
+            dragStartCenters,
+        )
+    } else {
+        -1
+    }
+
+    fun dragYieldOffset(index: Int): Float {
+        val source = draggingSource ?: return 0f
+        val targetIndex = dragTargetIndex
+        if (targetIndex < 0) return 0f
+        val from = activeDragOrder?.indexOf(source) ?: return 0f
+        if (from < 0 || index !in visibleSources.indices || index == from) return 0f
+        val order = activeDragOrder ?: return 0f
+        return when {
+            from < targetIndex && index in (from + 1)..targetIndex -> {
+                val previous = dragStartCenters[order[index - 1]] ?: return 0f
+                val current = dragStartCenters[order[index]] ?: return 0f
+                previous - current
+            }
+            from > targetIndex && index in targetIndex until from -> {
+                val next = dragStartCenters[order[index + 1]] ?: return 0f
+                val current = dragStartCenters[order[index]] ?: return 0f
+                next - current
+            }
+            else -> 0f
+        }
+    }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -448,12 +569,16 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
         EmbeddedSettingsGroup {
             visibleSources.forEachIndexed { index, source ->
                 key(source) {
+                    val isDragging = draggingSource == source
                     AutomaticLyricsSourceRow(
                         source = source,
                         sourceName = automaticLyricsSourceName(source),
                         position = index,
-                        dragging = draggingSource == source,
-                        dropTarget = dragTargetIndex == index && draggingSource != source,
+                        dragging = isDragging,
+                        dropTarget = dragTargetIndex == index && !isDragging,
+                        offsetY = if (isDragging) dragDistancePx else dragYieldOffset(index),
+                        animateOffset = dragStartOrder != null && !isDragging,
+                        showDivider = !isDragging && index < visibleSources.lastIndex,
                         canMoveUp = canMoveSource(index, index - 1),
                         canMoveDown = canMoveSource(index, index + 1),
                         onCenterPositioned = { center -> sourceCenters[source] = center },
@@ -463,7 +588,6 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
                         onMoveForAccessibility = { offset -> moveForAccessibility(source, offset) },
                     )
                 }
-                if (index < visibleSources.lastIndex) SettingsDivider()
             }
         }
     }
@@ -492,6 +616,47 @@ private fun EmbeddedSettingsHost.CurrentSongRow(song: CurrentSongDetails?) {
         },
         insideMargin = EmbeddedPreferencePadding,
     )
+}
+
+@Composable
+private fun LyricsActionButton(
+    title: String,
+    shortLabel: String,
+    icon: EmbeddedSvgIcon,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Button(
+        onClick = onClick,
+        modifier = modifier.semantics(mergeDescendants = true) {
+            contentDescription = title
+        },
+        minWidth = 0.dp,
+        minHeight = 64.dp,
+        insideMargin = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
+        colors = ButtonDefaults.buttonColors(
+            contentColor = MiuixTheme.colorScheme.onSecondaryVariant,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            EmbeddedSettingsIcon(
+                icon = icon,
+                modifier = Modifier.size(22.dp),
+                tint = MiuixTheme.colorScheme.onSecondaryVariant,
+            )
+            Text(
+                text = shortLabel,
+                style = MiuixTheme.textStyles.body2,
+                color = MiuixTheme.colorScheme.onSecondaryVariant,
+                maxLines = 2,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
 }
 
 @Composable
@@ -578,6 +743,9 @@ private fun EmbeddedSettingsHost.AutomaticLyricsSourceRow(
     position: Int,
     dragging: Boolean,
     dropTarget: Boolean,
+    offsetY: Float,
+    animateOffset: Boolean,
+    showDivider: Boolean,
     canMoveUp: Boolean,
     canMoveDown: Boolean,
     onCenterPositioned: (Float) -> Unit,
@@ -601,75 +769,116 @@ private fun EmbeddedSettingsHost.AutomaticLyricsSourceRow(
             add(CustomAccessibilityAction(moveDown) { currentMoveForAccessibility(1) })
         }
     }
+    val animatedOffset = if (animateOffset) {
+        val offset by animateFloatAsState(
+            targetValue = offsetY,
+            animationSpec = spring(dampingRatio = 0.82f, stiffness = 650f),
+            label = "lyrics-source-yield",
+        )
+        offset
+    } else {
+        0f
+    }
+    val scale by animateFloatAsState(
+        targetValue = if (dragging) 1.015f else 1f,
+        animationSpec = spring(dampingRatio = 0.82f, stiffness = 600f),
+        label = "lyrics-source-scale",
+    )
+    val liftColor by animateColorAsState(
+        targetValue = if (dragging) MiuixTheme.colorScheme.secondaryContainerVariant else Color.Transparent,
+        animationSpec = spring(dampingRatio = 0.9f, stiffness = 700f),
+        label = "lyrics-source-lift-color",
+    )
+    val liftElevation by animateDpAsState(
+        targetValue = if (dragging) 8.dp else 0.dp,
+        animationSpec = spring(dampingRatio = 0.82f, stiffness = 600f),
+        label = "lyrics-source-lift-elevation",
+    )
 
-    BasicComponent(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .onGloballyPositioned { onCenterPositioned(it.positionInRoot().y + it.size.height / 2f) }
-            .graphicsLayer { alpha = if (dragging) 0.72f else 1f },
-        title = sourceName,
-        titleColor = BasicComponentDefaults.titleColor(
-            color = if (dropTarget) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onBackground,
-        ),
-        startAction = {
-            Text(
-                text = (position + 1).toString(),
-                modifier = Modifier.width(28.dp),
-                style = MiuixTheme.textStyles.body2,
-                color = if (dropTarget) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                textAlign = TextAlign.Center,
-            )
-        },
-        endActions = {
-            IconButton(
-                onClick = {},
-                enabled = false,
+            .zIndex(if (dragging) 1f else 0f)
+            .graphicsLayer { translationY = if (animateOffset) animatedOffset else offsetY },
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                },
+            shape = RoundedCornerShape(CardDefaults.CornerRadius),
+            color = liftColor,
+            shadowElevation = liftElevation,
+        ) {
+            BasicComponent(
                 modifier = Modifier
-                    .size(44.dp)
-                    .semantics {
-                        contentDescription = dragDescription
-                        customActions = moveActions
-                    }
-                    .focusable()
-                    .pointerInput(source) {
-                        awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
-                            down.consume()
-                            currentStartDrag()
-                            var completed = false
-                            var previousY = down.position.y
-                            try {
-                                while (true) {
-                                    val event = awaitPointerEvent()
-                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                                    if (change.isConsumed || event.changes.any { it.id != down.id && it.pressed }) break
-                                    if (!change.pressed) {
-                                        change.consume()
-                                        currentFinishDrag(true)
-                                        completed = true
-                                        break
-                                    }
-                                    val deltaY = change.position.y - previousY
-                                    previousY = change.position.y
-                                    change.consume()
-                                    if (deltaY != 0f) currentDrag(deltaY)
-                                }
-                            } finally {
-                                if (!completed) currentFinishDrag(false)
-                            }
-                        }
+                    .fillMaxWidth()
+                    .onGloballyPositioned {
+                        onCenterPositioned(it.positionInRoot().y + it.size.height / 2f)
                     },
-            ) {
-                EmbeddedSettingsIcon(
-                    icon = EmbeddedSvgIcon.DragHandle,
-                    modifier = Modifier.size(24.dp),
-                    tint = if (dropTarget) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
-            }
-        },
-        insideMargin = EmbeddedPreferencePadding,
-        holdDownState = dragging,
-    )
+                title = sourceName,
+                titleColor = BasicComponentDefaults.titleColor(
+                    color = when {
+                        dropTarget -> MiuixTheme.colorScheme.primary
+                        dragging -> MiuixTheme.colorScheme.onSecondaryContainerVariant
+                        else -> MiuixTheme.colorScheme.onBackground
+                    },
+                ),
+                startAction = {
+                    Text(
+                        text = (position + 1).toString(),
+                        modifier = Modifier.width(28.dp),
+                        style = MiuixTheme.textStyles.body2,
+                        color = when {
+                            dropTarget -> MiuixTheme.colorScheme.primary
+                            dragging -> MiuixTheme.colorScheme.onSecondaryContainerVariant
+                            else -> MiuixTheme.colorScheme.onSurfaceVariantSummary
+                        },
+                        textAlign = TextAlign.Center,
+                    )
+                },
+                endActions = {
+                    IconButton(
+                        onClick = {},
+                        enabled = false,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .semantics {
+                                contentDescription = dragDescription
+                                customActions = moveActions
+                            }
+                            .focusable()
+                            .pointerInput(source) {
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = { currentStartDrag() },
+                                    onDragEnd = { currentFinishDrag(true) },
+                                    onDragCancel = { currentFinishDrag(false) },
+                                    onDrag = { change, dragAmount ->
+                                        change.consume()
+                                        if (dragAmount.y != 0f) currentDrag(dragAmount.y)
+                                    },
+                                )
+                            },
+                    ) {
+                        EmbeddedSettingsIcon(
+                            icon = EmbeddedSvgIcon.DragHandle,
+                            modifier = Modifier.size(24.dp),
+                            tint = when {
+                                dropTarget -> MiuixTheme.colorScheme.primary
+                                dragging -> MiuixTheme.colorScheme.onSecondaryContainerVariant
+                                else -> MiuixTheme.colorScheme.onSurfaceVariantSummary
+                            },
+                        )
+                    }
+                },
+                insideMargin = EmbeddedPreferencePadding,
+                holdDownState = dragging,
+            )
+        }
+        if (showDivider) SettingsDivider()
+    }
 }
 
 @Composable
