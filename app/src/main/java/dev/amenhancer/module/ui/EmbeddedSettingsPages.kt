@@ -7,10 +7,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -212,14 +216,22 @@ private fun EmbeddedSettingsHost.EmbeddedSettingsScreen(
             }
         },
     ) { padding ->
+        val direction = LocalLayoutDirection.current
+        val viewportPadding = PaddingValues(
+            start = padding.calculateStartPadding(direction),
+            top = padding.calculateTopPadding(),
+            end = padding.calculateEndPadding(direction),
+        )
         Box(
-            Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding),
+            Modifier.fillMaxSize().padding(viewportPadding).consumeWindowInsets(padding).imePadding(),
             contentAlignment = Alignment.TopCenter,
         ) {
             Column(
                 modifier = Modifier.widthIn(max = 720.dp).fillMaxSize()
                     .nestedScroll(scrollBehavior.nestedScrollConnection)
-                    .verticalScroll(rememberScrollState()).padding(12.dp),
+                    .verticalScroll(rememberScrollState())
+                    // Scroll behind the gesture area; keep only the final item clear of it.
+                    .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = 12.dp + padding.calculateBottomPadding()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 content = content,
             )

@@ -155,6 +155,10 @@ internal fun createEmbeddedSettingsDialog(
             }
             configuration.value = effective
             super.onConfigurationChanged(newConfig)
+            configureEmbeddedComposeWindow(
+                dialog,
+                effective.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES,
+            )
         }
     }.apply {
         addView(
@@ -170,6 +174,10 @@ internal fun createEmbeddedSettingsDialog(
         ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
     )
     configureEmbeddedComposeWindow(dialog, dark)
+    dialog.setOnShowListener {
+        // Apply after DecorView attaches as well, so the dialog theme cannot restore an opaque bar.
+        configureEmbeddedComposeWindow(dialog, activityReference.get()?.let { embeddedPalette(it).isDark } ?: dark)
+    }
     dialog.setOnDismissListener {
         backCallback.remove()
         composeView.disposeComposition()
@@ -196,6 +204,9 @@ private fun configureEmbeddedComposeWindow(dialog: Dialog, dark: Boolean) {
         setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         statusBarColor = android.graphics.Color.TRANSPARENT
         navigationBarColor = android.graphics.Color.TRANSPARENT
+        if (android.os.Build.VERSION.SDK_INT >= 28) {
+            navigationBarDividerColor = android.graphics.Color.TRANSPARENT
+        }
         if (android.os.Build.VERSION.SDK_INT >= 29) {
             isStatusBarContrastEnforced = false
             isNavigationBarContrastEnforced = false
