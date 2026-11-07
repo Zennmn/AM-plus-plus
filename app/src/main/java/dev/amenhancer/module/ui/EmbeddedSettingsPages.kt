@@ -86,7 +86,7 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
     val draft = EmbeddedSettingsDraft(initial, controller::saveOrdinarySettings)
     var settings by mutableStateOf(initial)
     var revision by mutableIntStateOf(0)
-    val backStack = navBackStackOf(EmbeddedSettingsPage.MAIN)
+    val backStack = navBackStackOf()
     val pageScrollStates = mutableMapOf<EmbeddedSettingsPage, ScrollState>()
     var dialog: Dialog? = null
 
@@ -113,13 +113,25 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
 
     fun selectCategory(page: EmbeddedSettingsPage) {
         if (auxiliaryDialogs.isNotEmpty() || page !in EmbeddedSettingsNavigationPages) return
-        val target = if (page == EmbeddedSettingsPage.MAIN) {
-            listOf(EmbeddedSettingsPage.MAIN)
-        } else {
-            listOf(EmbeddedSettingsPage.MAIN, page)
-        }
+        val target = listOf(page)
         if (backStack.toList() == target) return
         // A category is a destination, not another level in the previous category's history.
+        Snapshot.withMutableSnapshot {
+            backStack.clear()
+            backStack.addAll(target)
+        }
+    }
+
+    fun adaptNavigationToWidth(wide: Boolean) {
+        val pages = backStack.filterIsInstance<EmbeddedSettingsPage>()
+            .filterNot { it == EmbeddedSettingsPage.MAIN }
+        val target = if (wide) {
+            pages.ifEmpty { listOf(EmbeddedSettingsPage.CUSTOM_LYRICS) }
+        } else {
+            listOf(EmbeddedSettingsPage.MAIN) + pages
+        }
+        if (backStack.toList() == target) return
+        // Resize only adjusts the root; the current category and its children keep their keys.
         Snapshot.withMutableSnapshot {
             backStack.clear()
             backStack.addAll(target)
@@ -141,7 +153,13 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                 NavSwipeDirection.LeftToRight
             }
             BoxWithConstraints(Modifier.fillMaxSize()) {
-                val wide = maxWidth >= 600.dp
+                val wide = maxWidth >= EMBEDDED_SETTINGS_RAIL_MIN_WIDTH_DP.dp
+                // Seed before rendering from the measured window, including an initial split screen.
+                val navigationStack = remember {
+                    backStack.apply {
+                        if (isEmpty()) add(if (wide) EmbeddedSettingsPage.CUSTOM_LYRICS else EmbeddedSettingsPage.MAIN)
+                    }
+                }
                 val preferExpanded = maxWidth >= 1200.dp
                 val railState = rememberNavigationRailState(
                     if (preferExpanded) NavigationRailValue.Expanded else NavigationRailValue.Collapsed,
@@ -149,8 +167,11 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                 val railScrollState = rememberScrollState()
                 val focusManager = LocalFocusManager.current
                 val keyboardController = LocalSoftwareKeyboardController.current
-                val selectedCategory = (backStack.lastOrNull() as? EmbeddedSettingsPage)?.navigationCategory
-                    ?: EmbeddedSettingsPage.MAIN
+                val selectedCategory = (navigationStack.lastOrNull() as? EmbeddedSettingsPage)?.navigationCategory
+                    ?: EmbeddedSettingsPage.CUSTOM_LYRICS
+                LaunchedEffect(wide) {
+                    adaptNavigationToWidth(wide)
+                }
                 LaunchedEffect(preferExpanded) {
                     if (preferExpanded) railState.expand() else railState.collapse()
                 }
@@ -174,9 +195,7 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                                         selectCategory(category)
                                     },
                                     icon = EmbeddedSettingsSvgAssets.vector(category.navigationIcon),
-                                    label = localizedText(
-                                        if (category == EmbeddedSettingsPage.MAIN) ModuleText.SETTINGS_OVERVIEW else category.title,
-                                    ),
+                                    label = localizedText(category.title),
                                     enabled = auxiliaryDialogs.isEmpty(),
                                 )
                             }
@@ -193,13 +212,13 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                         ),
                     ) {
                         NavDisplay(
-                            backStack = backStack,
+                            backStack = navigationStack,
                             modifier = Modifier.fillMaxSize(),
                             onBack = goBack,
                             transition = NavTransitions.MiuixDefault,
                         ) {
                             entry<EmbeddedSettingsPage>(swipeDismiss = swipeDirection) { page ->
-                                val active = backStack.lastOrNull() == page
+                                val active = navigationStack.lastOrNull() == page
                                 val current = settings
                                 val refresh = revision
                                 val scrollState = pageScrollStates.getOrPut(page) { ScrollState(0) }
@@ -254,10 +273,11 @@ private fun EmbeddedSettingsHost.EmbeddedSettingsScreen(
 ) {
     val title = localizedText(page.title)
     val home = page == EmbeddedSettingsPage.MAIN
+    val closeSettings = home || (wide && page in EmbeddedSettingsNavigationPages)
     val contentSpacing = if (home) 16.dp else 12.dp
     val scrollBehavior = MiuixScrollBehavior()
     val navigation: @Composable () -> Unit = {
-        if (home) {
+        if (closeSettings) {
             IconButton(onClick = onBack) {
                 Icon(MiuixIcons.Basic.Close, contentDescription = localizedText(ModuleText.CLOSE_SETTINGS))
             }
@@ -333,8 +353,9 @@ private fun EmbeddedSettingsHost.EmbeddedSettingsScreen(
     }
 }
 
+private const val EMBEDDED_SETTINGS_RAIL_MIN_WIDTH_DP = 600
+
 private val EmbeddedSettingsNavigationPages = listOf(
-    EmbeddedSettingsPage.MAIN,
     EmbeddedSettingsPage.CUSTOM_LYRICS,
     EmbeddedSettingsPage.LYRICS_EFFECTS,
     EmbeddedSettingsPage.INTERFACE,
@@ -345,14 +366,14 @@ private val EmbeddedSettingsNavigationPages = listOf(
 
 private val EmbeddedSettingsPage.navigationCategory: EmbeddedSettingsPage
     get() = when (this) {
-        EmbeddedSettingsPage.AUTOMATIC_LYRICS, EmbeddedSettingsPage.LLM_LYRICS -> EmbeddedSettingsPage.CUSTOM_LYRICS
+        EmbeddedSettingsPage.MAIN, EmbeddedSettingsPage.AUTOMATIC_LYRICS, EmbeddedSettingsPage.LLM_LYRICS ->
+            EmbeddedSettingsPage.CUSTOM_LYRICS
         EmbeddedSettingsPage.BOTTOM_BAR_ANIMATION -> EmbeddedSettingsPage.INTERFACE
         else -> this
     }
 
 private val EmbeddedSettingsPage.navigationIcon: EmbeddedSvgIcon
     get() = when (navigationCategory) {
-        EmbeddedSettingsPage.MAIN -> EmbeddedSvgIcon.Document
         EmbeddedSettingsPage.CUSTOM_LYRICS -> EmbeddedSvgIcon.CustomLyrics
         EmbeddedSettingsPage.LYRICS_EFFECTS -> EmbeddedSvgIcon.LyricEffects
         EmbeddedSettingsPage.INTERFACE -> EmbeddedSvgIcon.TabletDualPane
