@@ -28,7 +28,6 @@ import dev.amenhancer.module.i18n.ModuleText
 import dev.amenhancer.module.lyrics.CustomLyricsMultiIdDraft
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImportResult
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImporter
-import dev.amenhancer.module.model.CustomLyricsEntry
 import dev.amenhancer.module.model.CustomLyricsSources
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.DropdownArrowEndAction
@@ -105,7 +104,7 @@ internal fun EmbeddedSettingsHost.showLyricsEditor(
         )
         saveSubmitted = true
         closeEditor()
-        host.runAsync(activity) { host.saveMany(draft, group?.appleMusicIds.orEmpty()) }
+        host.runAsync(activity) { host.controller.saveLyrics(draft, group?.appleMusicIds.orEmpty()) }
         dismiss()
     }
 
@@ -442,23 +441,6 @@ internal fun EmbeddedSettingsHost.showLyricsEditor(
         }
     }
 }
-
-/** Compatibility overload for callers that already hold one lyrics entry. */
-internal fun EmbeddedSettingsHost.showLyricsEditor(
-    activity: Activity,
-    entry: CustomLyricsEntry?,
-    song: CurrentSongDetails?,
-) = showLyricsEditor(
-    activity,
-    entry?.let { CustomLyricsUiGroup(listOf(it)) },
-    song,
-)
-
-/** Keeps the editor's multi-ID operation explicit at the host boundary. */
-internal fun EmbeddedSettingsHost.saveMany(
-    draft: CustomLyricsMultiIdDraft,
-    replacingAppleMusicIds: List<Long>,
-): EmbeddedActionResult = controller.saveLyrics(draft, replacingAppleMusicIds)
 
 internal fun EmbeddedSettingsHost.embeddedOnlineLyricsImporter(): CustomLyricsOnlineImporter =
     dev.amenhancer.module.lyrics.createEmbeddedOnlineLyricsImporter(application)

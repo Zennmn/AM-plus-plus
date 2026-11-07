@@ -35,7 +35,7 @@ private const val EMBEDDED_G3_SEGMENTS = 32
  * Unit-speed corner with theta(s) = pi/2 * smootherstep(s). Both theta' and
  * theta'' vanish at either end: curvature and its rate join the straight edge
  * continuously (G3). Integrate once; Android renders the curve as short Hermite
- * cubic spans, shared by fills, strokes, clips and transition silhouettes.
+ * cubic spans for the host ripple mask.
  */
 private val embeddedG3Corner = FloatArray((EMBEDDED_G3_SEGMENTS + 1) * 4).apply {
     fun angle(t: Double): Double = PI / 2.0 * t * t * t * (10.0 + t * (-15.0 + 6.0 * t))
@@ -63,7 +63,7 @@ private val embeddedG3Corner = FloatArray((EMBEDDED_G3_SEGMENTS + 1) * 4).apply 
     this[last + 2] = 0f
 }
 
-internal fun Path.setEmbeddedG3Rect(rect: RectF, cornerRadius: Float) {
+private fun Path.setEmbeddedG3Rect(rect: RectF, cornerRadius: Float) {
     rewind()
     if (rect.isEmpty) return
     val halfSide = minOf(rect.width(), rect.height()) / 2f
@@ -113,16 +113,13 @@ internal fun Path.setEmbeddedG3Rect(rect: RectF, cornerRadius: Float) {
 }
 
 
-/** Solid native View surface; geometry is cached until its bounds or radius change. */
+/** Cached mask for ripple feedback on native host entry views. */
 internal class EmbeddedG3Drawable : Drawable() {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val fillPath = Path()
-    private val strokePath = Path()
     private val shapeBounds = RectF()
     private var dirty = true
     private var fillColor = Color.TRANSPARENT
-    private var strokeColor = Color.TRANSPARENT
-    private var strokeWidth = 0f
     private var drawableAlpha = 255
     private var filter: ColorFilter? = null
 
@@ -138,13 +135,6 @@ internal class EmbeddedG3Drawable : Drawable() {
         invalidateSelf()
     }
 
-    fun setStroke(width: Int, color: Int) {
-        strokeWidth = width.coerceAtLeast(0).toFloat()
-        strokeColor = color
-        dirty = true
-        invalidateSelf()
-    }
-
     override fun onBoundsChange(bounds: Rect) {
         dirty = true
     }
@@ -153,8 +143,6 @@ internal class EmbeddedG3Drawable : Drawable() {
         if (!dirty) return
         shapeBounds.set(bounds)
         fillPath.setEmbeddedG3Rect(shapeBounds, cornerRadius)
-        shapeBounds.inset(strokeWidth / 2f, strokeWidth / 2f)
-        strokePath.setEmbeddedG3Rect(shapeBounds, (cornerRadius - strokeWidth / 2f).coerceAtLeast(0f))
         dirty = false
     }
 
@@ -165,13 +153,6 @@ internal class EmbeddedG3Drawable : Drawable() {
         paint.color = fillColor
         paint.alpha = Color.alpha(fillColor) * drawableAlpha / 255
         if (paint.alpha > 0) canvas.drawPath(fillPath, paint)
-        if (strokeWidth > 0f) {
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = strokeWidth
-            paint.color = strokeColor
-            paint.alpha = Color.alpha(strokeColor) * drawableAlpha / 255
-            if (paint.alpha > 0) canvas.drawPath(strokePath, paint)
-        }
     }
 
     @Suppress("DEPRECATION")

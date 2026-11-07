@@ -1,11 +1,5 @@
 package dev.amenhancer.module.ui
 
-import android.graphics.Canvas
-import android.graphics.ColorFilter
-import android.graphics.Paint
-import android.graphics.Path
-import android.graphics.PixelFormat
-import android.graphics.drawable.Drawable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
@@ -13,18 +7,16 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.unit.dp
-import androidx.core.graphics.PathParser
 
 /**
  * Resource-independent, 24 x 24 SVG glyphs for the embedded settings UI.
  *
- * Icons use a shared 1.75-unit rounded stroke. The application mark is not part of this catalogue.
+ * Icons use rounded strokes with a 1.75-unit default. The application mark is not part of this catalogue.
  */
 internal enum class EmbeddedSvgIcon {
     // Base actions and shared controls.
     AddLyrics,
     ImportTtml,
-    GitHubSync,
     BackupRestore,
     Back,
     RestoreDefault,
@@ -33,16 +25,13 @@ internal enum class EmbeddedSvgIcon {
     Model,
     Thinking,
     Music,
-    Exchange,
     DocumentSearch,
     TabletDualPane,
-    BottomBar,
     Glass,
     LyricsBlur,
     VideoDisplay,
     Refresh,
     AddCircle,
-    TtmlDocument,
     Search,
     Edit,
     Delete,
@@ -69,32 +58,14 @@ internal enum class EmbeddedSvgIcon {
 
     // Widgets and content states.
     DisplayDpi,
-    BarHeight,
-    BarBlur,
-    BlurRadius,
     Settings,
-    Power,
     Conflict,
 }
 
 private data class EmbeddedSvgSpec(
     val pathData: String,
-    val fillColor: Int = EmbeddedSettingsPalette.Light.primary,
-    val viewport: Float = 24f,
     val strokeWidth: Float = DEFAULT_STROKE,
-) {
-    val path: Path by lazy {
-        checkNotNull(PathParser.createPathFromPathData(pathData)) { "Invalid embedded SVG path" }
-    }
-
-    fun strokePaint(): Paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
-        strokeWidth = this@EmbeddedSvgSpec.strokeWidth
-    }
-
-}
+)
 
 private const val DEFAULT_STROKE = 1.75f
 
@@ -119,12 +90,6 @@ internal object EmbeddedSettingsSvgAssets {
             "M7 3.5H14.5L19 8V19Q19 20.5 17.5 20.5H7Q5.5 20.5 5.5 19V5Q5.5 3.5 7 3.5Z " +
                 "M14.5 3.5V8H19 " +
                 "M12 10.5v6 M9 13.5l3 3 3-3",
-        ),
-        EmbeddedSvgIcon.GitHubSync to stroked(
-            "M8 5.5a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z " +
-                "M8 18.5a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z " +
-                "M20 5.5a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z " +
-                "M6 7.5v9 M18 7.5v2.5a3 3 0 0 1-3 3H6",
         ),
         EmbeddedSvgIcon.BackupRestore to stroked(
             "M7.2 18.5h10.1a3.7 3.7 0 0 0 .5-7.36A5.3 5.3 0 0 0 7.6 9.4 " +
@@ -163,10 +128,6 @@ internal object EmbeddedSettingsSvgAssets {
                 "M9 17.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z " +
                 "M18 14.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z",
         ),
-        EmbeddedSvgIcon.Exchange to stroked(
-            "M4.5 8h14 M15.5 5l3 3-3 3 " +
-                "M19.5 16h-14 M8.5 13l-3 3 3 3",
-        ),
         EmbeddedSvgIcon.DocumentSearch to stroked(
             "M9.5 20.5h-3a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2h7l4 4v3 " +
                 "M13.5 3.5v4h4 M7.5 10h3.5 " +
@@ -176,10 +137,6 @@ internal object EmbeddedSettingsSvgAssets {
         EmbeddedSvgIcon.TabletDualPane to stroked(
             "M5.5 5h13a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z " +
                 "M11 5v14 M6.5 9h1.5 M6.5 12h1.5 M14 9h3.5 M14 12h2.5",
-        ),
-        EmbeddedSvgIcon.BottomBar to stroked(
-            "M7 3.5H17Q18.5 3.5 18.5 5V19Q18.5 20.5 17 20.5H7Q5.5 20.5 5.5 19V5Q5.5 3.5 7 3.5Z M5.5 16.5h13 " +
-                "M9 18.5h.01 M12 18.5h.01 M15 18.5h.01",
         ),
         EmbeddedSvgIcon.Glass to stroked(
             "M5 8H14Q15 8 15 9V16Q15 17 14 17H5Q4 17 4 16V9Q4 8 5 8Z " +
@@ -202,10 +159,6 @@ internal object EmbeddedSettingsSvgAssets {
         EmbeddedSvgIcon.AddCircle to stroked(
             "M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17Z " +
                 "M12 8v8 M8 12h8",
-        ),
-        EmbeddedSvgIcon.TtmlDocument to stroked(
-            "M7 3.5H14.5L19 8V19Q19 20.5 17.5 20.5H7Q5.5 20.5 5.5 19V5Q5.5 3.5 7 3.5Z M14.5 3.5V8H19 " +
-                "M9.5 12.5l-2 2 2 2 M14.5 12.5l2 2-2 2",
         ),
         EmbeddedSvgIcon.Search to stroked(
             "M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Z " +
@@ -304,29 +257,11 @@ internal object EmbeddedSettingsSvgAssets {
                 "M8 9.5h.01 M12 9.5h.01 M16 9.5h.01 " +
                 "M8 13.5h.01 M12 13.5h.01 M16 13.5h.01",
         ),
-        EmbeddedSvgIcon.BarHeight to stroked(
-            "M4 4h16 M4 20h16 M12 6.5v11 " +
-                "M9 9.5l3-3 3 3 M9 14.5l3 3 3-3",
-        ),
-        EmbeddedSvgIcon.BarBlur to stroked(
-            "M4 16.5h16 M4 19.5h16 " +
-                "M5.5 10c2-3.2 4-3.2 6 0s4 3.2 6 0 " +
-                "M7.5 13c1.3-2 2.7-2 4 0s2.7 2 4 0",
-        ),
-        EmbeddedSvgIcon.BlurRadius to stroked(
-            "M12 11.5h.01 " +
-                "M12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10Z " +
-                "M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18Z",
-        ),
         EmbeddedSvgIcon.Settings to stroked(
             "M4 6.5h2 M10 6.5h10 M4 12h9 M17 12h3 M4 17.5h3.5 M11.5 17.5H20 " +
                 "M8 4.5a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z " +
                 "M15 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z " +
                 "M9.5 15.5a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z",
-        ),
-        EmbeddedSvgIcon.Power to stroked(
-            "M12 3.5v8 " +
-                "M7.3 6.2a7.2 7.2 0 1 0 9.4 0",
         ),
         EmbeddedSvgIcon.Conflict to stroked(
             "M12 3.5 21 19.5H3Z " +
@@ -334,16 +269,16 @@ internal object EmbeddedSettingsSvgAssets {
         ),
     )
 
-    /** Compose representation of the same SVG spec, cached for reusable navigation icons. */
+    /** Cached vector glyphs shared by the settings controls and navigation. */
     @Synchronized
     fun vector(icon: EmbeddedSvgIcon): ImageVector = vectorCache.getOrPut(icon) {
         val spec = specs.getValue(icon)
         ImageVector.Builder(
             name = "EmbeddedSvgIcon.${icon.name}",
-            defaultWidth = spec.viewport.dp,
-            defaultHeight = spec.viewport.dp,
-            viewportWidth = spec.viewport,
-            viewportHeight = spec.viewport,
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f,
         ).addPath(
             pathData = addPathNodes(spec.pathData),
             stroke = SolidColor(Color.Black),
@@ -352,52 +287,4 @@ internal object EmbeddedSettingsSvgAssets {
             strokeLineJoin = StrokeJoin.Round,
         ).build()
     }
-
-    fun drawable(
-        icon: EmbeddedSvgIcon,
-        fillColor: Int? = null,
-    ): Drawable? = runCatching {
-        val spec = specs.getValue(icon)
-        EmbeddedSvgPathDrawable(spec, fillColor ?: spec.fillColor)
-    }.getOrNull()
-}
-
-private class EmbeddedSvgPathDrawable(
-    private val spec: EmbeddedSvgSpec,
-    private val fillColor: Int,
-) : Drawable() {
-    private val path = spec.path
-    private val paint = spec.strokePaint()
-    private var alphaValue = 255
-    private var colorFilterValue: ColorFilter? = null
-
-    override fun draw(canvas: Canvas) {
-        val box = bounds
-        if (box.width() <= 0 || box.height() <= 0) return
-        val size = minOf(box.width(), box.height()).toFloat()
-        val left = box.left + (box.width() - size) / 2f
-        val top = box.top + (box.height() - size) / 2f
-        val scale = size / spec.viewport
-        paint.color = fillColor
-        paint.alpha = android.graphics.Color.alpha(fillColor) * alphaValue / 255
-        paint.colorFilter = colorFilterValue
-
-        canvas.save()
-        canvas.translate(left, top)
-        canvas.scale(scale, scale)
-        canvas.drawPath(path, paint)
-        canvas.restore()
-    }
-
-    override fun setAlpha(alpha: Int) {
-        alphaValue = alpha.coerceIn(0, 255)
-        invalidateSelf()
-    }
-
-    override fun setColorFilter(colorFilter: ColorFilter?) {
-        colorFilterValue = colorFilter
-        invalidateSelf()
-    }
-
-    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 }

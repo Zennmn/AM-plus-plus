@@ -394,7 +394,7 @@ internal class EmbeddedSettingsHost private constructor(
 
         val density = activity.resources.displayMetrics.density
         val button = Button(activity).apply {
-            bindEmbeddedButtonTheme(activity, tintBackground = false)
+            backgroundTintList = null
             tag = FLOATING_BUTTON_TAG
             text = "AM"
             textSize = 12f
@@ -607,8 +607,6 @@ internal class EmbeddedSettingsHost private constructor(
         entry.closeRequested = true
         entry.visible.value = false
         auxiliaryDialogs.removeAll { it === entry }
-        if (entry.onDismissDelivered) return
-        entry.onDismissDelivered = true
         entry.onDismiss?.invoke()
     }
 
@@ -655,12 +653,9 @@ internal class EmbeddedSettingsHost private constructor(
 
     companion object {
         const val PLAYER_ACTIVITY_NAME = "com.apple.android.music.common.activity.PlayerActivity"
-        const val MAIN_CONTENT_ACTIVITY_NAME = "com.apple.android.music.common.MainContentActivity"
         const val FLOATING_BUTTON_TAG = "ampp_embedded_settings_button"
         const val SETTINGS_OPTION_TAG = "ampp_embedded_settings_option"
-        const val NATIVE_SETTINGS_PREFERENCE_KEY = "ampp_embedded_settings_preference"
         internal const val NATIVE_PREFERENCE_FALLBACK_DELAY_MS = 220L
-        internal const val MAX_NATIVE_PREFERENCE_SCAN = 256
         internal const val MAX_TAGGED_VIEW_SCAN = 4096
 
         fun install(

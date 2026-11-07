@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -38,7 +37,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.Snapshot
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -333,10 +331,9 @@ private fun EmbeddedSettingsHost.EmbeddedSettingsScreen(
         )
         Box(
             Modifier.fillMaxSize().padding(viewportPadding).consumeWindowInsets(padding).imePadding(),
-            contentAlignment = Alignment.TopCenter,
         ) {
             Column(
-                modifier = (if (wide) Modifier else Modifier.widthIn(max = 720.dp)).fillMaxSize()
+                modifier = Modifier.fillMaxSize()
                     .nestedScroll(scrollBehavior.nestedScrollConnection)
                     .verticalScroll(scrollState)
                     // Scroll behind the gesture area; keep only the final item clear of it.

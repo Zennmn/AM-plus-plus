@@ -1,7 +1,5 @@
 package dev.amenhancer.module.ui
 
-import android.app.Activity
-
 /** Pure lifecycle decisions used by the embedded host and its JVM tests. */
 internal enum class EmbeddedSettingsLifecycleAction {
     Ignore,

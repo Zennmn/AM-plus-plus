@@ -3,7 +3,6 @@ package dev.amenhancer.module.ui
 import dev.amenhancer.module.i18n.ModuleText
 
 import android.net.Uri
-import dev.amenhancer.module.config.EmbeddedConfigurationSession
 import dev.amenhancer.module.CurrentSongDetails
 import dev.amenhancer.module.lyrics.CustomLyricsDraft
 import dev.amenhancer.module.lyrics.CustomLyricsMultiIdDraft
@@ -59,14 +58,6 @@ internal interface EmbeddedSettingsController {
         isCancelled: () -> Boolean = { false },
         onProgress: (CustomLyricsUpdateProgress) -> Unit = {},
     ): CustomLyricsUpdateResult = CustomLyricsUpdateResult.Failed(ModuleText.LYRICS_UPDATE_UNAVAILABLE.text())
-}
-
-internal class EmbeddedSessionSettingsController(
-    private val session: EmbeddedConfigurationSession,
-) : EmbeddedSettingsController {
-    override fun currentSettings(): ModuleSettings = session.settings()
-
-    override fun saveOrdinarySettings(settings: ModuleSettings): Boolean = session.saveSettings(settings)
 }
 
 internal fun interface EmbeddedSafSelectionHandler {
