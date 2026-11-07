@@ -3,18 +3,27 @@ package dev.amenhancer.module.ui
 import android.app.Activity
 import android.app.Dialog
 import android.widget.Toast
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -22,16 +31,19 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -46,11 +58,15 @@ import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
+import top.yukonga.miuix.kmp.basic.NavigationRail
+import top.yukonga.miuix.kmp.basic.NavigationRailItem
+import top.yukonga.miuix.kmp.basic.NavigationRailValue
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.basic.TopAppBar
+import top.yukonga.miuix.kmp.basic.rememberNavigationRailState
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.Close
 import top.yukonga.miuix.kmp.nav.core.NavDisplay
@@ -70,6 +86,7 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
     var settings by mutableStateOf(initial)
     var revision by mutableIntStateOf(0)
     val backStack = navBackStackOf(EmbeddedSettingsPage.MAIN)
+    val pageScrollStates = mutableMapOf<EmbeddedSettingsPage, ScrollState>()
     var dialog: Dialog? = null
 
     fun update(next: ModuleSettings) {
@@ -93,6 +110,21 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
         if (auxiliaryDialogs.isEmpty() && page !in backStack) backStack.add(page)
     }
 
+    fun selectCategory(page: EmbeddedSettingsPage) {
+        if (auxiliaryDialogs.isNotEmpty() || page !in EmbeddedSettingsNavigationPages) return
+        val target = if (page == EmbeddedSettingsPage.MAIN) {
+            listOf(EmbeddedSettingsPage.MAIN)
+        } else {
+            listOf(EmbeddedSettingsPage.MAIN, page)
+        }
+        if (backStack.toList() == target) return
+        // A category is a destination, not another level in the previous category's history.
+        Snapshot.withMutableSnapshot {
+            backStack.clear()
+            backStack.addAll(target)
+        }
+    }
+
     runCatching {
         val opened = createEmbeddedSettingsDialog(activity, onBack = ::back, onDismiss = {
             if (dialogReference?.get() === dialog) {
@@ -107,33 +139,86 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
             } else {
                 NavSwipeDirection.LeftToRight
             }
-            Box(Modifier.fillMaxSize()) {
-                NavDisplay(
-                    backStack = backStack,
-                    modifier = Modifier.fillMaxSize(),
-                    onBack = goBack,
-                    transition = NavTransitions.MiuixDefault,
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val wide = maxWidth >= 600.dp
+                val preferExpanded = maxWidth >= 1200.dp
+                val railState = rememberNavigationRailState(
+                    if (preferExpanded) NavigationRailValue.Expanded else NavigationRailValue.Collapsed,
+                )
+                val railScrollState = rememberScrollState()
+                val focusManager = LocalFocusManager.current
+                val keyboardController = LocalSoftwareKeyboardController.current
+                val selectedCategory = (backStack.lastOrNull() as? EmbeddedSettingsPage)?.navigationCategory
+                    ?: EmbeddedSettingsPage.MAIN
+                LaunchedEffect(preferExpanded) {
+                    if (preferExpanded) railState.expand() else railState.collapse()
+                }
+                Row(
+                    Modifier.fillMaxSize().then(if (wide) Modifier.imePadding() else Modifier),
                 ) {
-                    entry<EmbeddedSettingsPage>(swipeDismiss = swipeDirection) { page ->
-                        val active = backStack.lastOrNull() == page
-                        val current = settings
-                        val refresh = revision
-                        EmbeddedSettingsScreen(activity, page, current, goBack) {
-                            when (page) {
-                                EmbeddedSettingsPage.MAIN -> EmbeddedSettingsHome(activity, current, refresh, ::open)
-                                EmbeddedSettingsPage.CUSTOM_LYRICS ->
-                                    EmbeddedCustomLyricsPage(activity, current, refresh, ::update, ::open)
-                                EmbeddedSettingsPage.AUTOMATIC_LYRICS -> EmbeddedAutomaticLyricsPage(current, ::update)
-                                EmbeddedSettingsPage.LLM_LYRICS ->
-                                    EmbeddedLlmLyricsPage(activity, current, ::update, active = active)
-                                EmbeddedSettingsPage.PLUGINS -> EmbeddedPluginManagementPage(activity, refresh, active)
-                                EmbeddedSettingsPage.BOTTOM_BAR_ANIMATION ->
-                                    EmbeddedAnimationSettingsPage(current) { edit -> update(edit(draft.settings)) }
-                                else -> EmbeddedSettingsCategory(
-                                    activity, page, current, refresh,
-                                    onEdit = { edit -> update(edit(draft.settings)) },
-                                    onOpenAnimationSettings = { open(EmbeddedSettingsPage.BOTTOM_BAR_ANIMATION) },
+                    if (wide) {
+                        NavigationRail(
+                            state = railState,
+                            modifier = Modifier.fillMaxHeight(),
+                            scrollState = railScrollState,
+                            expandContentDescription = localizedText(ModuleText.EXPAND_SETTINGS_NAVIGATION),
+                            collapseContentDescription = localizedText(ModuleText.COLLAPSE_SETTINGS_NAVIGATION),
+                        ) {
+                            EmbeddedSettingsNavigationPages.forEach { category ->
+                                NavigationRailItem(
+                                    selected = selectedCategory == category,
+                                    onClick = {
+                                        focusManager.clearFocus()
+                                        keyboardController?.hide()
+                                        selectCategory(category)
+                                    },
+                                    icon = EmbeddedSettingsSvgAssets.vector(category.navigationIcon),
+                                    label = localizedText(
+                                        if (category == EmbeddedSettingsPage.MAIN) ModuleText.SETTINGS_OVERVIEW else category.title,
+                                    ),
+                                    enabled = auxiliaryDialogs.isEmpty(),
                                 )
+                            }
+                        }
+                    }
+                    // Keep this NavDisplay at one stable call site when the window changes size.
+                    Box(
+                        Modifier.weight(1f).fillMaxSize().then(
+                            if (wide) Modifier
+                                .consumeWindowInsets(WindowInsets.displayCutout.only(WindowInsetsSides.Start))
+                                .consumeWindowInsets(WindowInsets.navigationBars.only(WindowInsetsSides.Start))
+                            else Modifier,
+                        ),
+                    ) {
+                        NavDisplay(
+                            backStack = backStack,
+                            modifier = Modifier.fillMaxSize(),
+                            onBack = goBack,
+                            transition = NavTransitions.MiuixDefault,
+                        ) {
+                            entry<EmbeddedSettingsPage>(swipeDismiss = swipeDirection) { page ->
+                                val active = backStack.lastOrNull() == page
+                                val current = settings
+                                val refresh = revision
+                                val scrollState = pageScrollStates.getOrPut(page) { ScrollState(0) }
+                                EmbeddedSettingsScreen(activity, page, current, wide, scrollState, goBack) {
+                                    when (page) {
+                                        EmbeddedSettingsPage.MAIN -> EmbeddedSettingsHome(activity, current, refresh, ::open)
+                                        EmbeddedSettingsPage.CUSTOM_LYRICS ->
+                                            EmbeddedCustomLyricsPage(activity, current, refresh, ::update, ::open)
+                                        EmbeddedSettingsPage.AUTOMATIC_LYRICS -> EmbeddedAutomaticLyricsPage(current, ::update)
+                                        EmbeddedSettingsPage.LLM_LYRICS ->
+                                            EmbeddedLlmLyricsPage(activity, current, ::update, active = active)
+                                        EmbeddedSettingsPage.PLUGINS -> EmbeddedPluginManagementPage(activity, refresh, active)
+                                        EmbeddedSettingsPage.BOTTOM_BAR_ANIMATION ->
+                                            EmbeddedAnimationSettingsPage(current) { edit -> update(edit(draft.settings)) }
+                                        else -> EmbeddedSettingsCategory(
+                                            activity, page, current, refresh,
+                                            onEdit = { edit -> update(edit(draft.settings)) },
+                                            onOpenAnimationSettings = { open(EmbeddedSettingsPage.BOTTOM_BAR_ANIMATION) },
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -160,12 +245,13 @@ private fun EmbeddedSettingsHost.EmbeddedSettingsScreen(
     activity: Activity,
     page: EmbeddedSettingsPage,
     settings: ModuleSettings,
+    wide: Boolean,
+    scrollState: ScrollState,
     onBack: () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val title = localizedText(page.title)
     val home = page == EmbeddedSettingsPage.MAIN
-    val wide = LocalConfiguration.current.screenWidthDp >= 600
     val contentSpacing = if (home) 16.dp else 12.dp
     val scrollBehavior = MiuixScrollBehavior()
     val navigation: @Composable () -> Unit = {
@@ -200,15 +286,13 @@ private fun EmbeddedSettingsHost.EmbeddedSettingsScreen(
         modifier = Modifier.fillMaxSize(),
         topBar = {
             if (wide) {
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
-                    SmallTopAppBar(
-                        title = title,
-                        modifier = Modifier.widthIn(max = 720.dp),
-                        navigationIcon = navigation,
-                        actions = actions,
-                        scrollBehavior = scrollBehavior,
-                    )
-                }
+                SmallTopAppBar(
+                    title = title,
+                    modifier = Modifier.fillMaxWidth(),
+                    navigationIcon = navigation,
+                    actions = actions,
+                    scrollBehavior = scrollBehavior,
+                )
             } else {
                 TopAppBar(
                     title = title,
@@ -230,17 +314,50 @@ private fun EmbeddedSettingsHost.EmbeddedSettingsScreen(
             contentAlignment = Alignment.TopCenter,
         ) {
             Column(
-                modifier = Modifier.widthIn(max = 720.dp).fillMaxSize()
+                modifier = (if (wide) Modifier else Modifier.widthIn(max = 720.dp)).fillMaxSize()
                     .nestedScroll(scrollBehavior.nestedScrollConnection)
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(scrollState)
                     // Scroll behind the gesture area; keep only the final item clear of it.
-                    .padding(start = 12.dp, top = contentSpacing, end = 12.dp, bottom = 12.dp + padding.calculateBottomPadding()),
+                    .padding(
+                        start = if (wide) 16.dp else 12.dp,
+                        top = contentSpacing,
+                        end = if (wide) 16.dp else 12.dp,
+                        bottom = 12.dp + padding.calculateBottomPadding(),
+                    ),
                 verticalArrangement = Arrangement.spacedBy(contentSpacing),
                 content = content,
             )
         }
     }
 }
+
+private val EmbeddedSettingsNavigationPages = listOf(
+    EmbeddedSettingsPage.MAIN,
+    EmbeddedSettingsPage.CUSTOM_LYRICS,
+    EmbeddedSettingsPage.LYRICS_EFFECTS,
+    EmbeddedSettingsPage.INTERFACE,
+    EmbeddedSettingsPage.TITLE_REGION,
+    EmbeddedSettingsPage.ADVANCED,
+    EmbeddedSettingsPage.PLUGINS,
+)
+
+private val EmbeddedSettingsPage.navigationCategory: EmbeddedSettingsPage
+    get() = when (this) {
+        EmbeddedSettingsPage.AUTOMATIC_LYRICS, EmbeddedSettingsPage.LLM_LYRICS -> EmbeddedSettingsPage.CUSTOM_LYRICS
+        EmbeddedSettingsPage.BOTTOM_BAR_ANIMATION -> EmbeddedSettingsPage.INTERFACE
+        else -> this
+    }
+
+private val EmbeddedSettingsPage.navigationIcon: EmbeddedSvgIcon
+    get() = when (navigationCategory) {
+        EmbeddedSettingsPage.MAIN -> EmbeddedSvgIcon.Document
+        EmbeddedSettingsPage.CUSTOM_LYRICS -> EmbeddedSvgIcon.CustomLyrics
+        EmbeddedSettingsPage.LYRICS_EFFECTS -> EmbeddedSvgIcon.LyricEffects
+        EmbeddedSettingsPage.INTERFACE -> EmbeddedSvgIcon.TabletDualPane
+        EmbeddedSettingsPage.TITLE_REGION -> EmbeddedSvgIcon.TitleMode
+        EmbeddedSettingsPage.PLUGINS -> EmbeddedSvgIcon.Plugins
+        else -> EmbeddedSvgIcon.Settings
+    }
 
 private val EmbeddedSettingsPage.title: ModuleText
     get() = when (this) {

@@ -6,6 +6,13 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.drawable.Drawable
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.addPathNodes
+import androidx.compose.ui.unit.dp
 import androidx.core.graphics.PathParser
 
 /**
@@ -100,6 +107,8 @@ private fun stroked(pathData: String, strokeWidth: Float = DEFAULT_STROKE): Embe
  * a polyline trace.
  */
 internal object EmbeddedSettingsSvgAssets {
+    private val vectorCache = mutableMapOf<EmbeddedSvgIcon, ImageVector>()
+
     private val specs: Map<EmbeddedSvgIcon, EmbeddedSvgSpec> = mapOf(
         EmbeddedSvgIcon.AddLyrics to stroked(
             "M7 3.5H14.5L19 8V19Q19 20.5 17.5 20.5H7Q5.5 20.5 5.5 19V5Q5.5 3.5 7 3.5Z " +
@@ -324,6 +333,25 @@ internal object EmbeddedSettingsSvgAssets {
                 "M12 8v5.5 M12 16.5h.01",
         ),
     )
+
+    /** Compose representation of the same SVG spec, cached for reusable navigation icons. */
+    @Synchronized
+    fun vector(icon: EmbeddedSvgIcon): ImageVector = vectorCache.getOrPut(icon) {
+        val spec = specs.getValue(icon)
+        ImageVector.Builder(
+            name = "EmbeddedSvgIcon.${icon.name}",
+            defaultWidth = spec.viewport.dp,
+            defaultHeight = spec.viewport.dp,
+            viewportWidth = spec.viewport,
+            viewportHeight = spec.viewport,
+        ).addPath(
+            pathData = addPathNodes(spec.pathData),
+            stroke = SolidColor(Color.Black),
+            strokeLineWidth = spec.strokeWidth,
+            strokeLineCap = StrokeCap.Round,
+            strokeLineJoin = StrokeJoin.Round,
+        ).build()
+    }
 
     fun drawable(
         icon: EmbeddedSvgIcon,
