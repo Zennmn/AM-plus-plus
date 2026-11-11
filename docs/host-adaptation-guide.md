@@ -517,6 +517,8 @@ staticMask 同时用于未来行初始化和已唱恢复，不能因它被调用
 
 **通用维护。** TTF/OTF 后台加载、暂时失败重试、行词一致及原字体恢复保持既有字体业务；区分 Hook 安装与字体真正就绪。字体、翻译、发音、模糊、CJK 和跨行均沿原生订阅与绑定协作，布局/字体变化触发对应几何失效，关闭仅释放仍拥有属性。
 
+**发音轨。** `lyricPronunciation.methods` 是精确 profile 的可选区域：声明后在宿主装配中安装一次，不增加设置，也不依赖“歌词效果优化”。进程 `Locale` 的 `language` 为 `zh`/`yue`/`ja`/`ko` 时，先采用原生 `matchToSystemLyricsScript`，结果为 `null` 时再从既有 `StringVector` 中优先取 `Latn`，否则取第一个非空项。逐曲原生可用性调用仅在原文与界面语言相同且当前已有发音数据时放宽同语言短路，并保持原调用线程及 `SongInfo` 原生身份约束；只复用原生 `setPronunciation` 的可用性、UI 和渲染，原翻译选择及用户偏好不改。无发音数据、非 CJK、未声明或契约解析/安装失败时保持原逻辑；本路径不改请求、TTML 或发音生成。
+
 [人工场景](feature-preservation.md#lyrics-typeface)
 
 <a id="chrome-glass"></a>

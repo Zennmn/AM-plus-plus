@@ -58,6 +58,7 @@ object AppleMusicHostFactory {
         check(profile.family in setOf("legacy-activity", "fragment-content")) {
             "Host family ${profile.family} needs its own verified native capability factory"
         }
+        LyricsPronunciationMatching.install(profile, classLoader)
         val resolver = IndexedTargetSymbolResolver(
             build = build,
             source = ApkTargetClassSource(application, classLoader),
