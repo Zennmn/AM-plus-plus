@@ -5815,6 +5815,13 @@
   },
   "lyricPronunciation": {
     "methods": {
+      "requestLyrics": {
+        "owner": "com.apple.android.music.ttml.e",
+        "name": "e",
+        "parameters": ["long", "[Ljava.lang.String;", "long", "[Ljava.lang.String;", "hi.c"],
+        "returns": "java.io.Serializable",
+        "static": false
+      },
       "evaluate": {
         "owner": "com.apple.android.music.player.fragment.PlayerLyricsViewFragment",
         "name": "F2",

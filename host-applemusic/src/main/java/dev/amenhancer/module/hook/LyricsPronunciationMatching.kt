@@ -3,7 +3,7 @@ package dev.amenhancer.module.hook
 import dev.amenhancer.host.applemusic.AppleMusicHostProfile
 import java.util.Locale
 
-/** Let the native lyrics UI select an existing pronunciation in CJK locales. */
+/** Request and select native lyric pronunciations in CJK locales. */
 internal object LyricsPronunciationMatching {
     private var installed = false
 
@@ -43,6 +43,20 @@ internal object LyricsPronunciationMatching {
 
             fun hook(role: String, callback: ModernMethodHook) {
                 check(ModernXposedRuntime.hookMethod(members.method(role), callback, registration)) { role }
+            }
+
+            if (names.optJSONObject("methods")?.has("requestLyrics") == true) {
+                hook("requestLyrics", object : ModernMethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        if (!isCjk(Locale.getDefault().language)) return
+                        // This array feeds l[script]. Keep l[lyrics] and the native script order.
+                        @Suppress("UNCHECKED_CAST")
+                        val scripts = param.args.getOrNull(3) as? Array<String> ?: return
+                        if (scripts.none { "en-Latn".equals(it, ignoreCase = true) }) {
+                            param.args[3] = scripts + "en-Latn"
+                        }
+                    }
+                })
             }
 
             // The same matcher is used when selecting the native track, building the menu,
@@ -98,10 +112,10 @@ internal object LyricsPronunciationMatching {
 
             registration.activate()
             installed = true
-            ModernXposedRuntime.log("Native CJK lyrics pronunciation matching installed (${profile.id})")
+            ModernXposedRuntime.log("Native CJK lyrics pronunciation hooks installed (${profile.id})")
         }.onFailure { error ->
             registration.close()
-            ModernXposedRuntime.log("Native CJK lyrics pronunciation matching unavailable (${profile.id})", error)
+            ModernXposedRuntime.log("Native CJK lyrics pronunciation hooks unavailable (${profile.id})", error)
         }
     }
 
