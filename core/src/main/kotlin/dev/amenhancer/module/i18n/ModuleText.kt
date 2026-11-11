@@ -198,7 +198,7 @@ enum class ModuleText(internal val english: String, internal val chinese: String
     LYRICS_PRONUNCIATION("Lyrics pronunciation", "歌词发音"),
     LYRICS_PRONUNCIATION_SUMMARY(
         "Use Show Pronunciation when Apple Music is set to Chinese, Japanese, or Korean. Restart to apply.",
-        "中、日、韩文界面也能用「显示发音」，重启 Apple Music 后生效",
+        "开启「显示发音」功能，重启 Apple Music 后生效",
     ),
     LYRIC_EFFECTS_OPTIMIZATION("Lyric effects optimization", "歌词效果优化"),
     LYRIC_EFFECTS_OPTIMIZATION_SUMMARY("Optimize Apple Music lyric effects", "对Applemusic歌词效果优化"),
