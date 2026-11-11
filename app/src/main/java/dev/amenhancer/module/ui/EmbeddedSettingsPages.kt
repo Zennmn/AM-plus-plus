@@ -403,8 +403,12 @@ private fun EmbeddedSettingsHost.EmbeddedSettingsHome(
     val lyricsCount = remember(revision) { runCatching { controller.lyricsEntries().size }.getOrDefault(0) }
     val font = remember(revision) { runCatching { controller.currentSettings().fontManifest }.getOrDefault(settings.fontManifest) }
     val fontName = if (font.enabled) font.displayName else localizedText(ModuleText.ORIGINAL_FONT)
-    val effectCount = listOf(settings.futureBlurEnabled, settings.cjkKaraokeAnimationEnabled, settings.lyricEffectsOptimizationEnabled)
-        .count { it }
+    val effectCount = listOf(
+        settings.futureBlurEnabled,
+        settings.cjkKaraokeAnimationEnabled,
+        settings.lyricEffectsOptimizationEnabled,
+        settings.lyricsPronunciationEnabled && nativeBridge.supportsLyricsPronunciation(activity),
+    ).count { it }
     val dpi = if (settings.appleMusicDpiOverrideDpi == ModuleSettings.FOLLOW_SYSTEM_APPLE_MUSIC_DPI) {
         localizedText(ModuleText.SUMMARY_DPI_SYSTEM)
     } else settings.appleMusicDpiOverrideDpi.toString()
@@ -462,6 +466,12 @@ private fun EmbeddedSettingsHost.EmbeddedSettingsCategory(
     when (page) {
         EmbeddedSettingsPage.LYRICS_EFFECTS -> {
             EmbeddedSettingsGroup {
+                if (nativeBridge.supportsLyricsPronunciation(activity)) {
+                    Setting(ModuleText.LYRICS_PRONUNCIATION, ModuleText.LYRICS_PRONUNCIATION_SUMMARY,
+                        settings.lyricsPronunciationEnabled, EmbeddedSvgIcon.Translation) { value ->
+                        onEdit { it.copy(lyricsPronunciationEnabled = value) }
+                    }
+                }
                 Setting(ModuleText.BIDIRECTIONAL_LYRIC_BLUR, ModuleText.BIDIRECTIONAL_LYRIC_BLUR_SUMMARY,
                     settings.futureBlurEnabled, EmbeddedSvgIcon.LyricsBlur) { value -> onEdit { it.copy(futureBlurEnabled = value) } }
                 Setting(ModuleText.CJK_KARAOKE_ANIMATION, ModuleText.CJK_KARAOKE_ANIMATION_SUMMARY,

@@ -45,6 +45,11 @@ internal object FragmentSettingsNativeFactory {
             override val supportsViewFallback = false
             override fun supportsStartupPagePrewarm(activity: Activity): Boolean =
                 FragmentStartupPagePrewarmTarget.supports(activity)
+            override fun supportsLyricsPronunciation(activity: Activity): Boolean {
+                val build = targetBuild(activity)
+                val profile = AppleMusicHostProfiles.find(build.packageName, build.versionName, build.versionCode)
+                return profile?.productionEnabled == true && profile.document.optJSONObject("lyricPronunciation") != null
+            }
             override fun supportsGlassScrollCollapse(activity: Activity): Boolean {
                 val build = targetBuild(activity)
                 return android.os.Build.VERSION.SDK_INT >= 33 &&

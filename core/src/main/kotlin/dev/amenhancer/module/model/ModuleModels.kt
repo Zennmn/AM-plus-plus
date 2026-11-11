@@ -57,6 +57,8 @@ data class ModuleSettings(
     val futureBlurEnabled: Boolean = true,
     /** Enables the native rush-gradient adaptation for CJK karaoke lyrics. */
     val cjkKaraokeAnimationEnabled: Boolean = true,
+    /** Enables native pronunciation requests and matching for CJK app languages at host startup. */
+    val lyricsPronunciationEnabled: Boolean = true,
     /** Opt-in corrections for wrapped sweeps and main lyric highlighting; applied at host startup. */
     val lyricEffectsOptimizationEnabled: Boolean = false,
     val navigationCompensationEnabled: Boolean = false,

@@ -16,6 +16,7 @@ interface SettingsViewBridge {
     /** Host eligibility for the collapse setting; unregistered host forms stay unavailable. */
     fun supportsGlassScrollCollapse(activity: Activity): Boolean = false
     fun supportsStartupPagePrewarm(activity: Activity): Boolean = false
+    fun supportsLyricsPronunciation(activity: Activity): Boolean = false
     fun fragmentView(fragment: Any): ViewGroup?
     fun findSettingsListOverlayContainer(root: View): ViewGroup?
     fun injectNativeSettingsPreference(fragment: Any, activity: Activity): Boolean

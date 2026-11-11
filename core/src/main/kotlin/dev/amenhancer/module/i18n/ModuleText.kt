@@ -195,6 +195,11 @@ enum class ModuleText(internal val english: String, internal val chinese: String
     BIDIRECTIONAL_LYRIC_BLUR_SUMMARY("Resumes one second after manual scrolling stops", "手动滚动停止 1 秒后恢复"),
     CJK_KARAOKE_ANIMATION("CJK lyric tail animation", "CJK 长尾歌词动画"),
     CJK_KARAOKE_ANIMATION_SUMMARY("Native rush-gradient for CJK lyrics · Restart Apple Music to apply", "CJK 歌词启用原生 rush-gradient 动画 · 重开 Apple Music 后生效"),
+    LYRICS_PRONUNCIATION("Lyrics pronunciation", "歌词发音"),
+    LYRICS_PRONUNCIATION_SUMMARY(
+        "Use Show Pronunciation when Apple Music is set to Chinese, Japanese, or Korean. Restart to apply.",
+        "中、日、韩文界面也能用「显示发音」，重启 Apple Music 后生效",
+    ),
     LYRIC_EFFECTS_OPTIMIZATION("Lyric effects optimization", "歌词效果优化"),
     LYRIC_EFFECTS_OPTIMIZATION_SUMMARY("Optimize Apple Music lyric effects", "对Applemusic歌词效果优化"),
     TITLE_CORRECTION("Song title correction", "歌曲名显示修正"),
