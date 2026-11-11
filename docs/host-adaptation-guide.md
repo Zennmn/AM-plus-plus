@@ -519,9 +519,9 @@ staticMask 同时用于未来行初始化和已唱恢复，不能因它被调用
 
 **歌词发音。** 仅在声明 `lyricPronunciation` 的精确生产 profile 显示独立选项。`lyrics_pronunciation_enabled` 默认开启，重启宿主后生效；关闭时不安装请求或显示 Hook。该设置独立于“歌词效果优化”和 AM 原生的发音显示偏好。
 
-进程 `Locale` 的 `language` 为 `zh`/`yue`/`ja`/`ko` 时，若声明了 `requestLyrics`，则在原生在线歌词请求的 `l[script]` 参数中去重追加 `en-Latn`，保留原脚本顺序、`l[lyrics]` 和离线路径；实际返回的轨道以服务响应为准。
+若声明了 `requestLyrics`，所有界面语言均在原生在线歌词请求的 `l[script]` 中去重追加 `en-Latn`，保留原脚本顺序、`l[lyrics]` 和离线路径；实际返回的轨道以服务响应为准。
 
-显示时先采用原生 `matchToSystemLyricsScript`，结果为 `null` 时再从既有 `StringVector` 中优先取 `Latn`，否则取第一个非空项。逐曲原生可用性调用仅在原文与界面语言相同且当前已有发音数据时放宽同语言短路，并保持原调用线程及 `SongInfo` 原生身份约束；复用原生 `setPronunciation` 的可用性、UI 和渲染，保留翻译选择及用户偏好。非 CJK、未声明或契约解析/安装失败时保留原逻辑；不生成发音或改写 TTML。
+显示时优先采用原生 `matchToSystemLyricsScript`；未匹配时从已有轨道选 `Latn`。仅 `zh`/`yue`/`ja`/`ko` 界面在缺少 `Latn` 时回退到首个非空轨道，并在当前曲目确有发音数据时放宽同语言短路。保持原调用线程和 `SongInfo` 原生身份约束，复用 `setPronunciation`、菜单和渲染，保留翻译选择及用户偏好。未声明或契约解析/安装失败时保留原逻辑；不生成发音或改写 TTML。
 
 [人工场景](feature-preservation.md#lyrics-typeface)
 

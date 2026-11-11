@@ -197,7 +197,7 @@ enum class ModuleText(internal val english: String, internal val chinese: String
     CJK_KARAOKE_ANIMATION_SUMMARY("Native rush-gradient for CJK lyrics · Restart Apple Music to apply", "CJK 歌词启用原生 rush-gradient 动画 · 重开 Apple Music 后生效"),
     LYRICS_PRONUNCIATION("Lyrics pronunciation", "歌词发音"),
     LYRICS_PRONUNCIATION_SUMMARY(
-        "Use Show Pronunciation when Apple Music is set to Chinese, Japanese, or Korean. Restart to apply.",
+        "Enable Show Pronunciation. Restart Apple Music to apply.",
         "开启「显示发音」功能，重启 Apple Music 后生效",
     ),
     LYRIC_EFFECTS_OPTIMIZATION("Lyric effects optimization", "歌词效果优化"),

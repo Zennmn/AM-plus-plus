@@ -3,7 +3,7 @@ package dev.amenhancer.module.hook
 import dev.amenhancer.host.applemusic.AppleMusicHostProfile
 import java.util.Locale
 
-/** Request and select native lyric pronunciations in CJK locales. */
+/** Request and match lyric pronunciations, with extra fallbacks for CJK app languages. */
 internal object LyricsPronunciationMatching {
     private var installed = false
 
@@ -28,7 +28,7 @@ internal object LyricsPronunciationMatching {
                 runCatching { address.invoke(it) as Long }.getOrNull()?.takeIf { value -> value != 0L }
             }
 
-            fun fallbackTag(vector: Any?): String? {
+            fun fallbackTag(vector: Any?, allowOtherScripts: Boolean): String? {
                 if (vector == null) return null
                 val size = vectorSize.invoke(vector) as Long
                 var first: String? = null
@@ -36,7 +36,7 @@ internal object LyricsPronunciationMatching {
                     val tag = vectorGet.invoke(vector, index) as? String ?: continue
                     if (tag.isBlank()) continue
                     if (tag.split('-').any { it.equals("Latn", ignoreCase = true) }) return tag
-                    if (first == null) first = tag
+                    if (allowOtherScripts && first == null) first = tag
                 }
                 return first
             }
@@ -48,7 +48,6 @@ internal object LyricsPronunciationMatching {
             if (names.optJSONObject("methods")?.has("requestLyrics") == true) {
                 hook("requestLyrics", object : ModernMethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
-                        if (!isCjk(Locale.getDefault().language)) return
                         // This array feeds l[script]. Keep l[lyrics] and the native script order.
                         @Suppress("UNCHECKED_CAST")
                         val scripts = param.args.getOrNull(3) as? Array<String> ?: return
@@ -63,8 +62,10 @@ internal object LyricsPronunciationMatching {
             // and deciding whether the selected pronunciation is visible.
             hook("match", object : ModernMethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    if (param.throwable != null || param.result != null || !isCjk(Locale.getDefault().language)) return
-                    runCatching { fallbackTag(param.args[0]) }.getOrNull()?.let { param.result = it }
+                    if (param.throwable != null || param.result != null) return
+                    val allowOtherScripts = isCjk(Locale.getDefault().language)
+                    runCatching { fallbackTag(param.args[0], allowOtherScripts) }
+                        .getOrNull()?.let { param.result = it }
                 }
             })
 
@@ -93,7 +94,10 @@ internal object LyricsPronunciationMatching {
                     if (current.languageRead || param.throwable != null || addressOf(song) != current.songAddress) return
                     current.languageRead = true
                     if (!(param.result as? String).equals(current.uiLanguage, ignoreCase = true)) return
-                    if (runCatching { fallbackTag(pronunciationLanguages.invoke(song)) }.getOrNull() == null) return
+                    val hasPronunciation = runCatching {
+                        fallbackTag(pronunciationLanguages.invoke(song), allowOtherScripts = true) != null
+                    }.getOrDefault(false)
+                    if (!hasPronunciation) return
                     // The host shares its same-language guard with translation. Enter its native
                     // selection branch for pronunciation, while keeping translation unavailable.
                     current.skipTranslation = true
@@ -112,10 +116,10 @@ internal object LyricsPronunciationMatching {
 
             registration.activate()
             installed = true
-            ModernXposedRuntime.log("Native CJK lyrics pronunciation hooks installed (${profile.id})")
+            ModernXposedRuntime.log("Native lyrics pronunciation hooks installed (${profile.id})")
         }.onFailure { error ->
             registration.close()
-            ModernXposedRuntime.log("Native CJK lyrics pronunciation hooks unavailable (${profile.id})", error)
+            ModernXposedRuntime.log("Native lyrics pronunciation hooks unavailable (${profile.id})", error)
         }
     }
 

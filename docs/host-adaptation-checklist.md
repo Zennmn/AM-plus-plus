@@ -266,10 +266,10 @@
 - [ ] 后台字体准备、重试、就绪状态、重建与原字体恢复分别有依据。
 - [ ] 独立的 `lyrics_pronunciation_enabled` 缺键默认开启；精确生产 profile 声明 `lyricPronunciation` 才显示选项。保存后重启宿主核对开关，关闭时请求与显示均走原生，不受“歌词效果优化”影响。
 - [ ] `lyricPronunciation.methods` 的声明、解析、宿主装配和一次性安装闭合；未声明、解析或安装失败保持原逻辑。
-- [ ] 若声明 `requestLyrics`，由 DEX 确认原生在线请求中转成 `l[script]` 的数组位置；仅 CJK 去重追加 `en-Latn`，保留已有标签、顺序、`l[lyrics]` 及离线加载路径。
-- [ ] DEX 已核对进程 `Locale` 语言判断、`matchToSystemLyricsScript` 与 `StringVector` 回退的匹配共用路径；`zh`/`yue`/`ja`/`ko` 先取原生结果，`null` 时优先 `Latn`、再取首个非空项，无另建入口。
-- [ ] 逐曲原生可用性调用仅在原文与界面语言相同且当前已有发音数据时放宽同语言短路；调用线程、`SongInfo` 原生身份及原生 `setPronunciation` 的可用性/UI/渲染边界一致，翻译选择及用户偏好隔离。
-- [ ] 人工验收用同一曲目对照 CJK 和英文的官方在线歌词，另覆盖第三方发音、缺轨与切歌；确认回退与同语言分支、翻译和用户偏好符合预期，TTML 未被改写。
+- [ ] 若声明 `requestLyrics`，由 DEX 确认原生在线请求中转成 `l[script]` 的数组位置；所有界面语言均去重追加 `en-Latn`，保留已有标签、顺序、`l[lyrics]` 及离线加载路径。
+- [ ] 原生 `matchToSystemLyricsScript` 优先，无匹配时所有界面语言可选已有的 `Latn`；只有 `zh`/`yue`/`ja`/`ko` 可再回退首个非空轨道。匹配仍与原生菜单和渲染共用。
+- [ ] 逐曲原生可用性调用仅在 CJK 界面、原文与界面语言相同且当前已有发音数据时放宽同语言短路；调用线程、`SongInfo` 原生身份及原生 `setPronunciation` 的可用性/UI/渲染边界一致，翻译选择及用户偏好隔离。
+- [ ] 人工验收用同一曲目对照 CJK、英文和其他界面语言的官方在线歌词，另覆盖第三方发音、无 `Latn`、缺轨与切歌；确认回退与同语言分支、翻译和用户偏好符合预期，TTML 未被改写。
 
 <a id="chrome-glass-checks"></a>
 
