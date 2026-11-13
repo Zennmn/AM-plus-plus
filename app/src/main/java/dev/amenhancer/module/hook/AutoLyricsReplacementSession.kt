@@ -24,6 +24,7 @@ import dev.amenhancer.module.lyrics.FileLlmLyricsCache
 import dev.amenhancer.module.lyrics.LlmLyricsClient
 import dev.amenhancer.module.lyrics.LlmLyricsConfig
 import dev.amenhancer.module.lyrics.LlmLyricsDocument
+import dev.amenhancer.module.lyrics.LlmTransliterationDocument
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -118,7 +119,7 @@ internal fun createAutoLyricsRuntime(
         { runnable -> Thread(runnable, "ampp-auto-lyrics").apply { isDaemon = true } },
         ThreadPoolExecutor.DiscardOldestPolicy(),
     )
-    runCatching {
+    if (configuration().let { it.customLyricsEnabled && it.automaticLyricsEnabled }) runCatching {
         executor.execute {
             cache.cachedIds().forEach { appleMusicId ->
                 if (appleMusicId in suppressedIds) return@forEach
@@ -158,7 +159,7 @@ internal fun createAutoLyricsRuntime(
         },
     )
     val llmExecutor = ThreadPoolExecutor(
-        1, 1, 0L, TimeUnit.MILLISECONDS, ArrayBlockingQueue(1),
+        2, 2, 0L, TimeUnit.MILLISECONDS, ArrayBlockingQueue(4),
         { task -> Thread(task, "ampp-llm-lyrics").apply { isDaemon = true } },
         ThreadPoolExecutor.AbortPolicy(),
     )
@@ -167,7 +168,9 @@ internal fun createAutoLyricsRuntime(
     val llm = LlmLyricsRuntime(
         configuration = {
             configuration().let { settings ->
-                if (settings.customLyricsEnabled && settings.automaticLyricsEnabled && settings.llmLyricsEnabled) {
+                if (settings.llmLyricsTransliterationEnabled ||
+                    (settings.customLyricsEnabled && settings.automaticLyricsEnabled && settings.llmLyricsEnabled)
+                ) {
                     LlmLyricsConfig.fromSettings(settings)
                 } else null
             }
@@ -194,7 +197,6 @@ internal fun createAutoLyricsRuntime(
             translated.takeUnless { isCancelled() }
         },
         executor = Executor { task ->
-            llmExecutor.queue.clear()
             llmExecutor.execute(task)
         },
         close = { llmExecutor.shutdownNow() },
@@ -202,6 +204,28 @@ internal fun createAutoLyricsRuntime(
             // Persist only a host-accepted result; never use the custom-lyrics publisher.
             llmCache.write(request.appleMusicId, request.originalTtml, request.config, translated)
         },
+        translationEnabled = {
+            configuration().let { it.customLyricsEnabled && it.automaticLyricsEnabled && it.llmLyricsEnabled }
+        },
+        transliterationEnabled = { configuration().llmLyricsTransliterationEnabled },
+        transliterate = transliterate@{ request, isCancelled ->
+            if (isCancelled()) return@transliterate null
+            val document = LlmTransliterationDocument.prepare(request.originalTtml) ?: return@transliterate null
+            if (isCancelled()) return@transliterate null
+            llmCache.read(request.appleMusicId, request.originalTtml, request.config, kind = "transliteration")
+                ?.let { return@transliterate it.takeUnless { isCancelled() } }
+            llmClient.transliterate(
+                config = request.config,
+                document = document,
+                title = request.title,
+                artist = request.artist,
+                isCancelled = isCancelled,
+            )?.takeUnless { isCancelled() }
+        },
+        onTransliterationPrepared = { request, ttml ->
+            llmCache.write(request.appleMusicId, request.originalTtml, request.config, ttml, kind = "transliteration")
+        },
+        discardPending = { llmExecutor.queue.clear() },
     )
     return AutoLyricsRuntime(
         resolver = resolver,

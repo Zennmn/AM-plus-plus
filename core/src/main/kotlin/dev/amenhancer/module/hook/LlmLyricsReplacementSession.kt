@@ -1,9 +1,10 @@
 package dev.amenhancer.module.hook
 
 import dev.amenhancer.module.lyrics.LlmLyricsConfig
+import dev.amenhancer.module.lyrics.LlmLyricsTrackComposer
 import java.util.concurrent.Executor
 
-/** Immutable copied input; no host pointer, ViewModel or credentials are written to disk here. */
+/** Immutable source copied before background work; never retains a host pointer. */
 data class LlmLyricsRequest(
     val appleMusicId: Long,
     val originalTtml: String,
@@ -12,20 +13,25 @@ data class LlmLyricsRequest(
     val artist: String? = null,
 )
 
-/** App-owned network/storage wiring consumed through the existing automatic lyrics capability. */
+/** App-owned requests and storage. Both features use the same API configuration. */
 data class LlmLyricsRuntime(
     val configuration: () -> LlmLyricsConfig?,
     val translate: (LlmLyricsRequest, isCancelled: () -> Boolean) -> String?,
     val executor: Executor,
     val close: () -> Unit = {},
-    /** Persist only after the current host has accepted the generated TTML. */
+    /** Save the individual result only after its composed document was accepted. */
     val onPrepared: (LlmLyricsRequest, String) -> Unit = { _, _ -> },
+    val transliterate: ((LlmLyricsRequest, isCancelled: () -> Boolean) -> String?)? = null,
+    val translationEnabled: () -> Boolean = { true },
+    val transliterationEnabled: () -> Boolean = { false },
+    val onTransliterationPrepared: (LlmLyricsRequest, String) -> Unit = { _, _ -> },
+    val discardPending: () -> Unit = {},
 )
 
 /**
- * Native lyric translation for one playback visit. The host must confirm native selection
- * before either disk cache or network is touched. Native pointers are retained
- * only for the current visit; each subsequent visit repeats source selection.
+ * Enhances the exact selected document. The host permits translation only for
+ * native input; transliteration also accepts selected custom lyrics. Requests
+ * run independently, while composition and native publication are serialized.
  */
 class LlmLyricsReplacementSession(
     private val runtime: LlmLyricsRuntime,
@@ -36,137 +42,177 @@ class LlmLyricsReplacementSession(
     private val bindAdamId: (Any, Long) -> Boolean,
     private val isAllowed: (Long) -> Boolean,
     private val onReplacementPublished: (Long) -> Unit,
+    private val isTranslationAllowed: (Long) -> Boolean = isAllowed,
 ) : AutoCloseable {
     private val lock = Any()
+    private val compositionLock = Any()
     private var activeId: Long? = null
     private var generation = 0L
-    private var nativeSelected = false
+    private var selected = false
     private var original: String? = null
     private var configuration: LlmLyricsConfig? = null
-    private var attempted = false
+    private var translationAllowed = false
+    private var transliterationAllowed = false
+    private var translationAttempted = false
+    private var transliterationAttempted = false
+    private var translated: String? = null
+    private var transliterated: String? = null
     private var ready: Any? = null
     private var closed = false
 
     fun onSongChanged(appleMusicId: Long?) = synchronized(lock) {
         if (closed || activeId == appleMusicId) return@synchronized
         activeId = appleMusicId
-        nativeSelected = false
+        selected = false
         invalidateLocked()
     }
 
-    /** Opens the LLM path for the native document selected during this host selection pass. */
-    fun onNativeSelected(appleMusicId: Long) = synchronized(lock) {
-        if (!closed && activeId == appleMusicId) nativeSelected = true
+    fun onSelected(appleMusicId: Long) = synchronized(lock) {
+        if (!closed && activeId == appleMusicId) selected = true
     }
 
-    /** Compatibility entry for callers that have not moved to explicit native selection. */
+    fun onNativeSelected(appleMusicId: Long) = onSelected(appleMusicId)
+
+    /** Compatibility entry for source-selection callers. */
     fun onSourcesMissed(appleMusicId: Long) {
         val wake = synchronized(lock) {
-            if (closed || activeId != appleMusicId || nativeSelected) false
-            else { nativeSelected = true; true }
+            if (closed || activeId != appleMusicId || selected) false
+            else { selected = true; true }
         }
         if (wake) onReplacementPublished(appleMusicId)
     }
 
-    /** A manual or third-party result always revokes a pending or prepared LLM result. */
+    /** The selected source is unavailable or no longer eligible. */
     fun onHigherPriorityResult(appleMusicId: Long) = synchronized(lock) {
-        if (activeId == appleMusicId && (nativeSelected || original != null || ready != null)) {
-            nativeSelected = false
+        if (activeId == appleMusicId && (selected || original != null || ready != null)) {
+            selected = false
             invalidateLocked()
         }
     }
 
-    /** Missing exact native input revokes old work without inventing a new source outcome. */
-    fun onNativeInputUnavailable(appleMusicId: Long) {
-        synchronized(lock) {
-            if (activeId == appleMusicId) {
-                nativeSelected = false
-                invalidateLocked()
-            }
-        }
-    }
+    fun onNativeInputUnavailable(appleMusicId: Long) = onHigherPriorityResult(appleMusicId)
 
-    /** The host supplies raw TTML associated with its verified original pointer. */
     fun replacementFor(
         appleMusicId: Long,
         originalTtml: String,
         title: String? = null,
         artist: String? = null,
+        allowTranslation: Boolean = true,
     ): Any? {
         val config = runtime.configuration()
-        val allowed = config?.isConfigured == true && isAllowed(appleMusicId)
+        val wantTranslation = allowTranslation && runtime.translationEnabled() && isTranslationAllowed(appleMusicId)
+        val wantTransliteration = runtime.transliterate != null && runtime.transliterationEnabled()
+        val allowed = config?.isConfigured == true && isAllowed(appleMusicId) &&
+            (wantTranslation || wantTransliteration)
         synchronized(lock) {
             if (closed || appleMusicId <= 0L || activeId != appleMusicId) return null
             if (!allowed) {
                 if (original != null || ready != null) invalidateLocked()
                 return null
             }
-            if (original != originalTtml || configuration != config) {
+            if (!selected) return null
+            if (original != originalTtml || configuration != config ||
+                translationAllowed != wantTranslation || transliterationAllowed != wantTransliteration ||
+                (ready != null && !runCatching { isAlive(ready) }.getOrDefault(false))
+            ) {
                 invalidateLocked()
                 original = originalTtml
                 configuration = config
+                translationAllowed = wantTranslation
+                transliterationAllowed = wantTransliteration
             }
-            if (!nativeSelected) return null
-            ready?.let { pointer ->
-                if (runCatching { isAlive(pointer) }.getOrDefault(false)) return pointer
-                // Rebuild a released native wrapper from the independent raw cache.
-                ready = null
-                attempted = false
-            }
-            if (attempted) return null
-            attempted = true
+            val request = LlmLyricsRequest(appleMusicId, originalTtml, config!!, title, artist)
             val stamp = generation
-            val request = LlmLyricsRequest(appleMusicId, originalTtml, config, title, artist)
-            runCatching { runtime.executor.execute { prepare(request, stamp) } }
-            return null
-        }
-    }
-
-    private fun prepare(request: LlmLyricsRequest, stamp: Long) {
-        try {
-            if (!isCurrent(request, stamp)) return
-            val ttml = runtime.translate(request) { !isCurrent(request, stamp) } ?: return
-            if (!isCurrent(request, stamp)) return
-            val pointer = parseTtml(ttml) ?: return
-            if (!isCurrent(request, stamp)) return
-            if (readAdamId(pointer) != request.appleMusicId && !bindAdamId(pointer, request.appleMusicId)) return
-            if (!verifyPtr(pointer) || readAdamId(pointer) != request.appleMusicId) return
-            if (!isCurrent(request, stamp)) return
-            runCatching { runtime.onPrepared(request, ttml) }
-            if (!isCurrent(request, stamp)) return
-            synchronized(lock) {
-                if (!matchesLocked(request, stamp)) return
-                ready = pointer
+            if (wantTranslation && !translationAttempted) {
+                translationAttempted = true
+                enqueue(request, stamp, false)
             }
-            if (isCurrent(request, stamp)) onReplacementPublished(request.appleMusicId)
-        } catch (_: Exception) {
-            // A native binding failure must not reach the shared worker thread.
+            if (wantTransliteration && !transliterationAttempted) {
+                transliterationAttempted = true
+                enqueue(request, stamp, true)
+            }
+            return ready
         }
     }
 
-    private fun isCurrent(request: LlmLyricsRequest, stamp: Long): Boolean =
-        synchronized(lock) { matchesLocked(request, stamp) } &&
-            isAllowed(request.appleMusicId) && runtime.configuration() == request.config
+    private fun enqueue(request: LlmLyricsRequest, stamp: Long, pronunciation: Boolean) {
+        try {
+            runtime.executor.execute { prepare(request, stamp, pronunciation) }
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+            if (pronunciation) transliterationAttempted = false else translationAttempted = false
+        }
+    }
+
+    private fun prepare(request: LlmLyricsRequest, stamp: Long, pronunciation: Boolean) {
+        try {
+            if (!isCurrent(request, stamp, pronunciation)) return
+            val cancelled = { !isCurrent(request, stamp, pronunciation) }
+            val generated = if (pronunciation) runtime.transliterate?.invoke(request, cancelled)
+                else runtime.translate(request, cancelled)
+            if (generated == null || cancelled()) return
+            // A late answer includes the already accepted sibling track.
+            synchronized(compositionLock) {
+                if (cancelled()) return
+                val tracks = synchronized(lock) {
+                    (if (pronunciation) translated else generated) to
+                        (if (pronunciation) generated else transliterated)
+                }
+                val combined = LlmLyricsTrackComposer.compose(request.originalTtml, tracks.first, tracks.second)
+                    ?: return
+                val pointer = parseTtml(combined) ?: return
+                if (cancelled()) return
+                if (readAdamId(pointer) != request.appleMusicId && !bindAdamId(pointer, request.appleMusicId)) return
+                if (!verifyPtr(pointer) || readAdamId(pointer) != request.appleMusicId) return
+                if (cancelled()) return
+                if (pronunciation) runtime.onTransliterationPrepared(request, generated)
+                else runtime.onPrepared(request, generated)
+                if (cancelled()) return
+                synchronized(lock) {
+                    if (!matchesLocked(request, stamp)) return
+                    translated = tracks.first
+                    transliterated = tracks.second
+                    ready = pointer
+                }
+            }
+            if (isCurrent(request, stamp, pronunciation)) onReplacementPublished(request.appleMusicId)
+        } catch (_: Exception) {
+            // Fail this feature only; an accepted sibling result remains usable.
+        }
+    }
+
+    private fun isCurrent(request: LlmLyricsRequest, stamp: Long, pronunciation: Boolean): Boolean =
+        synchronized(lock) {
+            matchesLocked(request, stamp) && (if (pronunciation) transliterationAllowed else translationAllowed)
+        } && isAllowed(request.appleMusicId) && runtime.configuration() == request.config &&
+            (if (pronunciation) runtime.transliterationEnabled()
+                else runtime.translationEnabled() && isTranslationAllowed(request.appleMusicId))
 
     private fun matchesLocked(request: LlmLyricsRequest, stamp: Long): Boolean =
-        !closed && generation == stamp && nativeSelected && activeId == request.appleMusicId &&
+        !closed && generation == stamp && selected && activeId == request.appleMusicId &&
             original == request.originalTtml && configuration == request.config
 
     private fun invalidateLocked() {
         generation++
+        runtime.discardPending()
         original = null
         configuration = null
+        translationAllowed = false
+        transliterationAllowed = false
+        translationAttempted = false
+        transliterationAttempted = false
+        translated = null
+        transliterated = null
         ready = null
-        attempted = false
     }
 
     override fun close() {
         synchronized(lock) {
             closed = true
-            nativeSelected = false
+            selected = false
             activeId = null
             invalidateLocked()
         }
         runtime.close()
     }
 }
+

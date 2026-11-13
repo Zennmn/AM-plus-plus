@@ -104,6 +104,10 @@ object ModuleSettingsSchema {
         automaticLyricsPreferNative = values.boolean(KEY_AUTOMATIC_LYRICS_PREFER_NATIVE, default = true),
         automaticLyricsSourceOrder = values.automaticLyricsSourceOrder(),
         llmLyricsEnabled = values.boolean(KEY_LLM_LYRICS_ENABLED, default = false),
+        llmLyricsTransliterationEnabled = values.boolean(
+            KEY_LLM_LYRICS_TRANSLITERATION_ENABLED,
+            default = false,
+        ),
         llmLyricsBaseUrl = ModuleSettings.normalizeLlmLyricsBaseUrl(values.string(KEY_LLM_LYRICS_BASE_URL)),
         llmLyricsApiKey = ModuleSettings.normalizeLlmLyricsApiKey(values.string(KEY_LLM_LYRICS_API_KEY)),
         llmLyricsModel = ModuleSettings.normalizeLlmLyricsModel(values.string(KEY_LLM_LYRICS_MODEL)),
@@ -182,6 +186,7 @@ object ModuleSettingsSchema {
                 ModuleSettings.normalizeAutomaticLyricsSourceOrder(settings.automaticLyricsSourceOrder)
                     .joinToString(","),
             KEY_LLM_LYRICS_ENABLED to settings.llmLyricsEnabled,
+            KEY_LLM_LYRICS_TRANSLITERATION_ENABLED to settings.llmLyricsTransliterationEnabled,
             KEY_LLM_LYRICS_BASE_URL to
                 ModuleSettings.normalizeLlmLyricsBaseUrl(settings.llmLyricsBaseUrl),
             KEY_LLM_LYRICS_API_KEY to
@@ -389,6 +394,7 @@ object ModuleSettingsSchema {
         KEY_AUTOMATIC_LYRICS_PREFER_NATIVE,
         KEY_AUTOMATIC_LYRICS_SOURCE_ORDER,
         KEY_LLM_LYRICS_ENABLED,
+        KEY_LLM_LYRICS_TRANSLITERATION_ENABLED,
         KEY_LLM_LYRICS_BASE_URL,
         KEY_LLM_LYRICS_API_KEY,
         KEY_LLM_LYRICS_MODEL,
@@ -445,6 +451,7 @@ object ModuleSettingsSchema {
     private const val KEY_AUTOMATIC_LYRICS_PREFER_NATIVE = "automatic_lyrics_prefer_native"
     private const val KEY_AUTOMATIC_LYRICS_SOURCE_ORDER = "automatic_lyrics_source_order"
     private const val KEY_LLM_LYRICS_ENABLED = "llm_lyrics_enabled"
+    private const val KEY_LLM_LYRICS_TRANSLITERATION_ENABLED = "llm_lyrics_transliteration_enabled"
     private const val KEY_LLM_LYRICS_BASE_URL = "llm_lyrics_base_url"
     private const val KEY_LLM_LYRICS_API_KEY = "llm_lyrics_api_key"
     private const val KEY_LLM_LYRICS_MODEL = "llm_lyrics_model"

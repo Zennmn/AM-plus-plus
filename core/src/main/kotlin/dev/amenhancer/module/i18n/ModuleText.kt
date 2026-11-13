@@ -159,8 +159,8 @@ enum class ModuleText(internal val english: String, internal val chinese: String
     SHORT_GLASS_SUMMARY("Bottom bar and mini player · Restart to apply", "底栏与迷你播放器 · 重启应用后生效"),
     SHORT_AUTO_LYRICS_SUMMARY("Configure sources and native priority", "配置补全来源与原生优先"),
     SHORT_LLM_LYRICS_SUMMARY(
-        "Add translations to foreign-language lyrics missing them",
-        "为缺少译文的外语歌词补充翻译",
+        "Translation and transliteration",
+        "翻译与音译",
     ),
     SHORT_DUAL_PANE_STATUS_SUMMARY("Applies while the dual-pane player is expanded", "在双栏播放器展开时生效"),
     TABLET_DUAL_PANE("Tablet dual-pane player", "平板双栏播放器"),
@@ -412,19 +412,29 @@ enum class ModuleText(internal val english: String, internal val chinese: String
     PLUGIN_DEX_SIGNATURE_INVALID("Corrupt DEX signature", "DEX 签名损坏"),
     PLUGIN_DEX_CHECKSUM_INVALID("Corrupt DEX checksum", "DEX 校验损坏"),
     PLUGIN_SDK_BUNDLED("Plugins must not bundle SDK classes", "插件不可打包 SDK 类"),
-    LLM_LYRICS_FALLBACK("LLM lyrics translation", "LLM 歌词翻译"),
+    LLM_LYRICS_FALLBACK("LLM lyrics", "LLM 歌词"),
     LLM_LYRICS_FALLBACK_SUMMARY(
-        "Model, API Key",
-        "模型、API Key",
+        "Translation and transliteration",
+        "翻译与音译",
     ),
     LLM_LYRICS_ENABLED("Enable translation", "启用翻译"),
     LLM_LYRICS_ENABLED_SUMMARY(
-        "Only applies to native Apple Music lyrics.",
-        "仅对 AM 原生歌词生效。",
+        "Adds translations only to official Apple Music lyrics.",
+        "仅补充 AM 官方歌词的翻译。",
     ),
     LLM_LYRICS_REQUIRES_AUTO(
         "Enable lyrics replacement and automatic live lyrics first",
         "先开启歌词替换和自动实时补全",
+    ),
+    LLM_LYRICS_TRANSLITERATION_ENABLED("Enable transliteration", "启用音译"),
+    LLM_LYRICS_TRANSLITERATION_ENABLED_SUMMARY(
+        "Adds transliteration where official or third-party lyrics lack pronunciation; existing transliteration is kept.",
+        "为缺发音的官方和第三方歌词补音译，已有音译时跳过。",
+    ),
+    LLM_LYRICS_API_SETTINGS("API settings", "API 设置"),
+    LLM_LYRICS_SHARED_API_CONFIG(
+        "Translation and transliteration use these settings",
+        "翻译和音译共用以下配置",
     ),
     LLM_LYRICS_BASE_URL("API address", "API 地址"),
     LLM_LYRICS_BASE_URL_SUMMARY(
@@ -446,7 +456,7 @@ enum class ModuleText(internal val english: String, internal val chinese: String
     LLM_LYRICS_THINKING_FORMAT_TYPE_HINT("On/off, optional effort", "带开关，可选强度"),
     LLM_LYRICS_THINKING_FORMAT_EFFORT_HINT("Effort only", "只设强度"),
     LLM_LYRICS_THINKING("Model thinking", "模型思考"),
-    LLM_LYRICS_THINKING_SUMMARY("Allow reasoning before translation", "允许模型先思考再翻译"),
+    LLM_LYRICS_THINKING_SUMMARY("Allow reasoning before generating lyrics", "允许模型在生成歌词前思考"),
     LLM_LYRICS_THINKING_EFFORT("Thinking effort", "思考强度"),
     LLM_LYRICS_THINKING_EFFORT_SUMMARY(
         "Follow API leaves the effort unset. Available levels depend on the API and model.",

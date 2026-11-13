@@ -279,18 +279,18 @@ public class LlmLyricsDocument private constructor(
     }
 }
 
-private const val TTML_NAMESPACE = "http://www.w3.org/ns/ttml"
-private const val TTML_METADATA_NAMESPACE = "http://www.w3.org/ns/ttml#metadata"
-private const val ITUNES_NAMESPACE = "http://music.apple.com/lyric-ttml-internal"
+internal const val TTML_NAMESPACE = "http://www.w3.org/ns/ttml"
+internal const val TTML_METADATA_NAMESPACE = "http://www.w3.org/ns/ttml#metadata"
+internal const val ITUNES_NAMESPACE = "http://music.apple.com/lyric-ttml-internal"
 private const val ITUNES_OPEN = "<iTunesMetadata xmlns=\"$ITUNES_NAMESPACE\">"
 private const val ITUNES_CLOSE = "</iTunesMetadata>"
-private const val CDATA_OPEN = "<![CDATA["
-private const val CDATA_CLOSE = "]]>"
+internal const val CDATA_OPEN = "<![CDATA["
+internal const val CDATA_CLOSE = "]]>"
 private const val TRANSLATION_TYPE = "subtitle"
 private const val TRANSLATION_LANGUAGE = "zh-Hans"
-private const val ROLE_TRANSLATION = "x-translation"
-private const val ROLE_ROMAN = "x-roman"
-private const val ROLE_BACKGROUND = "x-bg"
+internal const val ROLE_TRANSLATION = "x-translation"
+internal const val ROLE_ROMAN = "x-roman"
+internal const val ROLE_BACKGROUND = "x-bg"
 
 /** Stands in for a line the track has no text for, keeping its entry there. */
 private const val ABSENT_TEXT = " "
@@ -300,18 +300,18 @@ private val CLOCK_OFFSET = Regex("\\d+(?:\\.\\d+)?(?:ms|s|m|h)")
 private val CLOCK_PART = Regex("\\d+(?:\\.\\d+)?")
 private val CLOCK_WHOLE = Regex("\\d+")
 private val ENTITY = Regex("&(#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);")
-private val TIMING_ATTRIBUTE = attributePattern("itunes:timing")
-private val ITUNES_NAMESPACE_ATTRIBUTE = attributePattern("xmlns:itunes")
-private val KEY_ATTRIBUTE = attributePattern("itunes:key")
-private val BARE_KEY_ATTRIBUTE = attributePattern("key")
-private val BEGIN_ATTRIBUTE = attributePattern("begin")
-private val ROLE_ATTRIBUTE = attributePattern("ttm:role")
-private val BARE_ROLE_ATTRIBUTE = attributePattern("role")
-private val LANG_ATTRIBUTE = attributePattern("xml:lang")
-private val BARE_LANG_ATTRIBUTE = attributePattern("lang")
+internal val TIMING_ATTRIBUTE = attributePattern("itunes:timing")
+internal val ITUNES_NAMESPACE_ATTRIBUTE = attributePattern("xmlns:itunes")
+internal val KEY_ATTRIBUTE = attributePattern("itunes:key")
+internal val BARE_KEY_ATTRIBUTE = attributePattern("key")
+internal val BEGIN_ATTRIBUTE = attributePattern("begin")
+internal val ROLE_ATTRIBUTE = attributePattern("ttm:role")
+internal val BARE_ROLE_ATTRIBUTE = attributePattern("role")
+internal val LANG_ATTRIBUTE = attributePattern("xml:lang")
+internal val BARE_LANG_ATTRIBUTE = attributePattern("lang")
 
 /** One vocal. [id] stays in the model protocol; [key] anchors the native subtitle. */
-private data class LlmLine(
+internal data class LlmLine(
     val id: String,
     val key: String,
     val text: String,
@@ -329,17 +329,17 @@ private data class LlmLine(
  */
 private data class LlmInsertion(val start: Int, val end: Int, val open: String, val close: String)
 
-private fun attributePattern(name: String) = Regex(
+internal fun attributePattern(name: String) = Regex(
     "(?<![\\w:])" + Regex.escape(name) + "\\s*=\\s*\"([^\"]*)\"|" +
         "(?<![\\w:])" + Regex.escape(name) + "\\s*=\\s*'([^']*)'",
 )
 
-private fun attribute(attributes: String, pattern: Regex): String? {
+internal fun attribute(attributes: String, pattern: Regex): String? {
     val match = pattern.find(attributes) ?: return null
     return if (match.groups[1] != null) match.groupValues[1] else match.groupValues[2]
 }
 
-private fun roleOf(attributes: String): String? =
+internal fun roleOf(attributes: String): String? =
     (attribute(attributes, ROLE_ATTRIBUTE) ?: attribute(attributes, BARE_ROLE_ATTRIBUTE))
         ?.trim()
         ?.lowercase(Locale.ROOT)
@@ -368,7 +368,7 @@ private fun formatBackgroundSubtitle(value: String): String? {
 }
 
 /** A line's own xml:lang attribute, which outranks the document language. */
-private fun languageOf(attributes: String): String? =
+internal fun languageOf(attributes: String): String? =
     (attribute(attributes, LANG_ATTRIBUTE) ?: attribute(attributes, BARE_LANG_ATTRIBUTE))
         ?.trim()
         ?.ifEmpty { null }
@@ -391,7 +391,7 @@ private fun isTranslatable(text: String, lineLanguage: String?, documentLanguage
 }
 
 /** XML character references are decoded once, so the track escapes them once. */
-private fun decodeEntities(raw: String): String {
+internal fun decodeEntities(raw: String): String {
     if ('&' !in raw) return raw
     return ENTITY.replace(raw) { match ->
         when (val reference = match.groupValues[1]) {
@@ -456,7 +456,7 @@ private fun isKana(character: Char): Boolean = when (Character.UnicodeBlock.of(c
 }
 
 /** Clock offsets Apple writes: `3:02.550`, `34.339`, `1500ms`, `1.5s`. */
-private fun isClock(value: String?): Boolean {
+internal fun isClock(value: String?): Boolean {
     // Only finite, non-negative clock numbers pass, so a stray dot or sign
     // cannot pose as the timeline the subtitle track is aligned against.
     val text = value?.trim().orEmpty()
@@ -472,7 +472,7 @@ private fun isClock(value: String?): Boolean {
         parts.all { it.toDoubleOrNull()?.isFinite() == true }
 }
 
-private fun escapeText(value: String): String = buildString(value.length) {
+internal fun escapeText(value: String): String = buildString(value.length) {
     value.forEach { character ->
         when (character) {
             '&' -> append("&amp;")
@@ -483,7 +483,7 @@ private fun escapeText(value: String): String = buildString(value.length) {
     }
 }
 
-private fun escapeAttribute(value: String): String = buildString(value.length) {
+internal fun escapeAttribute(value: String): String = buildString(value.length) {
     value.forEach { character ->
         when (character) {
             '&' -> append("&amp;")
@@ -496,7 +496,8 @@ private fun escapeAttribute(value: String): String = buildString(value.length) {
     }
 }
 
-private class TtmlElement(
+internal class TtmlElement(
+    val start: Int,
     val attributes: String,
     val contentStart: Int,
     val contentEnd: Int,
@@ -504,7 +505,8 @@ private class TtmlElement(
     val selfClosing: Boolean,
 )
 
-private class TtmlTag(
+internal class TtmlTag(
+    val start: Int,
     val name: String,
     val attributes: String,
     val end: Int,
@@ -531,7 +533,7 @@ private class LlmFrame(
  * verbatim, and comments, CDATA and processing instructions are stepped over
  * instead of being parsed.
  */
-private object TtmlScanner {
+internal object TtmlScanner {
 
     fun element(text: String, name: String, from: Int): TtmlElement? {
         var index = from.coerceAtLeast(0)
@@ -724,13 +726,16 @@ private object TtmlScanner {
         val selfClosing = !closing && text[end - 1] == '/'
         val attributesEnd = if (selfClosing) end - 1 else end
         val attributes = if (attributesEnd > index) text.substring(index, attributesEnd) else ""
-        return TtmlTag(name, attributes, end, selfClosing, closing)
+        return TtmlTag(open, name, attributes, end, selfClosing, closing)
     }
+
+    /** Parse an already-located start tag, including its matching end when not empty. */
+    fun elementAt(text: String, open: TtmlTag): TtmlElement? = parse(text, open)
 
     private fun parse(text: String, open: TtmlTag): TtmlElement? {
         val name = open.name
         if (open.selfClosing) {
-            return TtmlElement(open.attributes, open.end + 1, open.end + 1, open.end + 1, true)
+            return TtmlElement(open.start, open.attributes, open.end + 1, open.end + 1, open.end + 1, true)
         }
         var depth = 1
         var index = open.end + 1
@@ -749,7 +754,14 @@ private object TtmlScanner {
                 if (candidate.closing) {
                     depth -= 1
                     if (depth == 0) {
-                        return TtmlElement(open.attributes, open.end + 1, nextOpen, nextEnd + 1, false)
+                        return TtmlElement(
+                            open.start,
+                            open.attributes,
+                            open.end + 1,
+                            nextOpen,
+                            nextEnd + 1,
+                            false,
+                        )
                     }
                 } else if (!candidate.selfClosing) {
                     depth += 1

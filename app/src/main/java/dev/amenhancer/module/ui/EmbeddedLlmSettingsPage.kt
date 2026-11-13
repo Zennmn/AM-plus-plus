@@ -4,6 +4,7 @@ import android.app.Activity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -35,11 +36,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.DropdownEntry
 import top.yukonga.miuix.kmp.basic.DropdownItem
+import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 
-/** Miuix content for the OpenAI-compatible translation fallback settings page. */
+/** Miuix content for the shared OpenAI-compatible translation and transliteration settings. */
 @Composable
 internal fun EmbeddedSettingsHost.EmbeddedLlmLyricsPage(
     activity: Activity,
@@ -82,6 +84,7 @@ internal fun EmbeddedSettingsHost.EmbeddedLlmLyricsPage(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        EmbeddedSettingsSection(title = localizedText(ModuleText.FEATURES))
         EmbeddedSettingsGroup {
             EmbeddedSettingSwitch(
                 title = localizedText(ModuleText.LLM_LYRICS_ENABLED),
@@ -96,6 +99,25 @@ internal fun EmbeddedSettingsHost.EmbeddedLlmLyricsPage(
                     currentOnSettingsChanged(currentSettings.copy(llmLyricsEnabled = checked))
                 },
             )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            EmbeddedSettingSwitch(
+                title = localizedText(ModuleText.LLM_LYRICS_TRANSLITERATION_ENABLED),
+                summary = localizedText(ModuleText.LLM_LYRICS_TRANSLITERATION_ENABLED_SUMMARY),
+                checked = settings.llmLyricsTransliterationEnabled,
+                icon = EmbeddedSvgIcon.Translation,
+                onCheckedChange = { checked ->
+                    currentOnSettingsChanged(
+                        currentSettings.copy(llmLyricsTransliterationEnabled = checked),
+                    )
+                },
+            )
+        }
+
+        EmbeddedSettingsSection(
+            title = localizedText(ModuleText.LLM_LYRICS_API_SETTINGS),
+            summary = localizedText(ModuleText.LLM_LYRICS_SHARED_API_CONFIG),
+        )
+        EmbeddedSettingsGroup {
             LlmEditableField.entries.forEach { field ->
                 val value = settings.llmValue(field)
                 EmbeddedSettingLink(

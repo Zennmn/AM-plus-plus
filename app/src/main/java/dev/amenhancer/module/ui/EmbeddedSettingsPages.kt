@@ -658,6 +658,8 @@ private fun EmbeddedSettingsHost.showEmbeddedPageDetails(activity: Activity, pag
         EmbeddedSettingsPage.PLUGINS -> listOf(ModuleText.PLUGINS to ModuleText.PLUGIN_RESTART_NOTICE)
         EmbeddedSettingsPage.LLM_LYRICS -> listOf(
             ModuleText.LLM_LYRICS_ENABLED to ModuleText.LLM_LYRICS_ENABLED_SUMMARY,
+            ModuleText.LLM_LYRICS_TRANSLITERATION_ENABLED to
+                ModuleText.LLM_LYRICS_TRANSLITERATION_ENABLED_SUMMARY,
             ModuleText.LLM_LYRICS_BASE_URL to ModuleText.LLM_LYRICS_BASE_URL_SUMMARY,
             ModuleText.LLM_LYRICS_API_KEY to ModuleText.LLM_LYRICS_API_KEY_SUMMARY,
             ModuleText.LLM_LYRICS_MODEL to ModuleText.LLM_LYRICS_MODEL_SUMMARY,
