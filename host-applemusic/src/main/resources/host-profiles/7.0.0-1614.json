@@ -5813,6 +5813,80 @@
       }
     }
   },
+  "lyricPronunciation": {
+    "methods": {
+      "requestLyrics": {
+        "owner": "com.apple.android.music.ttml.e",
+        "name": "e",
+        "parameters": ["long", "[Ljava.lang.String;", "long", "[Ljava.lang.String;", "hi.c"],
+        "returns": "java.io.Serializable",
+        "static": false
+      },
+      "evaluate": {
+        "owner": "com.apple.android.music.player.fragment.PlayerLyricsViewFragment",
+        "name": "F2",
+        "parameters": ["com.apple.android.music.ttml.javanative.model.SongInfo$SongInfoPtr"],
+        "returns": "void",
+        "static": false
+      },
+      "match": {
+        "owner": "com.apple.android.music.playback.util.LocaleUtil",
+        "name": "matchToSystemLyricsScript",
+        "parameters": ["com.apple.android.mediaservices.javanative.common.StringVector$StringVectorNative"],
+        "returns": "java.lang.String",
+        "static": true
+      },
+      "songInfo": {
+        "owner": "com.apple.android.music.ttml.javanative.model.SongInfo$SongInfoPtr",
+        "name": "get",
+        "parameters": [],
+        "returns": "com.apple.android.music.ttml.javanative.model.SongInfo$SongInfoNative",
+        "static": false
+      },
+      "address": {
+        "owner": "org.bytedeco.javacpp.Pointer",
+        "name": "address",
+        "parameters": [],
+        "returns": "long",
+        "static": false
+      },
+      "songLanguage": {
+        "owner": "com.apple.android.music.ttml.javanative.model.SongInfo$SongInfoNative",
+        "name": "getLanguage",
+        "parameters": [],
+        "returns": "java.lang.String",
+        "static": false
+      },
+      "setTranslation": {
+        "owner": "com.apple.android.music.ttml.javanative.model.SongInfo$SongInfoNative",
+        "name": "setTranslation",
+        "parameters": ["java.lang.String"],
+        "returns": "boolean",
+        "static": false
+      },
+      "pronunciationLanguages": {
+        "owner": "com.apple.android.music.ttml.javanative.model.SongInfo$SongInfoNative",
+        "name": "getPronunciationLanguages",
+        "parameters": [],
+        "returns": "com.apple.android.mediaservices.javanative.common.StringVector$StringVectorNative",
+        "static": false
+      },
+      "vectorSize": {
+        "owner": "com.apple.android.mediaservices.javanative.common.StringVector$StringVectorNative",
+        "name": "size",
+        "parameters": [],
+        "returns": "long",
+        "static": false
+      },
+      "vectorGet": {
+        "owner": "com.apple.android.mediaservices.javanative.common.StringVector$StringVectorNative",
+        "name": "get",
+        "parameters": ["long"],
+        "returns": "java.lang.String",
+        "static": false
+      }
+    }
+  },
   "lyricBackgroundHighlight": {
     "contractVersion": 4,
     "methods": {

@@ -167,7 +167,8 @@ internal class AppleMusicCustomLyricsTarget(
         }.getOrDefault(emptySet())
         val session = CustomLyricsReplacementSession(
             index = CustomLyricsIndexProvider {
-                config.customLyricsManifest().entries.associateBy(
+                (if (config.settings().customLyricsEnabled) config.customLyricsManifest().entries else emptyList())
+                    .associateBy(
                     CustomLyricsEntry::appleMusicId,
                 )
             },
@@ -296,9 +297,13 @@ internal class AppleMusicCustomLyricsTarget(
                 readAdamId = parser::adamIdOf,
                 bindAdamId = parser::bindAdamId,
                 isAllowed = { id ->
-                    config.settings().let { it.customLyricsEnabled && it.automaticLyricsEnabled && it.llmLyricsEnabled } &&
-                        id !in autoLyricsRuntime.suppressedIds &&
-                        id !in configuredManualIds &&
+                    currentSong.current()?.details?.appleMusicId == id && config.settings().let {
+                        it.llmLyricsTransliterationEnabled ||
+                            (it.customLyricsEnabled && it.automaticLyricsEnabled && it.llmLyricsEnabled)
+                    }
+                },
+                isTranslationAllowed = { id ->
+                    id !in autoLyricsRuntime.suppressedIds && id !in configuredManualIds &&
                         (!session.isMapped(id) || session.isAutoManaged(id)) &&
                         autoSession?.readyReplacementFor(id) == null
                 },
@@ -316,7 +321,7 @@ internal class AppleMusicCustomLyricsTarget(
         val selectReplacement: (Long, Long, Any?) -> Any? = { id, nativeId, original ->
             val settings = config.settings()
             val automaticEnabled = settings.customLyricsEnabled && settings.automaticLyricsEnabled
-            val configured = session.replacementFor(id)
+            val configured = if (settings.customLyricsEnabled) session.replacementFor(id) else null
             val manual = configured.takeUnless { automaticEnabled && session.isAutoManaged(id) }
             val native = parser.wrap(original, id)
             val metadata = timingObservations.metadataOf(original)
@@ -329,17 +334,24 @@ internal class AppleMusicCustomLyricsTarget(
             refreshSession?.onSongChanged(id.takeIf { manual != null || automatic != null })
             // Until preceding sources have missed, native is only the provisional display.
             // Sources after native never delay native's own translation enhancement.
-            val nativeSelected = manual == null && automatic == null && automaticEnabled && native != null &&
-                (sources.isEmpty() || autoSession?.hasLookupMiss(id) == true)
-            val llmEligible = nativeSelected && metadata?.hasTranslation != true &&
+            val nativeSelected = manual == null && automatic == null && native != null &&
+                (!automaticEnabled || sources.isEmpty() || autoSession?.hasLookupMiss(id) == true)
+            val translationEligible = nativeSelected && automaticEnabled &&
+                id !in configuredManualIds && id !in autoLyricsRuntime?.suppressedIds.orEmpty() &&
+                (!session.isMapped(id) || session.isAutoManaged(id)) &&
+                autoSession?.readyReplacementFor(id) == null &&
+                metadata?.hasTranslation != true &&
                 (metadata == null || metadata.language == null || metadata.isForeign)
-            val translated = if (llmEligible) {
-                llmSession?.onNativeSelected(id)
-                // Only the verified native result's own raw document may reach the LLM.
-                // Module-created parses are excluded by the parser hook below.
-                val raw = timingObservations.nativeTtmlOf(original)
+            val base = manual ?: automatic ?: native
+            val sourceSelected = manual != null || automatic != null || nativeSelected
+            val enhanced = if (sourceSelected && base != null) {
+                llmSession?.onSelected(id)
+                // A custom result is enhanced from its own document, never the native lyrics.
+                val raw = if (manual != null || automatic != null) parser.documentOf(base)
+                    else timingObservations.nativeTtmlOf(original)
                 val details = currentSong.current()?.takeIf { it.details.appleMusicId == id }?.details
-                if (raw != null) llmSession?.replacementFor(id, raw, details?.title, details?.artist)
+                if (raw != null) llmSession?.replacementFor(id, raw, details?.title, details?.artist,
+                    allowTranslation = translationEligible)
                 else {
                     llmSession?.onNativeInputUnavailable(id)
                     null
@@ -348,7 +360,7 @@ internal class AppleMusicCustomLyricsTarget(
                 llmSession?.onHigherPriorityResult(id)
                 null
             }
-            parser.forSubmission(manual ?: automatic ?: translated ?: native, id, nativeId)
+            parser.forSubmission(enhanced ?: base, id, nativeId)
         }
         resultBridge = LyricsResultSubmissionBridge.create(
             symbols = symbols,
@@ -466,7 +478,7 @@ internal class AppleMusicCustomLyricsTarget(
                     availabilityResolution.summary,
             )
         }
-        if (!parserHooked && config.settings().llmLyricsEnabled) {
+        if (!parserHooked && config.settings().let { it.llmLyricsEnabled || it.llmLyricsTransliterationEnabled }) {
             return TargetCapabilityInstall.Degraded(
                 "Custom lyric ViewModel submission installed, but LLM native TTML observation unavailable; " +
                     parseMethodResolution.summary,

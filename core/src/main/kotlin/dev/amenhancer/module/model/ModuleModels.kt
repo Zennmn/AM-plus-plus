@@ -57,6 +57,8 @@ data class ModuleSettings(
     val futureBlurEnabled: Boolean = true,
     /** Enables the native rush-gradient adaptation for CJK karaoke lyrics. */
     val cjkKaraokeAnimationEnabled: Boolean = true,
+    /** Enables native pronunciation requests and matching at host startup. */
+    val lyricsPronunciationEnabled: Boolean = true,
     /** Opt-in corrections for wrapped sweeps and main lyric highlighting; applied at host startup. */
     val lyricEffectsOptimizationEnabled: Boolean = false,
     val navigationCompensationEnabled: Boolean = false,
@@ -82,7 +84,9 @@ data class ModuleSettings(
      * Per-song eligibility gates live in the LLM lyrics runtime.
      */
     val llmLyricsEnabled: Boolean = false,
-    /** OpenAI-compatible Chat Completions endpoint; blank disables AM native translation. */
+    /** Adds pronunciation where official or third-party lyrics lack it; independent of translation. */
+    val llmLyricsTransliterationEnabled: Boolean = false,
+    /** OpenAI-compatible Chat Completions endpoint shared by translation and transliteration. */
     val llmLyricsBaseUrl: String = "",
     /** Bearer token sent to [llmLyricsBaseUrl]. Never logged or echoed back to the host. */
     val llmLyricsApiKey: String = "",

@@ -107,7 +107,8 @@ class CustomLyricsItemUpdateStructuralRegressionTest {
         assertTrue(target.contains("automaticLyricsLookupSources(settings, native != null, metadata)"))
         assertTrue(target.contains("autoSession?.configureSources(id, sources)"))
         assertTrue(target.contains("if (sources.isNotEmpty()) autoSession?.replacementFor(id) else null"))
-        assertTrue(target.contains("parser.forSubmission(manual ?: automatic ?: translated ?: native, id, nativeId)"))
+        assertTrue(target.contains("val base = manual ?: automatic ?: native"))
+        assertTrue(target.contains("parser.forSubmission(enhanced ?: base, id, nativeId)"))
         assertTrue(
             target.indexOf("val selectReplacement:") <
                 target.indexOf("LyricsResultSubmissionBridge.create("),

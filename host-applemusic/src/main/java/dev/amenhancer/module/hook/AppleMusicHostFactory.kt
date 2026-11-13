@@ -63,6 +63,7 @@ object AppleMusicHostFactory {
             source = ApkTargetClassSource(application, classLoader),
         )
         val settings = config.settings()
+        if (settings.lyricsPronunciationEnabled) LyricsPronunciationMatching.install(profile, classLoader)
         val customLyrics = AppleMusicCustomLyricsTarget(
             config = config,
             symbols = resolver,

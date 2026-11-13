@@ -29,7 +29,7 @@ class LlmLyricsCacheTest {
     }
 
     @Test
-    fun `explicit thinking-type efforts round trip through a fresh cache instance with version three`() {
+    fun `explicit thinking-type efforts round trip through a fresh cache instance with version four`() {
         val efforts = listOf(
             LlmLyricsThinkingEffort.LOW to "low",
             LlmLyricsThinkingEffort.HIGH to "high",
@@ -41,10 +41,11 @@ class LlmLyricsCacheTest {
             assertTrue(cache.write(id, original, config, translated))
             assertEquals(translated, FileLlmLyricsCache(directory).read(id, original, config))
             val raw = JSONObject(entryFile(id).readText())
-            assertEquals(3, raw.getInt("version"))
-            assertEquals("thinking_type", raw.getString("thinkingFormat"))
-            assertTrue(raw.getBoolean("thinkingEnabled"))
-            assertEquals(pair.second, raw.getString("thinkingEffort"))
+            assertEquals(4, raw.getInt("version"))
+            val slot = translationSlot(raw)
+            assertEquals("thinking_type", slot.getString("thinkingFormat"))
+            assertTrue(slot.getBoolean("thinkingEnabled"))
+            assertEquals(pair.second, slot.getString("thinkingEffort"))
         }
     }
 
@@ -71,10 +72,10 @@ class LlmLyricsCacheTest {
         for (effort in LlmLyricsThinkingEffort.values()) {
             assertEquals(translated, cache.read(1, original, config(thinking = false, effort = effort)))
         }
-        val raw = JSONObject(entryFile(1).readText())
-        assertEquals("thinking_type", raw.getString("thinkingFormat"))
-        assertFalse(raw.getBoolean("thinkingEnabled"))
-        assertEquals("default", raw.getString("thinkingEffort"))
+        val slot = translationSlot(JSONObject(entryFile(1).readText()))
+        assertEquals("thinking_type", slot.getString("thinkingFormat"))
+        assertFalse(slot.getBoolean("thinkingEnabled"))
+        assertEquals("default", slot.getString("thinkingEffort"))
     }
 
     @Test
@@ -120,7 +121,7 @@ class LlmLyricsCacheTest {
         for ((index, effort) in LlmLyricsThinkingEffort.values().withIndex()) {
             val id = index + 1L
             assertTrue(cache.write(id, original, config(), translated))
-            rewrite(id) { put("version", 1); remove("thinkingEffort") }
+            rewriteLegacy(id, 1) { remove("thinkingEffort") }
             val actual = FileLlmLyricsCache(directory).read(id, original, config(effort = effort))
             if (effort == LlmLyricsThinkingEffort.DEFAULT) assertEquals(translated, actual)
             else assertNull(actual)
@@ -130,7 +131,7 @@ class LlmLyricsCacheTest {
     @Test
     fun `legacy entries missing the thinking flag remain disabled`() {
         assertTrue(cache.write(1, original, config(thinking = false), translated))
-        rewrite(1) { put("version", 1); remove("thinkingEffort"); remove("thinkingEnabled") }
+        rewriteLegacy(1, 1) { remove("thinkingEffort"); remove("thinkingEnabled") }
         assertEquals(translated, cache.read(1, original, config(thinking = false)))
         assertNull(cache.read(1, original, config()))
     }
@@ -141,7 +142,9 @@ class LlmLyricsCacheTest {
         for ((index, effort) in invalid.withIndex()) {
             val id = index + 1L
             assertTrue(cache.write(id, original, config(), translated))
-            rewrite(id) { if (effort == null) remove("thinkingEffort") else put("thinkingEffort", effort) }
+            rewriteLegacy(id, 2) {
+                if (effort == null) remove("thinkingEffort") else put("thinkingEffort", effort)
+            }
             assertNull(FileLlmLyricsCache(directory).read(id, original, config()))
         }
     }
@@ -150,7 +153,7 @@ class LlmLyricsCacheTest {
     fun `legacy version two is interpreted as thinking type`() {
         val typed = config(thinking = false)
         assertTrue(cache.write(1, original, typed, translated))
-        rewrite(1) { put("version", 2); remove("thinkingFormat") }
+        rewriteLegacy(1, 2) { remove("thinkingFormat") }
         assertEquals(translated, cache.read(1, original, typed))
         assertNull(cache.read(1, original, typed.copy(thinkingFormat = LlmLyricsThinkingFormat.NONE)))
     }
@@ -162,7 +165,9 @@ class LlmLyricsCacheTest {
             for ((offset, value) in listOf(null, "unknown").withIndex()) {
                 val id = index * 2L + offset + 1L
                 assertTrue(cache.write(id, original, config(), translated))
-                rewrite(id) { if (value == null) remove(field) else put(field, value) }
+                rewriteLegacy(id, 3) {
+                    if (value == null) remove(field) else put(field, value)
+                }
                 assertNull(cache.read(id, original, config()))
             }
         }
@@ -171,7 +176,7 @@ class LlmLyricsCacheTest {
     @Test
     fun `a future cache version is not accepted with known thinking fields`() {
         assertTrue(cache.write(1, original, config(effort = LlmLyricsThinkingEffort.HIGH), translated))
-        rewrite(1) { put("version", 4) }
+        rewrite(1) { put("version", 5) }
         assertNull(cache.read(1, original, config(effort = LlmLyricsThinkingEffort.HIGH)))
     }
 
@@ -198,8 +203,30 @@ class LlmLyricsCacheTest {
 
     private fun entryFile(id: Long) = File(directory, "llm_$id.json")
 
+    private fun translationSlot(raw: JSONObject): JSONObject =
+        raw.getJSONObject("slots").getJSONObject("translation")
+
     private fun rewrite(id: Long, change: JSONObject.() -> Unit) {
         val file = entryFile(id)
         file.writeText(JSONObject(file.readText()).apply(change).toString())
+    }
+
+    private fun rewriteLegacy(
+        id: Long,
+        version: Int,
+        change: JSONObject.() -> Unit = {},
+    ) {
+        val file = entryFile(id)
+        val raw = JSONObject(file.readText())
+        val slot = translationSlot(raw)
+        val slotKeys = slot.keys()
+        while (slotKeys.hasNext()) {
+            val key = slotKeys.next()
+            raw.put(key, slot.get(key))
+        }
+        raw.remove("slots")
+        raw.put("version", version)
+        raw.apply(change)
+        file.writeText(raw.toString())
     }
 }

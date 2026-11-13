@@ -71,6 +71,10 @@ object ModuleSettingsSchema {
             KEY_CJK_KARAOKE_ANIMATION_ENABLED,
             default = true,
         ),
+        lyricsPronunciationEnabled = values.boolean(
+            KEY_LYRICS_PRONUNCIATION_ENABLED,
+            default = true,
+        ),
         lyricEffectsOptimizationEnabled = values.boolean(KEY_LYRIC_EFFECTS_OPTIMIZATION_ENABLED, default = false),
         navigationCompensationEnabled = values.boolean(
             KEY_NAVIGATION_COMPENSATION,
@@ -100,6 +104,10 @@ object ModuleSettingsSchema {
         automaticLyricsPreferNative = values.boolean(KEY_AUTOMATIC_LYRICS_PREFER_NATIVE, default = true),
         automaticLyricsSourceOrder = values.automaticLyricsSourceOrder(),
         llmLyricsEnabled = values.boolean(KEY_LLM_LYRICS_ENABLED, default = false),
+        llmLyricsTransliterationEnabled = values.boolean(
+            KEY_LLM_LYRICS_TRANSLITERATION_ENABLED,
+            default = false,
+        ),
         llmLyricsBaseUrl = ModuleSettings.normalizeLlmLyricsBaseUrl(values.string(KEY_LLM_LYRICS_BASE_URL)),
         llmLyricsApiKey = ModuleSettings.normalizeLlmLyricsApiKey(values.string(KEY_LLM_LYRICS_API_KEY)),
         llmLyricsModel = ModuleSettings.normalizeLlmLyricsModel(values.string(KEY_LLM_LYRICS_MODEL)),
@@ -157,6 +165,7 @@ object ModuleSettingsSchema {
                 ),
             KEY_FUTURE_BLUR to settings.futureBlurEnabled,
             KEY_CJK_KARAOKE_ANIMATION_ENABLED to settings.cjkKaraokeAnimationEnabled,
+            KEY_LYRICS_PRONUNCIATION_ENABLED to settings.lyricsPronunciationEnabled,
             KEY_LYRIC_EFFECTS_OPTIMIZATION_ENABLED to settings.lyricEffectsOptimizationEnabled,
             KEY_NAVIGATION_COMPENSATION to settings.navigationCompensationEnabled,
             KEY_FORCE_CELLULAR_DATA_ENTRY to settings.forceCellularDataEntryEnabled,
@@ -177,6 +186,7 @@ object ModuleSettingsSchema {
                 ModuleSettings.normalizeAutomaticLyricsSourceOrder(settings.automaticLyricsSourceOrder)
                     .joinToString(","),
             KEY_LLM_LYRICS_ENABLED to settings.llmLyricsEnabled,
+            KEY_LLM_LYRICS_TRANSLITERATION_ENABLED to settings.llmLyricsTransliterationEnabled,
             KEY_LLM_LYRICS_BASE_URL to
                 ModuleSettings.normalizeLlmLyricsBaseUrl(settings.llmLyricsBaseUrl),
             KEY_LLM_LYRICS_API_KEY to
@@ -369,6 +379,7 @@ object ModuleSettingsSchema {
         KEY_PHONE_LIQUID_GLASS_MINI_SINK_BOUNCE_DP,
         KEY_FUTURE_BLUR,
         KEY_CJK_KARAOKE_ANIMATION_ENABLED,
+        KEY_LYRICS_PRONUNCIATION_ENABLED,
         KEY_LYRIC_EFFECTS_OPTIMIZATION_ENABLED,
         KEY_NAVIGATION_COMPENSATION,
         KEY_FORCE_CELLULAR_DATA_ENTRY,
@@ -383,6 +394,7 @@ object ModuleSettingsSchema {
         KEY_AUTOMATIC_LYRICS_PREFER_NATIVE,
         KEY_AUTOMATIC_LYRICS_SOURCE_ORDER,
         KEY_LLM_LYRICS_ENABLED,
+        KEY_LLM_LYRICS_TRANSLITERATION_ENABLED,
         KEY_LLM_LYRICS_BASE_URL,
         KEY_LLM_LYRICS_API_KEY,
         KEY_LLM_LYRICS_MODEL,
@@ -425,6 +437,7 @@ object ModuleSettingsSchema {
     private const val KEY_FUTURE_BLUR = "future_blur_enabled"
     private const val KEY_STARTUP_PAGE_PREWARM = "startup_page_prewarm_enabled"
     private const val KEY_CJK_KARAOKE_ANIMATION_ENABLED = "cjk_karaoke_animation_enabled"
+    private const val KEY_LYRICS_PRONUNCIATION_ENABLED = "lyrics_pronunciation_enabled"
     private const val KEY_LYRIC_EFFECTS_OPTIMIZATION_ENABLED = "lyric_effects_optimization_enabled"
     private const val KEY_NAVIGATION_COMPENSATION = "navigation_compensation_enabled"
     private const val KEY_FORCE_CELLULAR_DATA_ENTRY = "force_cellular_data_entry_enabled"
@@ -438,6 +451,7 @@ object ModuleSettingsSchema {
     private const val KEY_AUTOMATIC_LYRICS_PREFER_NATIVE = "automatic_lyrics_prefer_native"
     private const val KEY_AUTOMATIC_LYRICS_SOURCE_ORDER = "automatic_lyrics_source_order"
     private const val KEY_LLM_LYRICS_ENABLED = "llm_lyrics_enabled"
+    private const val KEY_LLM_LYRICS_TRANSLITERATION_ENABLED = "llm_lyrics_transliteration_enabled"
     private const val KEY_LLM_LYRICS_BASE_URL = "llm_lyrics_base_url"
     private const val KEY_LLM_LYRICS_API_KEY = "llm_lyrics_api_key"
     private const val KEY_LLM_LYRICS_MODEL = "llm_lyrics_model"

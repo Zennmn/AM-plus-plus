@@ -158,6 +158,49 @@ class LlmLyricsClient(
         return parseTranslation(content, lines)
     }
 
+    /**
+     * Adds one context-aware Apple transliteration track to [document].
+     *
+     * The supplied document holds the original body naming and word timing.
+     * This method only sends its bounded prompt through the same transport and
+     * cancellation path as translation; any invalid or incomplete answer
+     * returns null so the caller keeps the existing lyrics.
+     */
+    fun transliterate(
+        config: LlmLyricsConfig,
+        document: LlmTransliterationDocument,
+        title: String? = null,
+        artist: String? = null,
+        isCancelled: () -> Boolean = { false },
+    ): String? {
+        val endpoint = config.endpoint ?: return null
+        val model = config.normalizedModel
+        if (model.isEmpty()) return null
+        if (isCancelled()) return null
+        if (!document.isWithinInputBounds(MAX_LINES, MAX_LINE_CHARS, MAX_TOTAL_CHARS)) {
+            return null
+        }
+        val body = encodeRequest(
+            config,
+            JSONArray()
+                .put(
+                    JSONObject()
+                        .put("role", "system")
+                        .put("content", TRANSLITERATION_SYSTEM_PROMPT),
+                )
+                .put(
+                    JSONObject()
+                        .put("role", "user")
+                        .put("content", document.prompt(title, artist)),
+                ),
+        ) ?: return null
+        val response = post(endpoint, config.apiKey, body, isCancelled) ?: return null
+        if (isCancelled()) return null
+        val content = messageContent(response) ?: return null
+        val result = document.withResponse(content) ?: return null
+        return result.takeUnless { isCancelled() }
+    }
+
     /** Only fixed reason codes/statuses may cross into the settings UI. */
     data class ConnectionResult(val failureReason: String? = null, val httpStatus: Int? = null) {
         val isSuccess: Boolean get() = failureReason == null
@@ -476,6 +519,9 @@ $input"""
         /** Bump when prompt or answer changes require invalidating cached translations. */
         const val PROMPT_VERSION = 3
 
+        /** Bump when the transliteration prompt or answer contract changes. */
+        const val TRANSLITERATION_PROMPT_VERSION = 1
+
         const val DEFAULT_CONNECT_TIMEOUT_MS = 10_000
         const val DEFAULT_READ_TIMEOUT_MS = 60_000
         const val DEFAULT_TOTAL_TIMEOUT_MS = 60_000L
@@ -493,6 +539,8 @@ $input"""
         private const val NANOS_PER_MILLI = 1_000_000L
         private const val SYSTEM_PROMPT =
             "Translate song lyrics. Return only the requested JSON and copy every vocal ID exactly."
+        private const val TRANSLITERATION_SYSTEM_PROMPT =
+            "Transliterate song lyrics. Return only the requested JSON and copy every vocal ID exactly."
         private val LEADING_JSON_FENCE = Regex("^```(?:json)?\\s*", RegexOption.IGNORE_CASE)
         private val TRAILING_JSON_FENCE = Regex("\\s*```$", RegexOption.IGNORE_CASE)
     }
