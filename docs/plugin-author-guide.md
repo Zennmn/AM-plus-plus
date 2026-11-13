@@ -265,7 +265,9 @@ private java.lang.reflect.Method resolveNoArgMethod(
 
 ### 7.1 设置页
 
-createSettings 接收本次页面的 Context，返回新的 View 与 PluginSettingsSession。不要把 Activity、View 或设置会话保存成插件进程级字段。关闭时解除监听、取消页面任务，确保 close 可以安全重复调用。
+createSettings 接收本次页面的 Context，返回新的 View 与 PluginSettingsSession。所有 ZIP 插件的设置统一显示为 AM++ 插件管理下的普通设置子页。AM++ 沿用 `createSettings()` 返回的 `View`；页面内容与滚动由插件负责，不创建独立 Activity。退出子页、切换设置分类或关闭模块设置时，AM++ 关闭对应 `PluginSettingsSession`；插件在 `close()` 中解除监听、取消页面任务，并确保可以安全重复调用。
+
+该承载方式沿用既有 `PluginSettingsSession`、`getView()`、`close()` 和 ZIP 导入契约，不新增 SDK 或 manifest 字段；已发布的旧插件无需重打包。
 
 仓库示例 BasicPlugin 已提供完整的 Switch 设置页和配置文件写入。XML 布局、R.drawable 等插件资源加载不属于 v1，普通图片可以从素材流解码成 Drawable/Bitmap。
 
@@ -382,7 +384,7 @@ adb logcat -s AppleMusicEnhancer
 
 启停、替换和删除都在重启后生效。替换保留配置与启用状态；失败导入保留已有版本。删除会清理插件自己的配置和缓存，不进入 AM++ 的歌词备份。
 
-发布前实际验证：独立构建、首次导入、启用重启、目标回调、设置打开/关闭、更新保留配置、停用、删除，以及与 AM++ 原有功能和常用插件的组合。歌词/网络插件另外检查快速切歌、请求失败和过期结果。
+发布前实际验证：独立构建、首次导入、启用重启、目标回调、设置子页打开/退出、切换设置分类和关闭模块设置时的会话清理、更新保留配置、停用、删除，以及与 AM++ 原有功能和常用插件的组合。歌词/网络插件另外检查快速切歌、请求失败和过期结果。
 
 构建与导入检查不能替代 LSPosed、嵌入版以及 Android 14+ 的实际加载/Hook/页面验收。作者需要记录自己的功能、宿主和设备范围，不能从 SDK 或样例的结果推断插件功能通过。
 

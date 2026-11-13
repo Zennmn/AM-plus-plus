@@ -23,12 +23,13 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
+import dev.amenhancer.plugin.api.PluginSettingsSession
 import dev.amenhancer.plugin.runtime.PluginRunState
 import dev.amenhancer.plugin.runtime.PluginStatus
 import java.util.concurrent.atomic.AtomicBoolean
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.nav.core.NavKey
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
@@ -36,6 +37,7 @@ internal fun EmbeddedSettingsHost.EmbeddedPluginManagementPage(
     activity: Activity,
     revision: Int,
     active: Boolean,
+    onOpenSettings: (id: String, title: String) -> Unit,
 ) {
     val manager = plugins
     val state = remember(manager) { EmbeddedPluginManagementState() }
@@ -288,7 +290,7 @@ internal fun EmbeddedSettingsHost.EmbeddedPluginManagementPage(
                             title = localizedText(ModuleText.PLUGIN_SETTINGS),
                             icon = EmbeddedSvgIcon.Settings,
                             enabled = controlsEnabled,
-                            onClick = { openPluginSettings(activity, manifest.id) },
+                            onClick = { onOpenSettings(manifest.id, manifest.name) },
                         )
                     }
                     HorizontalDivider(Modifier.padding(horizontal = 16.dp))
@@ -411,42 +413,42 @@ internal fun EmbeddedSettingsHost.importPluginZip(uri: Uri) {
     }
 }
 
-internal fun EmbeddedSettingsHost.openPluginSettings(activity: Activity, id: String) {
-    if (activity.isFinishing || activity.isDestroyed || currentActivity() !== activity) return
-    val session = plugins?.openSettings(id, embeddedThemedContext(activity))
-        ?: return Toast.makeText(
+internal class EmbeddedPluginSettingsPage(
+    val contentKey: String,
+    val title: String,
+    private val session: PluginSettingsSession,
+) : NavKey {
+    val view = session.view.also { check(it.parent == null) { "Plugin settings View is already attached" } }
+
+    fun close() {
+        runCatching { session.close() }
+    }
+}
+
+internal fun EmbeddedSettingsHost.createPluginSettingsPage(
+    activity: Activity,
+    id: String,
+    title: String,
+    contentKey: String,
+): EmbeddedPluginSettingsPage? {
+    val session = plugins?.openSettings(id, embeddedThemedContext(activity)) ?: run {
+        Toast.makeText(
             activity,
             localizedText(ModuleText.PLUGIN_NO_SETTINGS),
             Toast.LENGTH_SHORT,
         ).show()
-    val closed = AtomicBoolean()
-    fun closeSession() {
-        if (closed.compareAndSet(false, true)) runCatching { session.close() }
+        return null
     }
-    try {
-        val pluginView = session.view
-        check(pluginView.parent == null) { localizedText(ModuleText.SETTINGS_OPEN_FAILED, id) }
-        showEmbeddedMiuixDialog(
-            activity = activity,
-            title = localizedText(ModuleText.PLUGIN_SETTINGS),
-            scrollContent = false,
-            onDismiss = ::closeSession,
-            footer = { dismiss ->
-                EmbeddedDialogActions(
-                    dismissText = localizedText(ModuleText.CLOSE),
-                    onDismiss = dismiss,
-                )
-            },
-        ) {
-            AndroidView(factory = { pluginView }, modifier = Modifier.fillMaxWidth())
-        }
+    return try {
+        EmbeddedPluginSettingsPage(contentKey, title, session)
     } catch (error: Throwable) {
-        closeSession()
+        runCatching { session.close() }
         Toast.makeText(
             activity,
-            localizedText(ModuleText.SETTINGS_OPEN_FAILED, error.message),
+            localizedText(ModuleText.SETTINGS_OPEN_FAILED, error.message ?: id),
             Toast.LENGTH_LONG,
         ).show()
+        null
     }
 }
 
