@@ -46,8 +46,10 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import dev.amenhancer.glass.GlassPolicy
 import dev.amenhancer.module.config.TitleCorrectionMode
 import dev.amenhancer.module.i18n.ModuleText
@@ -61,6 +63,7 @@ import top.yukonga.miuix.kmp.basic.NavigationRail
 import top.yukonga.miuix.kmp.basic.NavigationRailItem
 import top.yukonga.miuix.kmp.basic.NavigationRailValue
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
@@ -86,6 +89,7 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
     var revision by mutableIntStateOf(0)
     val backStack = navBackStackOf()
     val pageScrollStates = mutableMapOf<EmbeddedSettingsPage, ScrollState>()
+    var pluginPageSequence = 0L
     var dialog: Dialog? = null
 
     fun update(next: ModuleSettings) {
@@ -98,7 +102,7 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
         // The root overlay host gets Back first. While a modal is exiting, keep its page in place.
         if (auxiliaryDialogs.isNotEmpty()) return
         if (backStack.size > 1) {
-            backStack.removeAt(backStack.lastIndex)
+            (backStack.removeAt(backStack.lastIndex) as? EmbeddedPluginSettingsPage)?.close()
         } else {
             dismiss()
         }
@@ -109,20 +113,31 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
         if (auxiliaryDialogs.isEmpty() && page !in backStack) backStack.add(page)
     }
 
+    fun canOpenPluginSettings(): Boolean =
+        backStack.lastOrNull() == EmbeddedSettingsPage.PLUGINS && auxiliaryDialogs.isEmpty() &&
+            activeSettingsDialog(activity) != null
+
+    fun openPluginSettings(id: String, title: String) {
+        if (!canOpenPluginSettings()) return
+        val page = createPluginSettingsPage(activity, id, title, "plugin-settings:${++pluginPageSequence}") ?: return
+        if (canOpenPluginSettings()) backStack.add(page) else page.close()
+    }
+
     fun selectCategory(page: EmbeddedSettingsPage) {
         if (auxiliaryDialogs.isNotEmpty() || page !in EmbeddedSettingsNavigationPages) return
         val target = listOf(page)
         if (backStack.toList() == target) return
+        val pluginPage = backStack.lastOrNull() as? EmbeddedPluginSettingsPage
         // A category is a destination, not another level in the previous category's history.
         Snapshot.withMutableSnapshot {
             backStack.clear()
             backStack.addAll(target)
         }
+        pluginPage?.close()
     }
 
     fun adaptNavigationToWidth(wide: Boolean) {
-        val pages = backStack.filterIsInstance<EmbeddedSettingsPage>()
-            .filterNot { it == EmbeddedSettingsPage.MAIN }
+        val pages = backStack.filterNot { it == EmbeddedSettingsPage.MAIN }
         val target = if (wide) {
             pages.ifEmpty { listOf(EmbeddedSettingsPage.CUSTOM_LYRICS) }
         } else {
@@ -143,6 +158,7 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                 pageRefresh = null
                 dismissAuxiliarySettingsDialogs()
             }
+            (backStack.lastOrNull() as? EmbeddedPluginSettingsPage)?.close()
         }) { dismiss ->
             val goBack = { back(dismiss) }
             val swipeDirection = if (LocalLayoutDirection.current == LayoutDirection.Rtl) {
@@ -165,8 +181,11 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                 val railScrollState = rememberScrollState()
                 val focusManager = LocalFocusManager.current
                 val keyboardController = LocalSoftwareKeyboardController.current
-                val selectedCategory = (navigationStack.lastOrNull() as? EmbeddedSettingsPage)?.navigationCategory
-                    ?: EmbeddedSettingsPage.CUSTOM_LYRICS
+                val selectedCategory = when (val page = navigationStack.lastOrNull()) {
+                    is EmbeddedSettingsPage -> page.navigationCategory
+                    is EmbeddedPluginSettingsPage -> EmbeddedSettingsPage.PLUGINS
+                    else -> EmbeddedSettingsPage.CUSTOM_LYRICS
+                }
                 LaunchedEffect(wide) {
                     adaptNavigationToWidth(wide)
                 }
@@ -228,7 +247,8 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                                         EmbeddedSettingsPage.AUTOMATIC_LYRICS -> EmbeddedAutomaticLyricsPage(current, ::update)
                                         EmbeddedSettingsPage.LLM_LYRICS ->
                                             EmbeddedLlmLyricsPage(activity, current, ::update, active = active)
-                                        EmbeddedSettingsPage.PLUGINS -> EmbeddedPluginManagementPage(activity, refresh, active)
+                                        EmbeddedSettingsPage.PLUGINS ->
+                                            EmbeddedPluginManagementPage(activity, refresh, active, ::openPluginSettings)
                                         EmbeddedSettingsPage.BOTTOM_BAR_ANIMATION ->
                                             EmbeddedAnimationSettingsPage(current) { edit -> update(edit(draft.settings)) }
                                         else -> EmbeddedSettingsCategory(
@@ -237,6 +257,25 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                                             onOpenAnimationSettings = { open(EmbeddedSettingsPage.BOTTOM_BAR_ANIMATION) },
                                         )
                                     }
+                                }
+                            }
+                            // The route owns a View; state saving only sees its per-session string key.
+                            entry<EmbeddedPluginSettingsPage>(
+                                contentKey = { it.contentKey },
+                                swipeDismiss = swipeDirection,
+                            ) { page ->
+                                EmbeddedSettingsScaffold(
+                                    title = page.title,
+                                    wide = wide,
+                                    navigation = {
+                                        EmbeddedSettingsIconAction(EmbeddedSvgIcon.Back, localizedText(ModuleText.BACK), onClick = goBack)
+                                    },
+                                ) { bottomPadding ->
+                                    // Keep a bounded viewport; the plugin owns its scrolling.
+                                    AndroidView(
+                                        factory = { page.view },
+                                        modifier = Modifier.fillMaxWidth().padding(bottom = bottomPadding),
+                                    )
                                 }
                             }
                         }
@@ -302,6 +341,33 @@ private fun EmbeddedSettingsHost.EmbeddedSettingsScreen(
         }
     }
 
+    EmbeddedSettingsScaffold(title, wide, navigation, actions, scrollBehavior) { bottomPadding ->
+        Column(
+            modifier = Modifier.fillMaxSize()
+                .nestedScroll(scrollBehavior.nestedScrollConnection)
+                .verticalScroll(scrollState)
+                // Scroll behind the gesture area; keep only the final item clear of it.
+                .padding(
+                    start = if (wide) 16.dp else 12.dp,
+                    top = contentSpacing,
+                    end = if (wide) 16.dp else 12.dp,
+                    bottom = 12.dp + bottomPadding,
+                ),
+            verticalArrangement = Arrangement.spacedBy(contentSpacing),
+            content = content,
+        )
+    }
+}
+
+@Composable
+private fun EmbeddedSettingsScaffold(
+    title: String,
+    wide: Boolean,
+    navigation: @Composable () -> Unit,
+    actions: @Composable RowScope.() -> Unit = {},
+    scrollBehavior: ScrollBehavior? = null,
+    content: @Composable (bottomPadding: Dp) -> Unit,
+) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
@@ -332,20 +398,7 @@ private fun EmbeddedSettingsHost.EmbeddedSettingsScreen(
         Box(
             Modifier.fillMaxSize().padding(viewportPadding).consumeWindowInsets(padding).imePadding(),
         ) {
-            Column(
-                modifier = Modifier.fillMaxSize()
-                    .nestedScroll(scrollBehavior.nestedScrollConnection)
-                    .verticalScroll(scrollState)
-                    // Scroll behind the gesture area; keep only the final item clear of it.
-                    .padding(
-                        start = if (wide) 16.dp else 12.dp,
-                        top = contentSpacing,
-                        end = if (wide) 16.dp else 12.dp,
-                        bottom = 12.dp + padding.calculateBottomPadding(),
-                    ),
-                verticalArrangement = Arrangement.spacedBy(contentSpacing),
-                content = content,
-            )
+            content(padding.calculateBottomPadding())
         }
     }
 }

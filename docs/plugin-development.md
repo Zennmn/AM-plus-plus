@@ -64,7 +64,9 @@ description 可选，其余必填。ID 是小写反向域名，versionCode 为�
 - onLoad(PluginContext) 在后台调用，用于定位目标并注册 Hook，此时回调未激活。可抛 PluginUnsupportedException 给出不支持原因。
 - onStart() 在冲突检查通过后、主线程调用。网络与耗时工作由作者放到后台。
 - onStop() 关闭作用域后在主线程尽力调用一次；进程被杀死不保证调用。
-- createSettings(Context) 在主线程调用，只允许本次正在运行的插件创建设置页。返回 PluginSettingsSession，页面关闭或 Activity 销毁时 close。
+- createSettings(Context) 在主线程调用，只允许本次正在运行的插件创建设置页。返回 PluginSettingsSession，页面关闭或 Activity 销毁时 close。设置统一显示为 AM++ 插件管理下的普通设置子页；AM++ 使用同一 `getView()`，页面内容与滚动由插件负责，不创建独立 Activity。退出子页、切换设置分类或关闭模块设置时由 AM++ 关闭会话；仅运行中插件经原有入口打开设置。
+
+设置页承载沿用既有 `PluginSettingsSession`、`getView()`、`close()` 与 ZIP 契约，不新增 `API_VERSION` 或 manifest 字段；旧插件无需重打包。
 
 PluginContext 提供 Application、宿主 ClassLoader、包名和版本、专属 data/cache 目录、素材流、日志、cleanup 登记及资源声明。SDK 的 ClassLoader 来自模块；插件定位宿主目标必须使用 getHostClassLoader()。
 

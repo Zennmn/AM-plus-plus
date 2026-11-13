@@ -788,7 +788,9 @@ GenericProfileViewModel 发布不可变Success状态，复用 `AppleArtistSurfac
 
 普通参数通过共享 `EmbeddedSettingsDraft` 合并最新草稿并持久化，无全局“保存”；输入弹窗和歌词编辑器保留确认保存。失败保留草稿供重试。
 
-系统文件选择使用原宿主 Activity。只接收当前设置会话发出的结果；编辑器导入与直接为当前歌曲导入分开处理，关闭编辑器后结果不得回落到直接导入路径。第三方插件仍提供 Android `View`，由模块弹层承载，关闭弹层或设置会话时释放。
+系统文件选择使用原宿主 Activity。只接收当前设置会话发出的结果；编辑器导入与直接为当前歌曲导入分开处理，关闭编辑器后结果不得回落到直接导入路径。
+
+第三方插件通过原有运行中入口和 `createSettings()` 提供 Android `View`，统一显示在 AM++ 插件管理下的普通设置子页。宿主沿用同一个 `getView()`；页面内容与滚动由插件负责，不创建独立 Activity。退出子页、切换设置分类或关闭模块设置时由 AM++ 关闭对应 `PluginSettingsSession`；仅运行中插件可经原有入口打开设置。设置页承载沿用既有 `PluginSettingsSession`、`getView()`、`close()` 与 ZIP 契约，不新增 `API_VERSION` 或 manifest 字段，旧插件无需重打包。
 
 LLM 设置在自定义歌词二级页集中管理，翻译与音译开关彼此独立，API、模型、密钥和思考参数集中在共享配置区。共享配置和测试入口不因任一功能关闭而隐藏；开关本身不从页面删除字段、清空已保存值或改变另一功能的参数。「思考参数格式」直接显示请求字段；「不发送」不显示思考控制，`thinking.type` 显示开关及跟随接口/低/高/最高四档，关闭时禁用强度行并保留已选值，`reasoning_effort` 只显示跟随接口/低/高。长字段标题与值上下分行、值单行省略、密钥遮蔽。设置图标复用 `EmbeddedSettingsSvgAssets` 缓存的 ImageVector，使用 24 viewport 的圆角描边，默认描边宽度 1.75，特殊图形沿用各自规格；由 miuix Icon 和导航组件提供主题着色。底栏动画二级页复用原四项配置/defaults，入口受宿主/玻璃/收缩资格，恢复单项/返回不能覆盖其他参数。
 
@@ -800,7 +802,7 @@ LLM 设置在自定义歌词二级页集中管理，翻译与音译开关彼此�
 
 宿主普通设置通过 `decodeOrdinarySettings` 解码，跳过独立歌词索引及旧内联歌词 JSON；显示/动画与资格检查不能因读取开关而反复解析歌词资产。歌词查询继续通过 `customLyricsManifest()` 的独立后台读取与缓存，完整 `decode` 保留导入/迁移语义。调整读取路径时核对消费者是否需要资产字段，不能用普通设置快照代替歌词索引。
 
-插件公共SDK与runtime不持有Apple Music私有事实；内置Hook经通用注册记录参与冲突分析，作用域关闭同步释放记录。SDK/生命周期/冲突规则唯一参考[插件开发手册](plugin-development.md)，独立工程操作见[作者教程](plugin-author-guide.md)，不因宿主混淆改公共协议。设置文案/语言维护见[本地化说明](localization.md)。
+插件公共SDK与runtime不持有Apple Music私有事实；内置Hook经通用注册记录参与冲突分析，作用域关闭同步释放记录。SDK/生命周期/冲突及插件设置子页规则唯一参考[插件开发手册](plugin-development.md)，独立工程操作见[作者教程](plugin-author-guide.md)，不因宿主混淆改公共协议。设置文案/语言维护见[本地化说明](localization.md)。
 
 [人工场景](feature-preservation.md#settings-data-plugins)
 
