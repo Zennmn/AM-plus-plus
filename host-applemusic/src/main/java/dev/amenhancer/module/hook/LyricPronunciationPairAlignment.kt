@@ -9,27 +9,41 @@ import kotlin.math.roundToInt
 
 /** Adjust the real child position after native layout, before the row uses it for sweeps. */
 internal fun alignLyricPronunciationBody(group: LinearLayout) {
+    // Native split glyphs share a horizontal child; extra vertical children are not one track.
     if (group.childCount != 2) return
     val top = group.getChildAt(0)
     val bottom = group.getChildAt(1)
     if (top.visibility != View.VISIBLE || bottom.visibility != View.VISIBLE ||
-        top.width <= 0 || bottom.width <= 0 || top.width == bottom.width
+        top.width <= 0 || bottom.width <= 0
     ) return
 
-    val wide = if (top.width > bottom.width) top else bottom
-    val narrow = if (wide === top) bottom else top
-    val widePieces = wide.textPieces() ?: return
-    val narrowPieces = narrow.textPieces() ?: return
-    if (!widePieces.hasDecoratedEdge() && !narrowPieces.hasDecoratedEdge()) return
+    val topPieces = top.textPieces() ?: return
+    val bottomPieces = bottom.textPieces() ?: return
+    if (!topPieces.hasDecoratedEdge() && !bottomPieces.hasDecoratedEdge()) return
 
     val path = Path()
     val bounds = RectF()
-    val wideCenter = widePieces.bodyCenter(wide, path, bounds) ?: return
-    val narrowCenter = narrowPieces.bodyCenter(narrow, path, bounds) ?: return
-    val left = (wide.left + wideCenter - narrowCenter).roundToInt()
-        .coerceIn(wide.left, wide.right - narrow.width)
-    narrow.offsetLeftAndRight(left - narrow.left)
+    val topBody = topPieces.bodyRange(top, path, bounds) ?: return
+    val bottomBody = bottomPieces.bodyRange(bottom, path, bounds) ?: return
+    val topBodyWidth = topBody.endInclusive - topBody.start
+    val bottomBodyWidth = bottomBody.endInclusive - bottomBody.start
+    if (topBodyWidth == bottomBodyWidth) return
+
+    val topIsWider = topBodyWidth > bottomBodyWidth
+    val anchor = if (topIsWider) top else bottom
+    val moving = if (topIsWider) bottom else top
+    val anchorBody = if (topIsWider) topBody else bottomBody
+    val movingBody = if (topIsWider) bottomBody else topBody
+    // Compare the virtual text spans above, but keep the entire moving view in the native slot.
+    val minLeft = group.paddingLeft
+    val maxLeft = group.width - group.paddingRight - moving.width
+    if (maxLeft < minLeft) return
+    val left = (anchor.left + anchorBody.center() - movingBody.center()).roundToInt()
+        .coerceIn(minLeft, maxLeft)
+    moving.offsetLeftAndRight(left - moving.left)
 }
+
+private fun ClosedFloatingPointRange<Float>.center(): Float = (start + endInclusive) / 2f
 
 private fun View.textPieces(): List<TextView>? {
     val pieces = when {
@@ -52,7 +66,11 @@ private fun List<TextView>.hasDecoratedEdge(): Boolean {
 }
 
 @Suppress("DEPRECATION") // Path.computeBounds(RectF, boolean) is available on older Android versions.
-private fun List<TextView>.bodyCenter(layer: View, path: Path, bounds: RectF): Float? {
+private fun List<TextView>.bodyRange(
+    layer: View,
+    path: Path,
+    bounds: RectF,
+): ClosedFloatingPointRange<Float>? {
     val first = indexOfFirst { it.layout.text.let { text -> text.bodyStart() < text.length } }
     if (first < 0) return null
     val last = indexOfLast { it.layout.text.bodyEnd() != 0 }
@@ -79,7 +97,7 @@ private fun List<TextView>.bodyCenter(layer: View, path: Path, bounds: RectF): F
             right = maxOf(right, pieceX + to)
         }
     }
-    return if (left < right) (left + right) / 2f else null
+    return if (left < right) left..right else null
 }
 
 private fun CharSequence.bodyStart(): Int {
