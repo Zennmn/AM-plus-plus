@@ -449,6 +449,15 @@ internal fun EmbeddedSettingsHost.openPluginSettings(activity: Activity, id: Str
     }
 }
 
+/** Optional flag: a plugin that draws its own Miuix top bar can ask the host to omit its chrome. */
+internal object PluginSettingsChromeBridge {
+    @Volatile
+    var customChrome: Boolean = false
+
+    @JvmStatic
+    fun useCustomChrome(value: Boolean) { customChrome = value }
+}
+
 /** Lets the plugin's own top-bar back button close the host full-screen page. */
 internal object PluginSettingsBackBridge {
     @Volatile
@@ -469,6 +478,7 @@ private fun EmbeddedSettingsHost.showFullScreenPluginSettings(
     fun close() {
         if (closed.compareAndSet(false, true)) {
             PluginSettingsBackBridge.closeCurrent = null
+            PluginSettingsChromeBridge.customChrome = false
             onClose()
         }
     }
@@ -479,7 +489,29 @@ private fun EmbeddedSettingsHost.showFullScreenPluginSettings(
         onDismiss = ::close,
     ) { dismiss ->
         requestDismiss = dismiss
-        AndroidView(factory = { pluginView }, modifier = Modifier.fillMaxSize())
+        if (PluginSettingsChromeBridge.customChrome) {
+            AndroidView(factory = { pluginView }, modifier = Modifier.fillMaxSize())
+        } else {
+            Scaffold(
+                modifier = Modifier.fillMaxSize(),
+                topBar = {
+                    SmallTopAppBar(
+                        title = localizedText(ModuleText.PLUGIN_SETTINGS),
+                        navigationIcon = {
+                            EmbeddedSettingsIconAction(
+                                EmbeddedSvgIcon.Back,
+                                localizedText(ModuleText.BACK),
+                                onClick = { dismiss() },
+                            )
+                        },
+                    )
+                },
+            ) { padding ->
+                Box(Modifier.fillMaxSize().padding(padding)) {
+                    AndroidView(factory = { pluginView }, modifier = Modifier.fillMaxSize())
+                }
+            }
+        }
     }
     // Use the dialog's animated dismiss path (slide-out) instead of dialog.dismiss(),
     // which would tear the window down immediately.
