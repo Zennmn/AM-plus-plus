@@ -2,6 +2,7 @@ package dev.amenhancer.module.ui
 
 import android.app.Activity
 import android.app.Dialog
+import android.view.ViewTreeObserver
 import android.widget.Toast
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +31,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -43,6 +45,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -264,17 +267,68 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                                 contentKey = { it.contentKey },
                                 swipeDismiss = swipeDirection,
                             ) { page ->
+                                val scrollBehavior = MiuixScrollBehavior()
+                                val reportedScroll = page.supportsReportedScroll
+                                val scrollFraction = page.reportedScrollFraction
+                                val hostView = LocalView.current
+                                fun applyReportedScroll() {
+                                    if (!page.isClosed && page.supportsReportedScroll) {
+                                        val state = scrollBehavior.state
+                                        val limit = state.heightOffsetLimit
+                                        if (limit.isFinite() && limit > -Float.MAX_VALUE) {
+                                            val offset = limit * page.reportedScrollFraction
+                                            if (state.heightOffset != offset) state.heightOffset = offset
+                                        }
+                                    }
+                                }
+                                LaunchedEffect(page, reportedScroll, scrollFraction, scrollBehavior) {
+                                    applyReportedScroll()
+                                }
+                                DisposableEffect(page, reportedScroll, scrollBehavior, hostView) {
+                                    if (!reportedScroll) {
+                                        onDispose {}
+                                    } else {
+                                        // Miuix's measured limit is a plain field, so layout changes do not recompose us.
+                                        val observer = hostView.viewTreeObserver
+                                        val listener = ViewTreeObserver.OnPreDrawListener {
+                                            applyReportedScroll()
+                                            true
+                                        }
+                                        observer.addOnPreDrawListener(listener)
+                                        onDispose {
+                                            val current = if (observer.isAlive) observer else hostView.viewTreeObserver
+                                            if (current.isAlive) current.removeOnPreDrawListener(listener)
+                                        }
+                                    }
+                                }
+                                DisposableEffect(page) {
+                                    val nestedScrollingEnabled = page.view.isNestedScrollingEnabled
+                                    // AndroidView forwards nested scroll only while its root View enables it.
+                                    page.view.isNestedScrollingEnabled = true
+                                    PluginSettingsScrollBridge.bind(page)
+                                    onDispose {
+                                        page.view.isNestedScrollingEnabled = nestedScrollingEnabled
+                                        PluginSettingsScrollBridge.release(page)
+                                    }
+                                }
                                 EmbeddedSettingsScaffold(
                                     title = page.title,
                                     wide = wide,
                                     navigation = {
                                         EmbeddedSettingsIconAction(EmbeddedSvgIcon.Back, localizedText(ModuleText.BACK), onClick = goBack)
                                     },
+                                    scrollBehavior = scrollBehavior,
+                                    largeTitle = page.largeTitle ?: page.title,
                                 ) { bottomPadding ->
-                                    // Keep a bounded viewport; the plugin owns its scrolling.
+                                    // The plugin owns scrolling; non-cooperating Views keep a fixed title.
                                     AndroidView(
                                         factory = { page.view },
-                                        modifier = Modifier.fillMaxWidth().padding(bottom = bottomPadding),
+                                        modifier = Modifier.fillMaxWidth()
+                                            .padding(bottom = bottomPadding)
+                                            .then(
+                                                if (reportedScroll) Modifier
+                                                else Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+                                            ),
                                     )
                                 }
                             }
@@ -366,6 +420,7 @@ private fun EmbeddedSettingsScaffold(
     navigation: @Composable () -> Unit,
     actions: @Composable RowScope.() -> Unit = {},
     scrollBehavior: ScrollBehavior? = null,
+    largeTitle: String = title,
     content: @Composable (bottomPadding: Dp) -> Unit,
 ) {
     Scaffold(
@@ -382,6 +437,7 @@ private fun EmbeddedSettingsScaffold(
             } else {
                 TopAppBar(
                     title = title,
+                    largeTitle = largeTitle,
                     navigationIcon = navigation,
                     actions = actions,
                     scrollBehavior = scrollBehavior,

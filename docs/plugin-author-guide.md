@@ -13,7 +13,7 @@
 | 统一注册记录与冲突提示 | 与 AM++、其他插件之间的行为兼容 |
 | 插件专属配置/缓存目录 | 数据格式、数据迁移、线程及实际对象清理 |
 
-首版支持方法/构造器 Hook、观察回调、普通素材和用标准 Android View 创建的设置页。插件可以实现主项目原本没有的功能。
+首版支持方法/构造器 Hook、观察回调、普通素材，以及通过 Android View 交付的设置页。新开发的插件设置界面以 Miuix 标准组件为基础，并适配手机和平板；这属于界面规范，不改变 SDK v1 的 View 接口。插件可以实现主项目原本没有的功能。
 
 首版没有统一歌词来源接口、播放器按钮插槽、Android XML 资源加载、SO 加载或插件 Activity/Service 注册。需要这些业务行为时，由作者使用自己的宿主适配实现；`claimResource` 只是冲突声明，不是 UI 挂载工具。
 
@@ -43,6 +43,8 @@
 ### 2.3 复制示例
 
 复制源码中的 `examples/basic-plugin/` 到你自己的目录，例如 `C:\Dev\MyAmppPlugin`。保持它是一个独立工程，不在 AM++ 的 settings.gradle.kts 中 include 它。
+
+该示例用于验证 SDK 接入、Hook 和配置生命周期；其中的原生 View 开关不作为新设置界面的模板。新增设置 UI 按[设置页规范](#71-设置页)使用 Miuix，并在插件工程中管理 UI 依赖。
 
 ```text
 MyAmppPlugin/
@@ -265,11 +267,17 @@ private java.lang.reflect.Method resolveNoArgMethod(
 
 ### 7.1 设置页
 
-createSettings 接收本次页面的 Context，返回新的 View 与 PluginSettingsSession。所有 ZIP 插件的设置统一显示为 AM++ 插件管理下的普通设置子页。AM++ 沿用 `createSettings()` 返回的 `View`；页面内容与滚动由插件负责，不创建独立 Activity。退出子页、切换设置分类或关闭模块设置时，AM++ 关闭对应 `PluginSettingsSession`；插件在 `close()` 中解除监听、取消页面任务，并确保可以安全重复调用。
+createSettings 接收本次页面的 Context，返回新的 View 与 PluginSettingsSession。插件设置显示为 AM++ 插件管理下的普通子页，由 AM++ 提供标题、返回按钮和转场；插件通过 `getView()` 返回正文并负责内容与滚动，新插件不应重复绘制完整顶栏，也不应调用宿主 Activity 返回来关闭子页。退出子页、切换设置分类、关闭模块设置或窗口销毁时，AM++ 关闭对应会话；插件在 `close()` 中解除监听、取消页面任务，并确保可以安全重复调用。
 
-该承载方式沿用既有 `PluginSettingsSession`、`getView()`、`close()` 和 ZIP 导入契约，不新增 SDK 或 manifest 字段；已发布的旧插件无需重打包。
+新插件的设置正文使用 Miuix 的主题、卡片、设置项、开关、输入框及弹层等标准组件，跟随当前配置的浅深色与字体缩放，不另绘一套相似皮肤。手机和平板共用配置与页面逻辑，按当前可用窗口宽度调整分组、内容宽度和布局；覆盖窄屏、宽屏、横竖屏及分屏，不按机型或固定像素尺寸写死。键盘出现和大字号下，内容应能滚动且关键操作可见，不重复预留宿主顶栏和安全区。
 
-仓库示例 BasicPlugin 已提供完整的 Switch 设置页和配置文件写入。XML 布局、R.drawable 等插件资源加载不属于 v1，普通图片可以从素材流解码成 Drawable/Bitmap。
+新插件优先使用标准 AndroidView 嵌套滚动互操作：正文滚动组件实际派发事件，AM++ 在挂载期间启用根 View 的嵌套滚动，手机大标题随事件折叠，宽屏使用小标题；宿主不给正文另套纵向滚动容器。自定义滚动实现可参考 [Android 嵌套滚动互操作](https://developer.android.com/develop/ui/compose/touch-input/pointer-input/nested-scroll#nested-scrolling-interop)。
+
+Compose 正文通过 View 交付时，还需把内部 Compose 滚动连接到 View 父级；仅启用根 View 的嵌套滚动标志不会自动完成这个连接。Miuix/Compose 依赖由插件工程管理，并遵守现有 DEX、资源和类加载边界，不把 AM++ 内部 UI 类作为公共 SDK。
+
+已采用 `PluginSettingsScrollBridge` 的插件可继续在 `createSettings` 中通过 `updateTitle`、`updateLargeTitle` 和 `updateSupportsScroll(true)` 声明顶栏信息，再用 `report` 上报 0～1 的折叠比例；关闭后应停止上报。该模式不再与原生嵌套滚动同时写标题；两条路径都没有输入时保持固定标题。此入口只保留兼容，既有插件无需重打包，新插件优先标准滚动。`PluginSettingsSession`、`getView()`、`close()`、SDK 与 ZIP 契约不变。
+
+仓库示例 BasicPlugin 演示标准 View 的设置会话、配置文件写入与关闭清理，不是 Miuix UI 模板。XML 布局、R.drawable 等插件资源加载不属于 v1，普通图片可以从素材流解码成 Drawable/Bitmap；既有 View 插件继续兼容。
 
 ### 7.2 专属目录
 
@@ -385,6 +393,8 @@ adb logcat -s AppleMusicEnhancer
 启停、替换和删除都在重启后生效。替换保留配置与启用状态；失败导入保留已有版本。删除会清理插件自己的配置和缓存，不进入 AM++ 的歌词备份。
 
 发布前实际验证：独立构建、首次导入、启用重启、目标回调、设置子页打开/退出、切换设置分类和关闭模块设置时的会话清理、更新保留配置、停用、删除，以及与 AM++ 原有功能和常用插件的组合。歌词/网络插件另外检查快速切歌、请求失败和过期结果。
+
+设置 UI 需分别检查手机窄屏、平板宽屏及分屏，包含浅深色、大字号、键盘遮挡、滚动折叠和返回；记录实际验证的窗口范围，不以单一手机截图代替平板适配。
 
 构建与导入检查不能替代 LSPosed、嵌入版以及 Android 14+ 的实际加载/Hook/页面验收。作者需要记录自己的功能、宿主和设备范围，不能从 SDK 或样例的结果推断插件功能通过。
 
