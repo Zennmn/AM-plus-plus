@@ -2731,7 +2731,7 @@
     }
   },
   "knownDegradations": [],
-  "profileRevision": 3,
+  "profileRevision": 4,
   "chrome": {
     "resources": {
       "NAVIGATION_HOST_GROUP": {
@@ -2844,6 +2844,7 @@
     }
   },
   "layoutVariants": {
+    "lyricPronunciationPairLayout": "lyrics_pronunciation_vertical_group",
     "gradientEdges": [
       {
         "vertical": [

@@ -73,7 +73,7 @@
 | `indexed` | 符号映射及适用的 `methodContracts` / `fieldContracts` |
 | `hookTargets` / `catalogQueryRenames` | HLE 入口、签名/调用方约束、`runtimeMemberNames`、目录查询映射 |
 | `settings` / `chrome` | 设置模型、入口、导航、播放器资源及旧族成员；`settings.members` 保存变化后的完整偏好列表和 Compose 方法契约 |
-| `layoutVariants` / `cjk` | binding、渐变变体、前景文本、`maxSpanGlowCharacters` 与可选 `terminalGradient` / `splitWordGlow` 契约 |
+| `layoutVariants` / `cjk` | binding、渐变变体、逐字音译配对布局、前景文本、`maxSpanGlowCharacters` 与可选 `terminalGradient` / `splitWordGlow` 契约 |
 | `lyricResultSubmission` / `lyricBlur` / `lyricWrapSweep` / `lyricBackgroundHighlight` | 歌词结果、显示模糊、跨行扫光及活动行背景高亮优化的独立角色与契约 |
 | Fragment 专用区域 | `fragmentDualPane`、`fragmentLyricsRuntime`、`fragmentKaraokeWidth`、`fragmentTabletVideoHandoff`、`fragmentChrome`、`playerRecovery` |
 | `startupPagePrewarm` / `artistComposeProfile` | 独立预热、Compose 艺人表面的成员、构造器与语义参数 |
@@ -168,7 +168,7 @@ Fragment view 重建、配置变化与 controller 销毁分别关闭会话。状
 | [共用歌词结果提交](#lyrics-result-submission) | `indexed`、`lyricResultSubmission`、原生安装与 item 更新 | [结果提交](feature-preservation.md#lyrics-result-submission) |
 | [歌词来源](#lyrics-sources)、[简体替换和声修复](#simplified-replacement-backgrounds)、[LLM 翻译与音译](#llm-lyrics-fallback) | 原生 TTML 观察、共享歌词效果优化门禁的单解析器修复、指针/歌曲身份、选中文档及共用结果通道 | [来源](feature-preservation.md#lyrics-sources)、[LLM](feature-preservation.md#llm-lyrics-fallback) |
 | [模糊](#lyrics-blur)、[CJK](#cjk-animation)、[字体](#lyrics-typeface) | 各自契约、显示状态、绑定与资源 | [模糊](feature-preservation.md#lyrics-blur)、[CJK](feature-preservation.md#cjk-animation)、[字体](feature-preservation.md#lyrics-typeface) |
-| [歌词效果优化](#lyric-background-highlight)：[简体替换和声修复](#simplified-replacement-backgrounds)、[逐行双声部对齐](#line-lyric-agent-alignment)、[CJK 末词补偿与英语拆词辉光](#cjk-animation)、[跨行扫光](#lyric-wrap-sweep)与活动行高亮 | 共享设置门禁；`lyricRepairs` 保留各项诊断并按 parser 与已声明可选项汇总状态，`terminalGradient` / `splitWordGlow` / `lyricWrapSweep` / `lyricBackgroundHighlight` 分别核对契约、降级和失败 | [辉光与末词](feature-preservation.md#cjk-animation)、[跨行](feature-preservation.md#lyric-wrap-sweep)、[活动行](feature-preservation.md#lyric-background-highlight) |
+| [歌词效果优化](#lyric-background-highlight)：[简体替换和声修复](#simplified-replacement-backgrounds)、[逐行双声部对齐](#line-lyric-agent-alignment)、[逐字音译居中](#word-pronunciation-pair-alignment)、[CJK 末词补偿与英语拆词辉光](#cjk-animation)、[跨行扫光](#lyric-wrap-sweep)与活动行高亮 | 共享设置门禁；`lyricRepairs` 保留各项诊断并按 parser 与已声明可选项汇总状态，各能力分别核对接缝、降级和失败 | [逐字音译](host-adaptation-checklist.md#word-pronunciation-pair-alignment-checks)、[辉光与末词](feature-preservation.md#cjk-animation)、[跨行](feature-preservation.md#lyric-wrap-sweep)、[活动行](feature-preservation.md#lyric-background-highlight) |
 | [玻璃导航](#chrome-glass)、[收缩](#glass-collapse-rendering) | `chrome` / `fragmentChrome`、独立能力位、滚动与 sheet 端口 | [玻璃](feature-preservation.md#chrome-glass)、[收缩](feature-preservation.md#glass-collapse-rendering) |
 | [启动预热](#startup-page-prewarm) | 独立能力、`startupPagePrewarm` 与形态导航资源 | [预热](feature-preservation.md#startup-page-prewarm) |
 | [平板布局、视频与恢复](#tablet-layout) | 双栏、binding、资源、视频/恢复与布局变体 | [平板](feature-preservation.md#tablet-layout) |
@@ -443,7 +443,7 @@ CJK 辉光使用 `trim` 原文去除 Unicode 标点 `\p{P}` 后的副本判断�
 
 ### 5.6 跨行歌词扫光
 
-**生效与接缝。** 设置 `ModuleSettings.lyricEffectsOptimizationEnabled`（配置键 `lyric_effects_optimization_enabled`）是简体替换和声修复、逐行双声部对齐、CJK 末词补偿、跨行扫光与活动行高亮共用的现有开关，默认及缺键均为关闭，更改后重启宿主生效。关闭时 `LyricsParserFeature`、`LyricWrapSweepFeature` 与 `LyricBackgroundHighlightFeature` 都返回 `DISABLED`，且既有 `lyricRepairs` 组不调用解析修复、逐行对齐或末词补偿的 `install`；自定义歌词开启时仍可安装同一解析 Hook 供观察，但 before 不执行修复。开启后，解析修复、逐行对齐和末词补偿共用既有 `lyricRepairs` 安装入口，保留三项完整诊断并按前述规则汇总整体状态；跨行扫光与活动行高亮仍分别按精确 profile 的 `lyricWrapSweep` 与 `lyricBackgroundHighlight` 契约安装和核对，各自报告支持、降级或失败。任一子项不可用不阻止其他子项或撤销其安装。跨行扫光的 `LyricWrapSweepTarget` 使用能力键 `FEATURE_LYRIC_WRAP_SWEEP`，不新增独立设置。CJK 辉光开关只控制辉光，不控制这些 Feature。
+**生效与接缝。** 设置 `ModuleSettings.lyricEffectsOptimizationEnabled`（配置键 `lyric_effects_optimization_enabled`）是歌词效果优化的共用开关，默认及缺键均为关闭，更改后重启宿主生效。关闭时 `LyricsParserFeature`、`LyricWrapSweepFeature` 与 `LyricBackgroundHighlightFeature` 都返回 `DISABLED`，不启动 `lyricRepairs`；自定义歌词开启时仍可安装同一解析 Hook 供观察，但 before 不执行修复。开启后，`lyricRepairs` 按前述规则保留各子项诊断并汇总状态；跨行扫光与活动行高亮仍分别按精确 profile 的 `lyricWrapSweep` 与 `lyricBackgroundHighlight` 契约安装和核对，各自报告支持、降级或失败。任一子项不可用不阻止其他子项或撤销其安装。跨行扫光的 `LyricWrapSweepTarget` 使用能力键 `FEATURE_LYRIC_WRAP_SWEEP`，不新增独立设置。CJK 辉光开关只控制 CJK 辉光。
 
 入口为 [LyricWrapSweepContract](../host-applemusic/src/main/java/dev/amenhancer/module/hook/LyricWrapSweepContract.kt)、[Geometry](../host-applemusic/src/main/java/dev/amenhancer/module/hook/LyricWrapSweepGeometry.kt)、[AppleMusicLyricWrapSweepTarget](../host-applemusic/src/main/java/dev/amenhancer/module/hook/AppleMusicLyricWrapSweepTarget.kt) 和 core 的 [LyricWrapSweepPolicy](../core/src/main/kotlin/dev/amenhancer/module/hook/LyricWrapSweepPolicy.kt)。Contract 的必需清单与关系校验是协议依据，不另写混淆名或支持版本表。
 
@@ -516,6 +516,16 @@ staticMask 同时用于未来行初始化和已唱恢复，不能因它被调用
 **适用边界与行绑定。** 仅处理原生 `timing=Line`：排除 `Group` 后，`Person`/`Other` 有效声部恰为两个，且至少一个为 `Person`。首个实际出现的 `Person` 按原歌词的首字母方向确定主侧，另一声部使用对侧；`Group` 行、未知声部、单声部、更多声部及逐字文档恢复原生布局。普通行绑定后，每次为主文、译文、音译重算同一物理侧或原生对齐，并同步缩放中心；保留文字方向、尺寸、边距和时间数据，不缓存跨歌曲映射。延迟布局回调读取当前 view 状态，不保留 native 指针；无需独立 payload、recycle Hook 或常驻布局监听。
 
 **维护触发。** 新版本授予能力位前，核对普通行筛选、位置换算、agent ABI、原生首字母方向判定、内容 payload 回到完整绑定及一次性布局回调顺序。人工场景覆盖双声部、原生回落、滚动复用、翻译/音译切换、混合脚本和开关重启；不能依据相邻版本自动继承资格。
+
+<a id="word-pronunciation-pair-alignment"></a>
+
+#### 5.6.3 歌词效果优化：逐字音译居中
+
+`layoutVariants.lyricPronunciationPairLayout` 由精确生产 profile 声明原生逐字配对的布局名。`lyricRepairs` 在“歌词效果优化”开启时通过现有布局回调注册；缺声明保留原生，资源缺失报告降级。它与音译轨的请求、选择及原生显示偏好独立。
+
+配对容器为竖向 `LinearLayout`，按最宽子项占宽。只在创建时设容器的水平居中，使较宽侧原位不变、较窄侧居中；宽度以原生测量为准。保留原生词对、间距、换行和动画。整行音译不使用该容器；方向相反时，原生在测量后拆开词对、将两轨分别排入横向容器，仍沿用原生排法。
+
+移植时核对资源创建是否走可按名识别的回调、容器占宽和子项边距/对齐是否仍满足上述条件，以及原生扫光是否读取调整后的视图位置。未确认前不继承声明。
 
 <a id="lyrics-typeface"></a>
 
