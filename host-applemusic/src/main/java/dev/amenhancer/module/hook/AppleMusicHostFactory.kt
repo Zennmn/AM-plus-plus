@@ -69,6 +69,9 @@ object AppleMusicHostFactory {
             ) {
                 // The wider child determines the group width. The host keeps its mixed-direction rows separate.
                 root.setHorizontalGravity(Gravity.CENTER_HORIZONTAL)
+                root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+                    alignLyricPronunciationBody(root)
+                }
             }
         }
         return TargetCapabilityInstall.Active("Word pronunciation pair alignment registered")
