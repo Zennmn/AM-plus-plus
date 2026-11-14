@@ -51,7 +51,7 @@
 
 ### 2.2 功能覆盖表
 
-按此表逐域填写。自动来源/LLM虽然共用提交，模糊与CJK辉光各有适用结论；LLM 翻译与音译虽共用 API 配置，仍分别填写资格、安装、降级与失败结论。简体替换和声修复、逐行双声部对齐、英语拆词辉光、CJK末词补偿、跨行扫光与活动行高亮共用“歌词效果优化”开关，但仍分别填写安装、降级与失败结论。
+按此表逐域填写。自动来源/LLM虽然共用提交，模糊与CJK辉光各有适用结论；LLM 翻译与音译虽共用 API 配置，仍分别填写资格、安装、降级与失败结论。共用“歌词效果优化”开关的各项能力仍分别填写安装、降级与失败结论。
 
 | 功能域 | 资料 / 接入依据 | 源码与包证据 | 安装 / 降级状态 | 人工结果入口 |
 |---|---|---|---|---|
@@ -65,6 +65,7 @@
 | 歌词效果优化：跨行扫光 | 共享lyric_effects_optimization_enabled、独立lyricWrapSweep、视觉行/媒体时间/退役 | 待填写 | 待填写 | 待填写 |
 | 歌词效果优化：活动行高亮 | 共享lyric_effects_optimization_enabled、独立lyricBackgroundHighlight、活动行/词ID/焦点 | 待填写 | 待填写 | 待填写 |
 | 歌词效果优化：逐行双声部对齐 | 共享lyric_effects_optimization_enabled、capabilities.lineLyricAgentAlignment、普通行绑定后处理、复用lyricBlur行角色 | 待填写 | 待填写 | 歌词效果优化矩阵 |
+| 歌词效果优化：逐字音译居中 | 共享lyric_effects_optimization_enabled、layoutVariants.lyricPronunciationPairLayout、原生逐字配对容器 | 待填写 | 待填写 | [人工场景](#word-pronunciation-pair-alignment-checks) |
 | 字体与歌词面板 | 生命周期、binding/adapter、资源/度量 | 待填写 | 待填写 | 待填写 |
 | 手机/平板玻璃、mini | chrome/fragmentChrome、导航与sheet | 待填写 | 待填写 | 待填写 |
 | 底栏收缩 | 独立资格、滚动/触摸、共享几何与渲染 | 待填写 | 待填写 | 待填写 |
@@ -264,6 +265,17 @@
 - [ ] 只为 Line 文档的两个有效 `Person`/`Other`（至少一 `Person`）分侧；首个实际 `Person` 原文决定主侧，Group 行、未知/单声部、更大阵容及 Word 文档恢复原生布局。
 - [ ] 每次绑定重算主文、译文、音译的物理侧与 pivot，保留 `textDirection`、尺寸、边距及时间；一次性布局回调只读当前 view，不保留 native 指针或跨歌曲侧别缓存。
 - [ ] 内容 payload 回到完整绑定，其他 payload 不改对齐或 pivot；滚动复用、混合脚本、翻译/音译切换及开关重启须按人工场景核对。
+
+<a id="word-pronunciation-pair-alignment-checks"></a>
+
+#### 4.6.3 歌词效果优化：逐字音译居中
+
+[维护规则](host-adaptation-guide.md#word-pronunciation-pair-alignment)
+
+- [ ] 在当前精确 profile 核对 `layoutVariants.lyricPronunciationPairLayout`。资源回调在词对首次测量前命中；竖向容器由最宽子项撑开，子项边距和重力不干扰居中。缺少声明或资源时保留原生。
+- [ ] 人工覆盖原文宽、音译宽、等宽，以及切换大文本和开关重启；确认每对独立居中、宽侧原位，换行和逐字扫光位置正常。
+- [ ] 核对首尾引号、标点和空格的实际占宽补偿，覆盖开闭引号分属相邻词对、标点和正文同处预排版字形片段、两侧都有符号。较窄侧从基础居中位置移动且不越出占位；词内标点和附加音标不触发补偿，原生横向分片按整层计算。
+- [ ] 核对无逐字音译、整行音译及原文和音译方向相反时的原生排法。
 
 <a id="lyrics-typeface-checks"></a>
 
