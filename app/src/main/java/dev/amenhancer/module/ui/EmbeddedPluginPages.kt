@@ -6,10 +6,21 @@ import android.app.Activity
 import android.net.Uri
 import android.os.Build
 import android.widget.Toast
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SmallTopAppBar
+import top.yukonga.miuix.kmp.basic.TopAppBar
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.Close
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Stable
@@ -17,19 +28,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import dev.amenhancer.plugin.api.PluginSettingsSession
+import androidx.compose.ui.viewinterop.AndroidView
 import dev.amenhancer.plugin.runtime.PluginRunState
 import dev.amenhancer.plugin.runtime.PluginStatus
 import java.util.concurrent.atomic.AtomicBoolean
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.nav.core.NavKey
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
@@ -37,7 +48,6 @@ internal fun EmbeddedSettingsHost.EmbeddedPluginManagementPage(
     activity: Activity,
     revision: Int,
     active: Boolean,
-    onOpenSettings: (id: String, title: String) -> Unit,
 ) {
     val manager = plugins
     val state = remember(manager) { EmbeddedPluginManagementState() }
@@ -290,7 +300,7 @@ internal fun EmbeddedSettingsHost.EmbeddedPluginManagementPage(
                             title = localizedText(ModuleText.PLUGIN_SETTINGS),
                             icon = EmbeddedSvgIcon.Settings,
                             enabled = controlsEnabled,
-                            onClick = { onOpenSettings(manifest.id, manifest.name) },
+                            onClick = { openPluginSettings(activity, manifest.id) },
                         )
                     }
                     HorizontalDivider(Modifier.padding(horizontal = 16.dp))
@@ -413,43 +423,76 @@ internal fun EmbeddedSettingsHost.importPluginZip(uri: Uri) {
     }
 }
 
-internal class EmbeddedPluginSettingsPage(
-    val contentKey: String,
-    val title: String,
-    private val session: PluginSettingsSession,
-) : NavKey {
-    val view = session.view.also { check(it.parent == null) { "Plugin settings View is already attached" } }
-
-    fun close() {
-        runCatching { session.close() }
-    }
-}
-
-internal fun EmbeddedSettingsHost.createPluginSettingsPage(
-    activity: Activity,
-    id: String,
-    title: String,
-    contentKey: String,
-): EmbeddedPluginSettingsPage? {
-    val session = plugins?.openSettings(id, embeddedThemedContext(activity)) ?: run {
-        Toast.makeText(
+internal fun EmbeddedSettingsHost.openPluginSettings(activity: Activity, id: String) {
+    if (activity.isFinishing || activity.isDestroyed || currentActivity() !== activity) return
+    val session = plugins?.openSettings(id, embeddedThemedContext(activity))
+        ?: return Toast.makeText(
             activity,
             localizedText(ModuleText.PLUGIN_NO_SETTINGS),
             Toast.LENGTH_SHORT,
         ).show()
-        return null
+    val closed = AtomicBoolean()
+    fun closeSession() {
+        if (closed.compareAndSet(false, true)) runCatching { session.close() }
     }
-    return try {
-        EmbeddedPluginSettingsPage(contentKey, title, session)
+    try {
+        val pluginView = session.view
+        check(pluginView.parent == null) { localizedText(ModuleText.SETTINGS_OPEN_FAILED, id) }
+        showFullScreenPluginSettings(activity, pluginView, ::closeSession)
     } catch (error: Throwable) {
-        runCatching { session.close() }
+        closeSession()
         Toast.makeText(
             activity,
-            localizedText(ModuleText.SETTINGS_OPEN_FAILED, error.message ?: id),
+            localizedText(ModuleText.SETTINGS_OPEN_FAILED, error.message),
             Toast.LENGTH_LONG,
         ).show()
-        null
     }
+}
+
+/** Lets the plugin's own top-bar back button close the host full-screen page. */
+internal object PluginSettingsBackBridge {
+    @Volatile
+    var closeCurrent: (() -> Unit)? = null
+
+    @JvmStatic
+    fun close() { closeCurrent?.invoke() }
+}
+
+/** Plugin settings as a full page: no OverlayDialog card, no dimmed modal sheet. */
+private fun EmbeddedSettingsHost.showFullScreenPluginSettings(
+    activity: Activity,
+    pluginView: android.view.View,
+    onClose: () -> Unit,
+) {
+    if (activity.isFinishing || activity.isDestroyed) return
+    val closed = java.util.concurrent.atomic.AtomicBoolean()
+    fun close() {
+        if (closed.compareAndSet(false, true)) {
+            PluginSettingsBackBridge.closeCurrent = null
+            onClose()
+        }
+    }
+    var requestDismiss: (() -> Unit)? = null
+    val dialog = createEmbeddedSettingsDialog(
+        activity = activity,
+        onBack = { dismiss -> dismiss() },
+        onDismiss = ::close,
+    ) { dismiss ->
+        requestDismiss = dismiss
+        AndroidView(factory = { pluginView }, modifier = Modifier.fillMaxSize())
+    }
+    // Use the dialog's animated dismiss path (slide-out) instead of dialog.dismiss(),
+    // which would tear the window down immediately.
+    PluginSettingsBackBridge.closeCurrent = { requestDismiss?.invoke() ?: dialog.dismiss() }
+    // The plugin page's top-bar back button calls Activity.onBackPressed(). While this
+    // dialog is open, consume it here so it dismisses the dialog instead of finishing
+    // Apple Music (the system back gesture already reaches the dialog's own callback).
+    val backCallback = object : androidx.activity.OnBackPressedCallback(true) {
+        override fun handleOnBackPressed() { dialog.dismiss() }
+    }
+    (activity as? androidx.activity.ComponentActivity)?.onBackPressedDispatcher?.addCallback(activity, backCallback)
+    dialog.setOnDismissListener { backCallback.remove() }
+    dialog.show()
 }
 
 @Stable
