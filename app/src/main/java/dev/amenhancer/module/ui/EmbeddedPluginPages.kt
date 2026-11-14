@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.TopAppBar
@@ -449,6 +450,19 @@ internal fun EmbeddedSettingsHost.openPluginSettings(activity: Activity, id: Str
     }
 }
 
+/** v2 scroll bridge: a plugin page reports its scroll fraction so the host Miuix TopAppBar can collapse. */
+internal object PluginSettingsScrollBridge {
+    @Volatile var title: String? = null
+    @Volatile var largeTitle: String? = null
+    @Volatile var supportsScroll: Boolean = false
+    @Volatile var listener: ((Float) -> Unit)? = null
+
+    @JvmStatic fun updateTitle(value: String) { title = value }
+    @JvmStatic fun updateLargeTitle(value: String) { largeTitle = value }
+    @JvmStatic fun updateSupportsScroll(value: Boolean) { supportsScroll = value }
+    @JvmStatic fun report(fraction: Float) { listener?.invoke(fraction.coerceIn(0f, 1f)) }
+}
+
 /** Optional flag: a plugin that draws its own Miuix top bar can ask the host to omit its chrome. */
 internal object PluginSettingsChromeBridge {
     @Volatile
@@ -479,6 +493,10 @@ private fun EmbeddedSettingsHost.showFullScreenPluginSettings(
         if (closed.compareAndSet(false, true)) {
             PluginSettingsBackBridge.closeCurrent = null
             PluginSettingsChromeBridge.customChrome = false
+            PluginSettingsScrollBridge.listener = null
+            PluginSettingsScrollBridge.title = null
+            PluginSettingsScrollBridge.largeTitle = null
+            PluginSettingsScrollBridge.supportsScroll = false
             onClose()
         }
     }
@@ -489,14 +507,40 @@ private fun EmbeddedSettingsHost.showFullScreenPluginSettings(
         onDismiss = ::close,
     ) { dismiss ->
         requestDismiss = dismiss
-        if (PluginSettingsChromeBridge.customChrome) {
-            AndroidView(factory = { pluginView }, modifier = Modifier.fillMaxSize())
+        val hostTitle = PluginSettingsScrollBridge.title ?: localizedText(ModuleText.PLUGIN_SETTINGS)
+        val hostLargeTitle = PluginSettingsScrollBridge.largeTitle ?: hostTitle
+        if (PluginSettingsScrollBridge.supportsScroll) {
+            val scrollBehavior = MiuixScrollBehavior()
+            PluginSettingsScrollBridge.listener = { fraction ->
+                scrollBehavior.state.heightOffset = scrollBehavior.state.heightOffsetLimit * fraction
+            }
+            Scaffold(
+                modifier = Modifier.fillMaxSize(),
+                topBar = {
+                    TopAppBar(
+                        title = hostTitle,
+                        largeTitle = hostLargeTitle,
+                        navigationIcon = {
+                            EmbeddedSettingsIconAction(
+                                EmbeddedSvgIcon.Back,
+                                localizedText(ModuleText.BACK),
+                                onClick = { dismiss() },
+                            )
+                        },
+                        scrollBehavior = scrollBehavior,
+                    )
+                },
+            ) { padding ->
+                Box(Modifier.fillMaxSize().padding(padding)) {
+                    AndroidView(factory = { pluginView }, modifier = Modifier.fillMaxSize())
+                }
+            }
         } else {
             Scaffold(
                 modifier = Modifier.fillMaxSize(),
                 topBar = {
                     SmallTopAppBar(
-                        title = localizedText(ModuleText.PLUGIN_SETTINGS),
+                        title = hostTitle,
                         navigationIcon = {
                             EmbeddedSettingsIconAction(
                                 EmbeddedSvgIcon.Back,
