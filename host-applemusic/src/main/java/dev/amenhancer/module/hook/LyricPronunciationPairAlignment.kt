@@ -1,6 +1,8 @@
 package dev.amenhancer.module.hook
 
+import android.os.Build
 import android.text.Layout
+import android.text.PrecomputedText
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -58,11 +60,23 @@ private fun List<TextView>.edgeAdvance(leading: Boolean): Float? {
         val start = if (leading) 0 else text.bodyEnd()
         val end = if (leading) text.bodyStart() else text.length
         if (start < end) {
-            val from = layout.getPrimaryHorizontal(start)
-            val to = layout.getPrimaryHorizontal(end)
-            // Two different caret positions indicate a bidi boundary, not a simple edge.
-            if (from != layout.getSecondaryHorizontal(start) || to != layout.getSecondaryHorizontal(end)) return null
-            val advance = (to - from) * layout.getParagraphDirection(0)
+            val direction = layout.getParagraphDirection(0)
+            val advance = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+                text is PrecomputedText && text.params.textPaint.equalsForTextMeasurement(layout.paint)
+            ) {
+                val rtl = direction == Layout.DIR_RIGHT_TO_LEFT
+                if (layout.getLineEnd(0) != text.length || layout.getLineContainsTab(0) ||
+                    (maxOf(0, start - 1) until minOf(text.length, end + 1)).any { layout.isRtlCharAt(it) != rtl }
+                ) return null
+                // Caret queries can return the whole shaped run width at an interior offset.
+                text.getWidth(start, end)
+            } else {
+                val from = layout.getPrimaryHorizontal(start)
+                val to = layout.getPrimaryHorizontal(end)
+                // Two different caret positions indicate a bidi boundary, not a simple edge.
+                if (from != layout.getSecondaryHorizontal(start) || to != layout.getSecondaryHorizontal(end)) return null
+                (to - from) * direction
+            }
             if (!advance.isFinite() || advance < 0f) return null
             width += advance
         }
