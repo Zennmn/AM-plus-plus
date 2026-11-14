@@ -1,103 +1,74 @@
 package dev.amenhancer.module.hook
 
-import android.graphics.Path
-import android.graphics.RectF
+import android.text.Layout
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
 import kotlin.math.roundToInt
 
-/** Adjust the real child position after native layout, before the row uses it for sweeps. */
-internal fun alignLyricPronunciationBody(group: LinearLayout) {
-    // Native split glyphs share a horizontal child; extra vertical children are not one track.
+/** Compensate for edge spacing after span centering, before the row reads the child positions. */
+internal fun compensateLyricPronunciationEdges(group: LinearLayout) {
     if (group.childCount != 2) return
     val top = group.getChildAt(0)
     val bottom = group.getChildAt(1)
     if (top.visibility != View.VISIBLE || bottom.visibility != View.VISIBLE ||
-        top.width <= 0 || bottom.width <= 0
+        top.width <= 0 || bottom.width <= 0 || top.width == bottom.width
     ) return
 
-    val topPieces = top.textPieces() ?: return
-    val bottomPieces = bottom.textPieces() ?: return
-    if (!topPieces.hasDecoratedEdge() && !bottomPieces.hasDecoratedEdge()) return
-
-    val path = Path()
-    val bounds = RectF()
-    val topBody = topPieces.bodyRange(top, path, bounds) ?: return
-    val bottomBody = bottomPieces.bodyRange(bottom, path, bounds) ?: return
-    val topBodyWidth = topBody.endInclusive - topBody.start
-    val bottomBodyWidth = bottomBody.endInclusive - bottomBody.start
-    if (topBodyWidth == bottomBodyWidth) return
-
-    val topIsWider = topBodyWidth > bottomBodyWidth
-    val anchor = if (topIsWider) top else bottom
-    val moving = if (topIsWider) bottom else top
-    val anchorBody = if (topIsWider) topBody else bottomBody
-    val movingBody = if (topIsWider) bottomBody else topBody
-    // Compare the virtual text spans above, but keep the entire moving view in the native slot.
+    val anchor = if (top.width > bottom.width) top else bottom
+    val moving = if (anchor === top) bottom else top
     val minLeft = group.paddingLeft
     val maxLeft = group.width - group.paddingRight - moving.width
-    if (maxLeft < minLeft) return
-    val left = (anchor.left + anchorBody.center() - movingBody.center()).roundToInt()
-        .coerceIn(minLeft, maxLeft)
+    if (maxLeft <= minLeft) return
+
+    val anchorBias = anchor.edgeBias() ?: return
+    val movingBias = moving.edgeBias() ?: return
+    val correction = anchorBias - movingBias
+    if (correction == 0f) return
+
+    // Use the original LinearLayout center, so a second layout never adds to the previous offset.
+    val centeredLeft = minLeft + (maxLeft - minLeft) / 2
+    val left = (centeredLeft + correction).roundToInt().coerceIn(minLeft, maxLeft)
     moving.offsetLeftAndRight(left - moving.left)
 }
 
-private fun ClosedFloatingPointRange<Float>.center(): Float = (start + endInclusive) / 2f
-
-private fun View.textPieces(): List<TextView>? {
+private fun View.edgeBias(): Float? {
     val pieces = when {
         this is TextView -> listOf(this)
+        // Native split glyphs share a horizontal child and move together.
         this is LinearLayout && orientation == LinearLayout.HORIZONTAL ->
             List(childCount) { getChildAt(it) as? TextView ?: return null }
         else -> return null
     }
-    return pieces.takeIf { it.isNotEmpty() && it.all { piece ->
-        piece.visibility == View.VISIBLE && piece.layout?.let {
-            it.lineCount == 1 && it.getEllipsisCount(0) == 0
-        } == true
-    } }
+    val leading = pieces.edgeAdvance(leading = true) ?: return null
+    val trailing = pieces.edgeAdvance(leading = false) ?: return null
+    val rtl = if (this is TextView) layout.getParagraphDirection(0) == Layout.DIR_RIGHT_TO_LEFT
+        else layoutDirection == View.LAYOUT_DIRECTION_RTL
+    // Leading occupies the physical left in LTR; a larger left edge shifts the body right.
+    return (if (rtl) trailing - leading else leading - trailing) / 2f
 }
 
-private fun List<TextView>.hasDecoratedEdge(): Boolean {
-    val first = first().layout.text
-    val last = last().layout.text
-    return first.isEmpty() || last.isEmpty() || first.bodyStart() != 0 || last.bodyEnd() != last.length
-}
-
-@Suppress("DEPRECATION") // Path.computeBounds(RectF, boolean) is available on older Android versions.
-private fun List<TextView>.bodyRange(
-    layer: View,
-    path: Path,
-    bounds: RectF,
-): ClosedFloatingPointRange<Float>? {
-    val first = indexOfFirst { it.layout.text.let { text -> text.bodyStart() < text.length } }
-    if (first < 0) return null
-    val last = indexOfLast { it.layout.text.bodyEnd() != 0 }
-    var left = Float.POSITIVE_INFINITY
-    var right = Float.NEGATIVE_INFINITY
-    // A native layer may be split into several views for glyph animation; trim only the layer's edges.
-    for (index in first..last) {
+private fun List<TextView>.edgeAdvance(leading: Boolean): Float? {
+    var width = 0f
+    for (index in if (leading) indices else indices.reversed()) {
         val piece = this[index]
-        val layout = piece.layout
-        val start = if (index == first) layout.text.bodyStart() else 0
-        val end = if (index == last) layout.text.bodyEnd() else layout.text.length
-        if (start >= end) continue
-        layout.getSelectionPath(start, end, path)
-        path.computeBounds(bounds, true)
-
-        val contentLeft = piece.compoundPaddingLeft.toFloat()
-        val contentRight = (piece.width - piece.compoundPaddingRight).toFloat()
-        if (contentRight <= contentLeft) continue
-        val pieceX = if (piece === layer) 0 else piece.left - layer.scrollX
-        val from = (bounds.left + contentLeft - piece.scrollX).coerceIn(contentLeft, contentRight)
-        val to = (bounds.right + contentLeft - piece.scrollX).coerceIn(contentLeft, contentRight)
-        if (from < to) {
-            left = minOf(left, pieceX + from)
-            right = maxOf(right, pieceX + to)
+        val layout = piece.layout ?: return null
+        if (piece.visibility != View.VISIBLE || layout.lineCount != 1 || layout.getEllipsisCount(0) != 0) return null
+        val text = layout.text
+        val start = if (leading) 0 else text.bodyEnd()
+        val end = if (leading) text.bodyStart() else text.length
+        if (start < end) {
+            val from = layout.getPrimaryHorizontal(start)
+            val to = layout.getPrimaryHorizontal(end)
+            // Two different caret positions indicate a bidi boundary, not a simple edge.
+            if (from != layout.getSecondaryHorizontal(start) || to != layout.getSecondaryHorizontal(end)) return null
+            val advance = (to - from) * layout.getParagraphDirection(0)
+            if (!advance.isFinite() || advance < 0f) return null
+            width += advance
         }
+        if (end - start < text.length) return width
     }
-    return if (left < right) left..right else null
+    return null // A symbol-only track has no body to align.
 }
 
 private fun CharSequence.bodyStart(): Int {
