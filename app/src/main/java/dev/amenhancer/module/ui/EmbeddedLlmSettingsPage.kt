@@ -319,10 +319,7 @@ internal fun LlmLyricsStatusSection(
     modifier: Modifier = Modifier,
 ) {
     val snapshot by LyricsPlaybackRuntimeRegistry.llmStatus.collectAsState()
-    val configuration = LocalConfiguration.current
-    val locale = configuration.locales.let { locales ->
-        if (locales.isEmpty) Locale.getDefault() else locales[0]
-    }
+    val locale = LocalConfiguration.current.locales[0] ?: Locale.ROOT
     val config = remember(settings) { LlmLyricsConfig.fromSettings(settings) }
     val configurationKey = config.hashCode()
     val activeSnapshot = snapshot?.takeIf { status ->
