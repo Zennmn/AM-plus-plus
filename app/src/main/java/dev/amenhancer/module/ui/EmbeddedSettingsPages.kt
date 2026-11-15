@@ -390,7 +390,7 @@ private fun EmbeddedSettingsHost.EmbeddedSettingsScreen(
             }
         } else {
             EmbeddedSettingsIconAction(EmbeddedSvgIcon.Document, localizedText(ModuleText.SETTINGS_DETAILS_ACTION)) {
-                showEmbeddedPageDetails(activity, page, settings)
+                showEmbeddedPageDetails(activity, page)
             }
         }
     }
@@ -729,7 +729,7 @@ private fun EmbeddedSettingsHost.showEmbeddedDpiDialog(activity: Activity, curre
     }
 }
 
-private fun EmbeddedSettingsHost.showEmbeddedPageDetails(activity: Activity, page: EmbeddedSettingsPage, settings: ModuleSettings) {
+private fun EmbeddedSettingsHost.showEmbeddedPageDetails(activity: Activity, page: EmbeddedSettingsPage) {
     val entries = when (page) {
         EmbeddedSettingsPage.MAIN -> emptyList()
         EmbeddedSettingsPage.CUSTOM_LYRICS -> listOf(
@@ -739,10 +739,7 @@ private fun EmbeddedSettingsHost.showEmbeddedPageDetails(activity: Activity, pag
         )
         EmbeddedSettingsPage.AUTOMATIC_LYRICS -> listOf(
             ModuleText.AUTO_LYRICS_ENABLED to ModuleText.AUTO_LYRICS_SUMMARY,
-            ModuleText.AUTO_LYRICS_PREFER_NATIVE to ModuleText.AUTO_LYRICS_PREFER_NATIVE_SUMMARY,
-            ModuleText.AUTO_LYRICS_SOURCE_ORDER to if (settings.automaticLyricsPreferNative) {
-                ModuleText.AUTO_LYRICS_SOURCE_ORDER_NATIVE_HIDDEN
-            } else ModuleText.AUTO_LYRICS_SOURCE_ORDER_ALL,
+            ModuleText.AUTO_LYRICS_SOURCE_ORDER to ModuleText.AUTO_LYRICS_SOURCE_ORDER_ALL,
         )
         EmbeddedSettingsPage.LYRICS_EFFECTS -> listOf(
             ModuleText.BIDIRECTIONAL_LYRIC_BLUR to ModuleText.BIDIRECTIONAL_LYRIC_BLUR_SUMMARY,

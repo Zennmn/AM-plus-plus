@@ -18,7 +18,7 @@ import dev.amenhancer.module.lyrics.source.AmLyricsClient
 import dev.amenhancer.module.lyrics.source.AmLyricsIndexEntry
 import dev.amenhancer.module.lyrics.source.AmllTtmlClient
 import dev.amenhancer.module.lyrics.source.HttpLyricTransport
-import dev.amenhancer.module.lyrics.source.FileLunabeatCatalogCache
+import dev.amenhancer.module.lyrics.embeddedLunabeatCatalogCache
 import dev.amenhancer.module.lyrics.source.LunabeatClient
 import dev.amenhancer.module.lyrics.CustomLyricsDraft
 import dev.amenhancer.module.lyrics.CustomLyricsBatchSaveResult
@@ -170,7 +170,7 @@ internal class EmbeddedRuntimeSettingsController(
         val lunabeat = LunabeatClient(
             indexTransport = HttpLyricTransport(maxResponseBytes = LunabeatClient.INDEX_MAX_BYTES),
             lyricsTransport = HttpLyricTransport(),
-            cache = FileLunabeatCatalogCache(File(appContext.filesDir, "ampp-lunabeat-cache")),
+            cache = embeddedLunabeatCatalogCache(appContext, content.sourceCache),
         )
         val importer = CustomLyricsOnlineImporter(
             fetchAmll = AmllTtmlClient(HttpLyricTransport())::fetch,
@@ -211,7 +211,7 @@ internal class EmbeddedRuntimeSettingsController(
         val lunabeat = LunabeatClient(
             indexTransport = HttpLyricTransport(maxResponseBytes = LunabeatClient.INDEX_MAX_BYTES),
             lyricsTransport = HttpLyricTransport(),
-            cache = FileLunabeatCatalogCache(File(appContext.filesDir, "ampp-lunabeat-cache")),
+            cache = embeddedLunabeatCatalogCache(appContext, content.sourceCache),
         )
         content.updateLyrics(
             sources = CustomLyricsUpdateSources(

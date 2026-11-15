@@ -227,19 +227,10 @@ enum class ModuleText(internal val english: String, internal val chinese: String
         "Find lyrics automatically in the configured order; when off, use configured lyrics only.",
         "按设定顺序自动查找歌词；关闭后仅使用已配置歌词",
     ),
-    AUTO_LYRICS_PREFER_NATIVE("Prefer AM native", "优先使用 AM 原生"),
-    AUTO_LYRICS_PREFER_NATIVE_SUMMARY(
-        "When enabled, qualifying AM native lyrics are preferred; when off, the same eligibility rules apply in source order",
-        "开启后优先使用达标原生；关闭后按来源排序，但原生仍须符合条件",
-    ),
     AUTO_LYRICS_SOURCE_ORDER("Source priority", "来源排序"),
     LUNABEAT_AFTER_NATIVE(
         "Lunabeat must be placed after AM native",
         "Lunabeat 必须排在 AM 原生之后",
-    ),
-    AUTO_LYRICS_SOURCE_ORDER_NATIVE_HIDDEN(
-        "Prefer word-synced AM native lyrics, with translations for foreign-language lyrics; otherwise search in this order. Keep native lyrics if no source matches.",
-        "AM 原生为逐字歌词且外语有译文时优先使用；否则按下方顺序查找，无结果则保留原生。",
     ),
     AUTO_LYRICS_SOURCE_ORDER_ALL(
         "Search in this order. AM native lyrics must still be word-synced, with translations for foreign-language lyrics; otherwise keep searching. Fall back to native lyrics if no source matches.",
@@ -428,8 +419,8 @@ enum class ModuleText(internal val english: String, internal val chinese: String
     ),
     LLM_LYRICS_TRANSLITERATION_ENABLED("Enable transliteration", "启用音译"),
     LLM_LYRICS_TRANSLITERATION_ENABLED_SUMMARY(
-        "Adds transliteration where official or third-party lyrics lack pronunciation; existing transliteration is kept.",
-        "为缺发音的官方和第三方歌词补音译，已有音译时跳过。",
+        "Adds transliteration where official or third-party lyrics lack pronunciation; skips Latin-only lyrics and keeps existing transliteration.",
+        "为缺发音的官方和第三方歌词补音译，纯拉丁文字或已有音译时跳过。",
     ),
     LLM_LYRICS_API_SETTINGS("API settings", "API 设置"),
     LLM_LYRICS_SHARED_API_CONFIG(
@@ -447,6 +438,21 @@ enum class ModuleText(internal val english: String, internal val chinese: String
         "无需鉴权的接口可留空",
     ),
     LLM_LYRICS_MODEL("Model", "模型"),
+    LLM_LYRICS_CUSTOM_HEADERS("Custom request headers", "自定义请求头"),
+    LLM_LYRICS_CUSTOM_HEADERS_SUMMARY(
+        "One Name: Value per line. Leave blank to use default headers.",
+        "每行一条「名称: 值」，留空使用默认请求头。",
+    ),
+    LLM_LYRICS_CUSTOM_HEADERS_OVERRIDE_HINT(
+        "Overrides matching default headers, including Authorization.",
+        "同名项会覆盖默认值，包括 Authorization。",
+    ),
+    LLM_LYRICS_INPUT_HINT_CUSTOM_HEADERS("X-Api-Key: your-key", "X-Api-Key: your-key"),
+    LLM_LYRICS_CUSTOM_HEADERS_COUNT("%1\$s headers configured", "已配置 %1\$s 条"),
+    LLM_LYRICS_CUSTOM_HEADERS_INVALID(
+        "Use Name: Value on each line, without control characters. Host, Content-Length and connection headers are managed automatically.",
+        "请按每行「名称: 值」填写，不含控制字符。Host、Content-Length 等连接请求头由系统管理。",
+    ),
     LLM_LYRICS_THINKING_FORMAT("Thinking parameter format", "思考参数格式"),
     LLM_LYRICS_THINKING_FORMAT_SUMMARY(
         "Follow the API docs. If unsure, choose Do not send.",
@@ -491,7 +497,97 @@ enum class ModuleText(internal val english: String, internal val chinese: String
     LLM_LYRICS_TEST_TLS_FAILED("Secure connection failed. Check the certificate and device time.", "安全连接失败，请检查证书和设备时间"),
     LLM_LYRICS_TEST_NETWORK_FAILED("Cannot connect. Check the network and API address.", "无法连接，请检查网络和 API 地址"),
     LLM_LYRICS_TEST_INVALID_RESPONSE("Invalid API response", "接口响应格式不符"),
-    LLM_LYRICS_TEST_FAILED("Connection failed. Check the API settings.", "连接失败，请检查 API 设置");
+    LLM_LYRICS_TEST_FAILED("Connection failed. Check the API settings.", "连接失败，请检查 API 设置"),
+
+    // Runtime lyrics menu and source/cache state.
+    LYRICS_MENU("Lyrics menu", "歌词菜单"),
+    LYRICS_MENU_AUTO_SOURCE_ORDER("Automatic source order", "自动来源排序"),
+    LYRICS_MENU_OPEN_FAILED("Couldn't open the lyrics menu. Try again.", "无法打开歌词菜单，请重试。"),
+    LYRICS_MENU_SONG_NOT_READY("Song information isn't ready yet. Source and timing controls are unavailable.", "当前歌曲信息尚未就绪，暂时无法切换来源或调整时间。"),
+    LYRICS_SOURCE_NOT_FOUND(
+        "No lyrics found on %1\$s. Keeping current lyrics.",
+        "%1\$s 未找到这首歌的歌词，已保留当前歌词",
+    ),
+    LYRICS_SOURCE_REQUEST_FAILED(
+        "Cannot request lyrics. Keeping current lyrics.",
+        "请求歌词失败，已保留当前歌词",
+    ),
+    LYRICS_SOURCE_INVALID(
+        "Invalid lyrics from the source. Keeping current lyrics.",
+        "来源歌词无效，已保留当前歌词",
+    ),
+    LYRICS_SOURCE_FALLBACK(
+        "Saved source unavailable; using fallback lyrics.",
+        "当前保存来源不可用，本次已回退",
+    ),
+    LYRICS_OFFSET_UNAVAILABLE("Cannot apply the TTML offset", "无法应用 TTML 偏移"),
+    LYRICS_OFFSET_SAVE_FAILED("Cannot save the TTML offset", "无法保存 TTML 偏移"),
+    LYRICS_PREFERENCE_SAVE_FAILED(
+        "Cannot save the lyrics source preference",
+        "无法保存歌词来源偏好",
+    ),
+    LYRICS_SOURCE_SECTION("Source", "来源"),
+    LYRICS_SOURCE_AUTOMATIC("Automatic", "自动"),
+    LYRICS_SOURCE_AUTOMATIC_SUMMARY("Use manual TTML first, then the automatic source order", "优先使用手动 TTML，再按自动补全规则选择"),
+    LYRICS_SOURCE_AMLL("AMLL", "AMLL"),
+    LYRICS_SOURCE_AM_LYRICS("AM-Lyrics", "AM-Lyrics"),
+    LYRICS_SOURCE_LUNABEAT("Lunabeat", "Lunabeat"),
+    LYRICS_SOURCE_MANUAL("Manual TTML", "手动 TTML"),
+    LYRICS_ACTIVE_SOURCE("Active source: %1\$s", "当前来源：%1\$s"),
+    LYRICS_NO_ACTIVE_SOURCE("No active lyrics source", "暂无生效的歌词来源"),
+    LYRICS_SOURCE_PENDING("Switching to %1\$s…", "正在切换至 %1\$s…"),
+    LYRICS_OFFSET_TITLE("TTML timing offset", "TTML 时间偏移"),
+    LYRICS_OFFSET_SOURCE("Adjusts %1\$s", "调整 %1\$s"),
+    LYRICS_OFFSET_DISABLED(
+        "Available only while timed lyrics are active",
+        "仅在带时间轴的歌词生效时可用",
+    ),
+    LYRICS_OFFSET_INPUT("Milliseconds", "毫秒"),
+    LYRICS_OFFSET_INVALID("Enter a whole number of milliseconds", "请输入整数毫秒值"),
+    LYRICS_OFFSET_DECREASE("−100 ms", "−100 毫秒"),
+    LYRICS_OFFSET_INCREASE("+100 ms", "+100 毫秒"),
+    LYRICS_OFFSET_RESET("Reset", "归零"),
+    LYRICS_OFFSET_EDIT("Adjust timing", "调整时间偏移"),
+    LYRICS_OFFSET_APPLY("Done", "完成"),
+    LYRICS_OFFSET_SAVING("Saving…", "正在保存…"),
+    LYRICS_THIRD_PARTY_CACHE("Third-party lyrics cache", "第三方歌词缓存"),
+    LYRICS_CACHE_SUMMARY(
+        "Used: %1\$s · Manual lyrics and preferences are kept",
+        "占用：%1\$s · 保留手动歌词和偏好",
+    ),
+    LYRICS_CACHE_STATUS("%1\$s · Used: %2\$s", "%1\$s · 占用：%2\$s"),
+    LYRICS_CACHE_CLEARING("Clearing third-party lyrics cache…", "正在清除第三方歌词缓存…"),
+    LYRICS_CACHE_CLEAR("Clear cache", "清除缓存"),
+    LYRICS_CACHE_CLEARED("Third-party lyrics cache cleared", "第三方歌词缓存已清除"),
+    LYRICS_CACHE_CLEAR_FAILED("Cannot clear the third-party lyrics cache", "无法清除第三方歌词缓存"),
+    LYRICS_CACHE_UNAVAILABLE("Lyrics cache is unavailable", "歌词缓存不可用"),
+    LYRICS_CACHE_SIZE_UNAVAILABLE("Cannot read cache usage", "无法读取缓存占用"),
+
+    // LLM lyrics live status.
+    LLM_STATUS_TITLE("LLM lyrics", "LLM 歌词"),
+    LLM_STATUS_TRANSLATION("Translation", "翻译"),
+    LLM_STATUS_TRANSLITERATION("Transliteration", "音译"),
+    LLM_STATUS_WAITING("Waiting for lyrics", "等待歌词"),
+    LLM_STATUS_OFF("Off", "已关闭"),
+    LLM_STATUS_CONFIG_REQUIRED("Complete API settings", "请完成 API 设置"),
+    LLM_STATUS_REQUIRES_AUTO("Enable automatic live lyrics first", "需先开启自动实时补全"),
+    LLM_STATUS_NATIVE_ONLY("AM native only", "仅支持 AM 原生"),
+    LLM_STATUS_EXISTS_TRANSLATION("Existing translation", "已有译文"),
+    LLM_STATUS_EXISTS_TRANSLITERATION("Existing transliteration", "已有音译"),
+    LLM_STATUS_NOT_NEEDED("No addition needed", "无需补充"),
+    LLM_STATUS_NO_TRANSLITERATION_NEEDED("Latin text needs no transliteration", "拉丁文字无需音译"),
+    LLM_STATUS_UNSUPPORTED("Not supported for these lyrics", "当前歌词不支持补充"),
+    LLM_STATUS_QUEUED("Queued", "排队中"),
+    LLM_STATUS_GENERATING("Generating", "生成中"),
+    LLM_STATUS_APPLYING("Applying", "应用中"),
+    LLM_STATUS_READY("Generated", "已生成"),
+    LLM_STATUS_CACHED("Using cache", "使用缓存"),
+    LLM_STATUS_REQUEST_FAILED("Request failed", "请求失败"),
+    LLM_STATUS_AUTH_FAILED("Authentication failed", "鉴权失败"),
+    LLM_STATUS_RATE_LIMITED("Rate limited", "请求受限"),
+    LLM_STATUS_TIMED_OUT("Timed out", "请求超时"),
+    LLM_STATUS_INVALID_RESPONSE("Result unavailable", "结果不可用"),
+    LLM_STATUS_ORIGINAL_KEPT("Original lyrics kept", "保留原歌词");
 
     fun text(vararg arguments: Any?, locale: Locale = Locale.getDefault()): String {
         val template = if (locale.language.equals("zh", ignoreCase = true)) chinese else english

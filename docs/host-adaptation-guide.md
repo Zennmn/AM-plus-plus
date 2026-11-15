@@ -17,6 +17,8 @@
 
 实际宿主的版本信息由 [TargetBuildLookup.targetBuild](../host-applemusic/src/main/java/dev/amenhancer/module/hook/TargetBuildLookup.kt) 按 `packageName` 查询包信息读取，并以实际 `packageName`、`versionName`、`versionCode` 构造 `TargetBuild`。[AppleMusicHostProfiles](../host-applemusic/src/main/java/dev/amenhancer/host/applemusic/AppleMusicHostProfiles.kt) 只按精确 `versionName`+`versionCode` 选择共享 profile，生产入口另检查 `productionEnabled`。文件名为 `<versionName>-<versionCode>.json`，同一组合只登记一次；`index.json` 还决定旧 HLE 的已审核候选顺序，新增档案保留既有条目的相对顺序。`profile.packageName` 描述原包及内部类、方法、资源命名空间，不是运行时包名白名单。
 
+歌词菜单是独立的精确能力。7.0.0-1614 的菜单接缝已有确认；其他构建须在各自档案中声明并成功解析原生动作容器、弹窗内容与回调，不能由发音、翻译或结果提交能力推定。未声明或解析失败的构建只缺少歌词菜单，原生歌词动作和其他功能继续按各自资格运行。
+
 本规则只覆盖 Android 安装包名（application ID）变化；内部类、方法和资源命名空间保持原包，其他改包行为不获得兼容。实际安装包名只用于身份、版本和组件。
 
 生产准入、能力可用和人工通过分别判断：
@@ -79,7 +81,7 @@
 | `startupPagePrewarm` / `artistComposeProfile` | 独立预热、Compose 艺人表面的成员、构造器与语义参数 |
 | `verification` / 匹配策略 | 离线描述符/资源证据、`ambiguityPolicy`、已审核的 `legacyFirstMatchExceptions` |
 
-JSON 保存宿主事实，参数变换、线程、回退和生命周期策略由 Kotlin 实现。共享 profile 只按精确 `versionName`+`versionCode` 选择；`profile.packageName` 描述原包及内部类、方法、资源命名空间，不是运行时包名字段，实际运行时包名由 `TargetBuild` 单独记录。profile schema、各独立契约的版本字段和应用配置 schema 分别维护，以当前解析器及 [ModuleConstants](../core/src/main/kotlin/dev/amenhancer/module/ModuleConstants.kt) 为准；普通混淆适配不附带修改配置格式。
+JSON 保存宿主事实，参数变换、线程、回退和生命周期策略由 Kotlin 实现。歌词菜单使用当前解析器定义的独立精确契约；7.0.0-1614 的接缝已确认，其他构建以各自契约声明和解析结果为准，不能由发音、翻译或结果提交能力推定。共享 profile 只按精确 `versionName`+`versionCode` 选择；`profile.packageName` 描述原包及内部类、方法、资源命名空间，不是运行时包名字段，实际运行时包名由 `TargetBuild` 单独记录。profile schema、各独立契约的版本字段和应用配置 schema 分别维护，以当前解析器及 [ModuleConstants](../core/src/main/kotlin/dev/amenhancer/module/ModuleConstants.kt) 为准；普通混淆适配不附带修改配置格式。
 
 ### 3.2 三种接入方式
 
@@ -89,7 +91,7 @@ JSON 保存宿主事实，参数变换、线程、回退和生命周期策略由
 | HLE 兼容候选 | [AppleMusicHookProfiles](../host-applemusic/src/main/java/io/github/proify/lyricon/amprovider/xposed/AppleMusicHookProfiles.kt) 将 JSON 转为旧引擎候选 | Fragment 使用严格候选；旧 Activity 保留既有内部匹配和已审核回退顺序，外层生产门禁仍精确 |
 | 独立区域契约 | [FragmentProfileMembers](../host-applemusic/src/main/java/dev/amenhancer/module/hook/FragmentProfileMembers.kt) 解析完整方法/字段/构造器，能力 Contract 再校验类型关系 | 用于结果提交、模糊、跨行、预热、Fragment 等；名字中的 Fragment 不限制其只能用于该页面族 |
 
-独立契约的必需角色由代码 Inventory / requirements 维护，JSON 少写角色会导致预检失败，不能把漏项解释为可选。各能力分别解析和报告，双栏预检成功不代表 chrome、恢复或歌词能力完整。
+独立契约的必需角色由代码 Inventory / requirements 维护，JSON 少写角色会导致预检失败，不能把漏项解释为可选。各能力分别解析和报告，双栏预检成功不代表 chrome、恢复或歌词能力完整。歌词菜单只使用当前构建声明的精确接缝，不能由发音、翻译或结果提交能力推定。
 
 新增依赖时统一同步：当前 profile、代码必需角色/关系校验、适用的 `verification` 及 `scripts/verify-host-profile.py` 等离线覆盖；清单记录该能力的证据与结论，不复制完整描述符。协议发生不兼容变化时，连同契约版本和解析器设计升级。
 
@@ -166,7 +168,7 @@ Fragment view 重建、配置变化与 controller 销毁分别关闭会话。状
 | 功能域 | profile / 主要接缝 | 人工场景 |
 |---|---|---|
 | [共用歌词结果提交](#lyrics-result-submission) | `indexed`、`lyricResultSubmission`、原生安装与 item 更新 | [结果提交](feature-preservation.md#lyrics-result-submission) |
-| [歌词来源](#lyrics-sources)、[简体替换和声修复](#simplified-replacement-backgrounds)、[LLM 翻译与音译](#llm-lyrics-fallback) | 原生 TTML 观察、共享歌词效果优化门禁的单解析器修复、指针/歌曲身份、选中文档及共用结果通道 | [来源](feature-preservation.md#lyrics-sources)、[LLM](feature-preservation.md#llm-lyrics-fallback) |
+| [歌词来源与歌词菜单](#lyrics-sources)、[简体替换和声修复](#simplified-replacement-backgrounds)、[LLM 翻译与音译](#llm-lyrics-fallback) | 原生 TTML 观察、共享歌词效果优化门禁的单解析器修复、指针/歌曲身份、选中文档、来源缓存、精确菜单接缝及共用结果通道 | [来源](feature-preservation.md#lyrics-sources)、[LLM](feature-preservation.md#llm-lyrics-fallback) |
 | [模糊](#lyrics-blur)、[CJK](#cjk-animation)、[字体](#lyrics-typeface) | 各自契约、显示状态、绑定与资源 | [模糊](feature-preservation.md#lyrics-blur)、[CJK](feature-preservation.md#cjk-animation)、[字体](feature-preservation.md#lyrics-typeface) |
 | [歌词效果优化](#lyric-background-highlight)：[简体替换和声修复](#simplified-replacement-backgrounds)、[逐行双声部对齐](#line-lyric-agent-alignment)、[逐字音译居中](#word-pronunciation-pair-alignment)、[CJK 末词补偿与英语拆词辉光](#cjk-animation)、[跨行扫光](#lyric-wrap-sweep)与活动行高亮 | 共享设置门禁；`lyricRepairs` 保留各项诊断并按 parser 与已声明可选项汇总状态，各能力分别核对接缝、降级和失败 | [逐字音译](host-adaptation-checklist.md#word-pronunciation-pair-alignment-checks)、[辉光与末词](feature-preservation.md#cjk-animation)、[跨行](feature-preservation.md#lyric-wrap-sweep)、[活动行](feature-preservation.md#lyric-background-highlight) |
 | [玻璃导航](#chrome-glass)、[收缩](#glass-collapse-rendering) | `chrome` / `fragmentChrome`、独立能力位、滚动与 sheet 端口 | [玻璃](feature-preservation.md#chrome-glass)、[收缩](feature-preservation.md#glass-collapse-rendering) |
@@ -179,7 +181,7 @@ Fragment view 重建、配置变化与 controller 销毁分别关闭会话。状
 
 ### 5.1 共用歌词结果提交
 
-**生效条件与入口。** 当前精确 profile 声明 `lyricResultSubmission`，且 `LyricsViewModel` 与既有 item-update 均命中同一档案。[LyricsResultSubmissionContract](../host-applemusic/src/main/java/dev/amenhancer/module/hook/LyricsResultSubmissionContract.kt) 定义必需角色，[LyricsResultSubmissionBridge](../host-applemusic/src/main/java/dev/amenhancer/module/hook/LyricsResultSubmissionBridge.kt) 管理附加、选择、索引与安装确认；[AppleMusicCustomLyricsTarget](../host-applemusic/src/main/java/dev/amenhancer/module/hook/AppleMusicCustomLyricsTarget.kt) 将手动、自动和 LLM 候选送入同一通道。
+**生效条件与入口。** 当前精确 profile 声明 `lyricResultSubmission`，且 `LyricsViewModel` 与既有 item-update 均命中同一档案。[LyricsResultSubmissionContract](../host-applemusic/src/main/java/dev/amenhancer/module/hook/LyricsResultSubmissionContract.kt) 定义必需角色，[LyricsResultSubmissionBridge](../host-applemusic/src/main/java/dev/amenhancer/module/hook/LyricsResultSubmissionBridge.kt) 管理附加、选择、索引与安装确认；[AppleMusicCustomLyricsTarget](../host-applemusic/src/main/java/dev/amenhancer/module/hook/AppleMusicCustomLyricsTarget.kt) 将手动、自动、显式换源、时间偏移副本和 LLM 候选送入同一通道。
 
 ```text
 原生加载 / 模块候选准备
@@ -213,6 +215,8 @@ Fragment view 重建、配置变化与 controller 销毁分别关闭会话。状
 结果写入、实际容器保存与安装确认分别保存。所有容器提交只在主线程进行，与原生写入保持同一线程。身份对齐后，选中指针尚未确认安装可经容器补发，每次外部恢复回调最多一次，自身写入不再次排队；确认后同文档去重，但去重前必须确认实际跟踪 LiveData 的当前值仍保存该指针。空值或更换容器不能沿用旧确认，应保留可用选择并经通道补发；实际保存值读取失败时保留选择、报告原因并等待后续恢复，不能将读取失败当作去重成功。附加以及同一 ViewModel 的新请求都要重新读取实际 `lyricsResult` 容器，不能只在新 ViewModel 时刷新。换到新 Fragment 实例且已有选择时重新等待确认；同实例重复附加不重置已确认状态，除非实际容器为空或不再保存选中指针。
 
 原生结果的接收归属与提交目标 ID 分开校验。同一当前 canonical 请求、同一当前 ViewModel 的显式加载已捕获某 raw native ID 时，可只保留一个属于该 ID 且仍存活的结果；即使 Fragment 当前 native ID 尚未对齐也不得因 canonical 相同而丢弃，但不得提前提交。item-update、resume 或 ready 唤醒完成 owner 对齐后，再经实际结果容器恢复既有选择与仲裁。新请求、换 ViewModel、切歌或关闭使该暂存退役；无关或失活结果拒绝，现有 native 目标 ID 优先级不变，也不得为此新增线程、定时轮询、profile 角色或改写原生 item。
+
+来源、偏移、手动歌词及缓存清除完成后，通过同一 Bridge 唤醒当前歌曲的重新提交；代次必须覆盖网络候选、原生准备和 LLM 结果。切换来源或清除缓存后，旧代次的迟到结果不能发布到新选择；当前显示可继续保留到新候选可用。界面与 runtime 只交换复制状态和宿主中立命令，不把 native pointer 放入菜单或设置层。
 
 #### 结果与派生索引
 
@@ -250,30 +254,50 @@ Fragment view 重建、配置变化与 controller 销毁分别关闭会话。状
 
 <a id="lyrics-sources"></a>
 
-### 5.2 歌词来源与候选准备
+### 5.2 歌词来源、菜单与候选准备
 
-**宿主接缝。** 当前歌曲身份由 `CurrentItemIdentitySeam` 读取精确 item、公开 ID 与可选 persistentId；配置身份仅按当前发布快照的精确关系归一，原生提交仍绑定实际 item ID。自定义歌词的原生 parser、SongInfoPtr、文档身份与可用性谓词由 `AppleMusicCustomLyricsTarget` 接入。手动、自动、刷新及 LLM 只准备候选，最终均通过[共用结果通道](#lyrics-result-submission)。字体、模糊、翻译、发音和其他订阅者继续使用原生显示链。
+**宿主接缝。** 当前歌曲身份由 `CurrentItemIdentitySeam` 读取精确 item、公开 ID 与可选 persistentId；配置身份仅按当前发布快照的精确关系归一，原生提交仍绑定实际 item ID。自定义歌词的原生 parser、SongInfoPtr、文档身份与可用性谓词由 `AppleMusicCustomLyricsTarget` 接入。手动、自动、刷新、显式换源及 LLM 只准备候选，最终均通过[共用结果通道](#lyrics-result-submission)。字体、模糊、翻译、发音和其他订阅者继续使用原生显示链。
 
 | 层 | 维护入口与职责 |
 |---|---|
-| `core` | [CustomLyricsReplacementSession](../core/src/main/kotlin/dev/amenhancer/module/hook/CustomLyricsReplacementSession.kt)、[AutoLyricsReplacementSession](../core/src/main/kotlin/dev/amenhancer/module/hook/AutoLyricsReplacementSession.kt)、[AutoLyricsRefreshSession](../core/src/main/kotlin/dev/amenhancer/module/hook/AutoLyricsRefreshSession.kt)：资格、候选、代次、取消、解析与缓存策略 |
+| `core` | [CustomLyricsReplacementSession](../core/src/main/kotlin/dev/amenhancer/module/hook/CustomLyricsReplacementSession.kt)、[AutoLyricsReplacementSession](../core/src/main/kotlin/dev/amenhancer/module/hook/AutoLyricsReplacementSession.kt)、[AutoLyricsRefreshSession](../core/src/main/kotlin/dev/amenhancer/module/hook/AutoLyricsRefreshSession.kt)、`LyricsPlaybackControls` / `LyricsPlaybackRuntime`：资格、候选、来源与偏移偏好、代次、取消、解析及缓存边界 |
 | `core` 来源 | [OnlineLyricClients / AutoLyricsSourceResolver](../core/src/main/kotlin/dev/amenhancer/module/lyrics/source/OnlineLyricClients.kt)、AMLL 转换、Lunabeat 与 AM-Lyrics：来源请求和格式转换 |
 | `host-applemusic` | `CurrentItemIdentitySeam`、`OpaqueTtmlParser`、`TtmlTimingObservationRegistry` 与结果 Bridge：原生对象及反射只在适配层 |
-| `app` | `AppleMusicAssembly` 与 [AutoLyricsReplacementSession.kt](../app/src/main/java/dev/amenhancer/module/hook/AutoLyricsReplacementSession.kt) 的 `createAutoLyricsRuntime`：存储、执行器、来源服务与配置装配 |
+| `app` | `AppleMusicAssembly`、[AutoLyricsReplacementSession.kt](../app/src/main/java/dev/amenhancer/module/hook/AutoLyricsReplacementSession.kt) 的 `createAutoLyricsRuntime`、`EmbeddedLyricsPlaybackRuntime` 与 `LyricsPlaybackRuntimeRegistry`：存储、执行器、来源服务、共享控制入口及配置装配 |
 
-**通用维护。** 歌曲禁用优先于模块候选，可用手动结果优先。`automatic_lyrics_prefer_native` 默认及缺键开启；开启时始终先判断达标 AM 原生，关闭时 AM 原生按 `automatic_lyrics_source_order` 的位置参与选择。两种模式共用既有逐字/语言/译文资格：已观察的原生须为逐字，已声明外语的逐字原生还须有非空译文；未观察的现存原生指针继续保守保留，不从正文猜测语言或质量。
+**选择与回退。** 每首歌的持久来源选择优先于本地内容；未显式选源时，先采用列表中启用的手动 TTML，再进入既有自动来源策略。自动策略遵守 `automatic_lyrics_source_order` 和原生质量门槛；显式选源按稳定 source ID 读取合法可显示文档，不能被缓存淘汰或自动来源顺序改写。失败时保留当前已显示歌词及原选择，不把失败结果标成已选来源；已取得候选但来源偏好保存失败时，不得冒充已记住，保留之前的选择与显示并提示保存失败，下次播放仍按原持久偏好。切回“自动”清除该歌的手动选源偏好，恢复手动 TTML 优先与自动回退。
 
-原生优先关闭且原生符合上述资格时，排序模式才仅查询其前置第三方来源，前置均未命中后采用原生。不达标或不可用时跳过原生项，仍按顺序查询全部第三方来源，包括排在原生之后的 Lunabeat；全部未命中时仍保留可用原生，不清空当前歌词。AM 原生来自宿主结果，不新增网络客户端，也不发布成自定义条目。
+AM 原生与第三方来源按同一顺序参与选择。原生达标时，只查询排在它前面的第三方来源，均未命中后采用原生；原生不达标或不可用时按顺序查询全部第三方，包括排在原生之后的 Lunabeat。全部未命中时仍保留可用原生。AM 原生来自宿主结果，不新增网络客户端，也不写入来源索引；逐字、语言和译文资格不因排位改变。
 
-来源顺序始终以稳定 ID 保存为同一份完整顺序，不新增显隐专用配置；默认 AMLL → AM-Lyrics → AM原生 → Lunabeat，配置解码及写入过滤未知项、去重并补齐缺项。规范化时若 Lunabeat 位于 AM 原生之前，只将 Lunabeat 移到 AM 原生之后，其他来源的相对顺序保持不变；读取、保存与运行时入口共同使用该结果，旧配置不能绕过约束。`automaticLyricsLookupSources` 统一计算结果选择、解析观察、可用性补偿和切歌预热的第三方查询范围。来源范围变化撤销旧请求代次，迟到结果不能越过新的原生位置；宿主通道适配不能重置用户顺序或改变这套选择规则。
+来源顺序以稳定 ID 保存为完整的四项列表，默认 AM 原生 → AMLL → AM-Lyrics → Lunabeat。配置解码及写入过滤未知项、去重并补齐缺项；若 Lunabeat 位于 AM 原生之前，只将 Lunabeat 移到原生之后。旧配置的 `automatic_lyrics_prefer_native` 开启或缺键时，将原生移到首位并保留其他来源相对顺序；明确关闭时保留旧顺序。写入转换后的顺序与配置版本后才清理旧键，避免再次调整用户新保存的排列。`automaticLyricsLookupSources` 统一计算结果选择、解析观察、可用性补偿和切歌预热的第三方查询范围。范围变化撤销旧请求代次；宿主通道适配不能重置用户顺序或改变这套选择规则。
 
-自动发布的条目通过现有 `CustomLyricsEntry.autoManaged` 标识归属，缓存只在其 provider 所处位置生效，不抢占更靠前的来源或原生。新自动结果可替换已有自动管理项；手动导入、用户明确选择及缺少归属字段的旧条目默认受手动保护，不根据 provider 名称推断归属。归属随索引、备份和来源更新保留；用户明确编辑后按手动项保存。来源刷新只更新所记录的 provider，不把“更新”隐式改成重新选源。ETag、退避及切歌/退役取消继续沿原会话维护。
+**内容与索引。** 歌词管理列表只保存手动导入或粘贴的 TTML；在线获取、自动补全和刷新得到的第三方正文进入独立来源缓存，不再经 `AutoLyricsPublisher` 转成配置列表项，也不以 `autoManaged` 充当缓存归属。来源索引按歌曲与稳定 provider ID 记录，和手动索引相互独立，两者当前写入上限均为 2 MiB；正文独立存储，不计入索引配额。新增同歌同来源直接替换该槽；索引满额时只淘汰来源缓存中最近最少使用的记录，手动 TTML、来源选择、每歌每来源偏移和 LLM 缓存不参与淘汰。来源缓存代次用于拒绝清缓存前发起的迟到写入；旧索引可继续作为发布成功前的回退，归类重试不能重复或覆盖较新的来源数据。
 
-歌词管理页的“自动实时补全”进入独立二级页，总开关、原生优先和来源排序集中于该页。来源行使用末端拖动柄：按住后上下拖动，松手保存，取消还原。柄外手势归页面滚动，拖动时两者不争用；触摸与无障碍上移/下移使用同一排序规则。连续改序只更新当前列表并保存，保持滚动位置与焦点。标题、说明和来源行使用相同内容边界，重置动作有无障碍名称。同页刷新不重开窗口或触发跨页动效。
+升级先完整读取旧索引，不能把读取边界直接缩到 2 MiB。旧第三方条目按保存的 source 归入来源索引并继续引用原 `fileId`，正文不复制、不重新下载；未知 provider 按现有保守规则归为手动项。旧手动数据即使超过 2 MiB 仍可读取、删除或缩小，但禁止继续扩大索引；旧第三方索引超过 2 MiB 时按 LRU 收敛到额度内。升级不整体清空来源缓存，未超限的旧正文继续复用。
 
-原生优先开启时隐藏原生行；保存时仍写完整顺序。原位置能保持就保持；若 Lunabeat 已移到原位置之前，只把隐藏的原生项前插到 Lunabeat 之前，保持其他可见来源的相对顺序。原生与 Lunabeat 同时可见时，两者不能互相越过，阻止后不保存。重置只恢复 `ModuleSettings.DEFAULT_AUTOMATIC_LYRICS_SOURCE_ORDER`（AMLL → AM-Lyrics → AM 原生 → Lunabeat），保留总开关和原生优先。保存后以最新完整顺序继续处理下一次改序。
+列表新增已有歌曲 ID 时直接覆盖该歌的 TTML 正文与元数据，不要求先搜索再编辑；批量新增只替换本次输入目标与现有条目的交集，不能误删同文件组或未输入 ID。新文件发布成功后更新当前歌曲会话与[共用结果通道](#lyrics-result-submission)，磁盘保存成功本身不等于当前画面已经切换。播放刷新只更新命中的 provider；设置页批量更新逐来源检查缓存，不覆盖手动索引或同歌的其他来源。ETag、退避及切歌/退役取消继续沿原会话维护。
 
-TTML 文件有界读取、输入合法性、原生指针存活/ID 检查和来源转换分别保留。自动来源发布自定义条目与临时缓存迁移继续使用已有发布器，刷新只处理允许更新的来源条目；LLM 翻译与音译使用独立双槽缓存，不混入该发布链。TTML 结构与 AMLL 时间轴整理见[格式说明](apple-music-ttml-format.md)。
+歌词管理页的“自动实时补全”进入独立二级页，提供总开关和来源排序。设置页和排序弹窗均显示原生资格说明：AM 原生须为逐字歌词，外语还需有译文；不满足继续查找，均无结果保留原生。来源行使用末端拖动柄：按住后上下拖动，松手保存，取消还原。柄外手势归页面滚动，拖动时两者不争用；触摸与无障碍上移/下移使用同一排序规则。连续改序只更新当前列表并保存，保持滚动位置与焦点。标题、说明和来源行使用相同内容边界，行高随内容和字体测量，不用拖动柄或装饰尺寸撑高空白；重置动作有无障碍名称。同页刷新不重开窗口或触发跨页动效。
+
+AM 原生一直显示在排序中，Lunabeat 不能移到它之前，阻止后不保存。重置只恢复 `ModuleSettings.DEFAULT_AUTOMATIC_LYRICS_SOURCE_ORDER`（AM 原生 → AMLL → AM-Lyrics → Lunabeat），保留总开关和每首歌的手选来源。保存后以最新完整顺序继续处理下一次改序。
+
+TTML 文件有界读取、输入合法性、原生指针存活/ID 检查和来源转换分别保留。自动结果、显式换源及刷新统一写入来源缓存；旧配置中的第三方正文按原 `fileId` 归类复用，手动条目保持独立索引。自动刷新每次播放检查一次正在使用的来源，按歌曲身份记录检查状态；暂未选出源不重置该状态。正文相同不重新提交；正文确有更新时，旧歌词保留到同源新结果准备成功，再经共用结果通道提交。LLM 翻译与音译使用独立双槽缓存，不混入来源索引。TTML 结构与 AMLL 时间轴整理见[格式说明](apple-music-ttml-format.md)。
+
+<a id="lyrics-playback-menu"></a>
+
+**歌词菜单、时间偏移与清除。** 歌词页入口在模块启用时保持可用，不依赖当前歌曲是否已有手动项。原生第一层保留原有“发音”“翻译”动作与可用性，并在其后提供第三项“歌词菜单”；只有点击第三项才打开模块自己的 Miuix 总弹窗，来源选择、时间偏移、第三方缓存占用与清除都放在该弹窗内。不得把管理操作逐项追加到原生第一层，也不得全局 Hook `PopupWindow`、`addView` 或按相似类名猜菜单成员。
+
+菜单接入必须由当前精确 profile 的独立契约声明原生动作容器、当前弹窗内容及显示前准备接缝，并在安装前校验类型、调用语义和生命周期。新增一行时沿用宿主原生行的填充方式和子行宽度规则，保留原有行、弹窗宽高模式、锚点身份和默认定位。可选的 `resources.endIcon` 声明已确认的宿主 drawable，仅设置新增行的末端图标，沿用行自身的图标间距与着色；资源不可用时保留文字入口。7.0.0-1614 的原生行以无父容器方式填充，挂到纵向容器后统一使用默认整行宽度；不要让新增行单独按内容定宽。该构建在原生行加入后、首次显示前构造关闭回调任务，使用 `constructors.menuReadyCallback` 接入，严格核对参数为当前菜单监听器、弹窗尚未显示。其他构建即使有发音/翻译资源，也须逐构建补齐精确接缝。契约缺失或解析失败时只降级歌词菜单，保留原生动作与其他歌词功能。
+
+新增项与前一项之间复用 profile 的可选 `resources.separator` 宿主 drawable，以其固有高度和主题色绘制细线，作为新增行的顶部 foreground 装饰，保留原有 foreground；只有模块项时不增加分隔。分隔不增加子 View、不参与菜单测量、不覆盖或修改原生行背景，资源缺失时仍保留可点击的文字入口。不要向 `WRAP_CONTENT` 菜单加入 `MATCH_PARENT` 的普通 View：它在有界测量下会取满可用宽度，使弹窗横向撑满；菜单宽度应继续由原生 TextView 的文字、图标和内边距决定。
+
+三条菜单行及绘制装饰必须在首次显示和定位测量前准备好；手机原生定位及既有平板菜单偏移均按最终行内容尺寸计算。不得在点击处理结束后再追加、等可见后调用 `update` 移动窗体，或通过逐帧检查补偿行高；这些做法会使首次测量遗漏新增行，产生遮挡及跳动。保留 `WRAP_CONTENT`、原生回调和动画；菜单接入不再叠加第二套定位，也不改变原生行、锚点或播放器布局。
+
+第三项沿用宿主的菜单关闭流程，随后在活动窗口中打开模块总弹窗。默认只显示来源、自动来源排序、时间偏移和缓存的紧凑入口；来源用 Miuix 下拉选择，排序与偏移使用同一承载窗口中的 Miuix 对话框。“关闭”、排序与时间偏移弹窗的“返回”均为 Miuix 全宽蓝色主按钮，留在滚动内容外。排序复用设置页的拖动、无障碍移位和恢复默认；菜单只更新已绑定会话中的自动来源顺序，不更改歌曲手选来源。由组件处理进出场；正常关闭在 Miuix 退场完成后释放承载窗口，宿主窗口销毁时直接释放。模块复用独立的 Compose 窗口基础，负责资源、主题和 AndroidX owner，无需先进入设置页。歌曲身份未就绪时弹窗仍可打开，只暂停本曲来源与偏移操作并提示；身份对齐后开放，切歌时关闭旧曲弹窗。设置页“自动实时补全”中的第三方歌词缓存行与菜单使用同一 runtime 的统计、范围和清除操作；占用只汇总来源索引、来源正文及关联缓存文件，按唯一文件去重，不把手动 TTML 或 LLM 缓存算入。
+
+清除只删除来源索引及未被手动索引引用的正文，保留手动 TTML、每歌来源选择、每歌每来源偏移、字体和 LLM 缓存。清除推进来源缓存代次，使在途请求和旧写入失效；当前已显示歌词可继续显示，后续按需重新获取。完成后重新统计实际剩余占用，部分删除失败不能显示为 0 B。占用读取和删除走既有后台文件路径，不读取歌词正文或计算哈希。
+
+时间偏移属于 TTML 时间轴，按歌曲与当前 source 分别保存，原始正文保持不变；每次从基准生成显示副本，0 ms 恢复基准。Apple 歌词方言的 full-clock（`hh:mm:ss[.fraction]`、`mm:ss[.fraction]`）可在正文、逐字、和声、头部及有独立计时的辅助轨各层同步平移；这些时钟按文档绝对时间处理，不得把父级偏移再次累加到子级。涉及父子相对计时链的 `s`/`ms`/`m`/`h` 单位偏移或裸 seconds，只有在不存在显式计时的父/子链且相对基准可证明时才可调整；无法证明时整次拒绝并保持原文。一般维护原则是：不要重复平移父子相对链；无法证明时降级，不以数值包含关系猜测绝对或相对。来源或偏移变化使旧网络、原生准备和 LLM 代次失效，并由同一结果 Bridge 重新提交；无法捕获原生原文、纯文本或时间结构不可解释时保留原文并报告本次偏移不可用，不生成空白或另一首歌曲的替代文档。
 
 AMLL 转换器及 `scripts/amll_to_apple_ttml.py` 的译文/音译和声节点须显式绑定 TTML 默认命名空间和 `ttm` 元数据命名空间。`iTunesMetadata`、轨道及 `text` 属于 Apple 命名空间，内部 `x-bg` 的 `span` 属于 TTML，不能让它继承 Apple 默认命名空间；维护 Kotlin 与 CLI 时同步这项输出约定。
 
@@ -320,7 +344,7 @@ AMLL 转换器及 `scripts/amll_to_apple_ttml.py` 的译文/音译和声节点�
 | [LlmLyricsReplacementSession.kt](../core/src/main/kotlin/dev/amenhancer/module/hook/LlmLyricsReplacementSession.kt) | 选中文档门禁、并行请求、先到先提交、两轨合成、取消与原生指针准备 |
 | `app` / `host-applemusic` | 设置/私有存储/后台装配，以及原文观察/模块解析排除/共用结果提交，各守既有边界 |
 
-手动/禁用状态及来源选择先于 LLM 缓存，每次再播放重新判断。选择结果确定后，只能增强该次选中的完整文档：不得把官方逐字单元与第三方逐行单元、另一来源的译文或当前页面的近似文字拼成一轨。翻译仅用于最终选中的 AM 官方原生，并继续沿用现有翻译资格：自动链路与来源优先级已满足，歌曲未被手动项或禁用项取代，原生歌词有可用逐行/逐字时间轴，根语言及逐行语言经过既有中文/外文判断，且没有非空官方译文。第三方来源、模块手动项及其自带译文不进入 LLM 翻译，原译文原样保留。
+手动/禁用状态及来源选择先于 LLM 缓存，每次再播放重新判断。选择结果确定后，只能增强该次选中的完整文档：不得把官方逐字单元与第三方逐行单元、另一来源的译文或当前页面的近似文字拼成一轨。翻译仅用于最终选中的 AM 官方原生，手选 AM 原生也进入相同资格判断：自动实时补全及 LLM 翻译已开启，歌曲未被禁用，捕获的原生 TTML 有可用逐行/逐字时间轴，根语言及逐行语言经过既有中文/外文判断，且没有非空官方译文。第三方来源、模块手动项及其自带译文不进入 LLM 翻译，原译文原样保留。
 
 音译可增强最终选中的 AM 官方、手动或自动第三方文档，不要求翻译开关、自定义歌词或自动实时补全开启。来源选择仍先完成；选中第三方便只读取该条目自己的文档，选中官方便只读取当前原生指针关联的原文。已存在可用音译时整首跳过；空的音译容器、空文本项或只有空白的内容不算可用音译，不短路上后续判断。音译使用音译槽自身的可用性与文档结构判断，不借用翻译的已有译文/中文门禁；英文内容只做原样复制。
 
@@ -344,7 +368,7 @@ AMLL 转换器及 `scripts/amll_to_apple_ttml.py` 的译文/音译和声节点�
 
 #### 通用维护：客户端、缓存与取消
 
-接口使用共享的 OpenAI Compatible Chat Completions 配置。翻译、音译与手动连通测试共用 API、模型、密钥、思考参数、配置快照和 `encodeRequest`，沿用 Bearer、非流式、有界响应及 60 秒期限。思考字段只按用户选择生成，不根据地址或模型猜测：
+接口使用共享的 OpenAI Compatible Chat Completions 配置。翻译、音译与手动连通测试共用 API、模型、密钥、自定义请求头、思考参数、配置快照和 `encodeRequest`，沿用 Bearer、非流式、有界响应。每次 HTTP 请求总时限为 5 分钟，socket 读取超时同为 5 分钟，连接超时保持 10 秒；翻译和音译各自计时，排队及本地解析不计入 HTTP 时限。切歌、改源或配置变化仍立即取消旧任务，失败不自动重试。自定义请求头为空时沿用默认；非空时每行 `名称: 值`，名称不区分大小写，同名以最后一条为准并覆盖默认项（含 Authorization），值内的冒号保留。保存和发送共用 `LlmLyricsConfig.parseCustomHeaders`：拒绝非法名称、控制字符及 Host/Content-Length 等传输管理字段，格式错误不关闭编辑器，也不发出网络请求；错误提示不包含输入内容。思考字段只按用户选择生成，不根据地址或模型猜测：
 
 | 思考参数格式 | 请求中的思考字段 |
 | --- | --- |
@@ -354,13 +378,19 @@ AMLL 转换器及 `scripts/amll_to_apple_ttml.py` 的译文/音译和声节点�
 
 切换格式保留已保存的开关和强度。请求快照与缓存按有效值归一化：未使用的开关、默认或当前格式不支持的档位不进入请求。接口拒绝时按失败处理，不自动改参数重试。连接成功只说明请求可用，不能证明服务采纳了强度。
 
-缓存为宿主私有 `files/ampp-llm-lyrics`，每首歌一个文件，最多 200 首，命中更新 LRU。新写格式 4：文件保存原文身份及独立的 `translation` / `transliteration` 槽，每槽分别保存目标语言、规范化接口、模型、思考格式与有效值及对应提示词版本。原文身份变化使两槽同时失效；单槽身份失配只删除该槽，另一槽继续可读。格式 1-3 继续按旧单译文格式读取，格式 1/2 按 `thinking.type` 解释，旧数据不批量改写。API Key 不落盘。仅网络成功不够，只有包含该槽的合成文档通过原生 parse 后才持久化；失败不写缓存，也不删除同歌另一有效槽。不调用 `AutoLyricsPublisher`，不生成自定义条目，不参与自定义歌词备份或在线更新。
+缓存为宿主私有 `files/ampp-llm-lyrics`，每首歌一个文件，最多 200 首，命中更新 LRU。新写格式 5：文件保存原文身份及独立的 `translation` / `transliteration` 槽，每槽分别保存目标语言、规范化接口、模型、思考格式与有效值、对应提示词版本及规范化请求头摘要；请求头名称统一大小写后排序再计算身份，值不写入歌词缓存。原文身份变化使两槽同时失效；单槽身份失配只删除该槽，另一槽继续可读。格式 1-3 继续按旧单译文格式读取，格式 1/2 按 `thinking.type` 解释，格式 4 保留双槽读取；旧记录缺少请求头摘要视为空配置，非空自定义请求头不复用该旧槽。旧数据不批量改写，旧客户端拒绝格式 5。API Key 与请求头原值仅保留在普通设置中。仅网络成功不够，只有包含该槽的合成文档通过原生 parse 后才持久化；失败不写缓存，也不删除同歌另一有效槽。不调用 `AutoLyricsPublisher`，不生成自定义条目，不参与自定义歌词备份或在线更新。
 
 请求与回复协议、声部分组、逐字轨写回或输出约定变化并影响已有结果时，翻译提升 `LlmLyricsClient.PROMPT_VERSION`，音译提升其独立提示词版本，使对应旧槽在下一次合格查询时失效。单纯调整风格可保留相应版本。缓存身份或读取兼容规则变化时维护缓存格式，不增加第二缓存目录，也不批量改写自定义歌词。
 
-**提交顺序。** 当前选中文档同时满足两种增强资格时，翻译和音译各自独立入队并并行请求，不等待对方。先通过校验的任务立即与原文中另一已接受槽合成、经共用结果通道准备并提交；后到任务必须从原文重新合成“已接受槽 + 本次槽”，再经同一通道提交，不能用只含单槽的迟到结果覆盖两轨或更新版本。合成与发布串行化，但网络请求不串行。切歌、选中文档/原文变化、API/模型/思考参数变化、任一功能开关关闭或会话关闭时，取消两个任务及未完成的原生准备；旧代次迟到结果不得回写缓存或发布到新歌曲。
+**提交顺序。** 当前选中文档同时满足两种增强资格时，翻译和音译各自独立入队并并行请求，不等待对方。先通过校验的任务立即与原文中另一已接受槽合成、经共用结果通道准备并提交；后到任务必须从原文重新合成“已接受槽 + 本次槽”，再经同一通道提交，不能用只含单槽的迟到结果覆盖两轨或更新版本。合成与发布串行化，但网络请求不串行。切歌、选中文档/原文变化、API/模型/请求头/思考参数变化、任一功能开关关闭或会话关闭时，取消两个任务及未完成的原生准备；旧代次迟到结果不得回写缓存或发布到新歌曲。
 
-合成文档仍由 [共用结果提交](#lyrics-result-submission) 处理。发布前继续复用 `LyricsResultSubmissionBridge.prepareContext` 对实际提交指针执行原生 `setScript` 和索引准备，不增加成员复制、额外状态搬运层或第二条提交路径。单任务失败不影响另一任务；另一槽成功后仍可按原门禁提交，失败任务不循环重试。正常资格跳过保持安静，不保留逐阶段诊断集合、耗时统计或原因回调；原生 TTML 观察属于功能输入，不能随临时日志删除。连通错误通过[设置页](#settings-data-plugins)的手动测试展示。
+合成文档仍由 [共用结果提交](#lyrics-result-submission) 处理。发布前继续复用 `LyricsResultSubmissionBridge.prepareContext` 对实际提交指针执行原生 `setScript` 和索引准备，不增加成员复制、额外状态搬运层或第二条提交路径。单任务失败不影响另一任务；另一槽成功后仍可按原门禁提交，失败任务不循环重试。正常资格跳过不弹提示、不写排查日志；原生 TTML 观察属于功能输入，不能随临时日志删除。手动连通测试继续独立于播放请求。
+
+**当前歌曲状态。** 歌词菜单与 LLM 设置页共用状态区。菜单使用单层分区，模型为次要信息，翻译/音译采用左侧名称、右侧短标签；设置页沿用标准 Miuix 分组。长文案与放大字体允许换行，不用固定高度裁字；失败只在对应标签着色，并统一提示保留原歌词。Miuix 加载动画必须同时指定组件 `size`、线宽与布局约束，不能仅靠外层 `Modifier.size` 缩放默认绘制。状态文字保持轻量过渡。状态来自同一 `LlmLyricsReplacementSession` 的请求代次：app 报告已有轨、资格跳过、缓存命中与实际发网，客户端只上报固定的鉴权、限流、超时、请求或响应错误；缓存结果也须经过合成与原生解析才能显示为可用。就绪表示候选已生成并通过解析，不承诺原生发音或翻译开关已开启。失败保留原歌词和已接受的另一轨，不因状态展示自动重试。
+
+无已有音译且原文全部为拉丁文字时，在缓存读取和请求之前报告“拉丁文字无需音译”。按正文主唱、背景声部及单元的实际 Unicode 文字判断，不依赖 `xml:lang`；带变音符号的拉丁字母、分解组合音标及已转为罗马字的歌词同样跳过。空白、数字、标点及其他中性字符不构成需要音译的文字，纯数字或无有效歌词仍走原有资格判断。任何原文声部含汉字、假名、韩文、西里尔或其他非拉丁文字时继续生成；已有音译不覆盖，此门禁不改变 LLM 翻译资格。
+
+状态仅保存当前歌曲的只读快照，经现有 `LyricsPlaybackRuntimeRegistry` 的独立 `StateFlow` 订阅，不持有宿主指针、原文、API Key、请求头或服务返回正文，不维护历史或假进度。切歌、换源、配置或功能开关变化按现有代次退役；状态快照的歌曲和配置身份必须与界面一致，旧 runtime 的迟到状态不能覆盖新 owner。打开、关闭、重组或观察卡片不发网、不扫描缓存、不唤醒歌词结果 Bridge，避免状态刷新引起歌词闪烁；订阅跟随 Compose 生命周期释放。
 
 **变更触发。** 新构建复核现有原生匹配 Hook、原文 parser、指针身份、`prepareContext` 和结果通道；原生不再经过可观察入口或现有匹配 Hook 无法关联选中歌曲时，先停用相应功能，再在宿主层建立有证据的输入，不靠新增混淆名兜底。时间轴/语言/轨道变化在通用 TTML 层适配，版本名、反射、Hook 不进入客户端或缓存。
 
@@ -792,7 +822,9 @@ GenericProfileViewModel 发布不可变Success状态，复用 `AppleArtistSurfac
 
 说明与帮助弹窗只使用弹层本身的一层内容边距，标题、正文和通用提示沿同一阅读边界按布局方向对齐。正文使用正常前景色和正文字号，标题依靠字重区分，不复用面向页面分组的 `SmallTitle` 边距和弱化摘要色。长说明仅滚动正文，确认按钮保留在固定页脚；页面分组、偏好摘要和禁用控件仍使用其各自的主题层级。
 
-歌词管理的快捷操作在统一圆角区域内等宽横排，以竖分割线区分点击范围，长文案可换行而不挤占相邻操作。搜索、结果计数、列表和加载更多保持在同一内容组内，分页按钮与搜索框共用左右内边距，并保持相同的高度、圆角和主题底色；首屏最多 20 条，加载更多每次增加 50 条，筛选结果由空恢复时重新显示最多 20 条，同条件刷新保留已展示窗口并按结果总数收敛。歌词编辑使用紧凑的连续表单，避免为每个字段重复添加标题和卡片，确认操作保留在滚动区外。
+歌词管理的快捷操作在统一圆角区域内等宽横排，以竖分割线区分点击范围，长文案可换行而不挤占相邻操作。搜索、结果计数、列表和加载更多保持在同一内容组内，分页按钮与搜索框共用左右内边距，并保持相同的高度、圆角和主题底色；首屏最多 20 条，加载更多每次增加 50 条，筛选结果由空恢复时重新显示最多 20 条，同条件刷新保留已展示窗口并按结果总数收敛。歌词编辑使用紧凑的连续表单，避免为每个字段重复添加标题和卡片，确认操作保留在滚动区外；新增已有歌曲 ID 时直接覆盖，并在成功后刷新当前播放会话。
+
+自动实时补全二级页提供总开关和来源排序，并显示第三方歌词缓存的当前实际占用及清除操作。该行与歌词页第三项菜单共用同一统计和清除服务，显示实际剩余空间；手动 TTML、来源/偏移偏好和 LLM 缓存不在该行管理，也不因清缓存改变当前已显示内容。
 
 来源排序以单层底色和轻微纵向缩放显示抬起，非拖动行连续让位但不额外使用蓝色高亮，原有长按反馈与位移动画保持；松手后归位、底色与缩放同时恢复，取消时让位行也立即回退。静止底色与父卡片一致，不叠加透明阴影或额外原生按压层，避免黑色浮框。动画只改变呈现，松手保存、取消还原及来源约束保持原有语义。
 
@@ -810,13 +842,15 @@ GenericProfileViewModel 发布不可变Success状态，复用 `AppleArtistSurfac
 
 既有 `PluginSettingsScrollBridge` 的 `updateTitle`、`updateLargeTitle`、`updateSupportsScroll`、`report` 作为可选兼容入口：在 `createSettings` 前绑定页面，状态由页面持有，桥只弱引用当前页；关闭或失败时解除，已排队的主线程更新重新校验页面身份。禁止在桥中保留全局标题、窗口或 UI 监听。声明上报模式的页面以 0～1 的比例驱动顶栏，不再同时消费原生嵌套滚动；比例须在顶栏高度测量完成后应用，尺寸变化后重新映射。无上报且无事件时保持固定标题。SDK/ZIP 契约保持，既有插件无需重打包。
 
-LLM 设置在自定义歌词二级页集中管理，翻译与音译开关彼此独立，API、模型、密钥和思考参数集中在共享配置区。共享配置和测试入口不因任一功能关闭而隐藏；开关本身不从页面删除字段、清空已保存值或改变另一功能的参数。「思考参数格式」直接显示请求字段；「不发送」不显示思考控制，`thinking.type` 显示开关及跟随接口/低/高/最高四档，关闭时禁用强度行并保留已选值，`reasoning_effort` 只显示跟随接口/低/高。长字段标题与值上下分行、值单行省略、密钥遮蔽。设置图标复用 `EmbeddedSettingsSvgAssets` 缓存的 ImageVector，使用 24 viewport 的圆角描边，默认描边宽度 1.75，特殊图形沿用各自规格；由 miuix Icon 和导航组件提供主题着色。底栏动画二级页复用原四项配置/defaults，入口受宿主/玻璃/收缩资格，恢复单项/返回不能覆盖其他参数。
+LLM 设置在自定义歌词二级页集中管理，翻译与音译开关彼此独立，API、模型、密钥、自定义请求头和思考参数集中在共享配置区。共享配置和测试入口不因任一功能关闭而隐藏；开关本身不从页面删除字段、清空已保存值或改变另一功能的参数。「思考参数格式」直接显示请求字段；「不发送」不显示思考控制，`thinking.type` 显示开关及跟随接口/低/高/最高四档，关闭时禁用强度行并保留已选值，`reasoning_effort` 只显示跟随接口/低/高。长字段标题与值上下分行、值单行省略、密钥遮蔽；请求头入口只显示已配置条数，点击多行编辑，格式错误留在原编辑器。设置图标复用 `EmbeddedSettingsSvgAssets` 缓存的 ImageVector，使用 24 viewport 的圆角描边，默认描边宽度 1.75，特殊图形沿用各自规格；由 miuix Icon 和导航组件提供主题着色。底栏动画二级页复用原四项配置/defaults，入口受宿主/玻璃/收缩资格，恢复单项/返回不能覆盖其他参数。
 
-手动“测试连接”只显式点击时读取当前 API、模型、密钥及思考格式与有效参数快照，在后台通过共享客户端发简短 Chat Completions，并采用与正式翻译、音译相同的请求参数映射，验证非空模型内容；不读写歌词/缓存、不改设置、不代替整首歌词资格验证。在途单次、离页/关对话框取消并丢迟到结果；固定本地化原因区分缺配置、认证、404、429、其他HTTP、超时、DNS/TLS/连接及响应错误，不显示密钥、原异常或服务正文。
+请求头弹窗使用短格式说明、随内容增长的原生 Miuix TextField 和下方次要覆盖提示；按行数限制可见内容，不以固定最小高度撑大空框，超过可见行数由输入框滚动。错误在同一提示位以主题错误色展示，保留输入及取消/保存操作；键盘与放大字体下继续沿用窗口的滚动和避让。
+
+手动“测试连接”只显式点击时读取当前 API、模型、密钥、请求头及思考格式与有效参数快照，在后台通过共享客户端发简短 Chat Completions，并采用与正式翻译、音译相同的请求参数映射，验证非空模型内容；不读写歌词/缓存、不改设置、不代替整首歌词资格验证。在途单次、离页/关对话框取消并丢迟到结果；固定本地化原因区分缺配置、认证、404、429、其他HTTP、超时、DNS/TLS/连接及响应错误，不显示密钥、原异常或服务正文。
 
 #### 通用维护：数据和公共协议
 
-配置schema/键、文件ID/目录、迁移marker、SQLite/cache namespace及ZIP格式有明确归属，普通设置保存不覆盖字体/歌词等资产。LLM 的 `llm_lyrics_transliteration_enabled`、`llm_lyrics_thinking_format` 和 `llm_lyrics_thinking_effort` 使用普通设置编解码、键集合与既有 schema 升级；功能开关分别持久化，共用配置不重复保存。无旧配置时两个功能均关闭且不发思考字段；升级已有配置时保留原来的 `thinking.type` 行为，未知格式安全回退到「不发送」。继续使用既有原子发布、事务恢复、只读迁移重试、导入冲突与取消路径；格式变更单独设计迁移/回退。
+配置schema/键、文件ID/目录、迁移marker、SQLite/cache namespace及ZIP格式有明确归属，普通设置保存不覆盖字体/歌词等资产。手动歌词索引与来源缓存索引分别持有指针和代次，引用既有不可变正文文件；来源偏好和每歌每来源偏移属于普通设置数据，不随正文缓存淘汰。旧 8 MiB 索引只用于兼容读取，新索引独立限制为 2 MiB；清缓存保留手动索引、偏好、字体与 LLM 缓存。LLM 的 `llm_lyrics_transliteration_enabled`、`llm_lyrics_thinking_format`、`llm_lyrics_thinking_effort` 和 `llm_lyrics_custom_headers` 使用普通设置编解码、键集合与既有 schema 升级；功能开关分别持久化，共用配置不重复保存。无旧配置时两个功能均关闭且不发思考字段；升级已有配置时保留原来的 `thinking.type` 行为，未知格式安全回退到「不发送」。继续使用既有原子发布、事务恢复、只读迁移重试、导入冲突与取消路径；格式变更单独设计迁移/回退。
 
 宿主普通设置通过 `decodeOrdinarySettings` 解码，跳过独立歌词索引及旧内联歌词 JSON；显示/动画与资格检查不能因读取开关而反复解析歌词资产。歌词查询继续通过 `customLyricsManifest()` 的独立后台读取与缓存，完整 `decode` 保留导入/迁移语义。调整读取路径时核对消费者是否需要资产字段，不能用普通设置快照代替歌词索引。
 

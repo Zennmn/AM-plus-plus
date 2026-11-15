@@ -9,8 +9,11 @@ import dev.amenhancer.module.model.CustomLyricsSources
 
 /** Validates the cross-process index without trusting remote preferences. */
 object CustomLyricsManifestPolicy {
-    /** Upper bound for the remote index file that carries the whole manifest. */
+    /** Legacy read bound; older releases accepted a single combined 8 MiB index. */
     const val MAX_INDEX_BYTES = 8 * 1024 * 1024
+
+    /** New manual and source indexes are independently bounded to 2 MiB. */
+    const val MAX_CURRENT_INDEX_BYTES = 2 * 1024 * 1024
 
     private val fileIdPattern = Regex("[A-Za-z0-9_-]{1,96}")
     private val sha256Pattern = Regex("[0-9a-fA-F]{64}")
@@ -44,6 +47,17 @@ object CustomLyricsManifestPolicy {
     fun isValidFileId(fileId: String): Boolean =
         fileIdPattern.matches(fileId) && fileId.none { it == '.' || it == '/' || it == '\\' }
 
+    /** Unknown providers are conservatively manual, as are entries without a source. */
+    fun canonicalSource(source: String): String =
+        source.takeIf(allowedSources::contains) ?: CustomLyricsSources.MANUAL
+
+    fun isThirdPartySource(source: String): Boolean =
+        source in allowedSources && source != CustomLyricsSources.MANUAL
+
+
+    fun isUsableSourceId(source: String): Boolean =
+        source.isNotBlank() && source.length <= 96 && source.none(Char::isISOControl)
+
     private fun sanitizeEntry(raw: CustomLyricsEntry): CustomLyricsEntry? {
         if (raw.appleMusicId <= 0L) return null
         if (!isValidFileId(raw.fileId)) return null
@@ -54,7 +68,7 @@ object CustomLyricsManifestPolicy {
             sha256 = raw.sha256.lowercase(),
             // Entries created by removed/unknown providers remain usable as
             // manually managed TTML instead of disappearing on read.
-            source = raw.source.takeIf(allowedSources::contains) ?: CustomLyricsSources.MANUAL,
+            source = canonicalSource(raw.source),
         )
     }
 }

@@ -74,6 +74,15 @@ class CustomLyricsReplacementSession(
         }
     }
 
+    /** Settings mutations also refresh known IDs, including deletion or disabling. */
+    fun refreshMappings(onComplete: () -> Unit = {}) {
+        try {
+            executor.execute { refreshIndex(); onComplete() }
+        } catch (_: RejectedExecutionException) {
+            logger("custom lyrics settings refresh was rejected")
+        }
+    }
+
     fun replacementFor(appleMusicId: Long): Any? {
         if (appleMusicId <= 0L) return null
         readyReplacementFor(appleMusicId)?.let { return it }

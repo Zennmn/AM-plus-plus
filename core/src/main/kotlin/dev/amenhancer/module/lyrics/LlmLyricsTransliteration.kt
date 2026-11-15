@@ -19,6 +19,50 @@ public class LlmTransliterationDocument private constructor(
     public val sourceLanguage: String?
         get() = document.language
 
+    /** True when lyric units contain a Latin letter and no non-Latin letters or marks. */
+    public val isLatinOnly: Boolean
+        get() {
+            var hasLatinLetter = false
+            for (line in document.lines) {
+                for (group in line.groups) {
+                    for (unit in group.units) {
+                        val source = unit.source
+                        var index = 0
+                        while (index < source.length) {
+                            val codePoint = Character.codePointAt(source, index)
+                            val type = Character.getType(codePoint)
+                            val isLetter = when (type) {
+                                Character.UPPERCASE_LETTER.toInt(),
+                                Character.LOWERCASE_LETTER.toInt(),
+                                Character.TITLECASE_LETTER.toInt(),
+                                Character.MODIFIER_LETTER.toInt(),
+                                Character.OTHER_LETTER.toInt() -> true
+                                else -> false
+                            }
+                            val isMark = when (type) {
+                                Character.NON_SPACING_MARK.toInt(),
+                                Character.ENCLOSING_MARK.toInt(),
+                                Character.COMBINING_SPACING_MARK.toInt() -> true
+                                else -> false
+                            }
+                            if (isLetter || isMark) {
+                                when (Character.UnicodeScript.of(codePoint)) {
+                                    Character.UnicodeScript.LATIN -> {
+                                        if (isLetter) hasLatinLetter = true
+                                    }
+                                    Character.UnicodeScript.COMMON,
+                                    Character.UnicodeScript.INHERITED -> Unit
+                                    else -> return false
+                                }
+                            }
+                            index += Character.charCount(codePoint)
+                        }
+                    }
+                }
+            }
+            return hasLatinLetter
+        }
+
     internal fun isWithinInputBounds(
         maxUnits: Int,
         maxUnitChars: Int,
@@ -181,6 +225,10 @@ $input"""
     }
 
     public companion object {
+        /** Shared with the status presenter; uses the same existing-track rule as generation. */
+        public fun hasPronunciation(ttml: String): Boolean =
+            TtmlInputPolicy.isAcceptable(ttml) && hasUsablePronunciation(ttml)
+
         /** Inspect once and return the eligible transliteration pass, or null when it is unsafe. */
         public fun prepare(ttml: String): LlmTransliterationDocument? {
             if (!TtmlInputPolicy.isAcceptable(ttml)) return null

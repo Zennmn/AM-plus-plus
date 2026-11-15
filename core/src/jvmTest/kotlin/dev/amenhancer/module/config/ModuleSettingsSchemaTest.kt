@@ -122,8 +122,7 @@ class ModuleSettingsSchemaTest {
                 "title_correction_mode" to "original_hyper",
                 "custom_lyrics_enabled" to false,
                 "automatic_lyrics_enabled" to true,
-                "automatic_lyrics_prefer_native" to true,
-                "automatic_lyrics_source_order" to "amll-ttml-db,am-lyrics,am-native,lunabeat-ttml-hub",
+                "automatic_lyrics_source_order" to "am-native,amll-ttml-db,am-lyrics,lunabeat-ttml-hub",
                 "llm_lyrics_enabled" to false,
                 "llm_lyrics_transliteration_enabled" to false,
                 "llm_lyrics_base_url" to "",
@@ -181,8 +180,7 @@ class ModuleSettingsSchemaTest {
                 "title_correction_mode" to "original_hyper",
                 "custom_lyrics_enabled" to false,
                 "automatic_lyrics_enabled" to true,
-                "automatic_lyrics_prefer_native" to true,
-                "automatic_lyrics_source_order" to "amll-ttml-db,am-lyrics,am-native,lunabeat-ttml-hub",
+                "automatic_lyrics_source_order" to "am-native,amll-ttml-db,am-lyrics,lunabeat-ttml-hub",
                 "llm_lyrics_enabled" to false,
                 "llm_lyrics_transliteration_enabled" to false,
                 "llm_lyrics_base_url" to "",
@@ -200,6 +198,35 @@ class ModuleSettingsSchemaTest {
                 "schema_version" to ModuleConstants.CONFIG_SCHEMA_VERSION,
             ),
             upgraded,
+        )
+    }
+
+    @Test
+    fun `a legacy native priority becomes the effective order without overriding later edits`() {
+        val legacyOrder = listOf("am-lyrics", "am-native", "amll-ttml-db", "lunabeat-ttml-hub")
+        val nativeFirst = listOf("am-native", "am-lyrics", "amll-ttml-db", "lunabeat-ttml-hub")
+        val oldValues = mapOf(
+            "schema_version" to 20,
+            "automatic_lyrics_source_order" to legacyOrder.joinToString(","),
+        )
+        assertEquals(nativeFirst, ModuleSettingsSchema.decodeOrdinarySettings(oldValues).automaticLyricsSourceOrder)
+        val preferredValues = oldValues + ("automatic_lyrics_prefer_native" to true)
+        val migrated = preferredValues + ModuleSettingsSchema.legacyAutomaticLyricsSourceOrderMigrationValues(preferredValues)
+        assertEquals(nativeFirst, ModuleSettingsSchema.decodeOrdinarySettings(migrated).automaticLyricsSourceOrder)
+        val reordered = migrated + ModuleSettingsSchema.encodeAutomaticLyricsSourceOrder(legacyOrder)
+        assertEquals(legacyOrder, ModuleSettingsSchema.decodeOrdinarySettings(reordered).automaticLyricsSourceOrder)
+    }
+
+    @Test
+    fun `disabled legacy native priority preserves the prior sorting default`() {
+        val oldValues = mapOf("schema_version" to 20, "automatic_lyrics_prefer_native" to false)
+        assertEquals(
+            listOf("amll-ttml-db", "am-lyrics", "am-native", "lunabeat-ttml-hub"),
+            ModuleSettingsSchema.decodeOrdinarySettings(oldValues).automaticLyricsSourceOrder,
+        )
+        assertEquals(
+            listOf("am-native", "amll-ttml-db", "am-lyrics", "lunabeat-ttml-hub"),
+            ModuleSettingsSchema.decodeOrdinarySettings(emptyMap<String, Any>()).automaticLyricsSourceOrder,
         )
     }
 

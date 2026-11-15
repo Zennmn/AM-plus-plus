@@ -5,8 +5,12 @@ import dev.amenhancer.module.i18n.ModuleText
 import dev.amenhancer.module.model.ModuleSettings
 import dev.amenhancer.module.model.LyricsFontManifest
 import dev.amenhancer.module.model.CustomLyricsManifest
+import dev.amenhancer.module.model.CustomLyricsEntry
+import dev.amenhancer.module.lyrics.CustomLyricsFilePolicy
+import dev.amenhancer.module.lyrics.TtmlInputPolicy
 import java.io.InputStream
 import android.os.ParcelFileDescriptor
+import java.io.File
 import java.util.UUID
 import java.security.MessageDigest
 
@@ -16,6 +20,9 @@ internal interface EmbeddedConfigurationStorage : ConfigurationReader {
     fun removeValues(keys: Set<String>, synchronous: Boolean = true): Boolean = true
     fun writeFile(name: String, bytes: ByteArray): Boolean
     fun deleteFile(name: String): Boolean
+
+    /** Metadata-only size lookup; never streams the payload. */
+    fun fileSizeBytes(name: String): Long? = null
 
     /** Copies and verifies a payload without requiring host implementations to buffer it. */
     fun copyFile(
@@ -49,6 +56,12 @@ internal interface EmbeddedConfigurationStorage : ConfigurationReader {
      * host-private implementation overrides it with a directory scan.
      */
     fun hasAnyFiles(): Boolean = false
+
+    /** Legacy automatic-cache directory, retained for reference-only migration. */
+    fun sourceCacheDirectory(): File? = null
+
+    /** Process-wide identity for stores backed by the same host files. */
+    fun sharedIdentity(): Any? = null
 
     companion object {
         private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
@@ -86,6 +99,12 @@ internal class EmbeddedConfigurationSession(
         synchronous = true,
     )
 
+    fun saveAutomaticLyricsSourceOrder(order: List<String>): Boolean {
+        if (!writable) return false
+        return writeValues(legacySettingsMigrationValues(storage.values()) +
+            ModuleSettingsSchema.encodeAutomaticLyricsSourceOrder(order))
+    }
+
     fun saveFontManifest(manifest: LyricsFontManifest): Boolean = writable && storage.writeValues(
         ModuleSettingsSchema.encodeFontManifest(manifest),
         synchronous = true,
@@ -95,6 +114,15 @@ internal class EmbeddedConfigurationSession(
 
     fun deleteFile(name: String): Boolean = writable && storage.deleteFile(name)
 
+    internal fun deleteSourceBodyFile(name: String): Boolean {
+        if (!writable) return false
+        return if (isLegacySourceFileName(name)) {
+            sourceCacheFile(name)?.let { file ->
+                runCatching { file.isFile && file.delete() }.getOrDefault(false)
+            } ?: false
+        } else storage.deleteFile(name)
+    }
+
     fun commitCustomLyrics(
         manifest: CustomLyricsManifest,
         allowRecovery: Boolean = false,
@@ -102,12 +130,40 @@ internal class EmbeddedConfigurationSession(
         CustomLyricsIndexCommitResult.Failed(ModuleText.MIGRATION_READ_ONLY.text())
     } else {
         synchronized(INDEX_MUTATION_LOCK) {
+            val state = indexRepository.state(storage.values())
+            val maxBytes = manualIndexCommitLimit(state, manifest)
+            if (maxBytes == null) {
+                return@synchronized CustomLyricsIndexCommitResult.Failed(
+                    ModuleText.LYRICS_INDEX_TOO_LARGE.text(),
+                )
+            }
             indexRepository.commit(
-                state = indexRepository.state(storage.values()),
+                state = state,
                 next = manifest,
                 allowRecovery = allowRecovery,
-            )
+                maxIndexBytes = maxBytes,
+            ).also { result ->
+                if (result is CustomLyricsIndexCommitResult.Committed) notifyManualChangeListeners(result.manifest)
+            }
         }
+    }
+
+    private fun manualIndexCommitLimit(
+        state: CustomLyricsIndexState,
+        next: CustomLyricsManifest,
+    ): Int? {
+        val oldSize = state.pointer?.sizeBytes ?: runCatching {
+            values()[LEGACY_MANUAL_MANIFEST_KEY]?.toString()
+                ?.toByteArray(Charsets.UTF_8)?.size?.toLong()
+        }.getOrNull() ?: 0L
+        val newSize = CustomLyricsManifestCodec.encode(next)
+            .toByteArray(Charsets.UTF_8).size.toLong()
+        val limit = CustomLyricsManifestPolicy.MAX_CURRENT_INDEX_BYTES.toLong()
+        if (oldSize > limit) {
+            if (newSize > oldSize) return null
+            return oldSize.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        }
+        return limit.toInt()
     }
 
     /**
@@ -136,16 +192,247 @@ internal class EmbeddedConfigurationSession(
                     ModuleText.LYRICS_INDEX_CHANGED.text(),
                 )
             }
+            val maxBytes = manualIndexCommitLimit(current, manifest)
+            if (maxBytes == null) {
+                return@synchronized CustomLyricsIndexCommitResult.Failed(
+                    ModuleText.LYRICS_INDEX_TOO_LARGE.text(),
+                )
+            }
             indexRepository.commit(
                 state = current,
                 next = manifest,
                 allowRecovery = allowRecovery,
-            )
+                maxIndexBytes = maxBytes,
+            ).also { result ->
+                if (result is CustomLyricsIndexCommitResult.Committed) notifyManualChangeListeners(result.manifest)
+            }
         }
     }
 
     internal fun <T> withCustomLyricsMutation(block: () -> T): T =
         synchronized(INDEX_MUTATION_LOCK, block)
+
+    internal fun observeManualChanges(listener: (CustomLyricsManifest) -> Unit) {
+        val identity = storage.sharedIdentity() ?: storage
+        synchronized(manualChangeLock) { manualChangeListeners[identity] = listener }
+    }
+
+    private fun notifyManualChangeListeners(manifest: CustomLyricsManifest) {
+        val identity = storage.sharedIdentity() ?: storage
+        val listener = synchronized(manualChangeLock) { manualChangeListeners[identity] }
+        listener?.let { runCatching { it(manifest) } }
+    }
+
+
+    internal fun readFileBytes(name: String, maxBytes: Int = TtmlInputPolicy.MAX_TTML_BYTES): ByteArray? = runCatching {
+        val legacy = if (isLegacySourceFileName(name)) {
+            sourceCacheFile(name)?.takeIf(File::isFile)?.inputStream()
+        } else null
+        (legacy ?: openFile(name))?.use { input ->
+            CustomLyricsFilePolicy.readBounded(input, maxBytes)
+        }
+    }.getOrNull()
+
+    internal fun fileLength(name: String): Long? = if (isLegacySourceFileName(name)) {
+        sourceCacheFile(name)?.takeIf(File::isFile)?.length()
+    } else storage.fileSizeBytes(name)
+
+    private fun isLegacySourceFileName(name: String): Boolean =
+        name.startsWith("lyric_") && (name.endsWith(".json") || name.endsWith(".ttml"))
+
+    internal fun readManualIndex(): CustomLyricsIndexState = synchronized(INDEX_MUTATION_LOCK) {
+        indexRepository.state(storage.values())
+    }
+
+    internal fun readSourceIndex(
+        pointerDecoder: (Map<String, *>) -> CustomLyricsIndexPointer?,
+        pointerPresent: (Map<String, *>) -> Boolean,
+        legacyDecoder: (Map<String, *>) -> CustomLyricsManifest,
+        decodeIndex: (ByteArray) -> CustomLyricsManifest?,
+        openFile: (String) -> InputStream? = storage::openFile,
+        readIndexBytes: ((String, Int) -> ByteArray?)? = null,
+    ): CustomLyricsIndexState = synchronized(INDEX_MUTATION_LOCK) {
+        CustomLyricsIndexRepository.stateWithCodec(
+            preferences = storage.values(),
+            openFile = openFile,
+            pointerDecoder = pointerDecoder,
+            pointerPresent = pointerPresent,
+            legacyDecoder = legacyDecoder,
+            decodeIndex = decodeIndex,
+            readIndexBytes = readIndexBytes ?: { fileId, maxBytes -> readFileBytes(fileId, maxBytes) },
+        )
+    }
+
+    internal fun commitManualIndex(
+        state: CustomLyricsIndexState,
+        manifest: CustomLyricsManifest,
+        allowRecovery: Boolean = false,
+        maxIndexBytes: Int = CustomLyricsManifestPolicy.MAX_CURRENT_INDEX_BYTES,
+    ): CustomLyricsIndexCommitResult = if (!writable) {
+        CustomLyricsIndexCommitResult.Failed(ModuleText.MIGRATION_READ_ONLY.text())
+    } else {
+        synchronized(INDEX_MUTATION_LOCK) {
+            val current = indexRepository.state(storage.values())
+            if (current != state) {
+                return@synchronized CustomLyricsIndexCommitResult.Failed(
+                    ModuleText.LYRICS_INDEX_CHANGED.text(),
+                )
+            }
+            indexRepository.commit(
+                state = current,
+                next = manifest,
+                allowRecovery = allowRecovery,
+                maxIndexBytes = maxIndexBytes,
+            ).also { result ->
+                if (result is CustomLyricsIndexCommitResult.Committed) {
+                    notifyManualChangeListeners(result.manifest)
+                }
+            }
+        }
+    }
+
+    internal fun commitSourceIndex(
+        state: CustomLyricsIndexState,
+        manifest: CustomLyricsManifest,
+        newFileId: () -> String,
+        publishPointer: (CustomLyricsIndexPointer) -> Boolean,
+        maxIndexBytes: Int = CustomLyricsManifestPolicy.MAX_CURRENT_INDEX_BYTES,
+        encode: (CustomLyricsManifest) -> String = CustomLyricsManifestCodec::encode,
+        decode: (ByteArray) -> CustomLyricsManifest? = { bytes ->
+            CustomLyricsManifestCodec.decodeIndexFile(bytes.toString(Charsets.UTF_8))
+        },
+        writeFile: (String, ByteArray) -> Boolean = storage::writeFile,
+        deleteFile: (String) -> Boolean = { storage.deleteFile(it) },
+        openFile: (String) -> InputStream? = storage::openFile,
+        readIndexBytes: (String, Int) -> ByteArray? = { fileId, limit ->
+            runCatching {
+                openFile(fileId)?.use { input ->
+                    CustomLyricsFilePolicy.readBounded(input, limit)
+                }
+            }.getOrNull()
+        },
+    ): CustomLyricsIndexCommitResult = if (!writable) {
+        CustomLyricsIndexCommitResult.Failed(ModuleText.MIGRATION_READ_ONLY.text())
+    } else {
+        synchronized(INDEX_MUTATION_LOCK) {
+            val repository = CustomLyricsIndexRepository(
+                newIndexFileId = newFileId,
+                openFile = openFile,
+                writeRemoteFile = writeFile,
+                publishPointer = publishPointer,
+                deleteRemoteFile = { deleteFile(it) },
+                maxIndexBytes = maxIndexBytes,
+                readIndexBytes = readIndexBytes,
+            )
+            repository.commit(
+                state = state,
+                next = manifest,
+                allowRecovery = false,
+                maxIndexBytes = maxIndexBytes,
+                encode = encode,
+                decode = decode,
+            )
+        }
+    }
+
+    internal fun writeValues(values: Map<String, Any>): Boolean =
+        writable && storage.writeValues(values, synchronous = true)
+
+    internal fun removeValues(keys: Set<String>): Boolean =
+        writable && storage.removeValues(keys, synchronous = true)
+
+    internal fun sourceCacheDirectory(): File? = storage.sourceCacheDirectory()
+
+    internal fun sharedStorageIdentity(): Any = storage.sharedIdentity() ?: storage
+
+    /** File-level access to the legacy source-cache directory. */
+    internal fun sourceCacheFile(name: String): File? {
+        if (!SOURCE_CACHE_FILE_PATTERN.matches(name)) return null
+        val root = sourceCacheDirectory() ?: return null
+        return File(root, name)
+    }
+
+    private fun sourceCacheFileFromRoot(root: File, name: String): File? =
+        if (SOURCE_CACHE_FILE_PATTERN.matches(name)) File(root, name) else null
+
+    internal fun sourceCacheLunabeatCatalog(): File? = sourceCacheDirectory()?.let {
+        sourceCacheFileFromRoot(File(it, "lunabeat"), "catalog.json")
+    }
+
+    /** Pre-runtime settings-page Lunabeat catalog; only this file is owned here. */
+    internal fun legacyLunabeatCatalog(): File? = sourceCacheDirectory()?.parentFile?.let {
+        File(File(it, "ampp-lunabeat-cache"), "catalog.json")
+    }
+
+    internal fun deleteLunabeatCatalog(): Boolean = runCatching {
+        sourceCacheLunabeatCatalog()?.let { file -> file.isFile && file.delete() } == true
+    }.getOrDefault(false)
+
+    internal fun sourceCacheRootFiles(): List<File> = runCatching {
+        sourceCacheDirectory()?.listFiles()?.filter(File::isFile).orEmpty()
+    }.getOrDefault(emptyList())
+
+    internal fun sourceCacheRootListing(): List<File> = runCatching {
+        sourceCacheDirectory()?.listFiles().orEmpty().toList()
+    }.getOrDefault(emptyList())
+
+
+    internal fun sourceCacheLegacyCandidateFile(appleMusicId: Long): File? = appleMusicId
+        .takeIf { it > 0L }
+        ?.let { sourceCacheFile("lyric_$it.json") }
+
+    internal fun sourceCacheLegacyTtmlFile(appleMusicId: Long): File? = appleMusicId
+        .takeIf { it > 0L }
+        ?.let { sourceCacheFile("lyric_$it.ttml") }
+
+    internal fun sourceCacheLegacyIds(): List<Long> = runCatching {
+        val file = sourceCacheFile("index.json")?.takeIf(File::isFile)
+            ?: return@runCatching emptyList()
+        val bytes = file.inputStream().use { CustomLyricsFilePolicy.readBounded(it, 16 * 1024) }
+        val array = org.json.JSONArray(bytes.toString(Charsets.UTF_8))
+        buildList {
+            for (index in 0 until array.length()) {
+                array.optLong(index, -1L).takeIf { it > 0L }?.let(::add)
+            }
+        }.distinct()
+    }.getOrDefault(emptyList())
+
+    internal fun deleteSourceCacheFile(name: String): Boolean = deleteSourceBodyFile(name)
+
+    internal fun sourceIndexPreferenceKeys(): Set<String> = setOf(
+        SOURCE_INDEX_FILE_ID,
+        SOURCE_INDEX_GENERATION,
+        SOURCE_INDEX_SHA256,
+        SOURCE_INDEX_SIZE_BYTES,
+    )
+
+    internal fun clearSourceIndexPointer(): Boolean = removeValues(sourceIndexPreferenceKeys())
+
+    internal fun encodeSourceIndexPointer(pointer: CustomLyricsIndexPointer): Map<String, Any> =
+        linkedMapOf(
+            SOURCE_INDEX_FILE_ID to pointer.fileId,
+            SOURCE_INDEX_GENERATION to pointer.generation,
+            SOURCE_INDEX_SHA256 to pointer.sha256,
+            SOURCE_INDEX_SIZE_BYTES to pointer.sizeBytes,
+        )
+
+    internal fun decodeSourceIndexPointer(values: Map<String, *>): CustomLyricsIndexPointer? {
+        val fileId = values[SOURCE_INDEX_FILE_ID] as? String ?: return null
+        val generation = (values[SOURCE_INDEX_GENERATION] as? Number)?.toLong() ?: return null
+        val sha256 = values[SOURCE_INDEX_SHA256] as? String ?: return null
+        val sizeBytes = (values[SOURCE_INDEX_SIZE_BYTES] as? Number)?.toLong() ?: return null
+        if (generation < 1L || sizeBytes !in 1L..CustomLyricsManifestPolicy.MAX_INDEX_BYTES.toLong()) {
+            return null
+        }
+        if (!CustomLyricsManifestPolicy.isValidFileId(fileId) ||
+            !CustomLyricsManifestPolicy.isValidSha256(sha256)
+        ) return null
+        return CustomLyricsIndexPointer(fileId, generation, sha256.lowercase(), sizeBytes)
+    }
+
+    internal fun hasSourceIndexPointerValues(values: Map<String, *>): Boolean =
+        sourceIndexPreferenceKeys().any(values::containsKey)
+
 
     private fun publishIndexPointer(pointer: CustomLyricsIndexPointer): Boolean =
         storage.writeValues(
@@ -168,10 +455,7 @@ internal class EmbeddedConfigurationSession(
      */
     private fun migrateLegacyValuesBeforeCleanup() {
         val values = runCatching { storage.values() }.getOrNull() ?: return
-        val migration = linkedMapOf<String, Any>().apply {
-            putAll(ModuleSettingsSchema.legacyTitleCorrectionMigrationValues(values))
-            putAll(ModuleSettingsSchema.legacyLlmThinkingFormatMigrationValues(values))
-        }
+        val migration = legacySettingsMigrationValues(values)
         if (migration.isNotEmpty() && !runCatching {
                 storage.writeValues(migration, synchronous = true)
             }.getOrDefault(false)
@@ -181,7 +465,20 @@ internal class EmbeddedConfigurationSession(
         storage.removeValues(ModuleSettingsSchema.obsoleteKeys, synchronous = true)
     }
 
+    private fun legacySettingsMigrationValues(values: Map<String, *>): Map<String, Any> =
+        ModuleSettingsSchema.legacyTitleCorrectionMigrationValues(values) +
+            ModuleSettingsSchema.legacyLlmThinkingFormatMigrationValues(values) +
+            ModuleSettingsSchema.legacyAutomaticLyricsSourceOrderMigrationValues(values)
+
     private companion object {
         val INDEX_MUTATION_LOCK = Any()
+        val manualChangeLock = Any()
+        val manualChangeListeners = mutableMapOf<Any, (CustomLyricsManifest) -> Unit>()
+        const val SOURCE_INDEX_FILE_ID = "lyrics_source_index_file_id"
+        const val SOURCE_INDEX_GENERATION = "lyrics_source_index_generation"
+        const val SOURCE_INDEX_SHA256 = "lyrics_source_index_sha256"
+        const val SOURCE_INDEX_SIZE_BYTES = "lyrics_source_index_size_bytes"
+        const val LEGACY_MANUAL_MANIFEST_KEY = "custom_lyrics_manifest"
+        val SOURCE_CACHE_FILE_PATTERN = Regex("[A-Za-z0-9_.-]{1,128}")
     }
 }

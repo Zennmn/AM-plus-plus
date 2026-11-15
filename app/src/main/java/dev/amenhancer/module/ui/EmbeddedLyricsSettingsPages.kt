@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -58,6 +59,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import dev.amenhancer.module.CurrentSongDetails
+import dev.amenhancer.module.hook.LyricsPlaybackRuntimeRegistry
 import dev.amenhancer.module.i18n.ModuleText
 import dev.amenhancer.module.model.CustomLyricsSources
 import dev.amenhancer.module.model.ModuleSettings
@@ -291,21 +293,52 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
     settings: ModuleSettings,
     onSettingsChanged: (ModuleSettings) -> Unit,
 ) {
-    val normalizedOrder = remember(settings.automaticLyricsSourceOrder) {
-        ModuleSettings.normalizeAutomaticLyricsSourceOrder(settings.automaticLyricsSourceOrder)
-    }
-    val initialVisibleSources = remember(normalizedOrder, settings.automaticLyricsPreferNative) {
-        visibleAutomaticLyricsSources(
-            order = normalizedOrder,
-            preferNative = settings.automaticLyricsPreferNative,
+    val currentSettings by rememberUpdatedState(settings)
+    val settingsChanged by rememberUpdatedState(onSettingsChanged)
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        EmbeddedSettingsGroup {
+            EmbeddedSettingSwitch(
+                title = localizedText(ModuleText.AUTO_LYRICS_ENABLED),
+                summary = localizedText(ModuleText.AUTO_LYRICS_SUMMARY),
+                checked = settings.automaticLyricsEnabled,
+                enabled = settings.customLyricsEnabled,
+                icon = EmbeddedSvgIcon.AutomaticLyrics,
+                onCheckedChange = { enabled ->
+                    settingsChanged(currentSettings.copy(automaticLyricsEnabled = enabled))
+                    pageRefresh?.invoke()
+                },
+            )
+        }
+        AutomaticLyricsSourceOrderEditor(
+            order = settings.automaticLyricsSourceOrder,
+            localize = { key, arguments -> localizedText(key, *arguments) },
+            onOrderChanged = { nextOrder ->
+                settingsChanged(currentSettings.copy(automaticLyricsSourceOrder = nextOrder))
+                true
+            },
+            onReset = { pageRefresh?.invoke() },
         )
+        EmbeddedLyricsCacheRow()
     }
-    var visibleSources by remember {
-        mutableStateOf(initialVisibleSources)
+}
+
+/** Shared drag and accessibility rules for settings and the lyrics popup. */
+@Composable
+internal fun AutomaticLyricsSourceOrderEditor(
+    order: List<String>,
+    localize: (ModuleText, Array<out Any?>) -> String,
+    onOrderChanged: (List<String>) -> Boolean,
+    onReset: (() -> Unit)? = null,
+    compact: Boolean = false,
+) {
+    fun localizedText(key: ModuleText, vararg arguments: Any?) = localize(key, arguments)
+    val normalizedOrder = remember(order) {
+        ModuleSettings.normalizeAutomaticLyricsSourceOrder(order)
     }
-    var nativeIndex by remember {
-        mutableIntStateOf(normalizedOrder.indexOf(CustomLyricsSources.AM_NATIVE))
-    }
+    var visibleSources by remember { mutableStateOf(normalizedOrder) }
     var dragStartOrder by remember { mutableStateOf<List<String>?>(null) }
     var dragStartCenters by remember { mutableStateOf<Map<String, Float>>(emptyMap()) }
     var draggingSource by remember { mutableStateOf<String?>(null) }
@@ -316,51 +349,21 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
     val sourceCenters = remember { mutableStateMapOf<String, Float>() }
     val haptics = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
-    val currentSettings by rememberUpdatedState(settings)
-    val settingsChanged by rememberUpdatedState(onSettingsChanged)
+    val orderChanged by rememberUpdatedState(onOrderChanged)
 
-    LaunchedEffect(initialVisibleSources, normalizedOrder, dragStartOrder, dragSettleJob) {
+    LaunchedEffect(normalizedOrder, dragStartOrder, dragSettleJob) {
         if (dragStartOrder == null && dragSettleJob == null) {
-            visibleSources = initialVisibleSources
-            nativeIndex = normalizedOrder.indexOf(CustomLyricsSources.AM_NATIVE)
+            visibleSources = normalizedOrder
         }
-    }
-
-    fun orderWithNative(sources: List<String>, nativePosition: Int): List<String> {
-        if (!currentSettings.automaticLyricsPreferNative) return sources.toList()
-        val nextSources = sources.toMutableList()
-        // Native is hidden in this mode, but its stored position must remain
-        // ahead of Lunabeat so the persisted order stays valid.
-        val lunabeatIndex = nextSources.indexOf(CustomLyricsSources.LUNABEAT)
-        val maximumNativeIndex = lunabeatIndex.takeIf { it >= 0 } ?: nextSources.size
-        nextSources.add(nativePosition.coerceIn(0, maximumNativeIndex), CustomLyricsSources.AM_NATIVE)
-        return nextSources
     }
 
     fun canMoveIn(order: List<String>, from: Int, to: Int): Boolean {
         if (from !in order.indices || to !in order.indices || from == to) return false
         val nextSources = order.toMutableList().apply { add(to, removeAt(from)) }
-        val fullOrder = orderWithNative(nextSources, nativeIndex)
-        return ModuleSettings.normalizeAutomaticLyricsSourceOrder(fullOrder) == fullOrder
+        return ModuleSettings.normalizeAutomaticLyricsSourceOrder(nextSources) == nextSources
     }
 
     fun canMoveSource(from: Int, to: Int): Boolean = canMoveIn(visibleSources, from, to)
-
-    fun persistSourceOrder(orderSources: List<String> = visibleSources) {
-        val nextOrder = ModuleSettings.normalizeAutomaticLyricsSourceOrder(
-            orderWithNative(orderSources, nativeIndex),
-        )
-        if (dragStartOrder == null && dragSettleJob == null) {
-            nativeIndex = nextOrder.indexOf(CustomLyricsSources.AM_NATIVE)
-        }
-        settingsChanged(currentSettings.copy(automaticLyricsSourceOrder = nextOrder))
-    }
-
-    fun moveSource(from: Int, to: Int): Boolean {
-        if (!canMoveSource(from, to)) return false
-        visibleSources = visibleSources.toMutableList().apply { add(to, removeAt(from)) }
-        return true
-    }
 
     fun startDrag(source: String) {
         if (dragStartOrder != null || dragSettleJob != null) return
@@ -427,6 +430,7 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
             canMoveIn(initialOrder, from, targetIndex)
         ) {
             initialOrder.toMutableList().apply { add(targetIndex, removeAt(from)) }
+                .takeIf { orderChanged(it) }
         } else {
             null
         }
@@ -435,7 +439,6 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
         } else {
             0f
         }
-        if (committedOrder != null) persistSourceOrder(committedOrder)
         dragReleaseTargetIndex = if (committedOrder != null) targetIndex else from
 
         dragSettleJob = scope.launch {
@@ -462,23 +465,20 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
     fun moveForAccessibility(source: String, offset: Int): Boolean {
         if (dragStartOrder != null || dragSettleJob != null) return false
         val from = visibleSources.indexOf(source)
-        if (from < 0 || !moveSource(from, from + offset)) return false
-        persistSourceOrder()
+        val to = from + offset
+        if (!canMoveSource(from, to)) return false
+        val nextOrder = visibleSources.toMutableList().apply { add(to, removeAt(from)) }
+        if (!orderChanged(nextOrder)) return false
+        visibleSources = nextOrder
         return true
     }
 
     fun resetSourceOrder() {
         if (dragStartOrder != null || dragSettleJob != null) return
-        val nextOrder = ModuleSettings.normalizeAutomaticLyricsSourceOrder(
-            ModuleSettings.DEFAULT_AUTOMATIC_LYRICS_SOURCE_ORDER,
-        )
-        nativeIndex = nextOrder.indexOf(CustomLyricsSources.AM_NATIVE)
-        visibleSources = visibleAutomaticLyricsSources(
-            order = nextOrder,
-            preferNative = currentSettings.automaticLyricsPreferNative,
-        )
-        settingsChanged(currentSettings.copy(automaticLyricsSourceOrder = nextOrder))
-        pageRefresh?.invoke()
+        val nextOrder = ModuleSettings.DEFAULT_AUTOMATIC_LYRICS_SOURCE_ORDER
+        if (!orderChanged(nextOrder)) return
+        visibleSources = nextOrder
+        onReset?.invoke()
     }
 
     DisposableEffect(Unit) {
@@ -490,24 +490,6 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
             draggingSource = null
             dragDistancePx = 0f
             dragReleaseTargetIndex = -1
-        }
-    }
-
-    val sourceSummary = buildString {
-        append(
-            localizedText(
-                if (settings.automaticLyricsPreferNative) {
-                    ModuleText.AUTO_LYRICS_SOURCE_ORDER_NATIVE_HIDDEN
-                } else {
-                    ModuleText.AUTO_LYRICS_SOURCE_ORDER_ALL
-                },
-            ),
-        )
-        append('\n')
-        append(localizedText(ModuleText.DRAG_TO_REORDER))
-        if (!settings.automaticLyricsPreferNative) {
-            append('\n')
-            append(localizedText(ModuleText.LUNABEAT_AFTER_NATIVE))
         }
     }
 
@@ -549,41 +531,50 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
 
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        EmbeddedSettingsGroup {
-            EmbeddedSettingSwitch(
-                title = localizedText(ModuleText.AUTO_LYRICS_ENABLED),
-                summary = localizedText(ModuleText.AUTO_LYRICS_SUMMARY),
-                checked = settings.automaticLyricsEnabled,
-                enabled = settings.customLyricsEnabled,
-                icon = EmbeddedSvgIcon.AutomaticLyrics,
-                onCheckedChange = { enabled ->
-                    settingsChanged(currentSettings.copy(automaticLyricsEnabled = enabled))
-                    pageRefresh?.invoke()
-                },
+        if (compact) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = localizedText(ModuleText.DRAG_TO_REORDER),
+                    modifier = Modifier.weight(1f),
+                    style = MiuixTheme.textStyles.body2,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+                EmbeddedSettingsIconAction(
+                    EmbeddedSvgIcon.RestoreDefault,
+                    localizedText(ModuleText.RESET_DEFAULT),
+                    onClick = ::resetSourceOrder,
+                )
+            }
+            Text(
+                text = localizedText(ModuleText.AUTO_LYRICS_SOURCE_ORDER_ALL),
+                modifier = Modifier.padding(horizontal = 12.dp),
+                style = MiuixTheme.textStyles.body2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
-            SettingsDivider()
-            EmbeddedSettingSwitch(
-                title = localizedText(ModuleText.AUTO_LYRICS_PREFER_NATIVE),
-                summary = localizedText(ModuleText.AUTO_LYRICS_PREFER_NATIVE_SUMMARY),
-                checked = settings.automaticLyricsPreferNative,
-                icon = EmbeddedSvgIcon.Music,
-                onCheckedChange = { preferNative ->
-                    settingsChanged(currentSettings.copy(automaticLyricsPreferNative = preferNative))
-                    pageRefresh?.invoke()
+        } else {
+            EmbeddedSettingsSection(
+                title = localizedText(ModuleText.AUTO_LYRICS_SOURCE_ORDER),
+            ) {
+                EmbeddedSettingsIconAction(
+                    EmbeddedSvgIcon.RestoreDefault,
+                    localizedText(ModuleText.RESET_DEFAULT),
+                    onClick = ::resetSourceOrder,
+                )
+            }
+            Text(
+                text = buildString {
+                    append(localizedText(ModuleText.AUTO_LYRICS_SOURCE_ORDER_ALL))
+                    append('\n')
+                    append(localizedText(ModuleText.DRAG_TO_REORDER))
                 },
-            )
-        }
-
-        EmbeddedSettingsSection(
-            title = localizedText(ModuleText.AUTO_LYRICS_SOURCE_ORDER),
-            summary = sourceSummary,
-        ) {
-            EmbeddedSettingsIconAction(
-                EmbeddedSvgIcon.RestoreDefault,
-                localizedText(ModuleText.RESET_DEFAULT),
-                onClick = ::resetSourceOrder,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                style = MiuixTheme.textStyles.body2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
         }
 
@@ -593,7 +584,9 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
                     val isDragging = draggingSource == source
                     AutomaticLyricsSourceRow(
                         source = source,
-                        sourceName = automaticLyricsSourceName(source),
+                        sourceName = automaticLyricsSourceName(source) { localizedText(it) },
+                        localize = localize,
+                        compact = compact,
                         position = index,
                         dragging = isDragging,
                         released = dragSettleJob != null,
@@ -610,6 +603,92 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
                     )
                 }
             }
+        }
+        Text(
+            text = localizedText(ModuleText.LUNABEAT_AFTER_NATIVE),
+            modifier = Modifier.padding(horizontal = 12.dp),
+            style = MiuixTheme.textStyles.body2,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        )
+    }
+}
+
+@Composable
+private fun EmbeddedSettingsHost.EmbeddedLyricsCacheRow() {
+    var controls by remember { mutableStateOf(LyricsPlaybackRuntimeRegistry.controls()) }
+    val observedControlsRef = remember { java.util.concurrent.atomic.AtomicReference<AutoCloseable?>(null) }
+    var usage by remember { mutableStateOf<Long?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var cacheReadFailed by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+    val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
+    val activity = currentActivity()
+
+    fun readUsage(clearFirst: Boolean = false) {
+        if (busy || activity == null) return
+        if (clearFirst && controls == null) return
+        busy = true
+        message = if (clearFirst) localizedText(ModuleText.LYRICS_CACHE_CLEARING) else null
+        runCatching {
+            worker.execute {
+                val operation = controls
+                val cleared = if (clearFirst) runCatching { operation?.clearCache() }.getOrNull() else null
+                val bytes = runCatching { operation?.cacheUsageBytes() }.getOrNull()
+                mainHandler.post {
+                    usage = bytes?.coerceAtLeast(0L)
+                    busy = false
+                    cacheReadFailed = bytes == null
+                    message = when {
+                        clearFirst && cleared != true -> localizedText(ModuleText.LYRICS_CACHE_CLEAR_FAILED)
+                        clearFirst && bytes == null -> localizedText(ModuleText.LYRICS_CACHE_SIZE_UNAVAILABLE)
+                        clearFirst -> localizedText(ModuleText.LYRICS_CACHE_CLEARED)
+                        operation == null -> localizedText(ModuleText.LYRICS_CACHE_UNAVAILABLE)
+                        bytes == null -> localizedText(ModuleText.LYRICS_CACHE_SIZE_UNAVAILABLE)
+                        else -> null
+                    }
+                }
+            }
+        }.onFailure {
+            mainHandler.post {
+                busy = false
+                message = localizedText(ModuleText.LYRICS_CACHE_CLEAR_FAILED)
+            }
+        }
+    }
+
+    LaunchedEffect(activity) {
+        val next = LyricsPlaybackRuntimeRegistry.controls()
+        // Registry binding happens before the settings dialog is opened. Keep
+        // one initial measurement and rely on observe for later cache writes.
+        if (next !== controls) controls = next
+        observedControlsRef.getAndSet(null)?.close()
+        observedControlsRef.set(
+            next?.observe { if (!busy) readUsage() },
+        )
+        if (next != null) readUsage()
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            observedControlsRef.getAndSet(null)?.close()
+        }
+    }
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        EmbeddedSettingsSection(
+            title = localizedText(ModuleText.LYRICS_THIRD_PARTY_CACHE),
+            summary = usage?.let { localizedText(ModuleText.LYRICS_CACHE_SUMMARY, formatLyricsCacheSize(it)) }
+                ?: localizedText(if (controls == null) ModuleText.LYRICS_CACHE_UNAVAILABLE else ModuleText.LYRICS_CACHE_SIZE_UNAVAILABLE),
+        )
+        EmbeddedSettingsGroup {
+            EmbeddedSettingLink(
+                title = localizedText(ModuleText.LYRICS_CACHE_CLEAR),
+                summary = message,
+                icon = EmbeddedSvgIcon.Delete,
+                enabled = controls != null && !busy && !cacheReadFailed,
+                onClick = { readUsage(clearFirst = true) },
+            )
         }
     }
 }
@@ -760,9 +839,11 @@ private fun EmbeddedSettingsHost.EmptyLyricsState(hasEntries: Boolean) {
 }
 
 @Composable
-private fun EmbeddedSettingsHost.AutomaticLyricsSourceRow(
+private fun AutomaticLyricsSourceRow(
     source: String,
     sourceName: String,
+    localize: (ModuleText, Array<out Any?>) -> String,
+    compact: Boolean,
     position: Int,
     dragging: Boolean,
     released: Boolean,
@@ -781,9 +862,9 @@ private fun EmbeddedSettingsHost.AutomaticLyricsSourceRow(
     val currentDrag by rememberUpdatedState(onDrag)
     val currentFinishDrag by rememberUpdatedState(onFinishDrag)
     val currentMoveForAccessibility by rememberUpdatedState(onMoveForAccessibility)
-    val dragDescription = localizedText(ModuleText.DRAG_SOURCE, sourceName)
-    val moveUp = localizedText(ModuleText.MOVE_UP)
-    val moveDown = localizedText(ModuleText.MOVE_DOWN)
+    val dragDescription = localize(ModuleText.DRAG_SOURCE, arrayOf(sourceName))
+    val moveUp = localize(ModuleText.MOVE_UP, emptyArray())
+    val moveDown = localize(ModuleText.MOVE_DOWN, emptyArray())
     val moveActions = buildList {
         if (canMoveUp) {
             add(CustomAccessibilityAction(moveUp) { currentMoveForAccessibility(-1) })
@@ -846,7 +927,7 @@ private fun EmbeddedSettingsHost.AutomaticLyricsSourceRow(
                 startAction = {
                     Text(
                         text = (position + 1).toString(),
-                        modifier = Modifier.width(28.dp),
+                        modifier = Modifier.widthIn(min = 16.dp),
                         style = MiuixTheme.textStyles.body2,
                         color = if (lifted) MiuixTheme.colorScheme.onSecondaryContainerVariant
                             else MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -878,13 +959,16 @@ private fun EmbeddedSettingsHost.AutomaticLyricsSourceRow(
                     ) {
                         EmbeddedSettingsIcon(
                             icon = EmbeddedSvgIcon.DragHandle,
-                            modifier = Modifier.size(24.dp),
+                            modifier = Modifier.size(if (compact) 20.dp else 24.dp),
                             tint = if (lifted) MiuixTheme.colorScheme.onSecondaryContainerVariant
                                 else MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
                     }
                 },
-                insideMargin = EmbeddedPreferencePadding,
+                insideMargin = PaddingValues(
+                    horizontal = if (compact) 12.dp else 16.dp,
+                    vertical = 4.dp,
+                ),
             )
         }
         // Keep the row footprint stable while the lifted row temporarily hides its separator.
@@ -1044,20 +1128,11 @@ private fun EmbeddedSettingsHost.showBackupRestoreDialog(activity: Activity) {
     }
 }
 
-private fun EmbeddedSettingsHost.automaticLyricsSourceName(source: String): String = when (source) {
+private fun automaticLyricsSourceName(source: String, localizedText: (ModuleText) -> String): String = when (source) {
     CustomLyricsSources.AUTO_CACHE -> localizedText(ModuleText.AUTO_CACHE)
     CustomLyricsSources.AMLL -> "AMLL"
-    CustomLyricsSources.AM_LYRICS -> localizedText(ModuleText.AM_LYRICS_REPOSITORY)
+    CustomLyricsSources.AM_LYRICS -> localizedText(ModuleText.LYRICS_SOURCE_AM_LYRICS)
     CustomLyricsSources.LUNABEAT -> "Lunabeat"
     CustomLyricsSources.AM_NATIVE -> localizedText(ModuleText.AM_NATIVE)
     else -> localizedText(ModuleText.MANUAL_TTML)
-}
-
-private fun visibleAutomaticLyricsSources(
-    order: List<String>,
-    preferNative: Boolean,
-): List<String> = if (preferNative) {
-    order.filterNot { it == CustomLyricsSources.AM_NATIVE }
-} else {
-    order
 }

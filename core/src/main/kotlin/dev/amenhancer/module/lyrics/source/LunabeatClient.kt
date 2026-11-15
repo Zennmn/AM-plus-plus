@@ -132,22 +132,39 @@ class LunabeatClient(
     private val indexTransport: LyricHttpTransport,
     private val lyricsTransport: LyricHttpTransport = indexTransport,
     private val cache: LunabeatCatalogCache,
+    private val onFailure: ((LyricFetchFailure) -> Unit)? = null,
 ) {
     fun fetch(appleMusicId: Long): String? {
         if (appleMusicId <= 0L) return null
         val catalog = loadCatalog() ?: return null
-        val song = catalog.entryFor(appleMusicId) ?: return null
+        val song = catalog.entryFor(appleMusicId)
+        if (song == null) {
+            onFailure?.invoke(LyricFetchFailure.NOT_FOUND)
+            return null
+        }
         return fetch(song)
     }
 
     /** Fetches one already-resolved catalog song without reloading the catalog. */
     fun fetch(song: LunabeatSong): String? {
-        val encodedPath = encodePath(song.path) ?: return null
+        val encodedPath = encodePath(song.path)
+        if (encodedPath == null) {
+            onFailure?.invoke(LyricFetchFailure.INVALID)
+            return null
+        }
         val bytes = lyricsTransport.getBytes("$LYRICS_BASE/$encodedPath") ?: return null
-        if (bytes.size > TtmlInputPolicy.MAX_TTML_BYTES) return null
-        if (!sha256(bytes).equals(song.sha256, ignoreCase = true)) return null
-        return bytes.toString(Charsets.UTF_8)
-            .takeIf(TtmlInputPolicy::isAcceptable)
+        if (bytes.size > TtmlInputPolicy.MAX_TTML_BYTES ||
+            !sha256(bytes).equals(song.sha256, ignoreCase = true)
+        ) {
+            onFailure?.invoke(LyricFetchFailure.INVALID)
+            return null
+        }
+        val ttml = bytes.toString(Charsets.UTF_8)
+        if (!TtmlInputPolicy.isAcceptable(ttml)) {
+            onFailure?.invoke(LyricFetchFailure.INVALID)
+            return null
+        }
+        return ttml
     }
 
     fun loadCatalog(): LunabeatCatalog? {
@@ -155,17 +172,21 @@ class LunabeatClient(
         val cached = cachedSnapshot?.let { snapshot ->
             parseCatalog(snapshot.manifestJson, snapshot.indexJson)
         }
+        if (cachedSnapshot != null && cached == null) onFailure?.invoke(LyricFetchFailure.INVALID)
         var response = indexTransport.getResponse(MANIFEST_URL, cachedSnapshot?.etag)
             ?: return cached
         if (response.statusCode == 304) {
             if (cached != null) return cached
             response = indexTransport.getResponse(MANIFEST_URL) ?: return null
-            if (response.statusCode == 304) return null
+            if (response.statusCode == 304) {
+                onFailure?.invoke(LyricFetchFailure.INVALID)
+                return null
+            }
         }
         if (response.statusCode != 200 || response.body == null) return cached
         val remoteManifestJson = response.body.toString(Charsets.UTF_8)
         val remoteManifest = parseManifest(remoteManifestJson)
-            ?: return cached
+            ?: return invalidUnlessCached(cached)
         if (cached != null &&
             cached.manifest.revision == remoteManifest.revision &&
             cached.manifest.indexPath == remoteManifest.indexPath
@@ -178,15 +199,20 @@ class LunabeatClient(
             }
             return cached
         }
-        val indexPath = encodePath(remoteManifest.indexPath) ?: return cached
+        val indexPath = encodePath(remoteManifest.indexPath) ?: return invalidUnlessCached(cached)
         val indexResponse = indexTransport.getResponse("$API_BASE/$indexPath") ?: return cached
         if (indexResponse.statusCode != 200 || indexResponse.body == null) return cached
         val indexBytes = indexResponse.body
-        if (indexBytes.size > INDEX_MAX_BYTES) return cached
+        if (indexBytes.size > INDEX_MAX_BYTES) return invalidUnlessCached(cached)
         val indexJson = indexBytes.toString(Charsets.UTF_8)
-        val updated = parseCatalog(remoteManifestJson, indexJson) ?: return cached
+        val updated = parseCatalog(remoteManifestJson, indexJson) ?: return invalidUnlessCached(cached)
         cache.write(remoteManifestJson, indexJson, response.etag)
         return updated
+    }
+
+    private fun invalidUnlessCached(cached: LunabeatCatalog?): LunabeatCatalog? {
+        if (cached == null) onFailure?.invoke(LyricFetchFailure.INVALID)
+        return cached
     }
 
     companion object {
