@@ -43,6 +43,7 @@ internal object FeatureInstallation {
         targetClassLoader: ClassLoader,
         currentSong: CurrentSongIdentityCache,
         writeAutomaticLyricsSourceOrder: (List<String>) -> Boolean,
+        writeAutomaticLyricsEnabled: (Boolean) -> Boolean,
     ) {
         module.installNow(config) {
             HookContext(
@@ -54,6 +55,7 @@ internal object FeatureInstallation {
                     lyricsTypefaceSession = lyricsTypefaceSession,
                     currentSong = currentSong,
                     writeAutomaticLyricsSourceOrder = writeAutomaticLyricsSourceOrder,
+                    writeAutomaticLyricsEnabled = writeAutomaticLyricsEnabled,
                 ),
             )
         }

@@ -11,6 +11,7 @@ internal fun assembleAppleMusicTarget(
     lyricsTypefaceSession: LyricsTypefaceResourceBinding,
     currentSong: CurrentSongIdentityCache = CurrentSongIdentityCache(),
     writeAutomaticLyricsSourceOrder: ((List<String>) -> Boolean)? = null,
+    writeAutomaticLyricsEnabled: ((Boolean) -> Boolean)? = null,
 ): TargetAdaptation {
     val automatic = run {
         val suppressed = runCatching { config.customLyricsManifest().entries
@@ -20,7 +21,16 @@ internal fun assembleAppleMusicTarget(
     }
     return AppleMusicHostFactory.appleMusic(config, application, classLoader, lyricsTypefaceSession, currentSong, automatic,
         onOpenLyricsMenu = { activity ->
-            showEmbeddedLyricsMenu(activity, currentSong, automatic.playback, config::settings, writeAutomaticLyricsSourceOrder)
+            showEmbeddedLyricsMenu(activity, currentSong, automatic.playback, config::settings,
+                writeAutomaticLyricsSourceOrder,
+                writeAutomaticLyricsEnabled = writeAutomaticLyricsEnabled?.let { write ->
+                    { enabled ->
+                        val saved = write(enabled)
+                        if (saved) automatic.playback?.onSettingsChanged()
+                        saved
+                    }
+                },
+            )
         },
     )
 }

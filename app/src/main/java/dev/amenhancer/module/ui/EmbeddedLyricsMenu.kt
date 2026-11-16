@@ -55,6 +55,7 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
+import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 private const val LYRICS_MENU_OFFSET_STEP_MS = 100
@@ -74,6 +75,7 @@ internal fun showEmbeddedLyricsMenu(
     controls: LyricsPlaybackControls?,
     readSettings: () -> ModuleSettings,
     writeSourceOrder: ((List<String>) -> Boolean)?,
+    writeAutomaticLyricsEnabled: ((Boolean) -> Boolean)? = null,
 ) {
     if (activity.isFinishing || activity.isDestroyed) return
     fun showFailure() {
@@ -126,6 +128,7 @@ internal fun showEmbeddedLyricsMenu(
                 visibleDetail = visibleDetail,
                 readSettings = readSettings,
                 writeSourceOrder = writeSourceOrder,
+                writeAutomaticLyricsEnabled = writeAutomaticLyricsEnabled,
                 dismiss = { requestDismiss(closeWindow) },
                 onPresented = { presented = true },
                 onDismissFinished = { if (closing) closeWindow() },
@@ -162,6 +165,7 @@ private fun EmbeddedLyricsMenuDialog(
     visibleDetail: MutableState<LyricsMenuDetail?>,
     readSettings: () -> ModuleSettings,
     writeSourceOrder: ((List<String>) -> Boolean)?,
+    writeAutomaticLyricsEnabled: ((Boolean) -> Boolean)?,
     dismiss: () -> Unit,
     onPresented: () -> Unit,
     onDismissFinished: () -> Unit,
@@ -194,7 +198,9 @@ private fun EmbeddedLyricsMenuDialog(
     var offsetBusy by remember { mutableStateOf(false) }
     var offsetMessage by remember { mutableStateOf<String?>(null) }
     var pendingOffset by remember { mutableStateOf<Int?>(initial.offsetMs) }
-    var llmStatusSettings by remember { mutableStateOf<ModuleSettings?>(null) }
+    var menuSettings by remember { mutableStateOf(runCatching(readSettings).getOrNull()) }
+    var automaticSaving by remember { mutableStateOf(false) }
+    val currentShow by rememberUpdatedState(show)
     val activeSource = snapshot.activeSource
     val songReady = appleMusicId > 0L && snapshot.isCurrentSong
     val canAdjust = songReady && snapshot.canAdjustTiming && activeSource != null && snapshot.pendingSource == null
@@ -222,7 +228,7 @@ private fun EmbeddedLyricsMenuDialog(
         ?: text(ModuleText.LYRICS_OFFSET_DISABLED)
 
     LaunchedEffect(show, appleMusicId, llmStatus) {
-        llmStatusSettings = if (show) runCatching(readSettings).getOrNull() else null
+        if (show) menuSettings = runCatching(readSettings).getOrNull()
     }
 
     fun refreshSnapshot() {
@@ -294,8 +300,37 @@ private fun EmbeddedLyricsMenuDialog(
     }
 
     fun refreshFromRuntime() {
+        menuSettings = runCatching(readSettings).getOrNull()
         refreshSnapshot()
         refreshCache()
+    }
+
+    fun saveAutomaticLyricsEnabled(enabled: Boolean) {
+        val current = menuSettings ?: return
+        val write = writeAutomaticLyricsEnabled ?: return
+        if (!show || automaticSaving || !current.customLyricsEnabled ||
+            current.automaticLyricsEnabled == enabled
+        ) return
+        automaticSaving = true
+        runCatching {
+            worker.execute {
+                val saved = runCatching { write(enabled) }.getOrDefault(false)
+                mainHandler.post {
+                    if (!currentShow || activity.isFinishing || activity.isDestroyed) return@post
+                    automaticSaving = false
+                    if (saved) {
+                        menuSettings = runCatching(readSettings).getOrNull()
+                            ?: current.copy(automaticLyricsEnabled = enabled)
+                        refreshSnapshot()
+                    } else {
+                        Toast.makeText(activity, text(ModuleText.SETTINGS_SAVE_FAILED), Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }.onFailure {
+            automaticSaving = false
+            Toast.makeText(activity, text(ModuleText.SETTINGS_SAVE_FAILED), Toast.LENGTH_SHORT).show()
+        }
     }
 
     fun applyOffset(value: Int) {
@@ -385,6 +420,31 @@ private fun EmbeddedLyricsMenuDialog(
             EmbeddedSettingsGroup(
                 modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
             ) {
+                menuSettings?.let { settings ->
+                    if (writeAutomaticLyricsEnabled != null) {
+                        val canToggle = show && settings.customLyricsEnabled && !automaticSaving
+                        SwitchPreference(
+                            title = text(ModuleText.AUTO_LYRICS),
+                            summary = text(
+                                if (settings.customLyricsEnabled) ModuleText.LYRICS_MENU_AUTO_SUMMARY
+                                else ModuleText.LYRICS_MENU_AUTO_DISABLED,
+                            ),
+                            checked = settings.automaticLyricsEnabled,
+                            enabled = canToggle,
+                            onCheckedChange = ::saveAutomaticLyricsEnabled,
+                            startAction = {
+                                EmbeddedSettingsIcon(
+                                    EmbeddedSvgIcon.AutomaticLyrics,
+                                    modifier = Modifier.size(22.dp),
+                                    tint = if (canToggle) MiuixTheme.colorScheme.primary
+                                    else MiuixTheme.colorScheme.disabledOnSecondaryVariant,
+                                )
+                            },
+                            insideMargin = LyricsMenuRowPadding,
+                        )
+                        HorizontalDivider(Modifier.padding(horizontal = 14.dp))
+                    }
+                }
                 OverlayDropdownPreference(
                     entry = DropdownEntry(items = sources.map { option ->
                         DropdownItem(
@@ -424,7 +484,7 @@ private fun EmbeddedLyricsMenuDialog(
                         },
                     )
                 }
-                llmStatusSettings?.let { statusSettings ->
+                menuSettings?.let { statusSettings ->
                     HorizontalDivider(Modifier.padding(horizontal = 16.dp))
                     LlmLyricsStatusSection(
                         settings = statusSettings,

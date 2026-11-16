@@ -57,6 +57,8 @@ interface LyricsPlaybackRuntime : LyricsPlaybackControls {
         onReady: (Long) -> Unit,
     ): AutoCloseable
     fun onSongChanged(appleMusicId: Long?)
+    /** Reselect the current song after its shared runtime settings are saved. */
+    fun onSettingsChanged()
     fun hasReadyLyrics(appleMusicId: Long): Boolean
     fun preferredSource(appleMusicId: Long): String?
     fun isSuppressed(appleMusicId: Long): Boolean

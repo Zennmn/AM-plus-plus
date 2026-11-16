@@ -167,6 +167,10 @@ class HookEntry : XposedModule() {
                                 targetClassLoader,
                                 currentSong,
                                 writeAutomaticLyricsSourceOrder = session::saveAutomaticLyricsSourceOrder,
+                                writeAutomaticLyricsEnabled = { enabled ->
+                                    val latest = session.settings()
+                                    session.saveSettings(latest.copy(automaticLyricsEnabled = enabled))
+                                },
                             )
                         }.onFailure { error ->
                             ModernXposedRuntime.log("embedded feature installation failed open", error)

@@ -58,6 +58,10 @@ internal class EmbeddedLyricsPlaybackRuntime(
         return AutoCloseable { synchronized(lock) { if (binding === next) binding = null } }
     }
 
+    override fun onSettingsChanged() {
+        notifyChanged(wake = true)
+    }
+
     override fun onSongChanged(appleMusicId: Long?) {
         val changed = synchronized(lock) {
             if (songId == appleMusicId) false else {

@@ -501,6 +501,14 @@ enum class ModuleText(internal val english: String, internal val chinese: String
 
     // Runtime lyrics menu and source/cache state.
     LYRICS_MENU("Lyrics menu", "歌词菜单"),
+    LYRICS_MENU_AUTO_SUMMARY(
+        "Applies to all songs · Your source choices take priority",
+        "全局生效 · 手选来源优先",
+    ),
+    LYRICS_MENU_AUTO_DISABLED(
+        "Enable Custom lyrics replacement first",
+        "请先开启「自定义歌词替换」",
+    ),
     LYRICS_MENU_AUTO_SOURCE_ORDER("Automatic source order", "自动来源排序"),
     LYRICS_MENU_OPEN_FAILED("Couldn't open the lyrics menu. Try again.", "无法打开歌词菜单，请重试。"),
     LYRICS_MENU_SONG_NOT_READY("Song information isn't ready yet. Source and timing controls are unavailable.", "当前歌曲信息尚未就绪，暂时无法切换来源或调整时间。"),
