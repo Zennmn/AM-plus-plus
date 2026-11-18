@@ -61,6 +61,8 @@ interface LyricsPlaybackRuntime : LyricsPlaybackControls {
     /** Reselect the current song after its shared runtime settings are saved. */
     fun onSettingsChanged()
     fun hasReadyLyrics(appleMusicId: Long): Boolean
+    /** Checks indexed sources before native preparation, including for an upcoming item. */
+    fun hasCachedLyrics(appleMusicId: Long, automaticSources: List<String>): Boolean
     fun preferredSource(appleMusicId: Long): String?
     fun isSuppressed(appleMusicId: Long): Boolean
     fun manualEntry(appleMusicId: Long): dev.amenhancer.module.model.CustomLyricsEntry?
