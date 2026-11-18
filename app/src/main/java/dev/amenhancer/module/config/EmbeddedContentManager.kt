@@ -162,7 +162,7 @@ internal class EmbeddedContentManager(
                 fileIdFactory = { fileIdFactory("lyrics") },
                 writeRemoteFile = session::writeFile,
                 publishManifest = { next ->
-                    when (val committed = session.commitCustomLyrics(next)) {
+                    when (val committed = commitManualLyrics(next)) {
                         is CustomLyricsIndexCommitResult.Committed -> true
                         is CustomLyricsIndexCommitResult.Failed -> { publishFailure = committed.message; false }
                     }
@@ -222,7 +222,7 @@ internal class EmbeddedContentManager(
                 fileIdFactory = { fileIdFactory("lyrics") },
                 writeRemoteFile = session::writeFile,
                 publishManifest = { next ->
-                    when (val committed = session.commitCustomLyrics(next)) {
+                    when (val committed = commitManualLyrics(next)) {
                         is CustomLyricsIndexCommitResult.Committed -> true
                         is CustomLyricsIndexCommitResult.Failed -> { publishFailure = committed.message; false }
                     }
@@ -381,7 +381,7 @@ internal class EmbeddedContentManager(
                 fileIdFactory = { fileIdFactory("lyrics") },
                 writeRemoteFile = session::writeFile,
                 publishManifest = { next ->
-                    session.commitCustomLyrics(next, allowRecovery = true) is CustomLyricsIndexCommitResult.Committed
+                    commitManualLyrics(next, allowRecovery = true) is CustomLyricsIndexCommitResult.Committed
                 },
                 deleteRemoteFile = ::deleteManualBody,
             ).merge(current, policy) { onFile -> CustomLyricsBackupCodec.decode(input, onFile) }.also { result ->
@@ -398,17 +398,12 @@ internal class EmbeddedContentManager(
         sources: CustomLyricsUpdateSources,
         isCancelled: () -> Boolean = { false },
         onProgress: (CustomLyricsUpdateProgress) -> Unit = {},
-        targetIds: Set<Long>? = null,
-        requireWordTiming: Boolean = false,
     ): CustomLyricsUpdateResult {
-        if (!sourceCache.prepare()) {
+        if (!sourceCache.prepareSource()) {
             return CustomLyricsUpdateResult.Failed(ModuleText.LYRICS_INDEX_UPDATE_UNREADABLE.text())
         }
         val epoch = sourceCache.generation()
-        val selected = sourceCache.entries().filter { targetIds == null || it.appleMusicId in targetIds }
-        if (targetIds != null && !selected.mapTo(mutableSetOf(), CustomLyricsEntry::appleMusicId).containsAll(targetIds)) {
-            return CustomLyricsUpdateResult.Failed(ModuleText.LYRICS_MAPPING_MISSING.text())
-        }
+        val selected = sourceCache.entries()
         // Legacy auto-cache envelopes have no stable provider, or use a legacy filename.
         // They remain usable and refresh through playback, without rewriting them in bulk.
         val refreshable = selected.filter { CustomLyricsManifestPolicy.isValidFileId(it.fileId) }
@@ -434,7 +429,6 @@ internal class EmbeddedContentManager(
                         summary.skipped + progress.skippedEntries, summary.failed + progress.failedEntries,
                     ))
                 },
-                requireWordTiming = requireWordTiming,
             )
             when (result) {
                 is CustomLyricsUpdateResult.Updated -> {
@@ -449,27 +443,32 @@ internal class EmbeddedContentManager(
         return CustomLyricsUpdateResult.Updated(CustomLyricsManifest(sourceCache.entries()), summary, issues)
     }
 
-    fun updateSong(
-        appleMusicId: Long,
-        sources: CustomLyricsUpdateSources,
-        isCancelled: () -> Boolean = { false },
-    ): CustomLyricsUpdateResult = updateLyrics(sources, isCancelled,
-        targetIds = setOf(appleMusicId), requireWordTiming = true)
-
     private fun currentLyricsManifest(): CustomLyricsManifest =
         sourceCache.manualManifest()
 
     private fun deleteManualBody(fileId: String) {
         if (!sourceCache.isFileReferenced(fileId) &&
-            sourceCache.manualManifest().entries.none { it.fileId == fileId }
+            sourceCache.manualIndexManifest().entries.none { it.fileId == fileId }
         ) session.deleteFile(fileId)
     }
 
     private fun publishLyrics(next: CustomLyricsManifest): EmbeddedLyricsMutationResult =
-        when (val result = session.commitCustomLyrics(next)) {
-            is CustomLyricsIndexCommitResult.Committed -> EmbeddedLyricsMutationResult.Updated(result.manifest)
+        when (val result = commitManualLyrics(next)) {
+            is CustomLyricsIndexCommitResult.Committed -> EmbeddedLyricsMutationResult.Updated(
+                CustomLyricsManifest(result.manifest.entries.filter {
+                    it.source == CustomLyricsSources.MANUAL
+                }),
+            )
             is CustomLyricsIndexCommitResult.Failed -> EmbeddedLyricsMutationResult.Failed(result.message)
         }
+
+    private fun commitManualLyrics(
+        next: CustomLyricsManifest,
+        allowRecovery: Boolean = false,
+    ): CustomLyricsIndexCommitResult = session.commitCustomLyrics(
+        sourceCache.preserveUnmigratedSources(next),
+        allowRecovery = allowRecovery,
+    )
 
     private fun readFile(fileId: String): ByteArray? = runCatching {
         session.readFileBytes(fileId)

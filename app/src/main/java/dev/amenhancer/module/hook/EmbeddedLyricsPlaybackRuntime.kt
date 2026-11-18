@@ -512,7 +512,7 @@ internal class EmbeddedLyricsPlaybackRuntime(
                 ) pendingOffset = null
             }
         }) {
-            val shifted = TtmlTimelineOffset.apply(ttml, offset)
+            val shifted = TtmlTimelineOffset.apply(ttml, offset, amllTiming = source == CustomLyricsSources.AMLL)
             val pointer = shifted?.let { backend.prepare(appleMusicId, it) }
             synchronized(lock) {
                 if (!isCurrentLocked(appleMusicId, stamp) || offsetGeneration != displayStamp ||
@@ -555,7 +555,8 @@ internal class EmbeddedLyricsPlaybackRuntime(
                 }) notifyChanged()
             return false
         }
-        val shifted = TtmlTimelineOffset.apply(raw, offsetMs) ?: return fail(ModuleText.LYRICS_OFFSET_UNAVAILABLE)
+        val shifted = TtmlTimelineOffset.apply(raw, offsetMs, amllTiming = source == CustomLyricsSources.AMLL)
+            ?: return fail(ModuleText.LYRICS_OFFSET_UNAVAILABLE)
         val pointer = if (offsetMs == 0) current.payload else {
             runCatching { backend.prepare(appleMusicId, shifted) }.getOrNull()
                 ?: return fail(ModuleText.LYRICS_OFFSET_UNAVAILABLE)

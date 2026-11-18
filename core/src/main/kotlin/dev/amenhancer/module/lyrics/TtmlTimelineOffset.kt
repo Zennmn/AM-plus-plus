@@ -10,21 +10,20 @@ import java.util.Locale
  * In Apple's lyric dialect, hh:mm:ss[.fraction] and mm:ss[.fraction] clocks on
  * nested lines, words and background voices are document-absolute. Those
  * explicit clocks are shifted together, including clocks in auxiliary tracks.
- * Unit offsets (s/ms/m/h) and bare seconds are accepted only outside a chain
- * of explicitly timed ancestors/descendants: a chain involving either syntax
- * is refused because its parent-relative time base cannot be inferred safely.
- * Numeric containment is never used to guess whether a time is absolute.
+ * AMLL also uses bare seconds as document-absolute timestamps. Outside that
+ * dialect, bare seconds and unit offsets are ambiguous under timed ancestors
+ * or descendants. Unit offsets remain ambiguous in AMLL too.
  *
  * Negative results are clipped to zero, but an explicit end at/before zero or
  * a collapsed interval makes the entire operation fail. A duration-anchored
- * start that would be clipped is also refused, since dur must stay unchanged.
+ * start that would be clipped is also refused to preserve its interval length.
  * Callers must apply the desired offset to the original document each time.
  * Zero offset returns that original verbatim, without validating it; nonzero
  * offsets return null for unsupported, unsafe or untimed documents.
  */
 public object TtmlTimelineOffset {
 
-    public fun apply(ttml: String, offsetMs: Int): String? {
+    public fun apply(ttml: String, offsetMs: Int, amllTiming: Boolean = false): String? {
         if (offsetMs == 0) return ttml
         if (!TtmlInputPolicy.isAcceptable(ttml)) return null
         val lower = ttml.lowercase(Locale.ROOT)
@@ -33,6 +32,7 @@ public object TtmlTimelineOffset {
         val edits = TtmlTimelineScanner(
             text = ttml,
             offsetSeconds = BigDecimal.valueOf(offsetMs.toLong(), 3),
+            amllTiming = amllTiming,
         ).scan() ?: return null
         if (edits.isEmpty()) return ttml
         val shifted = applyEdits(ttml, edits) ?: return null
@@ -57,6 +57,7 @@ public object TtmlTimelineOffset {
 private class TtmlTimelineScanner(
     private val text: String,
     private val offsetSeconds: BigDecimal,
+    private val amllTiming: Boolean,
 ) {
     private val stack = mutableListOf<Frame>()
     private val edits = mutableListOf<TimeEdit>()
@@ -65,6 +66,8 @@ private class TtmlTimelineScanner(
     private var headCount = 0
     private var bodyCount = 0
     private var timingElements = 0
+    private var amllBodyDuration: Pair<XmlAttribute, ParsedTime>? = null
+    private var latestEnd = BigDecimal.ZERO
 
     fun scan(): List<TimeEdit>? {
         var index = 0
@@ -78,19 +81,19 @@ private class TtmlTimelineScanner(
             if ((!rootSeen || rootClosed) && !isIgnorable(index, open)) return null
             index = open
             when {
-                text.startsWith("<!--", open) -> {
-                    index = literalEnd(open, "-->") ?: return null
-                }
-                text.startsWith("<![CDATA[", open) -> {
-                    index = literalEnd(open, "]]>") ?: return null
-                }
-                text.startsWith("<?", open) -> {
-                    index = literalEnd(open, "?>") ?: return null
+                text.startsWith("<!--", open) || text.startsWith("<![CDATA[", open) ||
+                    text.startsWith("<?", open) -> {
+                    index = TtmlScanner.literalEnd(text, open, strict = true)
+                    if (index < 0) return null
                 }
                 text.startsWith("<!", open) -> return null
                 text.startsWith("</", open) -> {
-                    val close = tagEnd(open) ?: return null
-                    val name = closingName(open, close) ?: return null
+                    val close = TtmlScanner.tagEnd(text, open)
+                    if (close < 0) return null
+                    val tag = TtmlScanner.tag(text, open, close)
+                    val name = tag.name.takeIf {
+                        tag.attributes.isBlank() && validName(it)
+                    } ?: return null
                     if (stack.isEmpty()) return null
                     val frame = stack.removeLast()
                     if (frame.name != name) return null
@@ -102,7 +105,8 @@ private class TtmlTimelineScanner(
                 }
                 else -> {
                     if (rootClosed) return null
-                    val close = tagEnd(open) ?: return null
+                    val close = TtmlScanner.tagEnd(text, open)
+                    if (close < 0) return null
                     val tag = startTag(open, close) ?: return null
                     if (!visit(tag)) return null
                     index = close + 1
@@ -111,6 +115,12 @@ private class TtmlTimelineScanner(
         }
         if (!rootSeen || !rootClosed || stack.isNotEmpty() || bodyCount != 1) return null
         if (timingElements == 0) return null
+        amllBodyDuration?.let { (attribute, parsed) ->
+            // AMLL's body dur is a document end bound, not a per-element interval.
+            if (offsetSeconds.signum() > 0 && latestEnd > parsed.seconds) {
+                addEdit(attribute, parsed, latestEnd)
+            }
+        }
         return edits
     }
 
@@ -155,14 +165,12 @@ private class TtmlTimelineScanner(
                     val parsed = parseTime(value(attribute)) ?: return false
                     if (parsed.seconds.signum() <= 0) return false
                     duration = parsed.seconds
+                    if (amllTiming && tag.localName == "body") amllBodyDuration = attribute to parsed
                 }
                 local == "begin" || local == "end" -> if (attribute.name != local) return false
             }
         }
 
-        val beginCount = tag.attributes.count { it.name == "begin" }
-        val endCount = tag.attributes.count { it.name == "end" }
-        if (beginCount > 1 || endCount > 1) return false
         val beginAttribute = tag.attributes.firstOrNull { it.name == "begin" }
         val endAttribute = tag.attributes.firstOrNull { it.name == "end" }
         val hasTiming = beginAttribute != null || endAttribute != null
@@ -170,11 +178,11 @@ private class TtmlTimelineScanner(
 
         val begin = beginAttribute?.let { parseTime(value(it)) ?: return false }
         val end = endAttribute?.let { parseTime(value(it)) ?: return false }
-        val hasOffsetTime = begin?.style?.isClock == false || end?.style?.isClock == false
+        val hasRelativeTime = isRelative(begin) || isRelative(end)
         // An untimed wrapper cannot reset the time base of its descendants.
         // Reject both offset children of clocks and clock children of offsets.
         if (hasTiming && parent?.hasExplicitTiming == true &&
-            (hasOffsetTime || parent.hasOffsetTiming)
+            (hasRelativeTime || parent.hasRelativeTiming)
         ) {
             return false
         }
@@ -182,15 +190,16 @@ private class TtmlTimelineScanner(
         val clippedBegin = begin != null && begin.seconds.add(offsetSeconds).signum() < 0
         if (duration != null && (clippedBegin || parent?.hasClippedBegin == true)) return false
         if (hasTiming) {
-            if (begin != null && end != null) {
-                if (begin.seconds >= end.seconds || shiftedSeconds(begin) >= shiftedSeconds(end)) {
-                    return false
-                }
-            }
             // Also covers end-only lines/voices whose start is implicit.
-            if (end != null && shiftedSeconds(end).signum() == 0) return false
+            if (end != null) {
+                val shiftedEnd = shiftedSeconds(end)
+                if (shiftedEnd.signum() == 0 ||
+                    (begin != null && (begin.seconds >= end.seconds || shiftedSeconds(begin) >= shiftedEnd))
+                ) return false
+                if (amllTiming) latestEnd = latestEnd.max(shiftedEnd)
+                endAttribute?.let { addEdit(it, end, shiftedEnd) }
+            }
             beginAttribute?.let { addEdit(it, requireNotNull(begin)) }
-            endAttribute?.let { addEdit(it, requireNotNull(end)) }
             timingElements += 1
         }
 
@@ -203,18 +212,21 @@ private class TtmlTimelineScanner(
                 inAuxiliary = inAuxiliary,
                 isRoot = isRoot,
                 hasExplicitTiming = hasTiming || parent?.hasExplicitTiming == true,
-                hasOffsetTiming = hasOffsetTime || parent?.hasOffsetTiming == true,
+                hasRelativeTiming = hasRelativeTime || parent?.hasRelativeTiming == true,
                 hasClippedBegin = clippedBegin || parent?.hasClippedBegin == true,
             )
         }
         return true
     }
 
-    private fun addEdit(attribute: XmlAttribute, parsed: ParsedTime) {
+    private fun isRelative(time: ParsedTime?): Boolean =
+        time?.style == TimeStyle.OFFSET || (!amllTiming && time?.style == TimeStyle.SECONDS)
+
+    private fun addEdit(attribute: XmlAttribute, parsed: ParsedTime, seconds: BigDecimal = shiftedSeconds(parsed)) {
         val raw = value(attribute)
         val leading = raw.takeWhile { it.isWhitespace() }
         val trailing = raw.drop(leading.length).takeLastWhile { it.isWhitespace() }
-        val replacement = leading + formatTime(shiftedSeconds(parsed), parsed) + trailing
+        val replacement = leading + formatTime(seconds, parsed) + trailing
         if (replacement != raw) {
             edits += TimeEdit(attribute.valueStart, attribute.valueEnd, replacement)
         }
@@ -232,37 +244,6 @@ private class TtmlTimelineScanner(
             if (!character.isWhitespace() && !(index == 0 && character == '\uFEFF')) return false
         }
         return true
-    }
-
-    private fun literalEnd(open: Int, terminator: String): Int? {
-        val close = text.indexOf(terminator, open + 2)
-        return if (close < 0) null else close + terminator.length
-    }
-
-    private fun tagEnd(open: Int): Int? {
-        var quote: Char? = null
-        var index = open + 1
-        while (index < text.length) {
-            val character = text[index]
-            when {
-                quote != null -> if (character == quote) quote = null
-                character == '"' || character == '\'' -> quote = character
-                character == '>' -> return index
-            }
-            index += 1
-        }
-        return null
-    }
-
-    private fun closingName(open: Int, close: Int): String? {
-        var index = open + 2
-        if (index >= close) return null
-        val nameStart = index
-        while (index < close && !text[index].isWhitespace()) index += 1
-        val name = text.substring(nameStart, index)
-        if (!validName(name)) return null
-        while (index < close && text[index].isWhitespace()) index += 1
-        return name.takeIf { index == close }
     }
 
     private fun startTag(open: Int, close: Int): StartTag? {
@@ -480,7 +461,7 @@ private data class Frame(
     val inAuxiliary: Boolean,
     val isRoot: Boolean,
     val hasExplicitTiming: Boolean,
-    val hasOffsetTiming: Boolean,
+    val hasRelativeTiming: Boolean,
     val hasClippedBegin: Boolean,
 )
 
@@ -511,11 +492,11 @@ private data class ParsedTime(
     val fractionScale: Int,
 )
 
-private enum class TimeStyle(val isClock: Boolean) {
-    CLOCK_3(true),
-    CLOCK_2(true),
-    OFFSET(false),
-    SECONDS(false),
+private enum class TimeStyle {
+    CLOCK_3,
+    CLOCK_2,
+    OFFSET,
+    SECONDS,
 }
 
 private const val OFFSET_MAX_TIME_LITERAL_LENGTH = 128

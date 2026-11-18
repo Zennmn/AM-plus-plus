@@ -184,11 +184,6 @@ private fun EmbeddedLyricsMenuDialog(
     val currentAppleMusicId by rememberUpdatedState(appleMusicId)
     var snapshot by remember(appleMusicId, controls) { mutableStateOf(initial) }
     val currentControls by rememberUpdatedState(controls)
-    var cacheBytes by remember { mutableStateOf<Long?>(null) }
-    var cacheBusy by remember { mutableStateOf(false) }
-    var cacheMessage by remember { mutableStateOf<String?>(null) }
-    var cacheReadFailed by remember { mutableStateOf(false) }
-    var cacheRefreshQueued by remember { mutableStateOf(false) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     var detail by visibleDetail
     val showOffsetEditor = detail == LyricsMenuDetail.OFFSET
@@ -256,53 +251,22 @@ private fun EmbeddedLyricsMenuDialog(
         }
     }
 
-    fun refreshCache(clearFirst: Boolean = false) {
-        if (cacheBusy) {
-            if (!clearFirst) cacheRefreshQueued = true
-            return
-        }
-        cacheBusy = true
-        if (clearFirst) cacheMessage = text(ModuleText.LYRICS_CACHE_CLEARING)
-        runCatching {
-            worker.execute {
-                val clearResult = if (clearFirst) runCatching { currentControls.clearCache() }.getOrNull() else null
-                val usage = runCatching { currentControls.cacheUsageBytes() }.getOrNull()
-                mainHandler.post {
-                    if (activity.isFinishing || activity.isDestroyed) return@post
-                    cacheBytes = usage?.coerceAtLeast(0L)
-                    cacheBusy = false
-                    cacheReadFailed = usage == null
-                    cacheMessage = when {
-                        clearFirst && clearResult != true -> text(ModuleText.LYRICS_CACHE_CLEAR_FAILED)
-                        clearFirst && usage == null -> text(ModuleText.LYRICS_CACHE_SIZE_UNAVAILABLE)
-                        clearFirst -> text(ModuleText.LYRICS_CACHE_CLEARED)
-                        usage == null -> text(ModuleText.LYRICS_CACHE_SIZE_UNAVAILABLE)
-                        else -> cacheMessage
-                    }
-                    refreshSnapshot()
-                    if (cacheRefreshQueued) {
-                        cacheRefreshQueued = false
-                        refreshCache()
-                    }
-                }
-            }
-        }.onFailure {
-            mainHandler.post {
-                cacheBusy = false
-                cacheReadFailed = true
-                cacheMessage = text(ModuleText.LYRICS_CACHE_CLEAR_FAILED)
-                if (cacheRefreshQueued) {
-                    cacheRefreshQueued = false
-                    refreshCache()
-                }
-            }
-        }
+    val cacheStatus = remember(activity, worker) {
+        LyricsCacheStatusState(
+            worker = worker,
+            mainHandler = mainHandler,
+            controls = { currentControls },
+            isAlive = { !activity.isFinishing && !activity.isDestroyed },
+        )
+    }
+    DisposableEffect(cacheStatus) {
+        onDispose { cacheStatus.close() }
     }
 
     fun refreshFromRuntime() {
         menuSettings = runCatching(readSettings).getOrNull()
         refreshSnapshot()
-        refreshCache()
+        cacheStatus.refresh()
     }
 
     fun saveAutomaticLyricsEnabled(enabled: Boolean) {
@@ -488,6 +452,7 @@ private fun EmbeddedLyricsMenuDialog(
                     HorizontalDivider(Modifier.padding(horizontal = 16.dp))
                     LlmLyricsStatusSection(
                         settings = statusSettings,
+                        snapshot = llmStatus,
                         currentAppleMusicId = if (songReady) appleMusicId else 0L,
                         compact = true,
                     )
@@ -508,20 +473,20 @@ private fun EmbeddedLyricsMenuDialog(
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp))
                 BasicComponent(
                     title = text(ModuleText.LYRICS_THIRD_PARTY_CACHE),
-                    summary = cacheBytes?.let(::formatLyricsCacheSize),
+                    summary = cacheStatus.usageBytes?.let(::formatLyricsCacheSize),
                     endActions = {
                         TextButton(
                             text = text(ModuleText.LYRICS_CACHE_CLEAR),
-                            onClick = { refreshCache(clearFirst = true) },
-                            enabled = show && !cacheBusy && !cacheReadFailed,
+                            onClick = { cacheStatus.refresh(clearFirst = true) },
+                            enabled = show && !cacheStatus.busy,
                             textStyle = MiuixTheme.textStyles.body2,
                         )
                     },
                     insideMargin = LyricsMenuRowPadding,
                 )
-                cacheMessage?.let { message ->
+                cacheStatus.message?.let { message ->
                     Text(
-                        text = message,
+                        text = text(message),
                         modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 10.dp),
                         style = MiuixTheme.textStyles.body2,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,

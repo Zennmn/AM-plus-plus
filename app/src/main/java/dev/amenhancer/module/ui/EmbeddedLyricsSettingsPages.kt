@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.widget.Toast
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animate
@@ -61,8 +63,10 @@ import androidx.compose.ui.zIndex
 import dev.amenhancer.module.CurrentSongDetails
 import dev.amenhancer.module.hook.LyricsPlaybackRuntimeRegistry
 import dev.amenhancer.module.i18n.ModuleText
+import dev.amenhancer.module.lyrics.LyricsPlaybackControls
 import dev.amenhancer.module.model.CustomLyricsSources
 import dev.amenhancer.module.model.ModuleSettings
+import java.util.concurrent.ExecutorService
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.BasicComponent
@@ -290,11 +294,15 @@ internal fun EmbeddedSettingsHost.EmbeddedCustomLyricsPage(
 
 @Composable
 internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
+    activity: Activity,
     settings: ModuleSettings,
-    onSettingsChanged: (ModuleSettings) -> Unit,
+    onSettingsSaved: ((ModuleSettings) -> ModuleSettings) -> Unit,
 ) {
-    val currentSettings by rememberUpdatedState(settings)
-    val settingsChanged by rememberUpdatedState(onSettingsChanged)
+    fun applySettings(saved: Boolean, change: (ModuleSettings) -> ModuleSettings): Boolean {
+        if (saved) onSettingsSaved(change)
+        else Toast.makeText(activity, localizedText(ModuleText.SETTINGS_SAVE_FAILED), Toast.LENGTH_SHORT).show()
+        return saved
+    }
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -307,8 +315,10 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
                 enabled = settings.customLyricsEnabled,
                 icon = EmbeddedSvgIcon.AutomaticLyrics,
                 onCheckedChange = { enabled ->
-                    settingsChanged(currentSettings.copy(automaticLyricsEnabled = enabled))
-                    pageRefresh?.invoke()
+                    val saved = applySettings(controller.saveAutomaticLyricsEnabled(enabled)) {
+                        it.copy(automaticLyricsEnabled = enabled)
+                    }
+                    if (saved) pageRefresh?.invoke()
                 },
             )
         }
@@ -316,8 +326,9 @@ internal fun EmbeddedSettingsHost.EmbeddedAutomaticLyricsPage(
             order = settings.automaticLyricsSourceOrder,
             localize = { key, arguments -> localizedText(key, *arguments) },
             onOrderChanged = { nextOrder ->
-                settingsChanged(currentSettings.copy(automaticLyricsSourceOrder = nextOrder))
-                true
+                applySettings(controller.saveAutomaticLyricsSourceOrder(nextOrder)) {
+                    it.copy(automaticLyricsSourceOrder = nextOrder)
+                }
             },
             onReset = { pageRefresh?.invoke() },
         )
@@ -613,63 +624,90 @@ internal fun AutomaticLyricsSourceOrderEditor(
     }
 }
 
-@Composable
-private fun EmbeddedSettingsHost.EmbeddedLyricsCacheRow() {
-    var controls by remember { mutableStateOf(LyricsPlaybackRuntimeRegistry.controls()) }
-    val observedControlsRef = remember { java.util.concurrent.atomic.AtomicReference<AutoCloseable?>(null) }
-    var usage by remember { mutableStateOf<Long?>(null) }
-    var busy by remember { mutableStateOf(false) }
-    var cacheReadFailed by remember { mutableStateOf(false) }
-    var message by remember { mutableStateOf<String?>(null) }
-    val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
-    val activity = currentActivity()
+/** Shared cache-row state; stale worker results are ignored after [close]. */
+internal class LyricsCacheStatusState(
+    private val worker: ExecutorService,
+    private val mainHandler: Handler,
+    private val controls: () -> LyricsPlaybackControls?,
+    private val isAlive: () -> Boolean,
+) {
+    var usageBytes by mutableStateOf<Long?>(null)
+        private set
+    var busy by mutableStateOf(false)
+        private set
+    var message by mutableStateOf<ModuleText?>(null)
+        private set
 
-    fun readUsage(clearFirst: Boolean = false) {
-        if (busy || activity == null) return
-        if (clearFirst && controls == null) return
+    private var closed = false
+    private var refreshQueued = false
+
+    fun refresh(clearFirst: Boolean = false) {
+        if (closed || !isAlive()) return
+        if (busy) {
+            if (!clearFirst) refreshQueued = true
+            return
+        }
+        val operation = controls() ?: return
         busy = true
-        message = if (clearFirst) localizedText(ModuleText.LYRICS_CACHE_CLEARING) else null
+        if (clearFirst) message = ModuleText.LYRICS_CACHE_CLEARING
         runCatching {
             worker.execute {
-                val operation = controls
-                val cleared = if (clearFirst) runCatching { operation?.clearCache() }.getOrNull() else null
-                val bytes = runCatching { operation?.cacheUsageBytes() }.getOrNull()
-                mainHandler.post {
-                    usage = bytes?.coerceAtLeast(0L)
-                    busy = false
-                    cacheReadFailed = bytes == null
-                    message = when {
-                        clearFirst && cleared != true -> localizedText(ModuleText.LYRICS_CACHE_CLEAR_FAILED)
-                        clearFirst && bytes == null -> localizedText(ModuleText.LYRICS_CACHE_SIZE_UNAVAILABLE)
-                        clearFirst -> localizedText(ModuleText.LYRICS_CACHE_CLEARED)
-                        operation == null -> localizedText(ModuleText.LYRICS_CACHE_UNAVAILABLE)
-                        bytes == null -> localizedText(ModuleText.LYRICS_CACHE_SIZE_UNAVAILABLE)
-                        else -> null
-                    }
-                }
+                val cleared = clearFirst && runCatching { operation.clearCache() }.getOrDefault(false)
+                val bytes = runCatching { operation.cacheUsageBytes() }.getOrNull()
+                mainHandler.post { finish(clearFirst, cleared, bytes) }
             }
-        }.onFailure {
-            mainHandler.post {
-                busy = false
-                message = localizedText(ModuleText.LYRICS_CACHE_CLEAR_FAILED)
-            }
+        }.onFailure { finish(clearFirst, cleared = false, bytes = null) }
+    }
+
+    private fun finish(clearFirst: Boolean, cleared: Boolean, bytes: Long?) {
+        if (closed || !isAlive()) return
+        usageBytes = bytes?.coerceAtLeast(0L)
+        busy = false
+        message = when {
+            clearFirst && !cleared -> ModuleText.LYRICS_CACHE_CLEAR_FAILED
+            bytes == null -> ModuleText.LYRICS_CACHE_SIZE_UNAVAILABLE
+            clearFirst -> ModuleText.LYRICS_CACHE_CLEARED
+            message == ModuleText.LYRICS_CACHE_SIZE_UNAVAILABLE -> null
+            else -> message
+        }
+        if (refreshQueued) {
+            refreshQueued = false
+            refresh()
         }
     }
 
-    LaunchedEffect(activity) {
-        val next = LyricsPlaybackRuntimeRegistry.controls()
-        // Registry binding happens before the settings dialog is opened. Keep
-        // one initial measurement and rely on observe for later cache writes.
-        if (next !== controls) controls = next
-        observedControlsRef.getAndSet(null)?.close()
-        observedControlsRef.set(
-            next?.observe { if (!busy) readUsage() },
-        )
-        if (next != null) readUsage()
+    fun close() {
+        closed = true
+        refreshQueued = false
     }
-    DisposableEffect(Unit) {
+}
+
+@Composable
+private fun EmbeddedSettingsHost.EmbeddedLyricsCacheRow() {
+    var controls by remember { mutableStateOf(LyricsPlaybackRuntimeRegistry.controls()) }
+    val activity = currentActivity()
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    val cacheStatus = remember(activity, worker, mainHandler) {
+        LyricsCacheStatusState(
+            worker = worker,
+            mainHandler = mainHandler,
+            controls = { LyricsPlaybackRuntimeRegistry.controls() },
+            isAlive = {
+                val current = currentActivity()
+                current != null && current === activity &&
+                    !current.isFinishing && !current.isDestroyed
+            },
+        )
+    }
+
+    DisposableEffect(cacheStatus) {
+        val next = LyricsPlaybackRuntimeRegistry.controls()
+        controls = next
+        val subscription = next?.observe { cacheStatus.refresh() }
+        cacheStatus.refresh()
         onDispose {
-            observedControlsRef.getAndSet(null)?.close()
+            subscription?.close()
+            cacheStatus.close()
         }
     }
     Column(
@@ -678,16 +716,18 @@ private fun EmbeddedSettingsHost.EmbeddedLyricsCacheRow() {
     ) {
         EmbeddedSettingsSection(
             title = localizedText(ModuleText.LYRICS_THIRD_PARTY_CACHE),
-            summary = usage?.let { localizedText(ModuleText.LYRICS_CACHE_SUMMARY, formatLyricsCacheSize(it)) }
+            summary = cacheStatus.usageBytes?.let {
+                localizedText(ModuleText.LYRICS_CACHE_SUMMARY, formatLyricsCacheSize(it))
+            }
                 ?: localizedText(if (controls == null) ModuleText.LYRICS_CACHE_UNAVAILABLE else ModuleText.LYRICS_CACHE_SIZE_UNAVAILABLE),
         )
         EmbeddedSettingsGroup {
             EmbeddedSettingLink(
                 title = localizedText(ModuleText.LYRICS_CACHE_CLEAR),
-                summary = message,
+                summary = cacheStatus.message?.let { localizedText(it) },
                 icon = EmbeddedSvgIcon.Delete,
-                enabled = controls != null && !busy && !cacheReadFailed,
-                onClick = { readUsage(clearFirst = true) },
+                enabled = controls != null && !cacheStatus.busy,
+                onClick = { cacheStatus.refresh(clearFirst = true) },
             )
         }
     }

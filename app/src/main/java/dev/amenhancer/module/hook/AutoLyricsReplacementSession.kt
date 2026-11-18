@@ -7,12 +7,9 @@ import dev.amenhancer.module.lyrics.source.AutoLyricsSourceResolver
 import dev.amenhancer.module.lyrics.source.AmllTtmlClient
 import dev.amenhancer.module.lyrics.source.AmLyricsClient
 import android.app.Application
-import dev.amenhancer.module.config.EmbeddedConfigurationSession
 import dev.amenhancer.module.config.EmbeddedContentManager
-import dev.amenhancer.module.config.HostPrivateEmbeddedStorage
 import dev.amenhancer.module.lyrics.TtmlInputPolicy
 import dev.amenhancer.module.lyrics.LyricsPlaybackSources
-import dev.amenhancer.module.lyrics.embeddedLunabeatCatalogCache
 import dev.amenhancer.module.model.CustomLyricsSources
 import dev.amenhancer.module.model.ModuleSettings
 import dev.amenhancer.module.lyrics.FileLlmLyricsCache
@@ -21,6 +18,7 @@ import dev.amenhancer.module.lyrics.LlmLyricsConfig
 import dev.amenhancer.module.lyrics.LlmLyricsPhase
 import dev.amenhancer.module.lyrics.LlmLyricsDocument
 import dev.amenhancer.module.lyrics.LlmTransliterationDocument
+import dev.amenhancer.module.lyrics.source.LunabeatCatalogCache
 import java.io.File
 import java.util.concurrent.Executor
 import java.util.concurrent.ArrayBlockingQueue
@@ -29,13 +27,11 @@ import java.util.concurrent.TimeUnit
 
 internal fun createAutoLyricsRuntime(
     application: Application,
-    suppressedIds: Set<Long> = emptySet(),
-    configuration: () -> ModuleSettings = { ModuleSettings() },
+    content: EmbeddedContentManager,
+    lunabeatCatalogCache: LunabeatCatalogCache,
+    configuration: () -> ModuleSettings,
 ): AutoLyricsRuntime {
-    val configuredContent = EmbeddedContentManager(
-        session = EmbeddedConfigurationSession(HostPrivateEmbeddedStorage(application)),
-    )
-    val sourceStore = configuredContent.sourceCache
+    val sourceStore = content.sourceCache
     val failures = ThreadLocal<dev.amenhancer.module.lyrics.source.LyricFetchFailure?>()
     val lyricTransport = HttpLyricTransport(
         connectTimeoutMs = 4_000,
@@ -52,7 +48,7 @@ internal fun createAutoLyricsRuntime(
     val lunabeat = LunabeatClient(
         indexTransport = indexTransport,
         lyricsTransport = lyricTransport,
-        cache = embeddedLunabeatCatalogCache(application, sourceStore),
+        cache = lunabeatCatalogCache,
         onFailure = { failures.set(it) },
     )
     val amll = AmllTtmlClient(lyricTransport, onFailure = { failures.set(it) })
@@ -63,19 +59,11 @@ internal fun createAutoLyricsRuntime(
         lunabeat = lunabeat,
     )
     val cache = object : AutoLyricsCache {
-        override fun read(appleMusicId: Long): String? = readCandidate(appleMusicId)?.ttml
-        override fun readCandidate(appleMusicId: Long): AutoLyricsCandidate? = sourceStore.readCandidate(appleMusicId)
-        override fun readCandidateForSource(appleMusicId: Long, source: String): AutoLyricsCandidate? =
+        override fun readCandidate(appleMusicId: Long, source: String): AutoLyricsCandidate? =
             sourceStore.readCandidate(appleMusicId, source)
-        override fun write(appleMusicId: Long, ttml: String): Boolean =
-            writeCandidate(appleMusicId, AutoLyricsCandidate(CustomLyricsSources.AUTO_CACHE, ttml))
-        override fun writeCandidate(appleMusicId: Long, candidate: AutoLyricsCandidate): Boolean =
-            sourceStore.writeCandidate(appleMusicId, candidate)
         override fun writeCandidateIfCurrent(appleMusicId: Long, candidate: AutoLyricsCandidate, generation: Long): Boolean =
             sourceStore.writeCandidate(appleMusicId, candidate, generation)
         override fun generation(): Long = sourceStore.generation()
-        override fun delete(appleMusicId: Long): Boolean = sourceStore.remove(appleMusicId)
-        override fun cachedIds(): List<Long> = sourceStore.cachedIds()
     }
     val executor = ThreadPoolExecutor(
         1,
@@ -207,7 +195,7 @@ internal fun createAutoLyricsRuntime(
         ThreadPoolExecutor.AbortPolicy(),
     )
     val playback = EmbeddedLyricsPlaybackRuntime(
-        content = configuredContent,
+        content = content,
         settings = configuration,
         executor = playbackExecutor,
         fetch = { id, source ->
@@ -225,7 +213,6 @@ internal fun createAutoLyricsRuntime(
         executor = executor,
         llm = llm,
         playback = playback,
-        suppressedIds = suppressedIds,
         refreshExecutor = Executor { task ->
             refreshExecutor.queue.clear()
             refreshExecutor.execute(task)

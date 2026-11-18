@@ -120,6 +120,7 @@ internal fun EmbeddedSettingsHost.EmbeddedLlmLyricsPage(
     ) {
         LlmLyricsStatusSection(
             settings = settings,
+            snapshot = liveLlmStatus,
             currentAppleMusicId = currentSongAppleMusicId,
         )
         EmbeddedSettingsSection(title = localizedText(ModuleText.FEATURES))
@@ -314,11 +315,11 @@ internal fun EmbeddedSettingsHost.EmbeddedLlmLyricsPage(
 @Composable
 internal fun LlmLyricsStatusSection(
     settings: ModuleSettings,
+    snapshot: LlmLyricsStatusSnapshot?,
     currentAppleMusicId: Long? = null,
     compact: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    val snapshot by LyricsPlaybackRuntimeRegistry.llmStatus.collectAsState()
     val locale = LocalConfiguration.current.locales[0] ?: Locale.ROOT
     val config = remember(settings) { LlmLyricsConfig.fromSettings(settings) }
     val configurationKey = config.hashCode()

@@ -9,7 +9,6 @@ import dev.amenhancer.module.model.CustomLyricsEntry
 import dev.amenhancer.module.model.CustomLyricsManifest
 import dev.amenhancer.module.model.CustomLyricsSources
 import java.io.File
-import java.util.concurrent.ConcurrentHashMap
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -33,10 +32,9 @@ internal class EmbeddedLyricsSourceStore(
 ) {
     private data class Key(val appleMusicId: Long, val source: String)
 
-    private class SharedState {
+    private class State {
         val stateLock = Any()
         val listeners = linkedSetOf<() -> Unit>()
-        var initialized = false
         var normalized = false
         var manualManifest = CustomLyricsManifest.empty()
         var sourceManifest = CustomLyricsManifest.empty()
@@ -44,11 +42,10 @@ internal class EmbeddedLyricsSourceStore(
         val offsets = linkedMapOf<Key, Int>()
         val lastUsed = linkedMapOf<Key, Long>()
         val pendingDeletes = linkedSetOf<String>()
-        var revision = 0L
         var generation = 0L
     }
 
-    private val shared = sharedStates.computeIfAbsent(session.sharedStorageIdentity()) { SharedState() }
+    private val shared = State()
 
     init {
         initialize()
@@ -67,10 +64,6 @@ internal class EmbeddedLyricsSourceStore(
             shared.sourceManifest.entries.any { it.appleMusicId == appleMusicId && !it.enabled }
     }
 
-    fun cachedIds(): List<Long> = synchronized(shared.stateLock) {
-        shared.sourceManifest.entries.map(CustomLyricsEntry::appleMusicId).distinct()
-    }
-
     fun entries(): List<CustomLyricsEntry> = synchronized(shared.stateLock) { shared.sourceManifest.entries }
 
     fun entryFor(appleMusicId: Long, source: String): CustomLyricsEntry? =
@@ -81,8 +74,9 @@ internal class EmbeddedLyricsSourceStore(
         }
 
     /** Updates one provider's enabled intent without publishing a manual entry. */
-    fun setSourceEnabled(appleMusicId: Long, source: String, enabled: Boolean): Boolean =
-        session.withCustomLyricsMutation {
+    fun setSourceEnabled(appleMusicId: Long, source: String, enabled: Boolean): Boolean {
+        if (!session.writable) return false
+        return session.withCustomLyricsMutation {
             val current = synchronized(shared.stateLock) {
                 shared.sourceManifest.entries.firstOrNull {
                     it.appleMusicId == appleMusicId && it.source == source
@@ -99,11 +93,11 @@ internal class EmbeddedLyricsSourceStore(
             if (!commitSourceManifest(CustomLyricsManifest(next))) return@withCustomLyricsMutation false
             synchronized(shared.stateLock) {
                 shared.sourceManifest = CustomLyricsManifest(next)
-                shared.revision++
             }
             notifyListeners()
             true
         }
+    }
 
     internal fun isFileReferenced(fileId: String): Boolean = synchronized(shared.stateLock) {
         shared.sourceManifest.entries.any { it.fileId == fileId }
@@ -114,7 +108,7 @@ internal class EmbeddedLyricsSourceStore(
     }
 
     fun setPreferredSource(appleMusicId: Long, source: String?): Boolean {
-        if (appleMusicId <= 0L) return false
+        if (!session.writable || appleMusicId <= 0L) return false
         val normalized = source
             ?.takeUnless { it == LyricsPlaybackSources.AUTOMATIC }
             ?.takeIf(CustomLyricsManifestPolicy::isUsableSourceId)
@@ -131,7 +125,6 @@ internal class EmbeddedLyricsSourceStore(
                 else {
                     shared.preferred.clear()
                     shared.preferred.putAll(next)
-                    shared.revision++
                     true
                 }
             }
@@ -145,7 +138,9 @@ internal class EmbeddedLyricsSourceStore(
     }
 
     fun setOffsetMs(appleMusicId: Long, source: String, offsetMs: Int): Boolean {
-        if (appleMusicId <= 0L || !CustomLyricsManifestPolicy.isUsableSourceId(source)) return false
+        if (!session.writable || appleMusicId <= 0L ||
+            !CustomLyricsManifestPolicy.isUsableSourceId(source)
+        ) return false
         val key = Key(appleMusicId, source)
         return session.withCustomLyricsMutation {
             val next = synchronized(shared.stateLock) {
@@ -160,7 +155,6 @@ internal class EmbeddedLyricsSourceStore(
                 else {
                     shared.offsets.clear()
                     shared.offsets.putAll(next)
-                    shared.revision++
                     true
                 }
             }
@@ -170,17 +164,10 @@ internal class EmbeddedLyricsSourceStore(
     }
 
     /** Worker body read. A hit updates the persisted LRU without changing the available lyrics. */
-    fun readCandidate(appleMusicId: Long, source: String? = null): AutoLyricsCandidate? {
+    fun readCandidate(appleMusicId: Long, source: String): AutoLyricsCandidate? {
         if (appleMusicId <= 0L) return null
         prepare()
-        val snapshot = synchronized(shared.stateLock) {
-            val candidates = shared.sourceManifest.entries.filter {
-                it.appleMusicId == appleMusicId && (source == null || it.source == source)
-            }
-            val preferred = shared.preferred[appleMusicId]
-            candidates.firstOrNull { it.source == preferred }
-                ?: candidates.maxByOrNull { shared.lastUsed[Key(it.appleMusicId, it.source)] ?: 0L }
-        }
+        val snapshot = entryFor(appleMusicId, source)
         val entry: CustomLyricsEntry = snapshot
             ?: readLegacyCandidate(appleMusicId, source)
             ?: return null
@@ -204,13 +191,15 @@ internal class EmbeddedLyricsSourceStore(
         expectedGeneration: Long? = null,
         enabled: Boolean = true,
     ): Boolean {
-        if (ids.isEmpty() || ids.any { it <= 0L } || ids.toSet().size != ids.size) return false
+        if (!session.writable || ids.isEmpty() || ids.any { it <= 0L } ||
+            ids.toSet().size != ids.size
+        ) return false
         val source = CustomLyricsManifestPolicy.canonicalSource(candidate.source)
         if (!CustomLyricsManifestPolicy.isThirdPartySource(source)) return false
         val inspection = CustomLyricsFilePolicy.inspect(candidate.ttml)
         if (inspection !is CustomLyricsInspection.Accepted) return false
         return session.withCustomLyricsMutation {
-            if (!generationMatches(expectedGeneration) || !prepare()) return@withCustomLyricsMutation false
+            if (!generationMatches(expectedGeneration) || !prepareSource()) return@withCustomLyricsMutation false
             val before = synchronized(shared.stateLock) {
                 SourceSnapshot(
                     manifest = shared.sourceManifest,
@@ -250,7 +239,6 @@ internal class EmbeddedLyricsSourceStore(
                 shared.sourceManifest = trimmedManifest
                 shared.lastUsed.clear()
                 shared.lastUsed.putAll(lastUsed.filterKeys(trimmed::containsKey))
-                shared.revision++
             }
             persistLastUsed(lastUsed)
             retireUnreferenced(before.manifest.entries.map(CustomLyricsEntry::fileId), trimmedManifest)
@@ -259,96 +247,90 @@ internal class EmbeddedLyricsSourceStore(
         }
     }
 
-    /** Removes one provider, or all providers for a song when [source] is null. */
-    fun remove(appleMusicId: Long, source: String? = null): Boolean {
-        if (appleMusicId <= 0L) return false
-        return session.withCustomLyricsMutation {
-            val before = synchronized(shared.stateLock) { shared.sourceManifest }
-            val targets = before.entries.filter {
-                it.appleMusicId == appleMusicId && (source == null || it.source == source)
-            }
-            val legacy = legacyFilesFor(appleMusicId, source)
-            if (targets.isEmpty() && legacy.isEmpty()) return@withCustomLyricsMutation false
-            val remaining = before.entries.filterNot {
-                it.appleMusicId == appleMusicId && (source == null || it.source == source)
-            }
-            if (targets.isNotEmpty() && !commitSourceManifest(CustomLyricsManifest(remaining))) {
-                return@withCustomLyricsMutation false
-            }
-            synchronized(shared.stateLock) {
-                shared.sourceManifest = CustomLyricsManifest(remaining)
-                shared.lastUsed.keys.removeAll {
-                    it.appleMusicId == appleMusicId && (source == null || it.source == source)
-                }
-                shared.revision++
-            }
-            retireUnreferenced(targets.map(CustomLyricsEntry::fileId), CustomLyricsManifest(remaining))
-            legacy.forEach { file ->
-                if (!isManualFile(file.name)) session.deleteSourceCacheFile(file.name)
-            }
-            notifyListeners()
-            true
-        }
-    }
-
     /**
      * Clears source bodies, the source index and Lunabeat catalog while keeping
-     * manual files and all preferred/offset metadata. Failed body deletions
-     * remain in the cleanup ledger so usage and retry cover the actual files.
+     * manual files and all preferred/offset metadata. Cache pointer recovery
+     * only needs a readable manual index to protect any shared old bodies.
      */
-    fun clear(): Boolean = session.withCustomLyricsMutation {
-        synchronized(shared.stateLock) { shared.generation++ }
-        try {
-            if (!prepare() || !session.writeValues(mapOf(LEGACY_CACHE_CLEARED_KEY to true))) {
-                return@withCustomLyricsMutation false
+    fun clear(): Boolean {
+        if (!session.writable) return false
+        return session.withCustomLyricsMutation {
+            synchronized(shared.stateLock) { shared.generation++ }
+            try {
+                val manualState = runCatching { session.readManualIndex() }.getOrNull()
+                    ?.takeIf { it.isResolved } ?: return@withCustomLyricsMutation false
+                val (legacyProviders, manual) = manualState.manifest.entries.partition {
+                    CustomLyricsManifestPolicy.isThirdPartySource(it.source)
+                }
+                val sourceState = runCatching { readSourceState() }.getOrNull()?.takeIf { it.isResolved }
+                val sourceEntries = sourceState?.manifest?.entries.orEmpty() + entries()
+                if (!session.writeValues(mapOf(LEGACY_CACHE_CLEARED_KEY to true))) {
+                    return@withCustomLyricsMutation false
+                }
+                if (!session.clearSourceIndexPointer()) return@withCustomLyricsMutation false
+
+                // If publishing a pruned manual index fails, its old references still protect the bodies.
+                val manualPruned = legacyProviders.isEmpty() || run {
+                    val next = CustomLyricsManifest(manual)
+                    val limit = session.manualIndexCommitLimit(manualState, next) ?: return@run false
+                    val result = session.commitManualIndex(manualState, next, maxIndexBytes = limit)
+                    result is CustomLyricsIndexCommitResult.Committed
+                }
+                val empty = CustomLyricsManifest.empty()
+                synchronized(shared.stateLock) {
+                    shared.sourceManifest = empty
+                    shared.lastUsed.clear()
+                    shared.normalized = false
+                    shared.manualManifest = if (manualPruned) CustomLyricsManifest(manual) else manualState.manifest
+                }
+                val ownedFiles = (sourceEntries + legacyProviders).map(CustomLyricsEntry::fileId) +
+                    listOfNotNull(sourceState?.pointer?.fileId) + session.sourceFileIds()
+                val removedBodies = retireUnreferenced(ownedFiles, empty)
+                val legacyFiles = session.sourceCacheRootFiles().filter {
+                    isSourceCacheFile(it.name) && !isManualFile(it.name)
+                }
+                val removedLegacy = (legacyFiles + listOfNotNull(
+                    session.sourceCacheLunabeatCatalog(), session.legacyLunabeatCatalog(),
+                )).distinct().map { file -> runCatching { !file.isFile || file.delete() }.getOrDefault(false) }
+                    .all { it }
+                val resetLru = persistLastUsed(emptyMap())
+                removedBodies && removedLegacy && resetLru && manualPruned
+            } finally {
+                notifyListeners()
             }
-            val before = synchronized(shared.stateLock) { shared.sourceManifest }
-            val oldPointer = session.decodeSourceIndexPointer(session.values())
-            if (!session.clearSourceIndexPointer()) return@withCustomLyricsMutation false
-            val empty = CustomLyricsManifest.empty()
-            synchronized(shared.stateLock) {
-                shared.sourceManifest = empty
-                shared.lastUsed.clear()
-                shared.revision++
-            }
-            val bodies = before.entries.map(CustomLyricsEntry::fileId) + listOfNotNull(oldPointer?.fileId)
-            val removedBodies = retireUnreferenced(bodies, empty)
-            val legacyFiles = session.sourceCacheRootFiles().filter { isSourceCacheFile(it.name) && !isManualFile(it.name) }
-            val removedLegacy = (legacyFiles + listOfNotNull(
-                session.sourceCacheLunabeatCatalog(), session.legacyLunabeatCatalog(),
-            )).distinct().map { file -> runCatching { !file.isFile || file.delete() }.getOrDefault(false) }.all { it }
-            val resetLru = persistLastUsed(emptyMap())
-            removedBodies && removedLegacy && resetLru
-        } finally {
-            notifyListeners()
         }
     }
 
     /**
      * Real on-disk usage: current source index, its unique referenced bodies,
-     * unclassified legacy candidates and the Lunabeat catalog. Uses metadata
-     * only; it never reads TTML bodies.
+     * provider rows still pending in the manual index, unclassified legacy
+     * candidates and the Lunabeat catalog. Uses metadata only; it never reads
+     * TTML bodies.
      */
     fun sizeBytes(): Long = session.withCustomLyricsMutation {
-        prepare()
+        val diskIds = session.sourceFileIds() + listOfNotNull(
+            session.decodeSourceIndexPointer(session.values())?.fileId,
+        )
         val referenced = synchronized(shared.stateLock) {
             shared.sourceManifest.entries.mapTo(linkedSetOf(), CustomLyricsEntry::fileId).apply {
                 addAll(shared.pendingDeletes)
+                addAll(diskIds)
+                shared.manualManifest.entries.filter {
+                    CustomLyricsManifestPolicy.isThirdPartySource(it.source)
+                }.mapTo(this, CustomLyricsEntry::fileId)
                 removeAll(shared.manualManifest.entries.filter {
                     it.source == CustomLyricsSources.MANUAL
                 }.map(CustomLyricsEntry::fileId).toSet())
             }
         }
-        session.decodeSourceIndexPointer(session.values())?.fileId?.let(referenced::add)
         referenced.sumOf(::fileBytesOnDisk) + session.sourceCacheRootFiles().sumOf {
-            if (isSourceCacheFile(it.name) && it.name !in referenced) it.length() else 0L
+            if (isSourceCacheFile(it.name) && it.name !in referenced && !isManualFile(it.name)) it.length()
+            else 0L
         } + listOfNotNull(session.sourceCacheLunabeatCatalog(), session.legacyLunabeatCatalog())
             .sumOf { it.takeIf(File::isFile)?.length() ?: 0L }
     }
 
     fun generation(): Long = synchronized(shared.stateLock) { shared.generation }
-
-    fun revision(): Long = synchronized(shared.stateLock) { shared.revision }
 
     /** Apply one provider's refresh without replacing or deleting a different provider's slot. */
     fun replaceUpdatedEntries(baseline: List<CustomLyricsEntry>, next: CustomLyricsManifest, epoch: Long): Boolean =
@@ -369,7 +351,6 @@ internal class EmbeddedLyricsSourceStore(
                 shared.sourceManifest = manifest
                 shared.lastUsed.clear()
                 shared.lastUsed.putAll(lastUsed)
-                shared.revision++
             }
             persistLastUsed(lastUsed)
             retireUnreferenced(before.manifest.entries.map(CustomLyricsEntry::fileId), manifest)
@@ -384,12 +365,27 @@ internal class EmbeddedLyricsSourceStore(
         }
     }
 
-    /** Runs a non-store write only while the clear generation is still current. */
+    /** Serializes publication with clear. The operation owns its write permission. */
     internal fun writeIfCurrent(expectedGeneration: Long, block: () -> Boolean): Boolean =
         session.withCustomLyricsMutation { generationMatches(expectedGeneration) && block() }
 
     internal fun manualManifest(): CustomLyricsManifest = synchronized(shared.stateLock) {
         CustomLyricsManifest(shared.manualManifest.entries.filter { it.source == CustomLyricsSources.MANUAL })
+    }
+
+    internal fun manualIndexManifest(): CustomLyricsManifest = synchronized(shared.stateLock) {
+        shared.manualManifest
+    }
+
+    /** Keep provider rows in the manual index until their source index is usable. */
+    internal fun preserveUnmigratedSources(next: CustomLyricsManifest): CustomLyricsManifest {
+        val nextIds = next.entries.mapTo(mutableSetOf(), CustomLyricsEntry::appleMusicId)
+        val pending = synchronized(shared.stateLock) {
+            shared.manualManifest.entries.filter {
+                CustomLyricsManifestPolicy.isThirdPartySource(it.source) && it.appleMusicId !in nextIds
+            }
+        }
+        return CustomLyricsManifest(pending + next.entries)
     }
 
     internal fun onManualManifestChanged(manifest: CustomLyricsManifest) {
@@ -398,54 +394,50 @@ internal class EmbeddedLyricsSourceStore(
             if (shared.manualManifest == safe) false
             else {
                 shared.manualManifest = safe
-                shared.revision++
                 true
             }
         }
         if (changed) notifyListeners()
     }
 
-    private fun initialize() {
-        if (synchronized(shared.stateLock) { shared.initialized }) return
-        session.withCustomLyricsMutation {
-            if (synchronized(shared.stateLock) { shared.initialized }) return@withCustomLyricsMutation
-            val preferred = readPreferred()
-            val offsets = readOffsets()
-            val lastUsed = readLastUsed()
-            val pendingDeletes = runCatching {
-                val array = JSONArray(session.values()[PENDING_DELETE_KEY] as? String ?: "[]")
-                (0 until array.length()).map { array.optString(it) }.filter(::isStorableFileId)
-            }.getOrDefault(emptyList())
-            val manual = runCatching { session.readManualIndex().manifest }
-                .getOrDefault(CustomLyricsManifest.empty())
-            val source = runCatching { readSourceState().manifest }
-                .getOrDefault(CustomLyricsManifest.empty())
-            session.observeManualChanges(::onManualManifestChanged)
-            synchronized(shared.stateLock) {
-                shared.preferred.putAll(preferred)
-                shared.offsets.putAll(offsets)
-                shared.lastUsed.putAll(lastUsed)
-                shared.pendingDeletes.addAll(pendingDeletes)
-                shared.manualManifest = manual
-                shared.sourceManifest = source
-                shared.initialized = true
-            }
-        }
+    private fun initialize() = session.withCustomLyricsMutation {
+        shared.preferred.putAll(readPreferred())
+        shared.offsets.putAll(readOffsets())
+        shared.lastUsed.putAll(readLastUsed())
+        shared.pendingDeletes.addAll(runCatching {
+            val array = JSONArray(session.values()[PENDING_DELETE_KEY] as? String ?: "[]")
+            (0 until array.length()).map { array.optString(it) }.filter(::isStorableFileId)
+        }.getOrDefault(emptyList()))
+        shared.manualManifest = runCatching { session.readManualIndex().manifest }
+            .getOrDefault(CustomLyricsManifest.empty())
+        shared.sourceManifest = runCatching { readSourceState().manifest }
+            .getOrDefault(CustomLyricsManifest.empty())
+        session.observeManualChanges(::onManualManifestChanged)
     }
 
     /**
-     * One-shot migration. The marker is published only after both indexes are
-     * successfully written, so a failed commit keeps all old data readable and
-     * retryable. Unknown sources stay in the manual index.
+     * Migrate provider rows only after the manual index itself is readable. The
+     * source index is published before provider rows leave the manual index;
+     * an unreadable source index keeps those rows in place for a later retry.
+     * Returns whether the manual index is usable, not whether the source index
+     * happens to be readable. The legacy-clear marker suppresses directory
+     * discovery only; provider rows already restored into the manual index
+     * remain migratable.
      */
     internal fun prepare(afterRestore: Boolean = false): Boolean = session.withCustomLyricsMutation {
+        if (!session.writable) return@withCustomLyricsMutation false
         if (!afterRestore && synchronized(shared.stateLock) { shared.normalized }) return@withCustomLyricsMutation true
         val manualState = runCatching { session.readManualIndex() }.getOrNull()
             ?: return@withCustomLyricsMutation false
         if (!manualState.isResolved) return@withCustomLyricsMutation false
         val sourceState = runCatching { readSourceState() }.getOrNull()
-            ?: return@withCustomLyricsMutation false
-        if (!sourceState.isResolved) return@withCustomLyricsMutation false
+        if (sourceState == null || !sourceState.isResolved) {
+            synchronized(shared.stateLock) {
+                shared.manualManifest = manualState.manifest
+                shared.normalized = false
+            }
+            return@withCustomLyricsMutation true
+        }
         val values = session.values()
         val includeLegacy = values[LEGACY_CACHE_CLEARED_KEY] != true && values[LEGACY_NORMALIZED_KEY] != true
         val thirdParty = manualState.manifest.entries.filter {
@@ -457,7 +449,9 @@ internal class EmbeddedLyricsSourceStore(
         val legacyEntries = if (includeLegacy) readLegacyCacheEntries() else emptyList()
         val sourceEntries = linkedMapOf<Key, CustomLyricsEntry>().apply {
             sourceState.manifest.entries.forEach { put(Key(it.appleMusicId, it.source), it) }
-            (thirdParty + legacyEntries).forEach { putIfAbsent(Key(it.appleMusicId, it.source), it) }
+            (thirdParty + legacyEntries).forEach {
+                putIfAbsent(Key(it.appleMusicId, it.source), it)
+            }
         }
         val lastUsed = linkedMapOf<Key, Long>().apply {
             synchronized(shared.stateLock) { putAll(shared.lastUsed) }
@@ -471,16 +465,32 @@ internal class EmbeddedLyricsSourceStore(
         val sourceManifest = CustomLyricsManifest(trimmed.values.toList())
         val sourceChanged = sourceManifest != sourceState.manifest
         if (sourceChanged && !commitSourceManifest(sourceManifest)) {
-            return@withCustomLyricsMutation false
+            synchronized(shared.stateLock) {
+                shared.manualManifest = manualState.manifest
+                shared.sourceManifest = sourceState.manifest
+                shared.normalized = false
+            }
+            return@withCustomLyricsMutation true
         }
 
         val nextManual = CustomLyricsManifest(manualOnly)
         val manualChanged = nextManual != manualState.manifest
         if (manualChanged) {
-            val maxBytes = manualCommitLimit(manualState, nextManual) ?: return@withCustomLyricsMutation false
-            if (session.commitManualIndex(manualState, nextManual, maxIndexBytes = maxBytes)
-                !is CustomLyricsIndexCommitResult.Committed
-            ) return@withCustomLyricsMutation false
+            val maxBytes = session.manualIndexCommitLimit(manualState, nextManual)
+            val committed = maxBytes != null && session.commitManualIndex(
+                manualState,
+                nextManual,
+                maxIndexBytes = maxBytes,
+            ) is CustomLyricsIndexCommitResult.Committed
+            if (!committed) {
+                synchronized(shared.stateLock) {
+                    shared.manualManifest = manualState.manifest
+                    shared.sourceManifest = sourceManifest
+                    shared.normalized = false
+                }
+                if (sourceChanged) notifyListeners()
+                return@withCustomLyricsMutation true
+            }
         }
 
         val marked = !includeLegacy || session.writeValues(mapOf(LEGACY_NORMALIZED_KEY to true))
@@ -489,7 +499,6 @@ internal class EmbeddedLyricsSourceStore(
             shared.manualManifest = nextManual
             shared.lastUsed.clear()
             shared.lastUsed.putAll(lastUsed.filterKeys(trimmed::containsKey))
-            if (sourceChanged || manualChanged) shared.revision++
             shared.normalized = marked
         }
         if (marked) {
@@ -498,7 +507,13 @@ internal class EmbeddedLyricsSourceStore(
                 .map(CustomLyricsEntry::fileId), sourceManifest)
         }
         if (sourceChanged || manualChanged) notifyListeners()
-        marked
+        true
+    }
+
+    /** Source mutations retain the original fail-closed behavior for a corrupt source index. */
+    internal fun prepareSource(): Boolean {
+        if (!prepare()) return false
+        return runCatching { readSourceState().isResolved }.getOrDefault(false)
     }
 
     /** Binary-search the retained LRU suffix; avoids repeated full JSON encodes. */
@@ -534,6 +549,7 @@ internal class EmbeddedLyricsSourceStore(
     }
 
     private fun touch(entry: CustomLyricsEntry) = session.withCustomLyricsMutation {
+        if (!session.writable) return@withCustomLyricsMutation
         val key = Key(entry.appleMusicId, entry.source)
         val next = synchronized(shared.stateLock) {
             if (entry !in shared.sourceManifest.entries) return@withCustomLyricsMutation
@@ -589,11 +605,11 @@ internal class EmbeddedLyricsSourceStore(
         return AutoLyricsCandidate(entry.source, ttml, entry.displayName)
     }
 
-    private fun readLegacyCandidate(appleMusicId: Long, source: String?): CustomLyricsEntry? {
+    private fun readLegacyCandidate(appleMusicId: Long, source: String): CustomLyricsEntry? {
         val values = session.values()
         if (values[LEGACY_NORMALIZED_KEY] == true || values[LEGACY_CACHE_CLEARED_KEY] == true) return null
-        return legacyFilesFor(appleMusicId, null).firstNotNullOfOrNull { file ->
-            legacyEntry(appleMusicId, file)?.takeIf { source == null || it.source == source }
+        return legacyFilesFor(appleMusicId).firstNotNullOfOrNull { file ->
+            legacyEntry(appleMusicId, file)?.takeIf { it.source == source }
         }
     }
 
@@ -601,7 +617,7 @@ internal class EmbeddedLyricsSourceStore(
         val ids = session.sourceCacheLegacyIds().toMutableSet()
         session.sourceCacheRootFiles().forEach { legacyIdOf(it.name)?.let(ids::add) }
         return ids.flatMap { id ->
-            legacyFilesFor(id, null).mapNotNull { file -> legacyEntry(id, file) }
+            legacyFilesFor(id).mapNotNull { file -> legacyEntry(id, file) }
         }
     }
 
@@ -631,12 +647,10 @@ internal class EmbeddedLyricsSourceStore(
         }
     }.getOrNull()
 
-    private fun legacyFilesFor(appleMusicId: Long, source: String?): List<File> = listOfNotNull(
+    private fun legacyFilesFor(appleMusicId: Long): List<File> = listOfNotNull(
         session.sourceCacheLegacyCandidateFile(appleMusicId),
         session.sourceCacheLegacyTtmlFile(appleMusicId),
-    ).filter(File::isFile).filter { file ->
-        source == null || parseLegacyFile(file)?.first == source
-    }
+    ).filter(File::isFile)
 
     private fun legacyIdOf(name: String): Long? {
         if (!name.startsWith("lyric_") || !name.endsWith(".json") && !name.endsWith(".ttml")) {
@@ -645,26 +659,13 @@ internal class EmbeddedLyricsSourceStore(
         return name.substring(6, name.length - 5).toLongOrNull()?.takeIf { it > 0L }
     }
 
-    private fun manualCommitLimit(
-        state: CustomLyricsIndexState,
-        next: CustomLyricsManifest,
-    ): Int? {
-        val oldSize = state.pointer?.sizeBytes ?: runCatching {
-            session.values()[LEGACY_MANUAL_KEY]?.toString()?.toByteArray(Charsets.UTF_8)?.size?.toLong()
-        }.getOrNull() ?: 0L
-        val newSize = CustomLyricsManifestCodec.encode(next).toByteArray(Charsets.UTF_8).size.toLong()
-        val limit = CustomLyricsManifestPolicy.MAX_CURRENT_INDEX_BYTES.toLong()
-        if (oldSize > limit) {
-            if (newSize > oldSize) return null
-            return oldSize.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-        }
-        return limit.toInt()
-    }
-
     private fun retireUnreferenced(fileIds: List<String>, next: CustomLyricsManifest): Boolean {
         val protected = synchronized(shared.stateLock) {
             shared.manualManifest.entries.mapTo(mutableSetOf(), CustomLyricsEntry::fileId)
-        }.apply { next.entries.mapTo(this, CustomLyricsEntry::fileId) }
+        }
+        protected.apply {
+            next.entries.mapTo(this, CustomLyricsEntry::fileId)
+        }
         val previous = synchronized(shared.stateLock) { shared.pendingDeletes.toSet() }
         val failed = (fileIds + previous).distinct().filter { fileId ->
             isStorableFileId(fileId) && fileId !in protected &&
@@ -685,10 +686,12 @@ internal class EmbeddedLyricsSourceStore(
     }
 
     private fun isSourceCacheFile(name: String): Boolean =
-        name == "index.json" || LEGACY_FILE_ID.matches(name)
+        name == "index.json" || isLegacyFileId(name)
+
+    private fun isLegacyFileId(fileId: String): Boolean = LEGACY_FILE_ID.matches(fileId)
 
     private fun fileBytesOnDisk(fileId: String): Long {
-        if (LEGACY_FILE_ID.matches(fileId)) {
+        if (isLegacyFileId(fileId)) {
             session.sourceCacheFile(fileId)?.takeIf(File::isFile)?.let {
                 return runCatching { it.length() }.getOrDefault(0L)
             }
@@ -862,10 +865,8 @@ internal class EmbeddedLyricsSourceStore(
         const val OFFSETS_KEY = "lyrics_source_offsets"
         const val LAST_USED_KEY = "lyrics_source_last_used"
         const val PENDING_DELETE_KEY = "lyrics_source_pending_deletes"
-        const val LEGACY_MANUAL_KEY = "custom_lyrics_manifest"
         const val LEGACY_CACHE_CLEARED_KEY = "lyrics_source_legacy_cleared"
         const val LEGACY_NORMALIZED_KEY = "lyrics_source_legacy_normalized"
-        val sharedStates = ConcurrentHashMap<Any, SharedState>()
 
         fun isStorableFileId(fileId: String): Boolean =
             CustomLyricsManifestPolicy.isValidFileId(fileId) ||

@@ -51,6 +51,7 @@ data class LyricsPlaybackChoice(val source: String, val payload: Any, val ttml: 
 
 /** Storage/network orchestration is wired by app; only host adapters parse native documents. */
 interface LyricsPlaybackRuntime : LyricsPlaybackControls {
+    /** Readiness notifications are delivered on the host's main thread. */
     fun bind(
         prepare: (Long, String) -> Any?,
         isAlive: (Any?) -> Boolean,

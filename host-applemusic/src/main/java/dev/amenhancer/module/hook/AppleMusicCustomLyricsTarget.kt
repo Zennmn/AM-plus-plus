@@ -163,11 +163,6 @@ internal class AppleMusicCustomLyricsTarget(
         var llmSession: LlmLyricsReplacementSession? = null
         var autoSession: AutoLyricsReplacementSession? = null
         val playback = autoLyricsRuntime?.playback
-        val configuredManualIds = runCatching {
-            config.customLyricsManifest().entries
-                .filter { it.enabled && it.source == CustomLyricsSources.MANUAL }
-                .mapTo(mutableSetOf(), CustomLyricsEntry::appleMusicId)
-        }.getOrDefault(emptySet())
         val session = CustomLyricsReplacementSession(
             index = CustomLyricsIndexProvider {
                 (if (config.settings().customLyricsEnabled) config.customLyricsManifest().entries
@@ -214,8 +209,9 @@ internal class AppleMusicCustomLyricsTarget(
         }
         autoSession = autoLyricsRuntime?.let { runtime ->
             AutoLyricsReplacementSession(
-                fetchCandidate = { appleMusicId ->
-                    runtime.resolver.fetch(appleMusicId)?.let { candidate ->
+                fetchCandidate = { appleMusicId, source ->
+                    // The core checked this source cache; fetch only the provider it requested.
+                    runtime.resolver.fetch(appleMusicId, listOf(source))?.let { candidate ->
                         val details = currentSong.current()
                             ?.takeIf { it.details.appleMusicId == appleMusicId }
                             ?.details
@@ -239,12 +235,10 @@ internal class AppleMusicCustomLyricsTarget(
                         }
                     }
                 },
-                publisher = runtime.publisher,
                 isAllowed = { appleMusicId ->
                     config.settings().let { it.customLyricsEnabled && it.automaticLyricsEnabled } &&
-                        (playback?.isSuppressed(appleMusicId) ?: (appleMusicId in runtime.suppressedIds)) == false &&
+                        !runtime.playback.isSuppressed(appleMusicId) &&
                         (playback?.manualEntry(appleMusicId)?.enabled != true) &&
-                        (playback != null || appleMusicId !in configuredManualIds) &&
                         (!session.isMapped(appleMusicId)) &&
                         playback?.preferredSource(appleMusicId) == null
                 },
@@ -265,24 +259,6 @@ internal class AppleMusicCustomLyricsTarget(
                         if (registration.isActive) resultBridge.onReplacementPublished(id)
                     }
                 },
-                fetchOrderedCandidate = { appleMusicId, sources, cached ->
-                    val resolved = sources.firstNotNullOfOrNull { source ->
-                        val stored = cached?.takeIf { it.source == source }
-                            ?: runtime.cache.readCandidateForSource(appleMusicId, source)
-                        runtime.resolver.fetch(appleMusicId, listOf(source), stored)
-                    } ?: (cached?.takeIf { it.source == CustomLyricsSources.AUTO_CACHE }
-                        ?: runtime.cache.readCandidateForSource(appleMusicId, CustomLyricsSources.AUTO_CACHE))
-                        ?.takeIf { TtmlTimingPolicy.isWord(it.ttml) }
-                    resolved?.let { found ->
-                        val details = currentSong.current()
-                            ?.takeIf { it.details.appleMusicId == appleMusicId }?.details
-                        val displayName = listOfNotNull(
-                            details?.title?.takeIf(String::isNotBlank),
-                            details?.artist?.takeIf(String::isNotBlank),
-                        ).joinToString(" - ").ifBlank { found.displayName }
-                        if (found === cached) found else found.copy(displayName = displayName)
-                    }
-                },
             )
         }
         llmSession = autoLyricsRuntime?.llm?.let { runtime ->
@@ -300,10 +276,10 @@ internal class AppleMusicCustomLyricsTarget(
                     }
                 },
                 isTranslationAllowed = { id ->
-                    (playback?.isSuppressed(id) ?: (id in autoLyricsRuntime.suppressedIds)) == false &&
+                    playback?.isSuppressed(id) != true &&
                         (playback?.preferredSource(id) == CustomLyricsSources.AM_NATIVE ||
                             (playback?.manualEntry(id)?.enabled != true &&
-                                (playback != null || id !in configuredManualIds) && !session.isMapped(id) &&
+                                !session.isMapped(id) &&
                                 autoSession?.readyReplacementFor(id) == null))
                 },
                 onReplacementPublished = { id ->
@@ -354,9 +330,9 @@ internal class AppleMusicCustomLyricsTarget(
                 CustomLyricsSources.LUNABEAT,
             ))
             val translationEligible = nativeSelected && automaticEnabled &&
-                (playback?.isSuppressed(id) ?: (id in autoLyricsRuntime?.suppressedIds.orEmpty())) == false &&
+                playback?.isSuppressed(id) != true &&
                 (explicit != null || (playback?.manualEntry(id)?.enabled != true &&
-                    (playback != null || id !in configuredManualIds) && !session.isMapped(id))) &&
+                    !session.isMapped(id))) &&
                 metadata?.hasTranslation != true && (metadata == null || metadata.language == null || metadata.isForeign)
             val selectionPending = playback?.snapshot(id)?.pendingSource != null
             val enhanced = if (selectionPending) {
@@ -410,24 +386,22 @@ internal class AppleMusicCustomLyricsTarget(
                 },
                 isAlive = parser::isAlive,
                 onReady = { id ->
-                    mainHandler.post {
-                        if (registration.isActive && currentSong.current()?.details?.appleMusicId == id) {
-                            val nextGeneration = controls.cacheGeneration()
-                            if (nextGeneration != observedCacheGeneration) {
-                                observedCacheGeneration = nextGeneration
-                                autoSession?.cancelPending(id)
-                            }
-                            val entry = controls.manualEntry(id)
-                            if (entry != observedManual) {
-                                observedManual = entry
-                                controls.invalidateSource(id, CustomLyricsSources.MANUAL)
-                                if (entry?.enabled == true) session.refreshEntry(entry)
-                                else session.refreshMappings {
-                                    mainHandler.post { if (registration.isActive) resultBridge.onReplacementPublished(id) }
-                                }
-                            }
-                            resultBridge.onReplacementPublished(id)
+                    if (registration.isActive && currentSong.current()?.details?.appleMusicId == id) {
+                        val nextGeneration = controls.cacheGeneration()
+                        if (nextGeneration != observedCacheGeneration) {
+                            observedCacheGeneration = nextGeneration
+                            autoSession?.cancelPending(id)
                         }
+                        val entry = controls.manualEntry(id)
+                        if (entry != observedManual) {
+                            observedManual = entry
+                            controls.invalidateSource(id, CustomLyricsSources.MANUAL)
+                            if (entry?.enabled == true) session.refreshEntry(entry)
+                            else session.refreshMappings {
+                                if (registration.isActive) resultBridge.onReplacementPublished(id)
+                            }
+                        }
+                        resultBridge.onReplacementPublished(id)
                     }
                 },
             )::close)
@@ -494,7 +468,7 @@ internal class AppleMusicCustomLyricsTarget(
                         }
                         val replacementReady = appleMusicId != null &&
                             (session.replacementOrPrepareFor(appleMusicId) != null ||
-                                autoSession?.replacementOrPrepareFor(appleMusicId) != null ||
+                                autoSession?.replacementFor(appleMusicId) != null ||
                                 playback?.hasReadyLyrics(appleMusicId) == true)
                         if (
                             shouldExposeCustomLyrics(

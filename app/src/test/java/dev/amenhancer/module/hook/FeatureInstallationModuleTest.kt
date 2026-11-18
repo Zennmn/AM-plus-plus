@@ -17,7 +17,6 @@ class FeatureInstallationModuleTest {
         val module = FeatureInstallationModule(
             plans = listOf(plan("dual", events, "dual resources")),
             installLayoutInflationHooks = { events += "layout hooks" },
-            registerApplicationCreated = { _, _, _ -> events += "application observer" },
             reportHealth = { _, health -> events += "report ${health.feature}" },
             reportError = { message, _ -> events += "error $message" },
         )
@@ -56,7 +55,6 @@ class FeatureInstallationModuleTest {
     fun `one call owns resource registration and ordered feature health`() {
         val events = mutableListOf<String>()
         var contextFactoryCalls = 0
-        var applicationCreated: (((() -> HookContext) -> Unit))? = null
         val module = FeatureInstallationModule(
             plans = listOf(
                 plan("dual", events, "dual resources"),
@@ -67,29 +65,11 @@ class FeatureInstallationModuleTest {
                 plan("online", events),
             ),
             installLayoutInflationHooks = { events += "layout hooks" },
-            registerApplicationCreated = { _, _, callback ->
-                events += "application observer"
-                applicationCreated = callback
-            },
             reportHealth = { _, health -> events += "report ${health.feature}" },
             reportError = { message, _ -> events += "error $message" },
         )
 
-        val session = module.install(config(), javaClass.classLoader!!)
-
-        assertEquals(
-            listOf(
-                "dual resources",
-                "phone resources",
-                "font resources",
-                "layout hooks",
-                "application observer",
-            ),
-            events,
-        )
-        assertEquals(FeatureInstallationPhase.RESOURCES_REGISTERED, session.snapshot().phase)
-
-        applicationCreated!! {
+        val session = module.installNow(config()) {
             contextFactoryCalls += 1
             context("6.5.0 (1580)")
         }
@@ -100,7 +80,6 @@ class FeatureInstallationModuleTest {
                 "phone resources",
                 "font resources",
                 "layout hooks",
-                "application observer",
                 "install dual",
                 "report dual",
                 "install editorial",
@@ -126,12 +105,11 @@ class FeatureInstallationModuleTest {
             session.snapshot().health.map(FeatureHealth::targetVersion),
         )
 
-        applicationCreated!! {
+        assertSame(session, module.installNow(config()) {
             contextFactoryCalls += 1
             context("unexpected")
-        }
-        assertSame(session, module.install(config(), javaClass.classLoader!!))
-        assertEquals(17, events.size)
+        })
+        assertEquals(16, events.size)
         assertEquals(1, contextFactoryCalls)
     }
 
@@ -146,12 +124,11 @@ class FeatureInstallationModuleTest {
                 FeatureInstallationPlan(feature("last", FeatureInstallResult.degraded("fallback"))),
             ),
             installLayoutInflationHooks = {},
-            registerApplicationCreated = { _, _, callback -> callback { context("target") } },
             reportHealth = { _, health -> reports += health },
             reportError = { message, _ -> errors += message },
         )
 
-        val session = module.install(config(), javaClass.classLoader!!)
+        val session = module.installNow(config()) { context("target") }
 
         assertEquals(listOf("first", "broken", "last"), reports.map(FeatureHealth::feature))
         assertEquals(
@@ -161,38 +138,6 @@ class FeatureInstallationModuleTest {
         assertEquals("StringBuilder: unexpected adapter failure", reports[1].message)
         assertEquals(listOf("broken failed"), errors)
         assertEquals(FeatureInstallationPhase.COMPLETE, session.snapshot().phase)
-    }
-
-    @Test
-    fun `embedded install registers resources and installs immediately without application observer`() {
-        val events = mutableListOf<String>()
-        val module = FeatureInstallationModule(
-            plans = listOf(
-                plan("dual", events, "dual resources"),
-                plan("font", events, "font resources"),
-            ),
-            installLayoutInflationHooks = { events += "layout hooks" },
-            registerApplicationCreated = { _, _, _ -> events += "application observer" },
-            reportHealth = { _, health -> events += "report ${health.feature}" },
-            reportError = { message, _ -> events += "error $message" },
-        )
-
-        val session = module.installNow(config()) { context("6.5.1 (1583)") }
-
-        assertEquals(
-            listOf(
-                "dual resources",
-                "font resources",
-                "layout hooks",
-                "install dual",
-                "report dual",
-                "install font",
-                "report font",
-            ),
-            events,
-        )
-        assertEquals(FeatureInstallationPhase.COMPLETE, session.snapshot().phase)
-        assertSame(session, module.installNow(config()) { context("unexpected") })
     }
 
     @Test
@@ -206,7 +151,6 @@ class FeatureInstallationModuleTest {
                 ),
             ),
             installLayoutInflationHooks = {},
-            registerApplicationCreated = { _, _, _ -> },
             reportHealth = { _, _ -> },
             reportError = { _, _ -> },
         )
@@ -235,13 +179,12 @@ class FeatureInstallationModuleTest {
                 plan("phone", events, "phone resources"),
             ),
             installLayoutInflationHooks = { events += "layout hooks" },
-            registerApplicationCreated = { _, _, _ -> events += "application observer" },
             reportHealth = { _, _ -> events += "report" },
             reportError = { _, _ -> events += "error" },
         )
 
         val error = assertThrows(IllegalStateException::class.java) {
-            module.install(config(), javaClass.classLoader!!)
+            module.installNow(config()) { context("unexpected") }
         }
 
         assertEquals("resource registration failed", error.message)

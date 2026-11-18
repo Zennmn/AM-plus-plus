@@ -205,6 +205,9 @@ object ModuleSettingsSchema {
         KEY_SCHEMA_VERSION to ModuleConstants.CONFIG_SCHEMA_VERSION,
     )
 
+    fun encodeAutomaticLyricsEnabled(enabled: Boolean): Map<String, Any> =
+        mapOf(KEY_AUTOMATIC_LYRICS_ENABLED to enabled)
+
     fun encodeFontManifest(manifest: LyricsFontManifest): Map<String, Any> {
         val safe = FontManifestPolicy.sanitize(manifest)
         return linkedMapOf(

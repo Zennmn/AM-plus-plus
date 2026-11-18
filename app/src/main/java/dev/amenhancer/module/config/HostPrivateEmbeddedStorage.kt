@@ -174,7 +174,9 @@ internal class HostPrivateEmbeddedStorage(
 
     override fun sourceCacheDirectory(): File = File(directory.parentFile, LEGACY_SOURCE_CACHE_DIRECTORY_NAME)
 
-    override fun sharedIdentity(): Any = directory.absoluteFile
+    override fun sourceFileIds(): List<String> = directory.listFiles().orEmpty()
+        .filter { it.isFile && SOURCE_FILE_ID.matches(it.name) }
+        .map(File::getName)
 
     private fun file(name: String): File? = name
         .takeIf(FILE_NAME_PATTERN::matches)
@@ -214,5 +216,6 @@ internal class HostPrivateEmbeddedStorage(
         const val FILES_DIRECTORY_NAME = "ampp-embedded-files"
         const val LEGACY_SOURCE_CACHE_DIRECTORY_NAME = "ampp-auto-lyrics"
         val FILE_NAME_PATTERN = Regex("[A-Za-z0-9_-]{1,128}")
+        val SOURCE_FILE_ID = Regex("source_(lyrics|index)_[0-9a-f]{32}")
     }
 }

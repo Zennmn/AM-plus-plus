@@ -160,17 +160,18 @@ class HookEntry : XposedModule() {
                         if (!initializationStarted.compareAndSet(false, true)) return
                         val session = embeddedSession ?: return
                         val currentSong = CurrentSongIdentityCache()
+                        val settingsController = EmbeddedRuntimeSettingsController(
+                            application,
+                            session,
+                            currentSong = { currentSong.current()?.details },
+                        )
                         runCatching {
                             FeatureInstallation.installEmbedded(
                                 config,
                                 application,
                                 targetClassLoader,
                                 currentSong,
-                                writeAutomaticLyricsSourceOrder = session::saveAutomaticLyricsSourceOrder,
-                                writeAutomaticLyricsEnabled = { enabled ->
-                                    val latest = session.settings()
-                                    session.saveSettings(latest.copy(automaticLyricsEnabled = enabled))
-                                },
+                                settingsController,
                             )
                         }.onFailure { error ->
                             ModernXposedRuntime.log("embedded feature installation failed open", error)
@@ -180,11 +181,7 @@ class HookEntry : XposedModule() {
                         }.getOrNull()
                         val host = EmbeddedSettingsHost.install(
                             application,
-                            EmbeddedRuntimeSettingsController(
-                                application,
-                                session,
-                                currentSong = { currentSong.current()?.details },
-                            ),
+                            settingsController,
                             activityMatcher = AppleMusicHostFactory.settingsActivityMatcher(application, playerActivityClass),
                             nativeBridgeFactory = { onOpen -> AppleMusicHostFactory.settingsViewBridge(application, onOpen) },
                         )

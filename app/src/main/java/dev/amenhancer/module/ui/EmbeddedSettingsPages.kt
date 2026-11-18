@@ -101,6 +101,11 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
         if (!saved) Toast.makeText(activity, localizedText(ModuleText.SETTINGS_SAVE_FAILED), Toast.LENGTH_SHORT).show()
     }
 
+    fun applySavedChange(change: (ModuleSettings) -> ModuleSettings) {
+        draft.applySavedChange(change)
+        settings = draft.settings
+    }
+
     fun back(dismiss: () -> Unit) {
         // The root overlay host gets Back first. While a modal is exiting, keep its page in place.
         if (auxiliaryDialogs.isNotEmpty()) return
@@ -247,7 +252,8 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                                         EmbeddedSettingsPage.MAIN -> EmbeddedSettingsHome(activity, current, refresh, ::open)
                                         EmbeddedSettingsPage.CUSTOM_LYRICS ->
                                             EmbeddedCustomLyricsPage(activity, current, refresh, ::update, ::open)
-                                        EmbeddedSettingsPage.AUTOMATIC_LYRICS -> EmbeddedAutomaticLyricsPage(current, ::update)
+                                        EmbeddedSettingsPage.AUTOMATIC_LYRICS ->
+                                            EmbeddedAutomaticLyricsPage(activity, current, ::applySavedChange)
                                         EmbeddedSettingsPage.LLM_LYRICS ->
                                             EmbeddedLlmLyricsPage(activity, current, ::update, active = active)
                                         EmbeddedSettingsPage.PLUGINS ->

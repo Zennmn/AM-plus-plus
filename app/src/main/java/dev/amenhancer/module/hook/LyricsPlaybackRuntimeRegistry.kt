@@ -1,6 +1,7 @@
 package dev.amenhancer.module.hook
 
 import dev.amenhancer.module.lyrics.LyricsPlaybackControls
+import dev.amenhancer.module.lyrics.LyricsPlaybackRuntime
 import dev.amenhancer.module.lyrics.LlmLyricsStatusSnapshot
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -8,13 +9,14 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /** One runtime belongs to the active host process; settings and the lyric menu share it. */
 internal object LyricsPlaybackRuntimeRegistry {
-    @Volatile private var active: LyricsPlaybackControls? = null
+    @Volatile private var active: LyricsPlaybackRuntime? = null
     private var llmOwner: Any? = null
     private val mutableLlmStatus = MutableStateFlow<LlmLyricsStatusSnapshot?>(null)
     val llmStatus: StateFlow<LlmLyricsStatusSnapshot?> = mutableLlmStatus.asStateFlow()
     fun controls(): LyricsPlaybackControls? = active
-    fun attach(controls: LyricsPlaybackControls) { active = controls }
-    fun detach(controls: LyricsPlaybackControls) { if (active === controls) active = null }
+    fun attach(runtime: LyricsPlaybackRuntime) { active = runtime }
+    fun detach(runtime: LyricsPlaybackRuntime) { if (active === runtime) active = null }
+    fun onSettingsChanged() { active?.onSettingsChanged() }
 
     @Synchronized fun attachLlmStatus(owner: Any) {
         llmOwner = owner

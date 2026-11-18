@@ -60,8 +60,8 @@ internal interface EmbeddedConfigurationStorage : ConfigurationReader {
     /** Legacy automatic-cache directory, retained for reference-only migration. */
     fun sourceCacheDirectory(): File? = null
 
-    /** Process-wide identity for stores backed by the same host files. */
-    fun sharedIdentity(): Any? = null
+    /** Generated third-party cache files, including any left by an interrupted write. */
+    fun sourceFileIds(): List<String> = emptyList()
 
     companion object {
         private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
@@ -79,7 +79,7 @@ internal class EmbeddedConfigurationSession(
     newIndexFileId: () -> String = {
         "index_" + UUID.randomUUID().toString().replace("-", "")
     },
-    private val writable: Boolean = true,
+    internal val writable: Boolean = true,
 ) : ConfigurationReader {
     init {
         if (writable) migrateLegacyValuesBeforeCleanup()
@@ -91,6 +91,7 @@ internal class EmbeddedConfigurationSession(
         publishPointer = ::publishIndexPointer,
         deleteRemoteFile = { storage.deleteFile(it) },
     )
+    private var manualChangeListener: ((CustomLyricsManifest) -> Unit)? = null
 
     fun settings(): ModuleSettings = ModuleSettingsSchema.decode(storage.values())
 
@@ -98,6 +99,9 @@ internal class EmbeddedConfigurationSession(
         ModuleSettingsSchema.encodeOrdinarySettings(settings),
         synchronous = true,
     )
+
+    fun saveAutomaticLyricsEnabled(enabled: Boolean): Boolean =
+        writeValues(ModuleSettingsSchema.encodeAutomaticLyricsEnabled(enabled))
 
     fun saveAutomaticLyricsSourceOrder(order: List<String>): Boolean {
         if (!writable) return false
@@ -148,7 +152,7 @@ internal class EmbeddedConfigurationSession(
         }
     }
 
-    private fun manualIndexCommitLimit(
+    internal fun manualIndexCommitLimit(
         state: CustomLyricsIndexState,
         next: CustomLyricsManifest,
     ): Int? {
@@ -166,61 +170,19 @@ internal class EmbeddedConfigurationSession(
         return limit.toInt()
     }
 
-    /**
-     * Captures the currently published lyrics index for a long-running update.
-     * The returned state is immutable and can safely cross the network worker
-     * boundary; callers must pass it back to [commitCustomLyricsIfUnchanged].
-     */
+    /** Captures the currently published lyrics index for a long-running operation. */
     internal fun customLyricsIndexState(): CustomLyricsIndexState =
         indexRepository.state(storage.values())
-
-    /**
-     * Compare-and-swap variant used by the lyrics updater. A background source
-     * scan must never publish over an edit made after its baseline snapshot.
-     */
-    internal fun commitCustomLyricsIfUnchanged(
-        expected: CustomLyricsIndexState,
-        manifest: CustomLyricsManifest,
-        allowRecovery: Boolean = false,
-    ): CustomLyricsIndexCommitResult = if (!writable) {
-        CustomLyricsIndexCommitResult.Failed(ModuleText.MIGRATION_READ_ONLY.text())
-    } else {
-        synchronized(INDEX_MUTATION_LOCK) {
-            val current = indexRepository.state(storage.values())
-            if (current != expected) {
-                return@synchronized CustomLyricsIndexCommitResult.Failed(
-                    ModuleText.LYRICS_INDEX_CHANGED.text(),
-                )
-            }
-            val maxBytes = manualIndexCommitLimit(current, manifest)
-            if (maxBytes == null) {
-                return@synchronized CustomLyricsIndexCommitResult.Failed(
-                    ModuleText.LYRICS_INDEX_TOO_LARGE.text(),
-                )
-            }
-            indexRepository.commit(
-                state = current,
-                next = manifest,
-                allowRecovery = allowRecovery,
-                maxIndexBytes = maxBytes,
-            ).also { result ->
-                if (result is CustomLyricsIndexCommitResult.Committed) notifyManualChangeListeners(result.manifest)
-            }
-        }
-    }
 
     internal fun <T> withCustomLyricsMutation(block: () -> T): T =
         synchronized(INDEX_MUTATION_LOCK, block)
 
     internal fun observeManualChanges(listener: (CustomLyricsManifest) -> Unit) {
-        val identity = storage.sharedIdentity() ?: storage
-        synchronized(manualChangeLock) { manualChangeListeners[identity] = listener }
+        manualChangeListener = listener
     }
 
     private fun notifyManualChangeListeners(manifest: CustomLyricsManifest) {
-        val identity = storage.sharedIdentity() ?: storage
-        val listener = synchronized(manualChangeLock) { manualChangeListeners[identity] }
-        listener?.let { runCatching { it(manifest) } }
+        manualChangeListener?.let { runCatching { it(manifest) } }
     }
 
 
@@ -343,7 +305,7 @@ internal class EmbeddedConfigurationSession(
 
     internal fun sourceCacheDirectory(): File? = storage.sourceCacheDirectory()
 
-    internal fun sharedStorageIdentity(): Any = storage.sharedIdentity() ?: storage
+    internal fun sourceFileIds(): List<String> = storage.sourceFileIds()
 
     /** File-level access to the legacy source-cache directory. */
     internal fun sourceCacheFile(name: String): File? {
@@ -364,18 +326,9 @@ internal class EmbeddedConfigurationSession(
         File(File(it, "ampp-lunabeat-cache"), "catalog.json")
     }
 
-    internal fun deleteLunabeatCatalog(): Boolean = runCatching {
-        sourceCacheLunabeatCatalog()?.let { file -> file.isFile && file.delete() } == true
-    }.getOrDefault(false)
-
     internal fun sourceCacheRootFiles(): List<File> = runCatching {
         sourceCacheDirectory()?.listFiles()?.filter(File::isFile).orEmpty()
     }.getOrDefault(emptyList())
-
-    internal fun sourceCacheRootListing(): List<File> = runCatching {
-        sourceCacheDirectory()?.listFiles().orEmpty().toList()
-    }.getOrDefault(emptyList())
-
 
     internal fun sourceCacheLegacyCandidateFile(appleMusicId: Long): File? = appleMusicId
         .takeIf { it > 0L }
@@ -396,8 +349,6 @@ internal class EmbeddedConfigurationSession(
             }
         }.distinct()
     }.getOrDefault(emptyList())
-
-    internal fun deleteSourceCacheFile(name: String): Boolean = deleteSourceBodyFile(name)
 
     internal fun sourceIndexPreferenceKeys(): Set<String> = setOf(
         SOURCE_INDEX_FILE_ID,
@@ -472,8 +423,6 @@ internal class EmbeddedConfigurationSession(
 
     private companion object {
         val INDEX_MUTATION_LOCK = Any()
-        val manualChangeLock = Any()
-        val manualChangeListeners = mutableMapOf<Any, (CustomLyricsManifest) -> Unit>()
         const val SOURCE_INDEX_FILE_ID = "lyrics_source_index_file_id"
         const val SOURCE_INDEX_GENERATION = "lyrics_source_index_generation"
         const val SOURCE_INDEX_SHA256 = "lyrics_source_index_sha256"

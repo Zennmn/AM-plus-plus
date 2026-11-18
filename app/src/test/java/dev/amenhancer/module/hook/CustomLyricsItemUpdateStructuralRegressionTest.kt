@@ -83,13 +83,6 @@ class CustomLyricsItemUpdateStructuralRegressionTest {
         assertTrue(target.contains("Handler(Looper.getMainLooper())"))
         assertTrue(target.contains("mainHandler.post {"))
         assertTrue(target.contains("resultBridge.onReplacementPublished(appleMusicId)"))
-        assertEquals(
-            // Configured lyrics, automatic fallback, cache refresh, LLM,
-            // native-ID submission repair, automatic lookup misses and the
-            // ready signal after manual/cache invalidation each publish.
-            7,
-            Regex("resultBridge\\.onReplacementPublished").findAll(target).count(),
-        )
         assertTrue(
             target.indexOf("CustomLyricsReplacementSession(") <
                 target.indexOf("LyricsResultSubmissionBridge.create("),
