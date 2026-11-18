@@ -258,6 +258,10 @@ Fragment view 重建、配置变化与 controller 销毁分别关闭会话。状
 
 **宿主接缝。** 当前歌曲身份由 `CurrentItemIdentitySeam` 读取精确 item、公开 ID 与可选 persistentId；配置身份仅按当前发布快照的精确关系归一，原生提交仍绑定实际 item ID。自定义歌词的原生 parser、SongInfoPtr、文档身份与可用性谓词由 `AppleMusicCustomLyricsTarget` 接入。手动、自动、刷新、显式换源及 LLM 只准备候选，最终均通过[共用结果通道](#lyrics-result-submission)。字体、模糊、翻译、发音和其他订阅者继续使用原生显示链。
 
+适配可用性谓词时，要核对换歌时的首次判定是否控制标题更新和原生歌词加载，以及延迟复查是否会补跑被跳过的步骤。原生判定无歌词时，可凭传入 item 的歌曲 ID 和已载入的来源索引，让符合显式来源或自动策略的启用缓存进入原生加载。该判定允许早于播放器身份更新，仅检查索引快照。正文读取、指针准备和提交仍走既有后台会话与原生结果通道。当前播放中已判定无候选的自动请求退出缓存资格，清除或停用的缓存随索引和来源设置生效。
+
+首次在线补全使用 `lyricResultSubmission.methods.unavailableFallback` 的精确声明。适配时核对 item-update 内的可用性判断、原生加载和复查失败后的回退，确认回退方法属于歌词 Fragment、无参数且会重查当前歌曲可用性。只允许已经打开的歌词页在换到已确认的当前 item 时等待有效的自动查找。在线命中继续用原生加载产生的结果通道；查找结束且没有可用文档时，经原回退方法重新判断。等待与同一歌曲、Fragment、ViewModel 和可见 View 绑定，切歌、离开页面或销毁会话后不回退旧页面。未声明该角色的档案沿用现有可用性处理。
+
 | 层 | 维护入口与职责 |
 |---|---|
 | `core` | [CustomLyricsReplacementSession](../core/src/main/kotlin/dev/amenhancer/module/hook/CustomLyricsReplacementSession.kt)、[AutoLyricsReplacementSession](../core/src/main/kotlin/dev/amenhancer/module/hook/AutoLyricsReplacementSession.kt)、[AutoLyricsRefreshSession](../core/src/main/kotlin/dev/amenhancer/module/hook/AutoLyricsRefreshSession.kt)、`LyricsPlaybackControls` / `LyricsPlaybackRuntime`：资格、候选、来源与偏移偏好、代次、取消、解析及缓存边界 |

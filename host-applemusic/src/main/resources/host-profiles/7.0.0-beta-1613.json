@@ -90,6 +90,13 @@
         "parameters": [],
         "returns": "void",
         "static": false
+      },
+      "unavailableFallback": {
+        "owner": "com.apple.android.music.player.fragment.PlayerLyricsViewFragment",
+        "name": "m2",
+        "parameters": [],
+        "returns": "void",
+        "static": false
       }
     },
     "fields": {

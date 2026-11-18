@@ -161,6 +161,11 @@ class AutoLyricsReplacementSession(
         }
     }
 
+    fun hasPendingLookup(appleMusicId: Long): Boolean = synchronized(lock) {
+        val stamp = pending[appleMusicId]
+        stamp != null && isCurrentRequestLocked(appleMusicId, stamp) && lookupMisses[appleMusicId] != stamp
+    }
+
     fun readyReplacementFor(appleMusicId: Long): Any? {
         if (appleMusicId <= 0L || !isAllowed(appleMusicId)) return null
         synchronized(lock) {

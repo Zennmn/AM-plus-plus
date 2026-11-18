@@ -12,10 +12,12 @@ class CustomLyricsAvailabilityPolicyTest {
     }
 
     @Test
-    fun `unavailable lyrics stay closed until an exact replacement is ready`() {
+    fun `unavailable lyrics require a song identity and a ready or cached source`() {
         assertFalse(shouldExposeCustomLyrics(false, null, replacementReady = true))
         assertFalse(shouldExposeCustomLyrics(false, 0L, replacementReady = true))
         assertFalse(shouldExposeCustomLyrics(false, 42L, replacementReady = false))
         assertTrue(shouldExposeCustomLyrics(false, 42L, replacementReady = true))
+        assertFalse(shouldExposeCustomLyrics(false, null, replacementReady = false, cachedLyricsAvailable = true))
+        assertTrue(shouldExposeCustomLyrics(false, 42L, replacementReady = false, cachedLyricsAvailable = true))
     }
 }

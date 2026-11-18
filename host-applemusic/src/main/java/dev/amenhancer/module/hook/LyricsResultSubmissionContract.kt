@@ -1,6 +1,7 @@
 package dev.amenhancer.module.hook
 
 import dev.amenhancer.host.applemusic.AppleMusicHostProfiles
+import java.lang.reflect.Method
 
 /**
  * Exact, per-build descriptor set for the native lyrics result channel.
@@ -29,6 +30,7 @@ internal class LyricsResultSubmissionContract private constructor(
     private val members: FragmentProfileMembers,
     val profileId: String,
     val loader: ClassLoader,
+    val unavailableFallbackMethod: Method?,
 ) {
     val fragmentViewModelField get() = members.field("fragmentViewModel")
     val lyricsResultField get() = members.field("lyricsResult")
@@ -108,11 +110,19 @@ internal class LyricsResultSubmissionContract private constructor(
             val vmClass = resolved.value
             val loader = vmClass.classLoader ?: ClassLoader.getSystemClassLoader()
             return runCatching {
+                val members = FragmentProfileMembers(loader, section, SECTION, requirements)
+                val fallback = if (section.optJSONObject("methods")?.has("unavailableFallback") == true) {
+                    members.method("unavailableFallback").also {
+                        check(it.declaringClass == members.method("fragmentResume").declaringClass &&
+                            it.parameterCount == 0 && it.returnType == Void.TYPE)
+                    }
+                } else null
                 LyricsResultSubmissionContract(
                     vmClass = vmClass,
-                    members = FragmentProfileMembers(loader, section, SECTION, requirements),
+                    members = members,
                     profileId = profileId,
                     loader = loader,
+                    unavailableFallbackMethod = fallback,
                 )
             }.onFailure { error ->
                 logger("lyric result submission contract unavailable: ${error.message}")

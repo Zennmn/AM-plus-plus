@@ -365,6 +365,9 @@ internal class AppleMusicCustomLyricsTarget(
             nativeFragmentSongId = seam::currentItemAdamIdOf,
             itemSongId = { seam.canonicalAdamIdOf(it, currentSong.current()) },
             selectReplacement = selectReplacement,
+            automaticLookupCanDeliver = { id ->
+                autoSession?.let { it.hasPendingLookup(id) || it.readyReplacementFor(id) != null } == true
+            },
             isAlive = parser::isAlive,
             isCurrentSubmission = parser::isCurrentSubmission,
             documentOf = parser::documentOf,
@@ -460,22 +463,26 @@ internal class AppleMusicCustomLyricsTarget(
                         val nativeLyricsAvailable = param.result as? Boolean ?: return@runCatching
                         if (nativeLyricsAvailable) return@runCatching
                         val appleMusicId = seam.canonicalAdamIdOf(param.args.getOrNull(0), currentSong.current())
-                        appleMusicId?.let { id ->
-                            session.ensureRequested(id)
-                            autoSession?.configureSources(id,
-                                automaticLyricsLookupSources(config.settings(), false, null))
-                            autoSession?.ensureRequested(id)
-                        }
-                        val replacementReady = appleMusicId != null &&
-                            (session.replacementOrPrepareFor(appleMusicId) != null ||
-                                autoSession?.replacementFor(appleMusicId) != null ||
-                                playback?.hasReadyLyrics(appleMusicId) == true)
+                            ?: return@runCatching
+                        val sources = automaticLyricsLookupSources(config.settings(), false, null)
+                        session.ensureRequested(appleMusicId)
+                        autoSession?.configureSources(appleMusicId, sources)
+                        autoSession?.ensureRequested(appleMusicId)
+                        val replacementReady = session.replacementOrPrepareFor(appleMusicId) != null ||
+                            autoSession?.replacementFor(appleMusicId) != null ||
+                            playback?.hasReadyLyrics(appleMusicId) == true
+                        // The first host check can gate both the item update and its lyrics request.
+                        val cachedLyricsAvailable = !replacementReady && playback?.hasCachedLyrics(
+                            appleMusicId,
+                            sources.takeUnless { autoSession?.hasLookupMiss(appleMusicId) == true }.orEmpty(),
+                        ) == true
                         if (
                             shouldExposeCustomLyrics(
                                 nativeLyricsAvailable = nativeLyricsAvailable,
                                 appleMusicId = appleMusicId,
                                 replacementReady = replacementReady,
-                            )
+                                cachedLyricsAvailable = cachedLyricsAvailable,
+                            ) || resultBridge.keepLyricsOpenForLookup(appleMusicId)
                         ) {
                             param.result = true
                         }
@@ -592,4 +599,6 @@ internal fun shouldExposeCustomLyrics(
     nativeLyricsAvailable: Boolean,
     appleMusicId: Long?,
     replacementReady: Boolean,
-): Boolean = nativeLyricsAvailable || (appleMusicId != null && appleMusicId > 0L && replacementReady)
+    cachedLyricsAvailable: Boolean = false,
+): Boolean = nativeLyricsAvailable ||
+    (appleMusicId != null && appleMusicId > 0L && (replacementReady || cachedLyricsAvailable))

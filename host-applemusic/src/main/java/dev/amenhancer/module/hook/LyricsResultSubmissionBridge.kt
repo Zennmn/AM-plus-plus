@@ -16,12 +16,20 @@ internal class LyricsResultSubmissionBridge private constructor(
     private val nativeFragmentSongId: (Any?) -> Long?,
     private val itemSongId: (Any) -> Long?,
     private val selectReplacement: (Long, Long, Any?) -> Any?,
+    private val automaticLookupCanDeliver: (Long) -> Boolean,
     private val isAlive: (Any?) -> Boolean,
     private val isCurrentSubmission: (Any) -> Boolean,
     private val documentOf: (Any) -> String?,
     private val logger: (String) -> Unit,
     private val mainHandler: Handler,
 ) {
+    private class OnlineLyricsWait(
+        val songId: Long,
+        val fragment: WeakReference<Any>,
+        val view: WeakReference<View>,
+        val model: WeakReference<Any>,
+    )
+
     private val lock = Any()
     private var attachedFragment = java.lang.ref.WeakReference<Any>(null)
     private val pendingFragments = mutableListOf<Pair<WeakReference<Any>, WeakReference<Any>>>()
@@ -37,6 +45,8 @@ internal class LyricsResultSubmissionBridge private constructor(
     /** Guards against rewriting the container write this bridge itself issues. */
     private val publishing = ThreadLocal<Boolean>()
     private val preparingIndex = ThreadLocal<Boolean>()
+    private val itemUpdate = ThreadLocal<ModernMethodHook.MethodHookParam>()
+    private var onlineLyricsWait: OnlineLyricsWait? = null
 
     @Volatile private var vm: Any? = null
     @Volatile private var container: Any? = null
@@ -77,6 +87,52 @@ internal class LyricsResultSubmissionBridge private constructor(
     private val fragmentViewMethod: Method? = runCatching {
         contract.fragmentResumeMethod.declaringClass.getMethod("getView")
     }.getOrNull()
+
+    private val fragmentResumedMethod = contract.unavailableFallbackMethod?.let {
+        runCatching { it.declaringClass.getMethod("isResumed") }.getOrNull()
+    }
+
+    /** Only an open lyrics panel changing items can start waiting on a cold lookup. */
+    fun keepLyricsOpenForLookup(appleMusicId: Long): Boolean {
+        if (closed || fragmentResumedMethod == null || Looper.myLooper() != Looper.getMainLooper() ||
+            currentSong.current()?.details?.appleMusicId != appleMusicId) return false
+        val waiting = synchronized(lock) { onlineLyricsWait?.takeIf { it.songId == appleMusicId } }
+        if (waiting != null && isActiveOnlineLyricsPanel(waiting)) return automaticLookupCanDeliver(appleMusicId)
+
+        val update = itemUpdate.get() ?: return false
+        val previousId = update.extras["lyricResult.previousItemId"] as? Long ?: return false
+        val fragment = update.thisObject ?: return false
+        if (previousId == appleMusicId || fragmentSongId(fragment) != appleMusicId) return false
+        val view = visibleLyricsView(fragment) ?: return false
+        val model = contract.fragmentViewModelField.get(fragment) ?: return false
+        if (!automaticLookupCanDeliver(appleMusicId)) return false
+        synchronized(lock) {
+            if (closed || currentSong.current()?.details?.appleMusicId != appleMusicId) return false
+            onlineLyricsWait = OnlineLyricsWait(
+                appleMusicId,
+                WeakReference(fragment),
+                WeakReference(view),
+                WeakReference(model),
+            )
+        }
+        return true
+    }
+
+    private fun visibleLyricsView(fragment: Any): View? {
+        if (fragmentResumedMethod?.invoke(fragment) != true) return null
+        return (fragmentViewMethod?.invoke(fragment) as? View)?.takeIf {
+            it.isAttachedToWindow && it.isShown && it.windowVisibility == View.VISIBLE
+        }
+    }
+
+    private fun isActiveOnlineLyricsPanel(wait: OnlineLyricsWait): Boolean {
+        val fragment = wait.fragment.get() ?: return false
+        val view = wait.view.get() ?: return false
+        val model = wait.model.get() ?: return false
+        return attachedFragment.get() === fragment && vmSnapshot() === model &&
+            contract.fragmentViewModelField.get(fragment) === model &&
+            fragmentSongId(fragment) == wait.songId && visibleLyricsView(fragment) === view
+    }
 
     private val loadLyricsHook = object : ModernMethodHook() {
         override fun beforeHookedMethod(param: MethodHookParam) {
@@ -348,6 +404,7 @@ internal class LyricsResultSubmissionBridge private constructor(
         synchronized(lock) {
             val changed = appleMusicId != observedPlaybackId
             observedPlaybackId = appleMusicId
+            if (changed && onlineLyricsWait?.songId != appleMusicId) onlineLyricsWait = null
             if (changed && appleMusicId != requestId) {
                 advanceRequestLocked()
                 requestId = 0L
@@ -371,8 +428,29 @@ internal class LyricsResultSubmissionBridge private constructor(
             // identity and selector after recovery changes a request generation.
             if (closed || verifiedCurrentId() != appleMusicId) return@post
             retryPendingAttachment(appleMusicId)
-            if (!closed && verifiedCurrentId() == appleMusicId) selectAndPublish(appleMusicId)
+            if (!closed && verifiedCurrentId() == appleMusicId) {
+                selectAndPublish(appleMusicId)
+                settleOnlineLyricsWait(appleMusicId)
+            }
         }
+    }
+
+    private fun settleOnlineLyricsWait(appleMusicId: Long) {
+        val wait = synchronized(lock) { onlineLyricsWait?.takeIf { it.songId == appleMusicId } } ?: return
+        runCatching {
+            val active = isActiveOnlineLyricsPanel(wait)
+            val hasDocument = active && requestIdSnapshot() == appleMusicId && currentDocument() != null
+            if (active && !hasDocument && automaticLookupCanDeliver(appleMusicId)) return
+            synchronized(lock) {
+                if (closed || onlineLyricsWait !== wait) return
+                onlineLyricsWait = null
+            }
+            if (active && !hasDocument && currentSong.current()?.details?.appleMusicId == appleMusicId) {
+                val fragment = wait.fragment.get() ?: return
+                // This host method checks availability again before entering its own fallback.
+                contract.unavailableFallbackMethod?.invoke(fragment)
+            }
+        }.onFailure { report("lyric online lookup fallback failed", it) }
     }
 
     private fun retryPendingAttachment(appleMusicId: Long) {
@@ -416,6 +494,7 @@ internal class LyricsResultSubmissionBridge private constructor(
     fun close() {
         synchronized(lock) {
             closed = true
+            onlineLyricsWait = null
             advanceRequestLocked()
             clearSelectionLocked()
             attachedFragment.clear()
@@ -736,8 +815,16 @@ internal class LyricsResultSubmissionBridge private constructor(
             itemUpdateMethod to object : ModernMethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     param.extras["lyricResult.previousItemId"] = fragmentSongId(param.thisObject)
+                    if (fragmentResumedMethod != null) {
+                        param.extras["lyricResult.outerItemUpdate"] = itemUpdate.get()
+                        itemUpdate.set(param)
+                    }
                 }
                 override fun afterHookedMethod(param: MethodHookParam) {
+                    if (itemUpdate.get() === param) {
+                        val outer = param.extras.remove("lyricResult.outerItemUpdate") as? ModernMethodHook.MethodHookParam
+                        if (outer == null) itemUpdate.remove() else itemUpdate.set(outer)
+                    }
                     if (param.throwable != null) return
                     val fragment = param.thisObject ?: return
                     runCatching {
@@ -791,6 +878,7 @@ internal class LyricsResultSubmissionBridge private constructor(
                         vm = null
                         container = null
                         attachedFragment.clear()
+                        onlineLyricsWait = null
                     }
                     currentSong.current()?.details?.appleMusicId?.let(::onReplacementPublished)
                 }
@@ -819,6 +907,7 @@ internal class LyricsResultSubmissionBridge private constructor(
             nativeFragmentSongId: (Any?) -> Long?,
             itemSongId: (Any) -> Long?,
             selectReplacement: (Long, Long, Any?) -> Any?,
+            automaticLookupCanDeliver: (Long) -> Boolean,
             isAlive: (Any?) -> Boolean,
             isCurrentSubmission: (Any) -> Boolean,
             documentOf: (Any) -> String?,
@@ -838,6 +927,7 @@ internal class LyricsResultSubmissionBridge private constructor(
                 nativeFragmentSongId = nativeFragmentSongId,
                 itemSongId = itemSongId,
                 selectReplacement = selectReplacement,
+                automaticLookupCanDeliver = automaticLookupCanDeliver,
                 isAlive = isAlive,
                 isCurrentSubmission = isCurrentSubmission,
                 documentOf = documentOf,

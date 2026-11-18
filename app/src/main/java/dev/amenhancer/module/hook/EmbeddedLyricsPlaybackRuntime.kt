@@ -106,6 +106,20 @@ internal class EmbeddedLyricsPlaybackRuntime(
         }
     }
 
+    override fun hasCachedLyrics(appleMusicId: Long, automaticSources: List<String>): Boolean {
+        if (!settings().customLyricsEnabled || synchronized(lock) { closed || clearingCache }) return false
+        val source = preferredSource(appleMusicId, includeUpcoming = true)
+        if (source != null) {
+            return source in REMOTE_SOURCES && store.entryFor(appleMusicId, source)?.enabled == true
+        }
+        if (automaticSources.isEmpty() || store.manualEntry(appleMusicId)?.enabled == true ||
+            store.isSuppressed(appleMusicId)) return false
+        return store.entries().any {
+            it.appleMusicId == appleMusicId && it.enabled &&
+                (it.source in automaticSources || it.source == CustomLyricsSources.AUTO_CACHE)
+        }
+    }
+
     override fun isSuppressed(appleMusicId: Long): Boolean = store.isSuppressed(appleMusicId)
     override fun manualEntry(appleMusicId: Long): CustomLyricsEntry? = store.manualEntry(appleMusicId)
     override fun cacheGeneration(): Long = store.generation()
@@ -118,12 +132,18 @@ internal class EmbeddedLyricsPlaybackRuntime(
         notifyChanged(wake = true)
     }
 
-    override fun preferredSource(appleMusicId: Long): String? {
-        val configured = store.preferredSource(appleMusicId)
-        val enabled = configured == null || sourceEnabled(appleMusicId, configured)
+    override fun preferredSource(appleMusicId: Long): String? =
+        preferredSource(appleMusicId, includeUpcoming = false)
+
+    private fun preferredSource(appleMusicId: Long, includeUpcoming: Boolean): String? {
+        val configured = store.preferredSource(appleMusicId)?.takeIf { sourceEnabled(appleMusicId, it) }
         return synchronized(lock) {
-            if (closed || songId != appleMusicId || failedPreferred) null
-            else pendingSource.takeIf { pendingInteractive } ?: configured.takeIf { enabled }
+            when {
+                closed -> null
+                songId != appleMusicId -> configured.takeIf { includeUpcoming }
+                failedPreferred -> null
+                else -> pendingSource.takeIf { pendingInteractive } ?: configured
+            }
         }
     }
 
