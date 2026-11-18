@@ -5,6 +5,12 @@ import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.widget.Toast
+import androidx.compose.foundation.IndicationNodeFactory
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.FocusInteraction
+import androidx.compose.foundation.interaction.HoverInteraction
+import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -15,9 +21,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
@@ -30,9 +38,14 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.node.DelegatableNode
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import dev.amenhancer.module.hook.CurrentSongIdentityCache
 import dev.amenhancer.module.hook.LyricsPlaybackRuntimeRegistry
@@ -45,6 +58,7 @@ import dev.amenhancer.module.model.CustomLyricsSources
 import dev.amenhancer.module.model.ModuleSettings
 import java.util.Locale
 import java.util.concurrent.Executors
+import kotlinx.coroutines.flow.filter
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.DropdownEntry
@@ -53,13 +67,19 @@ import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
+import top.yukonga.miuix.kmp.layout.DialogDefaults
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.MiuixIndication
 
 private const val LYRICS_MENU_OFFSET_STEP_MS = 100
-private val LyricsMenuRowPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)
+private val LyricsMenuBodyInset = 7.dp
+private val LyricsMenuFeedbackInset = 8.dp
+private val LyricsMenuFeedbackShape = RoundedCornerShape(12.dp)
+private val LyricsMenuRowPadding = PaddingValues(vertical = 12.dp)
+private val LyricsMenuPressableRowPadding = PaddingValues(horizontal = LyricsMenuFeedbackInset, vertical = 12.dp)
 
 private enum class LyricsMenuDetail { OFFSET, SOURCE_ORDER }
 
@@ -197,6 +217,7 @@ private fun EmbeddedLyricsMenuDialog(
     var automaticSaving by remember { mutableStateOf(false) }
     val currentShow by rememberUpdatedState(show)
     val activeSource = snapshot.activeSource
+    var sourceExpanded by remember { mutableStateOf(false) }
     val songReady = appleMusicId > 0L && snapshot.isCurrentSong
     val canAdjust = songReady && snapshot.canAdjustTiming && activeSource != null && snapshot.pendingSource == null
     val selectedSource = snapshot.preferredSource
@@ -373,6 +394,10 @@ private fun EmbeddedLyricsMenuDialog(
     OverlayDialog(
         show = show,
         title = text(ModuleText.LYRICS_MENU),
+        insideMargin = DpSize(
+            (DialogDefaults.insideMargin.width - LyricsMenuFeedbackInset).coerceAtLeast(0.dp),
+            DialogDefaults.insideMargin.height,
+        ),
         enableWindowDim = true,
         onDismissRequest = dismiss,
         onDismissFinished = onDismissFinished,
@@ -380,14 +405,19 @@ private fun EmbeddedLyricsMenuDialog(
         maxWidth = 380.dp,
     ) {
         SideEffect(onPresented)
+        // Restore the dialog inset for the footer and the text inside the pressable rows.
+        val contentInset = Modifier.padding(horizontal = LyricsMenuFeedbackInset)
         Column(Modifier.fillMaxWidth()) {
             EmbeddedSettingsGroup(
-                modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+                modifier = Modifier.weight(1f, fill = false)
+                    .padding(horizontal = LyricsMenuBodyInset)
+                    .verticalScroll(rememberScrollState()),
             ) {
                 menuSettings?.let { settings ->
                     if (writeAutomaticLyricsEnabled != null) {
                         val canToggle = show && settings.customLyricsEnabled && !automaticSaving
                         SwitchPreference(
+                            modifier = contentInset,
                             title = text(ModuleText.AUTO_LYRICS),
                             summary = text(
                                 if (settings.customLyricsEnabled) ModuleText.LYRICS_MENU_AUTO_SUMMARY
@@ -406,33 +436,50 @@ private fun EmbeddedLyricsMenuDialog(
                             },
                             insideMargin = LyricsMenuRowPadding,
                         )
-                        HorizontalDivider(Modifier.padding(horizontal = 14.dp))
+                        HorizontalDivider(contentInset)
                     }
                 }
-                OverlayDropdownPreference(
-                    entry = DropdownEntry(items = sources.map { option ->
-                        DropdownItem(
-                            text = text(option.title),
-                            selected = selectedSource == option.id,
-                            summary = text(ModuleText.LYRICS_SOURCE_AUTOMATIC_SUMMARY)
-                                .takeIf { option.id == LyricsPlaybackSources.AUTOMATIC },
-                            onClick = {
-                                if (selectedSource != option.id ||
-                                    (option.id != LyricsPlaybackSources.AUTOMATIC && activeSource != option.id)
-                                ) currentControls.selectSource(currentAppleMusicId, option.id)
-                            },
+                val colors = MiuixTheme.colorScheme
+                val sourceColors = if (sourceExpanded) {
+                    colors.copy(onSurfaceVariantActions = lerp(colors.onSurfaceVariantActions, colors.onSurface, 0.4f))
+                } else colors
+                MiuixTheme(colors = sourceColors, textStyles = MiuixTheme.textStyles) {
+                    LyricsMenuPressFeedback {
+                        OverlayDropdownPreference(
+                            modifier = Modifier.clip(LyricsMenuFeedbackShape),
+                            entry = DropdownEntry(items = sources.map { option ->
+                                DropdownItem(
+                                    text = text(option.title),
+                                    selected = selectedSource == option.id,
+                                    summary = text(ModuleText.LYRICS_SOURCE_AUTOMATIC_SUMMARY)
+                                        .takeIf { option.id == LyricsPlaybackSources.AUTOMATIC },
+                                    onClick = {
+                                        if (selectedSource != option.id ||
+                                            (option.id != LyricsPlaybackSources.AUTOMATIC && activeSource != option.id)
+                                        ) currentControls.selectSource(currentAppleMusicId, option.id)
+                                    },
+                                )
+                            }),
+                            title = text(ModuleText.LYRICS_SOURCE_SECTION),
+                            summary = sourceValue?.takeIf { activeSource != selectedSource }
+                                ?.let { text(ModuleText.LYRICS_ACTIVE_SOURCE, it) },
+                            enabled = show && songReady && pendingSource == null,
+                            insideMargin = LyricsMenuPressableRowPadding,
+                            renderInRootScaffold = true,
+                            onExpandedChange = { sourceExpanded = it },
                         )
-                    }),
-                    title = text(ModuleText.LYRICS_SOURCE_SECTION),
-                    summary = sourceValue?.takeIf { activeSource != selectedSource }
-                        ?.let { text(ModuleText.LYRICS_ACTIVE_SOURCE, it) },
-                    enabled = show && songReady && pendingSource == null,
-                    insideMargin = LyricsMenuRowPadding,
-                    renderInRootScaffold = true,
-                )
-                sourceFeedback?.let { EmbeddedSettingsNotice(it) }
+                    }
+                }
+                sourceFeedback?.let { message ->
+                    Text(
+                        text = message,
+                        modifier = Modifier.fillMaxWidth().then(contentInset).padding(vertical = 8.dp),
+                        style = MiuixTheme.textStyles.body2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                }
                 if (writeSourceOrder != null) {
-                    HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                    HorizontalDivider(contentInset)
                     LyricsMenuLink(
                         title = text(ModuleText.LYRICS_MENU_AUTO_SOURCE_ORDER),
                         value = null,
@@ -449,15 +496,16 @@ private fun EmbeddedLyricsMenuDialog(
                     )
                 }
                 menuSettings?.let { statusSettings ->
-                    HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                    HorizontalDivider(contentInset)
                     LlmLyricsStatusSection(
                         settings = statusSettings,
                         snapshot = llmStatus,
                         currentAppleMusicId = if (songReady) appleMusicId else 0L,
                         compact = true,
+                        modifier = contentInset,
                     )
                 }
-                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                HorizontalDivider(contentInset)
                 LyricsMenuLink(
                     title = text(ModuleText.LYRICS_OFFSET_TITLE),
                     value = if (snapshot.canAdjustTiming) "${snapshot.offsetMs} ms" else "—",
@@ -470,8 +518,9 @@ private fun EmbeddedLyricsMenuDialog(
                         detail = LyricsMenuDetail.OFFSET
                     },
                 )
-                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                HorizontalDivider(contentInset)
                 BasicComponent(
+                    modifier = contentInset,
                     title = text(ModuleText.LYRICS_THIRD_PARTY_CACHE),
                     summary = cacheStatus.usageBytes?.let(::formatLyricsCacheSize),
                     endActions = {
@@ -487,7 +536,7 @@ private fun EmbeddedLyricsMenuDialog(
                 cacheStatus.message?.let { message ->
                     Text(
                         text = text(message),
-                        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 10.dp),
+                        modifier = Modifier.fillMaxWidth().then(contentInset).padding(bottom = 10.dp),
                         style = MiuixTheme.textStyles.body2,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
@@ -496,7 +545,7 @@ private fun EmbeddedLyricsMenuDialog(
             TextButton(
                 text = text(ModuleText.CLOSE),
                 onClick = dismiss,
-                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                modifier = Modifier.fillMaxWidth().then(contentInset).padding(top = 10.dp),
                 colors = ButtonDefaults.textButtonColorsPrimary(),
             )
         }
@@ -510,9 +559,15 @@ private fun EmbeddedLyricsMenuDialog(
         renderInRootScaffold = true,
         maxWidth = 380.dp,
     ) {
+        val offsetPadding = PaddingValues(
+            top = EmbeddedPreferencePadding.calculateTopPadding(),
+            bottom = EmbeddedPreferencePadding.calculateBottomPadding(),
+        )
         Column(Modifier.fillMaxWidth().imePadding()) {
             EmbeddedSettingsGroup(
-                modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+                modifier = Modifier.weight(1f, fill = false)
+                    .padding(horizontal = LyricsMenuBodyInset)
+                    .verticalScroll(rememberScrollState()),
             ) {
                 BasicComponent(
                     title = offsetSourceSummary,
@@ -524,11 +579,11 @@ private fun EmbeddedLyricsMenuDialog(
                             else MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         )
                     },
-                    insideMargin = EmbeddedPreferencePadding,
+                    insideMargin = offsetPadding,
                 )
-                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+                HorizontalDivider()
                 Column(
-                    modifier = Modifier.fillMaxWidth().padding(EmbeddedPreferencePadding),
+                    modifier = Modifier.fillMaxWidth().padding(offsetPadding),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     TextField(
@@ -615,7 +670,11 @@ private fun EmbeddedLyricsMenuDialog(
     ) {
         val settings = orderSettings ?: return@OverlayDialog
         Column(Modifier.fillMaxWidth()) {
-            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+            Column(
+                Modifier.weight(1f, fill = false)
+                    .padding(horizontal = LyricsMenuBodyInset)
+                    .verticalScroll(rememberScrollState()),
+            ) {
                 AutomaticLyricsSourceOrderEditor(
                     order = settings.automaticLyricsSourceOrder,
                     localize = { key, arguments -> text(key, *arguments) },
@@ -645,29 +704,51 @@ private fun LyricsMenuFooter(label: String, onClick: () -> Unit) {
 
 @Composable
 private fun LyricsMenuLink(title: String, value: String?, enabled: Boolean, onClick: () -> Unit) {
-    BasicComponent(
-        title = title,
-        enabled = enabled,
-        insideMargin = LyricsMenuRowPadding,
-        onClick = onClick,
-        endActions = {
-            val tint = if (enabled) MiuixTheme.colorScheme.onSurfaceVariantSummary
-            else MiuixTheme.colorScheme.disabledOnSecondaryVariant
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (value != null) {
-                    Text(
-                        value,
-                        modifier = Modifier.widthIn(max = 108.dp),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MiuixTheme.textStyles.body2,
-                        color = tint,
-                    )
+    LyricsMenuPressFeedback {
+        BasicComponent(
+            modifier = Modifier.clip(LyricsMenuFeedbackShape),
+            title = title,
+            enabled = enabled,
+            insideMargin = LyricsMenuPressableRowPadding,
+            onClick = onClick,
+            endActions = {
+                val tint = if (enabled) MiuixTheme.colorScheme.onSurfaceVariantSummary
+                else MiuixTheme.colorScheme.disabledOnSecondaryVariant
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (value != null) {
+                        Text(
+                            value,
+                            modifier = Modifier.widthIn(max = 108.dp),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MiuixTheme.textStyles.body2,
+                            color = tint,
+                        )
+                    }
+                    EmbeddedSettingsIcon(EmbeddedSvgIcon.ChevronRight, modifier = Modifier.size(16.dp), tint = tint)
                 }
-                EmbeddedSettingsIcon(EmbeddedSvgIcon.ChevronRight, modifier = Modifier.size(16.dp), tint = tint)
+            },
+        )
+    }
+}
+
+@Composable
+private fun LyricsMenuPressFeedback(content: @Composable () -> Unit) {
+    val color = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+    val indication = remember(color) { LyricsMenuIndication(color) }
+    CompositionLocalProvider(LocalIndication provides indication, content = content)
+}
+
+private data class LyricsMenuIndication(val color: Color) : IndicationNodeFactory {
+    override fun create(interactionSource: InteractionSource): DelegatableNode {
+        // The dropdown emits an extra held-down interaction for the entire expanded state.
+        val transientSource = object : InteractionSource {
+            override val interactions = interactionSource.interactions.filter {
+                it is PressInteraction || it is FocusInteraction || it is HoverInteraction
             }
-        },
-    )
+        }
+        return MiuixIndication(color).create(transientSource)
+    }
 }
 
 private fun adjustedOffset(pending: Int?, current: Int, delta: Int): Int {

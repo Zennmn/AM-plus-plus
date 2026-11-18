@@ -348,7 +348,7 @@ internal fun LlmLyricsStatusSection(
     val content: @Composable () -> Unit = {
         Column(
             modifier = Modifier.fillMaxWidth().padding(
-                horizontal = if (compact) 14.dp else 16.dp,
+                horizontal = if (compact) 0.dp else 16.dp,
                 vertical = 14.dp,
             ),
             verticalArrangement = Arrangement.spacedBy(8.dp),

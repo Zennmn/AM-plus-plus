@@ -546,7 +546,7 @@ internal fun AutomaticLyricsSourceOrderEditor(
     ) {
         if (compact) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 2.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -563,7 +563,6 @@ internal fun AutomaticLyricsSourceOrderEditor(
             }
             Text(
                 text = localizedText(ModuleText.AUTO_LYRICS_SOURCE_ORDER_ALL),
-                modifier = Modifier.padding(horizontal = 12.dp),
                 style = MiuixTheme.textStyles.body2,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
@@ -617,7 +616,7 @@ internal fun AutomaticLyricsSourceOrderEditor(
         }
         Text(
             text = localizedText(ModuleText.LUNABEAT_AFTER_NATIVE),
-            modifier = Modifier.padding(horizontal = 12.dp),
+            modifier = Modifier.padding(horizontal = if (compact) 0.dp else 12.dp),
             style = MiuixTheme.textStyles.body2,
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
         )
@@ -1006,14 +1005,14 @@ private fun AutomaticLyricsSourceRow(
                     }
                 },
                 insideMargin = PaddingValues(
-                    horizontal = if (compact) 12.dp else 16.dp,
+                    horizontal = if (compact) 0.dp else 16.dp,
                     vertical = 4.dp,
                 ),
             )
         }
         // Keep the row footprint stable while the lifted row temporarily hides its separator.
         Box(Modifier.graphicsLayer { alpha = if (showDivider && !lifted) 1f else 0f }) {
-            SettingsDivider()
+            if (compact) HorizontalDivider() else SettingsDivider()
         }
     }
 }
