@@ -29,6 +29,7 @@ internal data class FragmentSettingsContract(
     val categoryItemsField: String = "c",
     val actionCallbackField: String = "j",
     val members: JSONObject? = null,
+    val resolutionFailure: String? = null,
 ) {
     private fun profiledMethod(loader: ClassLoader, role: String): Method? = members?.let {
         require(it.getInt("contractVersion") == 1) { "Unsupported native settings member contract" }
@@ -37,6 +38,7 @@ internal data class FragmentSettingsContract(
     }
 
     fun preferenceItemsMethod(loader: ClassLoader): Method {
+        check(resolutionFailure == null) { resolutionFailure.orEmpty() }
         profiledMethod(loader, "preferenceItems")?.let { method ->
             require(method.declaringClass == loader.loadClass(viewModelClass) &&
                 method.name == preferenceItemsMethod && !Modifier.isStatic(method.modifiers) &&
@@ -75,8 +77,8 @@ internal data class FragmentSettingsContract(
 
     /** Require the central profile to attest the exact native row builder, not merely a method name. */
     fun verifyDataCategoryProfile(loader: ClassLoader, profile: JSONObject, method: Method) {
-        val contract = profile.getJSONObject("indexed").getJSONObject("methodContracts")
-            .getJSONObject("settings-data-category-build")
+        val contract = members?.optJSONObject("methods")?.optJSONObject("dataCategory")
+            ?: profile.getJSONObject("indexed").getJSONObject("methodContracts").getJSONObject("settings-data-category-build")
         require(method.declaringClass == loader.loadClass(contract.getString("owner")))
         require(method.name == contract.getString("name"))
         require(method.returnType == loader.loadClass(contract.getString("returns")))
@@ -88,6 +90,20 @@ internal data class FragmentSettingsContract(
     }
 
     companion object {
+        /** Exact known variants only. Ambiguous or partial matches never select an arbitrary map. */
+        fun select(loader: ClassLoader, profile: JSONObject): FragmentSettingsContract {
+            val primary = from(profile.getJSONObject("settings"))
+            val variants = profile.optJSONArray("settingsVariants") ?: return primary
+            val candidates = listOf(primary) + (0 until variants.length()).map { from(variants.getJSONObject(it)) }
+            val matching = candidates.filter { candidate -> runCatching {
+                candidate.preferenceItemsMethod(loader)
+                candidate.composeMethod(loader)
+                candidate.dataCategoryMethod(loader)
+                FragmentSettingsModels.resolve(loader, candidate)
+            }.isSuccess }
+            check(matching.size == 1) { "Native settings variant match count: ${matching.size}" }
+            return matching.single()
+        }
         fun from(names: JSONObject): FragmentSettingsContract {
             val defaults = FragmentSettingsContract()
             fun name(key: String, fallback: String) = names.optString(key, fallback).also {

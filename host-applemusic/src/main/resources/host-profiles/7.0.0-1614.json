@@ -6350,5 +6350,164 @@
       "search": "Ea.f#x and Ea.m#x retain the same field type and are read by the same method-body operation in 1614. These continue to identify song and grid result MediaEntity rows.",
       "runtimeVerified": false
     }
-  }
+  },
+  "settingsVariants": [
+    {
+      "playerActivity": "com.apple.android.music.common.MainActivity",
+      "mainActivity": "com.apple.android.music.common.MainActivity",
+      "fragmentClass": "com.apple.android.music.settings2.fragment.SettingsFragment",
+      "viewModelClass": "com.apple.android.music.settings2.model.SettingsViewModel",
+      "viewModelMethod": "t1",
+      "preferenceItemsMethod": "getPreferenceItems",
+      "dataCategoryMethod": "getDataCategory",
+      "composeMethod": "PageContent",
+      "composerClass": "z0.n",
+      "categoryClass": "com.apple.android.music.settings2.model.b$a",
+      "actionClass": "com.apple.android.music.settings2.model.b$b$b",
+      "artworkClass": "Ra.J",
+      "callbackClass": "ji.a",
+      "unitClass": "kotlin.Unit",
+      "unitField": "a",
+      "categoryItemsField": "c",
+      "actionCallbackField": "j",
+      "members": {
+        "contractVersion": 1,
+        "methods": {
+          "preferenceItems": {
+            "owner": "com.apple.android.music.settings2.model.SettingsViewModel",
+            "name": "getPreferenceItems",
+            "parameters": [
+              "boolean",
+              "ji.a",
+              "ji.a",
+              "ji.a",
+              "ji.a",
+              "ji.a",
+              "ji.a",
+              "ji.a",
+              "ji.l",
+              "ji.q",
+              "ji.l",
+              "ji.a",
+              "ji.l",
+              "ji.a",
+              "ji.a",
+              "ji.l",
+              "ji.l",
+              "java.lang.String",
+              "boolean",
+              "boolean",
+              "boolean",
+              "java.lang.String",
+              "boolean",
+              "boolean",
+              "boolean",
+              "boolean",
+              "boolean",
+              "boolean"
+            ],
+            "returns": "java.util.List",
+            "static": false
+          },
+          "compose": {
+            "owner": "com.apple.android.music.settings2.fragment.SettingsFragment",
+            "name": "PageContent",
+            "parameters": [
+              "z0.n",
+              "int"
+            ],
+            "returns": "void",
+            "static": false
+          },
+          "dataCategory": {
+            "owner": "com.apple.android.music.settings2.model.SettingsViewModel",
+            "name": "getDataCategory",
+            "parameters": [
+              "ji.a"
+            ],
+            "returns": "com.apple.android.music.settings2.model.b$a",
+            "static": false
+          }
+        },
+        "fields": {}
+      },
+      "verification": {
+        "apkSha256": "49e83b64fccff79310c7dff174e02228dd0455a3d87df4d9655d1e4f8cd2e351",
+        "certificateSha256": "88ba590ec2e1ea33c4458daf59489faee2cef297a9b4071e18cf82ef531100aa",
+        "deviceValidated": false,
+        "source": "Official 7.0.0/1614 APK DEX; settings models, constructors, fields and methods checked separately",
+        "classes": {
+          "Lcom/apple/android/music/settings2/model/SettingsViewModel;": {
+            "methods": {
+              "getDataCategory(Lji/a;)Lcom/apple/android/music/settings2/model/b$a;": 18,
+              "getPreferenceItems(ZLji/a;Lji/a;Lji/a;Lji/a;Lji/a;Lji/a;Lji/a;Lji/l;Lji/q;Lji/l;Lji/a;Lji/l;Lji/a;Lji/a;Lji/l;Lji/l;Ljava/lang/String;ZZZLjava/lang/String;ZZZZZZ)Ljava/util/List;": 17
+            },
+            "fields": {}
+          },
+          "Lcom/apple/android/music/settings2/fragment/SettingsFragment;": {
+            "methods": {
+              "PageContent(Lz0/n;I)V": 17,
+              "t1()Lcom/apple/android/music/settings2/model/SettingsViewModel;": 17
+            },
+            "fields": {}
+          },
+          "Lcom/apple/android/music/settings2/model/b$a;": {
+            "methods": {
+              "<init>(Ljava/lang/String;Ljava/util/List;Ljava/lang/CharSequence;I)V": 65537
+            },
+            "fields": {
+              "c": {
+                "descriptor": "Ljava/util/List;",
+                "access": 17
+              }
+            }
+          },
+          "Lcom/apple/android/music/settings2/model/b$b$b;": {
+            "methods": {
+              "<init>(Ljava/lang/String;Ljava/lang/String;ZLjava/lang/String;LRa/J;Lji/a;I)V": 65537
+            },
+            "fields": {
+              "j": {
+                "descriptor": "Lji/a;",
+                "access": 17
+              }
+            }
+          },
+          "LRa/J;": {
+            "methods": {
+              "<init>(Ljava/lang/String;FZ)V": 65537
+            },
+            "fields": {}
+          },
+          "Lji/a;": {
+            "methods": {
+              "invoke()Ljava/lang/Object;": 1025
+            },
+            "fields": {}
+          },
+          "Lji/l;": {
+            "methods": {},
+            "fields": {}
+          },
+          "Lji/q;": {
+            "methods": {},
+            "fields": {}
+          },
+          "Lz0/n;": {
+            "methods": {},
+            "fields": {}
+          },
+          "Lkotlin/Unit;": {
+            "methods": {},
+            "fields": {
+              "a": {
+                "descriptor": "Lkotlin/Unit;",
+                "access": 25
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

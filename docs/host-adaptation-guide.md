@@ -899,3 +899,10 @@ HLE通过HleMetadataInstallation及AppleHookRegistrar.stageInstallation按表面
 回退先停新tuple或相应能力并恢复原生路径。配置/数据格式保持时通常无需反向迁移；格式变更须给出独立迁移/回退。已支持构建分别登记回归范围，未执行不填通过，不能扩大候选或改冻结基线替代证据。
 
 
+
+
+### 7.0.0/1614 设置接口变体
+
+同一版本号的 APK 可能具有不同的设置函数接口和 Compose 参数；见 [Issue #142](https://github.com/Zennmn/AM-plus-plus/issues/142)。`settings` 保留原契约，`settingsVariants` 仅登记完整核对过的精确组合。安装前同时解析 preferenceItems、Compose、dataCategory 及原生行模型；必须唯一匹配，部分匹配或歧义均降级设置注入，不选取首个候选。移动数据入口使用相同选择结果。
+
+新增 ji / z0.n 变体已在 SHA-256 为 `49e83b64fccff79310c7dff174e02228dd0455a3d87df4d9655d1e4f8cd2e351` 的官方签名 APK 静态核对方法、原生构造器与字段。可运行 `python scripts/verify-native-settings.py /path/to/apple-music.apk` 重验；脚本拒绝其他 APK 哈希或身份。`deviceValidated=false` 表示尚未完成实体设备验收，不能据静态检查宣称所有设备兼容。APK 本身不进入仓库。

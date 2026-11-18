@@ -55,7 +55,7 @@ internal class FragmentCellularDataEntryTarget(
         )
         return runCatching {
             val document = checkNotNull(profile).document
-            val names = FragmentSettingsContract.from(document.getJSONObject("settings"))
+            val names = FragmentSettingsContract.select(loader, document)
             val preferenceItems = names.preferenceItemsMethod(loader)
             val dataCategory = names.dataCategoryMethod(loader)
             names.verifyDataCategoryProfile(loader, document, dataCategory)
