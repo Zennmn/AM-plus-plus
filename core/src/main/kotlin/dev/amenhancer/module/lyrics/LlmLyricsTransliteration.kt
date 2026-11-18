@@ -887,7 +887,8 @@ private fun validReading(
     reading: String,
     english: Boolean,
 ): Boolean {
-    if (english) return reading == unit.source && ZERO_WIDTH_SPACE !in reading
+    if (english) return reading == unit.source && ZERO_WIDTH_SPACE !in reading &&
+        reading.none(::isNonLatinLetter)
     if (reading.none { !it.isWhitespace() }) return false
     if (reading.any { it == '\r' || it == '\n' || it == '\t' }) return false
     if (ZERO_WIDTH_SPACE in reading) {
