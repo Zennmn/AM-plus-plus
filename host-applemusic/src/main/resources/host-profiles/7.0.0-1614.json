@@ -2843,6 +2843,84 @@
       "fields": {}
     }
   },
+  "lyricsMenu": {
+    "contractVersion": 2,
+    "resources": {
+      "rowLayout": "menu_item_lyrics_translations",
+      "endIcon": "ic_actionsheet_more",
+      "separator": "bg_menu_item_lyrics_translations"
+    },
+    "methods": {
+      "evaluate": {
+        "owner": "com.apple.android.music.player.fragment.PlayerLyricsViewFragment",
+        "name": "F2",
+        "parameters": [
+          "com.apple.android.music.ttml.javanative.model.SongInfo$SongInfoPtr"
+        ],
+        "returns": "void",
+        "static": false
+      },
+      "chromeVisibility": {
+        "owner": "com.apple.android.music.player.fragment.PlayerLyricsViewFragment",
+        "name": "Z1",
+        "parameters": [
+          "int"
+        ],
+        "returns": "void",
+        "static": false
+      },
+      "resume": {
+        "owner": "com.apple.android.music.player.fragment.PlayerLyricsViewFragment",
+        "name": "onResume",
+        "parameters": [],
+        "returns": "void",
+        "static": false
+      },
+      "getActivity": {
+        "owner": "androidx.fragment.app.n",
+        "name": "getActivity",
+        "parameters": [],
+        "returns": "androidx.fragment.app.s",
+        "static": false
+      }
+    },
+    "constructors": {
+      "menuReadyCallback": {
+        "owner": "Hf.A",
+        "parameters": [
+          "java.lang.Object",
+          "int"
+        ]
+      }
+    },
+    "fields": {
+      "listenerFragment": {
+        "owner": "com.apple.android.music.player.fragment.a0",
+        "name": "a",
+        "type": "com.apple.android.music.player.fragment.PlayerLyricsViewFragment"
+      },
+      "fragmentBinding": {
+        "owner": "com.apple.android.music.player.fragment.PlayerLyricsViewFragment",
+        "name": "l0",
+        "type": "q8.X4"
+      },
+      "fragmentPopup": {
+        "owner": "com.apple.android.music.player.fragment.PlayerLyricsViewFragment",
+        "name": "l1",
+        "type": "android.widget.PopupWindow"
+      },
+      "menuAnchor": {
+        "owner": "q8.X4",
+        "name": "o0",
+        "type": "android.widget.ImageView"
+      }
+    },
+    "evidence": {
+      "sourceIdentity": "com.apple.android.music / 7.0.0 / 1614",
+      "snapshot": "a0.onClick inflates native pronunciation and translation rows with no parent and adds them to the vertical q8.yb LinearLayout using its default MATCH_PARENT row width. It then constructs Hf.A(a0, 1) before the isrtl branch and before the first PopupWindow.showAsDropDown. The module appends one row at this preparation seam, scoped to the exact a0 listener and its unshown popup, so native and tablet offset measurements include all rows. The PopupWindow itself wraps width and height and is anchored to q8.X4.o0. F2 evaluates native availability and sets that anchor visibility. Native row callbacks, dismissal and positioning remain intact.",
+      "runtimeVerified": false
+    }
+  },
   "layoutVariants": {
     "lyricPronunciationPairLayout": "lyrics_pronunciation_vertical_group",
     "gradientEdges": [

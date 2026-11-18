@@ -1,12 +1,11 @@
 package dev.amenhancer.module.hook
 
 import android.app.Application
-import android.content.Context
-import android.content.pm.PackageManager
 import dev.amenhancer.module.ModuleConstants
 import dev.amenhancer.module.config.TargetConfigClient
 import dev.amenhancer.module.model.FeatureHealth
 import dev.amenhancer.module.model.FeatureState
+import dev.amenhancer.module.settings.EmbeddedRuntimeSettingsController
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
@@ -30,18 +29,12 @@ internal object FeatureInstallation {
         module.registerResources(config)
     }
 
-    fun install(
-        config: TargetConfigClient,
-        targetClassLoader: ClassLoader,
-    ) {
-        module.install(config, targetClassLoader)
-    }
-
     fun installEmbedded(
         config: TargetConfigClient,
         application: Application,
         targetClassLoader: ClassLoader,
         currentSong: CurrentSongIdentityCache,
+        settingsController: EmbeddedRuntimeSettingsController,
     ) {
         module.installNow(config) {
             HookContext(
@@ -52,6 +45,7 @@ internal object FeatureInstallation {
                     classLoader = targetClassLoader,
                     lyricsTypefaceSession = lyricsTypefaceSession,
                     currentSong = currentSong,
+                    settingsController = settingsController,
                 ),
             )
         }
@@ -60,11 +54,6 @@ internal object FeatureInstallation {
 internal class FeatureInstallationModule(
     private val plans: List<FeatureInstallationPlan>,
     private val installLayoutInflationHooks: () -> Unit,
-    private val registerApplicationCreated: (
-        TargetConfigClient,
-        ClassLoader,
-        (() -> HookContext) -> Unit,
-    ) -> Unit,
     private val reportHealth: (HookContext, FeatureHealth) -> Unit,
     private val reportError: (String, Throwable) -> Unit,
 ) {
@@ -76,19 +65,6 @@ internal class FeatureInstallationModule(
 
     fun registerResources(config: TargetConfigClient) = synchronized(this) {
         registerResourcesIfNeeded(config)
-    }
-
-    fun install(
-        config: TargetConfigClient,
-        targetClassLoader: ClassLoader,
-    ): FeatureInstallationSession = synchronized(this) {
-        activeSession?.let { return@synchronized it }
-
-        registerResourcesIfNeeded(config)
-        val session = newSession()
-        registerApplicationCreated(config, targetClassLoader, session::install)
-        activeSession = session
-        session
     }
 
     fun installNow(
@@ -281,25 +257,6 @@ private fun productionFeatureInstallationModule(
             FeatureInstallationPlan(feature = AppleMusicDpiOverrideFeature()),
         ),
         installLayoutInflationHooks = AppleMusicHostFactory::installLayoutCallbacks,
-        registerApplicationCreated = { config, targetClassLoader, onCreated ->
-            val onCreate = Application::class.java.getDeclaredMethod("onCreate")
-            ModernXposedRuntime.hookMethod(onCreate, object : ModernMethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    val application = param.thisObject as Application
-                    onCreated {
-                        HookContext(
-                            config = config,
-                            target = assembleAppleMusicTarget(
-                                config = config,
-                                application = application,
-                                classLoader = targetClassLoader,
-                                lyricsTypefaceSession = lyricsTypefaceSession,
-                            ),
-                        )
-                    }
-                }
-            })
-        },
         reportHealth = { context, health -> context.config.reportHealth(health) },
         reportError = ModernXposedRuntime::log,
     )

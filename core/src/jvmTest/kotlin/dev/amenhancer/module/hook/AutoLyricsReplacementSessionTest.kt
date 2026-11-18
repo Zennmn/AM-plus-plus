@@ -2,7 +2,6 @@ package dev.amenhancer.module.hook
 
 import dev.amenhancer.module.model.CustomLyricsSources
 import java.util.ArrayDeque
-import java.nio.file.Files
 import java.util.concurrent.Executor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -18,15 +17,18 @@ class AutoLyricsReplacementSessionTest {
         val pointer = Pointer()
         var fetches = 0
         var published = 0
+        var fresh = 0
         val session = session(
             queued = queued,
             cache = cache,
-            fetch = {
+            fetch = { _, source ->
+                assertEquals(CustomLyricsSources.AMLL, source)
                 fetches += 1
-                AutoLyricsCandidate("amll", WORD_TTML)
+                AutoLyricsCandidate(source, WORD_TTML)
             },
             parse = { pointer },
             onPublished = { published += 1 },
+            onFresh = { fresh += 1 },
         )
 
         assertNull(session.replacementFor(42L))
@@ -37,20 +39,29 @@ class AutoLyricsReplacementSessionTest {
         assertSame(pointer, session.replacementFor(42L))
         assertEquals(1, fetches)
         assertEquals(1, published)
+        assertEquals(1, fresh)
         assertEquals(42L, pointer.adamId)
-        assertEquals(WORD_TTML, cache.values[42L])
+        assertEquals(WORD_TTML, cache.values[42L to CustomLyricsSources.AMLL]?.ttml)
     }
 
     @Test
     fun `a persisted Word cache is prepared before any network source`() {
         val queued = QueuedExecutor()
-        val cache = MemoryCache(mapOf(42L to WORD_TTML))
+        val cache = MemoryCache(
+            mapOf(
+                (42L to CustomLyricsSources.AMLL) to
+                    AutoLyricsCandidate(CustomLyricsSources.AMLL, WORD_TTML),
+            ),
+        )
         val pointer = Pointer()
         var fetches = 0
         val session = session(
             queued = queued,
             cache = cache,
-            fetch = { fetches += 1; AutoLyricsCandidate("network", WORD_TTML) },
+            fetch = { _, _ ->
+                fetches += 1
+                AutoLyricsCandidate(CustomLyricsSources.LUNABEAT, WORD_TTML)
+            },
             parse = { pointer },
         )
 
@@ -62,45 +73,15 @@ class AutoLyricsReplacementSessionTest {
     }
 
     @Test
-    fun `validated automatic result is published to configured storage and cache is retired`() {
-        val queued = QueuedExecutor()
-        val cache = MemoryCache(mapOf(42L to WORD_TTML))
-        var published = 0
-        val session = AutoLyricsReplacementSession(
-            fetchCandidate = { null },
-            cache = cache,
-            parseTtml = { Pointer() },
-            isAlive = { it is Pointer && it.live },
-            verifyPtr = { it is Pointer && it.live },
-            readAdamId = { (it as Pointer).adamId },
-            bindAdamId = { value, id -> (value as Pointer).adamId = id; true },
-            publisher = { id, candidate ->
-                assertEquals(42L, id)
-                assertEquals(CustomLyricsSources.AUTO_CACHE, candidate.source)
-                published += 1
-                AutoLyricsPublishResult.PUBLISHED
-            },
-            executor = queued,
-            logger = {},
-        )
-
-        session.replacementFor(42L)
-        queued.runAll()
-
-        assertEquals(1, published)
-        assertEquals(null, cache.read(42L))
-    }
-
-    @Test
     fun `stale generation cannot publish after the current song changes`() {
         val queued = QueuedExecutor()
         var fetches = 0
         var published = 0
         val session = session(
             queued = queued,
-            fetch = {
+            fetch = { _, source ->
                 fetches += 1
-                AutoLyricsCandidate("amll", WORD_TTML)
+                AutoLyricsCandidate(source, WORD_TTML)
             },
             parse = { Pointer() },
             onPublished = { published += 1 },
@@ -123,9 +104,9 @@ class AutoLyricsReplacementSessionTest {
         var fetches = 0
         val session = session(
             queued = queued,
-            fetch = {
+            fetch = { _, source ->
                 fetches += 1
-                AutoLyricsCandidate("amll", WORD_TTML)
+                AutoLyricsCandidate(source, WORD_TTML)
             },
             parse = { pointer },
         )
@@ -140,41 +121,15 @@ class AutoLyricsReplacementSessionTest {
     }
 
     @Test
-    fun `already configured publisher never publishes an automatic ready late replacement`() {
-        val queued = QueuedExecutor()
-        var published = 0
-        val session = AutoLyricsReplacementSession(
-            fetchCandidate = { AutoLyricsCandidate("amll", WORD_TTML) },
-            cache = MemoryCache(),
-            parseTtml = { Pointer() },
-            isAlive = { it is Pointer && it.live },
-            verifyPtr = { it is Pointer && it.live },
-            readAdamId = { (it as Pointer).adamId },
-            bindAdamId = { value, id -> (value as Pointer).adamId = id; true },
-            onReplacementPublished = { published += 1 },
-            publisher = { _, _ -> AutoLyricsPublishResult.ALREADY_CONFIGURED },
-            executor = queued,
-            logger = {},
-        )
-
-        session.onSongChanged(42L)
-        session.ensureRequested(42L)
-        queued.runAll()
-
-        assertEquals(0, published)
-        assertEquals(null, session.readyReplacementFor(42L))
-    }
-
-    @Test
     fun `a manual replacement becoming ready cancels the queued automatic lookup`() {
         val queued = QueuedExecutor()
         var allowed = true
         var fetches = 0
         val session = session(
             queued = queued,
-            fetch = {
+            fetch = { _, source ->
                 fetches += 1
-                AutoLyricsCandidate("amll", WORD_TTML)
+                AutoLyricsCandidate(source, WORD_TTML)
             },
             parse = { Pointer() },
             isAllowed = { allowed },
@@ -186,33 +141,8 @@ class AutoLyricsReplacementSessionTest {
         queued.runAll()
 
         assertEquals(0, fetches)
-        assertTrue(session.isTracking(42L).not())
-    }
-
-    @Test
-    fun `already applied takeover survives unknown refresh but yields to better native Word lyrics`() {
-        val queued = QueuedExecutor()
-        val pointer = Pointer()
-        val session = session(
-            queued = queued,
-            fetch = { AutoLyricsCandidate("amll", WORD_TTML) },
-            parse = { pointer },
-        )
-
-        session.onSongChanged(42L)
-        session.replacementFor(42L)
-        queued.runAll()
-        assertNull(session.takeoverReplacementFor(42L, Any(), metadata = null))
-
-        session.markTakeoverApplied(42L)
-        assertSame(pointer, session.takeoverReplacementFor(42L, Any(), metadata = null))
-        assertNull(
-            session.takeoverReplacementFor(
-                42L,
-                Any(),
-                TtmlDocumentMetadata(TtmlTimingMode.WORD, language = "zh", hasTranslation = false),
-            ),
-        )
+        assertNull(session.candidateFor(42L))
+        assertNull(session.readyReplacementFor(42L))
     }
 
     @Test
@@ -221,8 +151,11 @@ class AutoLyricsReplacementSessionTest {
         var parses = 0
         val session = session(
             queued = queued,
-            fetch = { AutoLyricsCandidate("line-source", LINE_TTML) },
-            parse = { parses += 1; Pointer() },
+            fetch = { _, source -> AutoLyricsCandidate(source, LINE_TTML) },
+            parse = {
+                parses += 1
+                Pointer()
+            },
         )
 
         assertNull(session.replacementFor(42L))
@@ -230,29 +163,18 @@ class AutoLyricsReplacementSessionTest {
 
         assertNull(session.readyReplacementFor(42L))
         assertEquals(0, parses)
-        assertTrue(session.isTracking(42L).not())
-    }
-
-    @Test
-    fun `file cache persists only Word TTML and reloads it by Adam ID`() {
-        val directory = Files.createTempDirectory("ampp-auto-lyrics-test").toFile()
-        try {
-            val cache = FileAutoLyricsCache(directory, maxEntries = 2)
-            assertTrue(cache.write(42L, WORD_TTML))
-            assertEquals(WORD_TTML, FileAutoLyricsCache(directory).read(42L))
-            assertTrue(!cache.write(43L, LINE_TTML))
-        } finally {
-            directory.deleteRecursively()
-        }
+        assertTrue(session.hasLookupMiss(42L))
     }
 
     private fun session(
         queued: QueuedExecutor,
         cache: AutoLyricsCache = MemoryCache(),
-        fetch: (Long) -> AutoLyricsCandidate?,
+        fetch: (Long, String) -> AutoLyricsCandidate?,
         parse: (String) -> Any?,
         onPublished: (Long) -> Unit = {},
+        onFresh: (Long) -> Unit = {},
         isAllowed: (Long) -> Boolean = { true },
+        sources: List<String> = listOf(CustomLyricsSources.AMLL),
     ): AutoLyricsReplacementSession {
         return AutoLyricsReplacementSession(
             fetchCandidate = fetch,
@@ -266,79 +188,83 @@ class AutoLyricsReplacementSessionTest {
                 true
             },
             onReplacementPublished = onPublished,
+            onFreshCandidate = onFresh,
             isAllowed = isAllowed,
             executor = queued,
             logger = {},
-        )
-    }
-
-    @Test
-    fun `file cache preserves candidate origin and name across restarts`() {
-        val directory = Files.createTempDirectory("ampp-origin-test").toFile()
-        try {
-            val candidate = AutoLyricsCandidate(CustomLyricsSources.LUNABEAT, WORD_TTML, "Song")
-            assertTrue(FileAutoLyricsCache(directory).writeCandidate(42, candidate))
-            assertEquals(candidate, FileAutoLyricsCache(directory).readCandidate(42))
-            assertEquals(WORD_TTML, FileAutoLyricsCache(directory).read(42))
-        } finally { directory.deleteRecursively() }
-    }
-
-    @Test
-    fun `legacy body remains usable and corrupt envelope falls back to it`() {
-        val directory = Files.createTempDirectory("ampp-legacy-test").toFile()
-        try {
-            java.io.File(directory, "lyric_42.ttml").writeText(WORD_TTML)
-            java.io.File(directory, "lyric_42.json").writeText("broken")
-            val cache = FileAutoLyricsCache(directory)
-            assertEquals(AutoLyricsCandidate(CustomLyricsSources.AUTO_CACHE, WORD_TTML), cache.readCandidate(42))
-            assertTrue(cache.writeCandidate(42, AutoLyricsCandidate(CustomLyricsSources.AMLL, WORD_TTML)))
-            assertTrue(!java.io.File(directory, "lyric_42.ttml").exists())
-            assertEquals(CustomLyricsSources.AMLL, cache.readCandidate(42)?.source)
-        } finally { directory.deleteRecursively() }
-    }
-
-    @Test
-    fun `cache bounds deletes and evicts both formats including JSON escaped text`() {
-        val directory = Files.createTempDirectory("ampp-capacity-test").toFile()
-        try {
-            val cache = FileAutoLyricsCache(directory, maxEntries = 1)
-            val quoted = WORD_TTML.replace("hello", "&quot;\\hello")
-            assertTrue(cache.writeCandidate(42, AutoLyricsCandidate(CustomLyricsSources.AMLL, quoted)))
-            assertEquals(quoted, cache.read(42))
-            java.io.File(directory, "lyric_42.ttml").writeText(WORD_TTML)
-            assertTrue(cache.write(43, WORD_TTML))
-            assertNull(cache.read(42))
-            assertTrue(!java.io.File(directory, "lyric_42.ttml").exists())
-            assertTrue(!java.io.File(directory, "lyric_42.json").exists())
-            assertEquals(listOf(43L), cache.cachedIds())
-            java.io.File(directory, "lyric_43.ttml").writeText(WORD_TTML)
-            assertTrue(cache.delete(43))
-            assertNull(cache.read(43))
-        } finally { directory.deleteRecursively() }
-    }
-
-    @Test
-    fun `cached candidate publishes its recorded provider without any remote request`() {
-        val queued = QueuedExecutor()
-        val candidate = AutoLyricsCandidate(CustomLyricsSources.AMLL, WORD_TTML, "Cached song")
-        var published: AutoLyricsCandidate? = null
-        val cache = object : AutoLyricsCache {
-            override fun read(appleMusicId: Long): String? = candidate.ttml
-            override fun write(appleMusicId: Long, ttml: String) = true
-            override fun readCandidate(appleMusicId: Long) = candidate
+        ).also { session ->
+            session.onSongChanged(42L)
+            session.configureSources(42L, sources)
         }
+    }
+
+    @Test
+    fun `providerless cache is used after the requested providers miss`() {
+        val queued = QueuedExecutor()
+        val pointer = Pointer()
+        val requested = mutableListOf<String>()
+        val candidate = AutoLyricsCandidate(CustomLyricsSources.AUTO_CACHE, WORD_TTML)
+        val cache = MemoryCache(mapOf((42L to CustomLyricsSources.AUTO_CACHE) to candidate))
+        var fresh = 0
+        val session = session(
+            queued = queued,
+            cache = cache,
+            fetch = { _, source ->
+                requested += source
+                null
+            },
+            parse = { pointer },
+            onFresh = { fresh += 1 },
+            sources = listOf(CustomLyricsSources.AMLL, CustomLyricsSources.LUNABEAT),
+        )
+
+        assertNull(session.replacementFor(42L))
+        queued.runAll()
+
+        assertEquals(listOf(CustomLyricsSources.AMLL, CustomLyricsSources.LUNABEAT), requested)
+        assertEquals(candidate, session.candidateFor(42L))
+        assertSame(pointer, session.readyReplacementFor(42L))
+        assertEquals(0, fresh)
+    }
+
+    @Test
+    fun `cached candidate is not marked as a fresh download`() {
+        val queued = QueuedExecutor()
+        val pointer = Pointer()
+        val candidate = AutoLyricsCandidate(CustomLyricsSources.LUNABEAT, WORD_TTML, "Cached song")
+        val cache = MemoryCache(
+            mapOf((42L to CustomLyricsSources.LUNABEAT) to candidate),
+        )
+        val requested = mutableListOf<String>()
+        var published = 0
+        var fresh = 0
         val session = AutoLyricsReplacementSession(
-            fetchCandidate = { error("must use cache") }, cache = cache,
-            parseTtml = { Pointer() }, isAlive = { true }, verifyPtr = { true },
+            fetchCandidate = { _, source ->
+                requested += source
+                null
+            }, cache = cache,
+            parseTtml = { pointer }, isAlive = { true }, verifyPtr = { true },
             readAdamId = { (it as Pointer).adamId },
-            bindAdamId = { pointer, id -> (pointer as Pointer).adamId = id; true },
-            publisher = AutoLyricsPublisher { _, value -> published = value; AutoLyricsPublishResult.PUBLISHED },
+            bindAdamId = { pointer, id ->
+                (pointer as Pointer).adamId = id
+                true
+            },
+            onReplacementPublished = { published += 1 },
+            onFreshCandidate = { fresh += 1 },
             executor = queued, logger = {},
         )
         session.onSongChanged(42)
+        session.configureSources(
+            42,
+            listOf(CustomLyricsSources.AMLL, CustomLyricsSources.LUNABEAT),
+        )
         session.ensureRequested(42)
         queued.runAll()
-        assertEquals(candidate, published)
+        assertEquals(listOf(CustomLyricsSources.AMLL), requested)
+        assertEquals(candidate, session.candidateFor(42))
+        assertSame(pointer, session.readyReplacementFor(42))
+        assertEquals(1, published)
+        assertEquals(0, fresh)
     }
 
     private class Pointer(
@@ -346,14 +272,23 @@ class AutoLyricsReplacementSessionTest {
         var live: Boolean = true,
     )
 
-    private class MemoryCache(initial: Map<Long, String> = emptyMap()) : AutoLyricsCache {
+    private class MemoryCache(
+        initial: Map<Pair<Long, String>, AutoLyricsCandidate> = emptyMap(),
+    ) : AutoLyricsCache {
         val values = initial.toMutableMap()
-        override fun read(appleMusicId: Long): String? = values[appleMusicId]
-        override fun write(appleMusicId: Long, ttml: String): Boolean {
-            values[appleMusicId] = ttml
+        private val currentGeneration = 0L
+        override fun readCandidate(appleMusicId: Long, source: String): AutoLyricsCandidate? =
+            values[appleMusicId to source]
+        override fun generation(): Long = currentGeneration
+        override fun writeCandidateIfCurrent(
+            appleMusicId: Long,
+            candidate: AutoLyricsCandidate,
+            generation: Long,
+        ): Boolean {
+            if (generation != currentGeneration) return false
+            values[appleMusicId to candidate.source] = candidate
             return true
         }
-        override fun delete(appleMusicId: Long): Boolean = values.remove(appleMusicId) != null
     }
 
     private class QueuedExecutor : Executor {

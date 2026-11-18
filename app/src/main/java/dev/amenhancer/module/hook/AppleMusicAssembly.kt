@@ -1,23 +1,31 @@
 package dev.amenhancer.module.hook
+
 import android.app.Application
 import dev.amenhancer.module.config.TargetConfigClient
-import dev.amenhancer.module.model.CustomLyricsEntry
+import dev.amenhancer.module.settings.EmbeddedRuntimeSettingsController
+import dev.amenhancer.module.ui.showEmbeddedLyricsMenu
 
 internal fun assembleAppleMusicTarget(
     config: TargetConfigClient,
     application: Application,
     classLoader: ClassLoader,
     lyricsTypefaceSession: LyricsTypefaceResourceBinding,
-    currentSong: CurrentSongIdentityCache = CurrentSongIdentityCache(),
+    currentSong: CurrentSongIdentityCache,
+    settingsController: EmbeddedRuntimeSettingsController,
 ): TargetAdaptation {
-    val settings = config.settings()
-    val automatic = if ((settings.customLyricsEnabled && settings.automaticLyricsEnabled) ||
-        settings.llmLyricsTransliterationEnabled
-    ) {
-        val suppressed = runCatching { config.customLyricsManifest().entries
-            .filterNot { it.enabled }.mapTo(mutableSetOf(), CustomLyricsEntry::appleMusicId)
-        }.getOrDefault(emptySet())
-        createAutoLyricsRuntime(application, suppressed, config::settings)
-    } else null
-    return AppleMusicHostFactory.appleMusic(config, application, classLoader, lyricsTypefaceSession, currentSong, automatic)
+    val automatic = createAutoLyricsRuntime(
+        application,
+        content = settingsController.content,
+        lunabeatCatalogCache = settingsController.lunabeatCatalogCache,
+        configuration = config::settings,
+    )
+    return AppleMusicHostFactory.appleMusic(config, application, classLoader, lyricsTypefaceSession, currentSong, automatic,
+        onOpenLyricsMenu = { activity ->
+            showEmbeddedLyricsMenu(
+                activity, currentSong, automatic.playback, config::settings,
+                writeSourceOrder = settingsController::saveAutomaticLyricsSourceOrder,
+                writeAutomaticLyricsEnabled = settingsController::saveAutomaticLyricsEnabled,
+            )
+        },
+    )
 }

@@ -164,9 +164,19 @@ internal class HostPrivateEmbeddedStorage(
         return runCatching { file.isFile && file.delete() }.getOrDefault(false)
     }
 
+    override fun fileSizeBytes(name: String): Long? = runCatching {
+        file(name)?.takeIf(File::isFile)?.length()
+    }.getOrNull()
+
     override fun hasAnyFiles(): Boolean = runCatching {
         directory.listFiles()?.any(File::isFile) == true
     }.getOrDefault(false)
+
+    override fun sourceCacheDirectory(): File = File(directory.parentFile, LEGACY_SOURCE_CACHE_DIRECTORY_NAME)
+
+    override fun sourceFileIds(): List<String> = directory.listFiles().orEmpty()
+        .filter { it.isFile && SOURCE_FILE_ID.matches(it.name) }
+        .map(File::getName)
 
     private fun file(name: String): File? = name
         .takeIf(FILE_NAME_PATTERN::matches)
@@ -204,6 +214,8 @@ internal class HostPrivateEmbeddedStorage(
     private companion object {
         const val PREFERENCES_NAME = "ampp-embedded-settings"
         const val FILES_DIRECTORY_NAME = "ampp-embedded-files"
+        const val LEGACY_SOURCE_CACHE_DIRECTORY_NAME = "ampp-auto-lyrics"
         val FILE_NAME_PATTERN = Regex("[A-Za-z0-9_-]{1,128}")
+        val SOURCE_FILE_ID = Regex("source_(lyrics|index)_[0-9a-f]{32}")
     }
 }

@@ -29,6 +29,7 @@ data class LlmLyricsConfig(
     val thinkingEnabled: Boolean = false,
     val thinkingEffort: LlmLyricsThinkingEffort = LlmLyricsThinkingEffort.DEFAULT,
     val thinkingFormat: LlmLyricsThinkingFormat = LlmLyricsThinkingFormat.NONE,
+    val customHeaders: String = "",
 ) {
     /** Normalized `.../chat/completions` target, or null when the address is unusable. */
     val endpoint: String? get() = LlmLyricsEndpoint.normalize(baseUrl)
@@ -46,7 +47,11 @@ data class LlmLyricsConfig(
                 (thinkingFormat != LlmLyricsThinkingFormat.THINKING_TYPE || effectiveThinkingEnabled)
         } ?: LlmLyricsThinkingEffort.DEFAULT
 
-    val isConfigured: Boolean get() = endpoint != null && normalizedModel.isNotEmpty()
+    /** Parsed once per request snapshot; invalid saved input never reaches the transport. */
+    val requestHeaders: Map<String, String>? = parseCustomHeaders(customHeaders)
+
+    val isConfigured: Boolean
+        get() = endpoint != null && normalizedModel.isNotEmpty() && requestHeaders != null
 
     companion object {
         /** Keep request snapshots equal when only an inactive thinking setting changes. */
@@ -58,12 +63,36 @@ data class LlmLyricsConfig(
                 thinkingEnabled = settings.llmLyricsThinkingEnabled,
                 thinkingEffort = settings.llmLyricsThinkingEffort,
                 thinkingFormat = settings.llmLyricsThinkingFormat,
+                customHeaders = ModuleSettings.normalizeLlmLyricsCustomHeaders(settings.llmLyricsCustomHeaders),
             )
             return config.copy(
                 thinkingEnabled = config.effectiveThinkingEnabled,
                 thinkingEffort = config.effectiveThinkingEffort,
             )
         }
+
+        /** Header names are case-insensitive; the last custom value overrides earlier values. */
+        fun parseCustomHeaders(value: String): Map<String, String>? {
+            if (value.length > ModuleSettings.MAX_LLM_LYRICS_CUSTOM_HEADERS_LENGTH) return null
+            val headers = linkedMapOf<String, String>()
+            for (raw in value.replace("\r\n", "\n").split('\n')) {
+                val line = raw.trim(' ', '\t')
+                if (line.isEmpty()) continue
+                val colon = line.indexOf(':')
+                if (colon <= 0) return null
+                val name = line.substring(0, colon).trim(' ', '\t')
+                if (!HEADER_NAME.matches(name)) return null
+                val normalizedName = name.lowercase(Locale.ROOT)
+                if (normalizedName in TRANSPORT_HEADERS) return null
+                val content = line.substring(colon + 1).trim(' ', '\t')
+                if (content.any { it != '\t' && (it.code < 32 || it.code == 127 || it.code > 255) }) return null
+                headers[normalizedName] = content
+            }
+            return headers.toMap()
+        }
+
+        private val HEADER_NAME = Regex("[!#$%&'*+.^_`|~0-9A-Za-z-]+")
+        private val TRANSPORT_HEADERS = setOf("host", "content-length", "transfer-encoding", "connection", "trailer", "upgrade", "te")
     }
 }
 
@@ -143,6 +172,7 @@ class LlmLyricsClient(
         title: String? = null,
         artist: String? = null,
         sourceLanguage: String? = null,
+        onFailure: (String, Int?) -> Unit = { _, _ -> },
         isCancelled: () -> Boolean = { false },
     ): Map<String, LlmLyricsLine>? {
         if (lines.isEmpty()) return emptyMap()
@@ -152,10 +182,16 @@ class LlmLyricsClient(
         if (isCancelled()) return null
         if (!isWithinInputBounds(lines)) return null
         val body = requestBody(config, lines, title, artist, sourceLanguage) ?: return null
-        val response = post(endpoint, config.apiKey, body, isCancelled) ?: return null
+        val response = post(endpoint, config, body, isCancelled, onFailure) ?: return null
         if (isCancelled()) return null
-        val content = messageContent(response) ?: return null
-        return parseTranslation(content, lines)
+        val content = messageContent(response) ?: run {
+            onFailure("invalid_response", null)
+            return null
+        }
+        return parseTranslation(content, lines) ?: run {
+            onFailure("invalid_response", null)
+            null
+        }
     }
 
     /**
@@ -171,6 +207,7 @@ class LlmLyricsClient(
         document: LlmTransliterationDocument,
         title: String? = null,
         artist: String? = null,
+        onFailure: (String, Int?) -> Unit = { _, _ -> },
         isCancelled: () -> Boolean = { false },
     ): String? {
         val endpoint = config.endpoint ?: return null
@@ -194,10 +231,16 @@ class LlmLyricsClient(
                         .put("content", document.prompt(title, artist)),
                 ),
         ) ?: return null
-        val response = post(endpoint, config.apiKey, body, isCancelled) ?: return null
+        val response = post(endpoint, config, body, isCancelled, onFailure) ?: return null
         if (isCancelled()) return null
-        val content = messageContent(response) ?: return null
-        val result = document.withResponse(content) ?: return null
+        val content = messageContent(response) ?: run {
+            onFailure("invalid_response", null)
+            return null
+        }
+        val result = document.withResponse(content) ?: run {
+            onFailure("invalid_response", null)
+            return null
+        }
         return result.takeUnless { isCancelled() }
     }
 
@@ -207,7 +250,7 @@ class LlmLyricsClient(
     }
 
     /**
-     * Explicit settings action: exercises the configured model and Bearer auth
+     * Explicit settings action: exercises the configured model and request headers
      * through the same transport as translation, without lyrics or cache access.
      * The caller owns the background thread and page-lifecycle cancellation.
      */
@@ -218,6 +261,7 @@ class LlmLyricsClient(
         val endpoint = config.endpoint ?: return ConnectionResult("invalid_endpoint")
         val model = config.normalizedModel
         if (model.isEmpty()) return ConnectionResult("missing_model")
+        if (config.requestHeaders == null) return ConnectionResult("invalid_headers")
         if (isCancelled()) return ConnectionResult("cancelled")
         val body = runCatching {
             encodeRequest(
@@ -228,7 +272,7 @@ class LlmLyricsClient(
             )
         }.getOrNull() ?: return ConnectionResult("request_encoding_or_limit")
         var failure = ConnectionResult("transport")
-        val response = post(endpoint, config.apiKey, body, isCancelled) { reason, status ->
+        val response = post(endpoint, config, body, isCancelled) { reason, status ->
             failure = ConnectionResult(reason, status)
         } ?: return failure
         if (isCancelled()) return ConnectionResult("cancelled")
@@ -249,11 +293,15 @@ class LlmLyricsClient(
      */
     private fun post(
         endpoint: String,
-        apiKey: String,
+        config: LlmLyricsConfig,
         body: ByteArray,
         isCancelled: () -> Boolean,
         onFailure: (String, Int?) -> Unit = { _, _ -> },
     ): String? {
+        val headers = config.requestHeaders ?: run {
+            onFailure("invalid_headers", null)
+            return null
+        }
         val connection = runCatching {
             URI(endpoint).toURL().openConnection() as HttpURLConnection
         }.getOrNull() ?: run {
@@ -283,7 +331,7 @@ class LlmLyricsClient(
         ).apply { isDaemon = true }
         watchdog.start()
         try {
-            val result = runCatching { exchange(connection, apiKey, body, onFailure) }
+            val result = runCatching { exchange(connection, config.apiKey, headers, body, onFailure) }
             val cancelled = runCatching(isCancelled).getOrDefault(false)
             if (cancelled || aborted.get() || System.nanoTime() >= deadlineNanos) {
                 onFailure(if (cancelled) "cancelled" else "timeout", null)
@@ -311,6 +359,7 @@ class LlmLyricsClient(
     private fun exchange(
         connection: HttpURLConnection,
         apiKey: String,
+        customHeaders: Map<String, String>,
         body: ByteArray,
         onFailure: (String, Int?) -> Unit,
     ): String? {
@@ -325,6 +374,7 @@ class LlmLyricsClient(
         connection.setRequestProperty("Accept", "application/json")
         connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
         if (key.isNotEmpty()) connection.setRequestProperty("Authorization", "Bearer $key")
+        customHeaders.forEach { (name, value) -> connection.setRequestProperty(name, value) }
         connection.setFixedLengthStreamingMode(body.size)
         connection.outputStream.use { output -> output.write(body) }
         val status = connection.responseCode
@@ -523,8 +573,8 @@ $input"""
         const val TRANSLITERATION_PROMPT_VERSION = 1
 
         const val DEFAULT_CONNECT_TIMEOUT_MS = 10_000
-        const val DEFAULT_READ_TIMEOUT_MS = 60_000
-        const val DEFAULT_TOTAL_TIMEOUT_MS = 60_000L
+        const val DEFAULT_READ_TIMEOUT_MS = 300_000
+        const val DEFAULT_TOTAL_TIMEOUT_MS = 300_000L
         const val DEFAULT_MAX_RESPONSE_BYTES = 1 shl 20
         const val MAX_LINES = 4096
         const val MAX_LINE_CHARS = 4096

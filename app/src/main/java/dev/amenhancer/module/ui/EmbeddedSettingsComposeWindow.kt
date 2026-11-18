@@ -64,6 +64,7 @@ internal fun createEmbeddedSettingsDialog(
     activity: Activity,
     onBack: ((dismiss: () -> Unit) -> Unit)? = null,
     onDismiss: (() -> Unit)? = null,
+    overlayOnly: Boolean = false,
     content: @Composable (dismiss: () -> Unit) -> Unit,
 ): Dialog {
     val activityReference = WeakReference(activity)
@@ -102,35 +103,44 @@ internal fun createEmbeddedSettingsDialog(
                 },
             ) {
                 MiuixTheme(controller = controller) {
-                    val progress = remember { Animatable(0f) }
+                    val progress = remember { Animatable(if (overlayOnly) 1f else 0f) }
                     val showing = visible.value
                     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
-                    LaunchedEffect(showing) {
+                    LaunchedEffect(showing, overlayOnly) {
                         // Match the MiuixDefault page push/pop. Android owns immediate teardown;
                         // only an explicit user close waits for this transition to finish.
-                        progress.animateTo(
-                            targetValue = if (showing) 1f else 0f,
-                            animationSpec = tween(500, easing = NavProgrammaticEasing),
-                        )
-                        if (!showing) dialog.dismiss()
+                        if (overlayOnly) {
+                            // The nested Miuix dialog owns the visible animation.
+                            if (showing) progress.snapTo(1f)
+                            else dialog.dismiss()
+                        } else {
+                            progress.animateTo(
+                                targetValue = if (showing) 1f else 0f,
+                                animationSpec = tween(500, easing = NavProgrammaticEasing),
+                            )
+                            if (!showing) dialog.dismiss()
+                        }
                     }
                     Box(
                         Modifier.fillMaxSize().drawBehind {
-                            drawRect(Color.Black.copy(alpha = 0.16f * progress.value))
+                            if (!overlayOnly) drawRect(Color.Black.copy(alpha = 0.16f * progress.value))
                         },
                     ) {
                         // Keep the default MiuixPopupHost so OverlayDialog shares this Scaffold.
                         Scaffold(
-                            modifier = Modifier.fillMaxSize().graphicsLayer {
-                                val direction = if (rtl) -1f else 1f
-                                translationX = (direction * (1f - progress.value) * size.width).roundToInt().toFloat()
-                            },
-                            containerColor = MiuixTheme.colorScheme.surface,
+                            modifier = Modifier.fillMaxSize().then(
+                                if (overlayOnly) Modifier
+                                else Modifier.graphicsLayer {
+                                    val direction = if (rtl) -1f else 1f
+                                    translationX = (direction * (1f - progress.value) * size.width).roundToInt().toFloat()
+                                },
+                            ),
+                            containerColor = if (overlayOnly) Color.Transparent else MiuixTheme.colorScheme.surface,
                             contentWindowInsets = WindowInsets(0, 0, 0, 0),
                         ) {
                             content(requestDismiss)
                         }
-                        if (!showing) {
+                        if (!showing && !overlayOnly) {
                             Box(Modifier.matchParentSize().pointerInput(Unit) {
                                 awaitPointerEventScope {
                                     while (true) {

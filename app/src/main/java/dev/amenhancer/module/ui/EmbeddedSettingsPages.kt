@@ -101,6 +101,11 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
         if (!saved) Toast.makeText(activity, localizedText(ModuleText.SETTINGS_SAVE_FAILED), Toast.LENGTH_SHORT).show()
     }
 
+    fun applySavedChange(change: (ModuleSettings) -> ModuleSettings) {
+        draft.applySavedChange(change)
+        settings = draft.settings
+    }
+
     fun back(dismiss: () -> Unit) {
         // The root overlay host gets Back first. While a modal is exiting, keep its page in place.
         if (auxiliaryDialogs.isNotEmpty()) return
@@ -247,7 +252,8 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                                         EmbeddedSettingsPage.MAIN -> EmbeddedSettingsHome(activity, current, refresh, ::open)
                                         EmbeddedSettingsPage.CUSTOM_LYRICS ->
                                             EmbeddedCustomLyricsPage(activity, current, refresh, ::update, ::open)
-                                        EmbeddedSettingsPage.AUTOMATIC_LYRICS -> EmbeddedAutomaticLyricsPage(current, ::update)
+                                        EmbeddedSettingsPage.AUTOMATIC_LYRICS ->
+                                            EmbeddedAutomaticLyricsPage(activity, current, ::applySavedChange)
                                         EmbeddedSettingsPage.LLM_LYRICS ->
                                             EmbeddedLlmLyricsPage(activity, current, ::update, active = active)
                                         EmbeddedSettingsPage.PLUGINS ->
@@ -390,7 +396,7 @@ private fun EmbeddedSettingsHost.EmbeddedSettingsScreen(
             }
         } else {
             EmbeddedSettingsIconAction(EmbeddedSvgIcon.Document, localizedText(ModuleText.SETTINGS_DETAILS_ACTION)) {
-                showEmbeddedPageDetails(activity, page, settings)
+                showEmbeddedPageDetails(activity, page)
             }
         }
     }
@@ -729,7 +735,7 @@ private fun EmbeddedSettingsHost.showEmbeddedDpiDialog(activity: Activity, curre
     }
 }
 
-private fun EmbeddedSettingsHost.showEmbeddedPageDetails(activity: Activity, page: EmbeddedSettingsPage, settings: ModuleSettings) {
+private fun EmbeddedSettingsHost.showEmbeddedPageDetails(activity: Activity, page: EmbeddedSettingsPage) {
     val entries = when (page) {
         EmbeddedSettingsPage.MAIN -> emptyList()
         EmbeddedSettingsPage.CUSTOM_LYRICS -> listOf(
@@ -739,10 +745,7 @@ private fun EmbeddedSettingsHost.showEmbeddedPageDetails(activity: Activity, pag
         )
         EmbeddedSettingsPage.AUTOMATIC_LYRICS -> listOf(
             ModuleText.AUTO_LYRICS_ENABLED to ModuleText.AUTO_LYRICS_SUMMARY,
-            ModuleText.AUTO_LYRICS_PREFER_NATIVE to ModuleText.AUTO_LYRICS_PREFER_NATIVE_SUMMARY,
-            ModuleText.AUTO_LYRICS_SOURCE_ORDER to if (settings.automaticLyricsPreferNative) {
-                ModuleText.AUTO_LYRICS_SOURCE_ORDER_NATIVE_HIDDEN
-            } else ModuleText.AUTO_LYRICS_SOURCE_ORDER_ALL,
+            ModuleText.AUTO_LYRICS_SOURCE_ORDER to ModuleText.AUTO_LYRICS_SOURCE_ORDER_ALL,
         )
         EmbeddedSettingsPage.LYRICS_EFFECTS -> listOf(
             ModuleText.BIDIRECTIONAL_LYRIC_BLUR to ModuleText.BIDIRECTIONAL_LYRIC_BLUR_SUMMARY,

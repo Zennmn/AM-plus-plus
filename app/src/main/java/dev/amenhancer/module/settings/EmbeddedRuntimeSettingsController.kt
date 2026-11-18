@@ -14,18 +14,19 @@ import dev.amenhancer.module.config.EmbeddedContentManager
 import dev.amenhancer.module.config.EmbeddedLyricsMutationResult
 import dev.amenhancer.module.font.FontFilePolicy
 import dev.amenhancer.module.font.FontImportResult
+import dev.amenhancer.module.hook.LyricsPlaybackRuntimeRegistry
 import dev.amenhancer.module.lyrics.source.AmLyricsClient
 import dev.amenhancer.module.lyrics.source.AmLyricsIndexEntry
 import dev.amenhancer.module.lyrics.source.AmllTtmlClient
 import dev.amenhancer.module.lyrics.source.HttpLyricTransport
-import dev.amenhancer.module.lyrics.source.FileLunabeatCatalogCache
+import dev.amenhancer.module.lyrics.embeddedLunabeatCatalogCache
 import dev.amenhancer.module.lyrics.source.LunabeatClient
 import dev.amenhancer.module.lyrics.CustomLyricsDraft
 import dev.amenhancer.module.lyrics.CustomLyricsBatchSaveResult
 import dev.amenhancer.module.lyrics.CustomLyricsFilePolicy
 import dev.amenhancer.module.lyrics.CustomLyricsInspection
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImportResult
-import dev.amenhancer.module.lyrics.CustomLyricsOnlineImporter
+import dev.amenhancer.module.lyrics.createEmbeddedOnlineLyricsImporter
 import dev.amenhancer.module.lyrics.CustomLyricsMultiIdDraft
 import dev.amenhancer.module.lyrics.CustomLyricsRestoreResult
 import dev.amenhancer.module.lyrics.CustomLyricsSaveResult
@@ -45,14 +46,22 @@ internal class EmbeddedRuntimeSettingsController(
     private val currentSong: () -> CurrentSongDetails?,
 ) : EmbeddedSettingsController {
     private val appContext = context.applicationContext
-    private val content = EmbeddedContentManager(
-        session = session,
-        validateTypeface = ::canBuildTypeface,
-    )
+    internal val content by lazy {
+        EmbeddedContentManager(session = session, validateTypeface = ::canBuildTypeface)
+    }
+    internal val lunabeatCatalogCache by lazy {
+        embeddedLunabeatCatalogCache(appContext, content.sourceCache, session.writable)
+    }
 
     override fun currentSettings(): ModuleSettings = session.settings()
 
     override fun saveOrdinarySettings(settings: ModuleSettings): Boolean = session.saveSettings(settings)
+
+    override fun saveAutomaticLyricsEnabled(enabled: Boolean): Boolean =
+        session.saveAutomaticLyricsEnabled(enabled).also { if (it) LyricsPlaybackRuntimeRegistry.onSettingsChanged() }
+
+    override fun saveAutomaticLyricsSourceOrder(order: List<String>): Boolean =
+        session.saveAutomaticLyricsSourceOrder(order)
 
     override fun currentSongDetails(): CurrentSongDetails? = currentSong()
 
@@ -162,36 +171,15 @@ internal class EmbeddedRuntimeSettingsController(
         }
     }
 
-    override fun importOnlineLyrics(
+    override fun fetchOnlineLyrics(
         source: EmbeddedOnlineSource,
         appleMusicId: Long,
-        displayName: String,
-    ): EmbeddedActionResult {
-        val lunabeat = LunabeatClient(
-            indexTransport = HttpLyricTransport(maxResponseBytes = LunabeatClient.INDEX_MAX_BYTES),
-            lyricsTransport = HttpLyricTransport(),
-            cache = FileLunabeatCatalogCache(File(appContext.filesDir, "ampp-lunabeat-cache")),
-        )
-        val importer = CustomLyricsOnlineImporter(
-            fetchAmll = AmllTtmlClient(HttpLyricTransport())::fetch,
-            fetchAmLyrics = AmLyricsClient(HttpLyricTransport())::fetch,
-            fetchLunabeat = lunabeat::fetch,
-        )
-        val imported = when (source) {
+    ): CustomLyricsOnlineImportResult {
+        val importer = createEmbeddedOnlineLyricsImporter(lunabeatCatalogCache)
+        return when (source) {
             EmbeddedOnlineSource.AMLL -> importer.importAmll(appleMusicId)
             EmbeddedOnlineSource.AM_LYRICS -> importer.importAmLyrics(appleMusicId)
             EmbeddedOnlineSource.LUNABEAT -> importer.importLunabeat(appleMusicId)
-        }
-        return when (imported) {
-            is CustomLyricsOnlineImportResult.Failed -> EmbeddedActionResult.Failed(imported.message)
-            is CustomLyricsOnlineImportResult.Imported -> content.importOnlineLyrics(
-                appleMusicId = appleMusicId,
-                displayName = displayName,
-                imported = imported,
-                replacingAppleMusicId = content.listLyrics()
-                    .firstOrNull { it.appleMusicId == appleMusicId }
-                    ?.appleMusicId,
-            ).toActionResult()
         }
     }
 
@@ -211,7 +199,7 @@ internal class EmbeddedRuntimeSettingsController(
         val lunabeat = LunabeatClient(
             indexTransport = HttpLyricTransport(maxResponseBytes = LunabeatClient.INDEX_MAX_BYTES),
             lyricsTransport = HttpLyricTransport(),
-            cache = FileLunabeatCatalogCache(File(appContext.filesDir, "ampp-lunabeat-cache")),
+            cache = lunabeatCatalogCache,
         )
         content.updateLyrics(
             sources = CustomLyricsUpdateSources(

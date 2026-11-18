@@ -29,7 +29,7 @@ class LlmLyricsCacheTest {
     }
 
     @Test
-    fun `explicit thinking-type efforts round trip through a fresh cache instance with version four`() {
+    fun `explicit thinking-type efforts round trip through a fresh cache instance with version five`() {
         val efforts = listOf(
             LlmLyricsThinkingEffort.LOW to "low",
             LlmLyricsThinkingEffort.HIGH to "high",
@@ -41,7 +41,7 @@ class LlmLyricsCacheTest {
             assertTrue(cache.write(id, original, config, translated))
             assertEquals(translated, FileLlmLyricsCache(directory).read(id, original, config))
             val raw = JSONObject(entryFile(id).readText())
-            assertEquals(4, raw.getInt("version"))
+            assertEquals(5, raw.getInt("version"))
             val slot = translationSlot(raw)
             assertEquals("thinking_type", slot.getString("thinkingFormat"))
             assertTrue(slot.getBoolean("thinkingEnabled"))
@@ -176,7 +176,7 @@ class LlmLyricsCacheTest {
     @Test
     fun `a future cache version is not accepted with known thinking fields`() {
         assertTrue(cache.write(1, original, config(effort = LlmLyricsThinkingEffort.HIGH), translated))
-        rewrite(1) { put("version", 5) }
+        rewrite(1) { put("version", 6) }
         assertNull(cache.read(1, original, config(effort = LlmLyricsThinkingEffort.HIGH)))
     }
 

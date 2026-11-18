@@ -25,46 +25,51 @@ import org.junit.Test
 class EmbeddedContentManagerTest {
 
     @Test
-    fun `single song update commits into full index and preserves other lyrics`() {
+    fun `cache update refreshes the source and preserves manual lyrics`() {
         val storage = MemoryStorage()
         val manager = EmbeddedContentManager(EmbeddedConfigurationSession(storage), sequenceFileIds("lyrics_song"))
+        val source = CustomLyricsSources.AMLL
         val old = wordTtml("old")
         val new = wordTtml("new")
-        manager.addLyrics(42, "Cached", old, CustomLyricsSources.AMLL)
+        manager.addLyrics(42, "Cached", old, source)
         manager.addLyrics(43, "Other", ttml("other"))
-        val other = manager.listLyrics().last()
-        val result = manager.updateSong(42, updateSources { new })
+        val other = manager.listLyrics().single()
+        val result = manager.updateLyrics(updateSources { new })
         assertTrue(result is dev.amenhancer.module.lyrics.CustomLyricsUpdateResult.Updated)
         assertEquals(1, result.summary.checked)
         assertEquals(1, result.summary.updated)
-        assertEquals(other, manager.listLyrics().last())
+        assertEquals(listOf(other), manager.listLyrics())
         assertEquals(ttml("other"), manager.readLyrics(43))
-        assertEquals("Cached", manager.listLyrics().first().displayName)
-        assertTrue(manager.readLyrics(42)!!.contains("new"))
+        assertEquals("Cached", manager.sourceCache.entryFor(42, source)?.displayName)
+        assertTrue(manager.sourceCache.readCandidate(42, source)?.ttml?.contains("new") == true)
     }
 
     @Test
-    fun `single song conflict or cancellation preserves newer edit delete and disable`() {
-        for (action in listOf("edit", "delete", "disable", "cancel")) {
+    fun `cache refresh preserves a concurrent edit clear disable or cancellation`() {
+        val source = CustomLyricsSources.AMLL
+        for (action in listOf("edit", "clear", "disable", "cancel")) {
             val storage = MemoryStorage()
             val manager = EmbeddedContentManager(EmbeddedConfigurationSession(storage), sequenceFileIds("lyrics_song"))
-            manager.addLyrics(42, "Cached", wordTtml("old"), CustomLyricsSources.AMLL)
+            manager.addLyrics(42, "Cached", wordTtml("old"), source)
             var cancelled = false
-            val result = manager.updateSong(42, updateSources {
+            val result = manager.updateLyrics(updateSources {
                 when (action) {
-                    "edit" -> manager.updateLyrics(42, "Edited", wordTtml("edited"))
-                    "delete" -> manager.deleteLyrics(42)
-                    "disable" -> manager.setLyricsEnabled(42, false)
+                    "edit" -> manager.addLyrics(42, "Edited", wordTtml("edited"), source)
+                    "clear" -> assertTrue(manager.sourceCache.clear())
+                    "disable" -> manager.sourceCache.setSourceEnabled(42, source, false)
                     "cancel" -> cancelled = true
                 }
                 wordTtml("remote")
             }, { cancelled })
-            assertTrue(result !is dev.amenhancer.module.lyrics.CustomLyricsUpdateResult.Updated)
+            assertTrue(action, result !is dev.amenhancer.module.lyrics.CustomLyricsUpdateResult.Updated)
             when (action) {
-                "edit" -> assertEquals(wordTtml("edited"), manager.readLyrics(42))
-                "delete" -> assertTrue(manager.listLyrics().isEmpty())
-                "disable" -> assertFalse(manager.listLyrics().single().enabled)
-                "cancel" -> assertEquals(wordTtml("old"), manager.readLyrics(42))
+                "edit" -> assertEquals(wordTtml("edited"), manager.sourceCache.readCandidate(42, source)?.ttml)
+                "clear" -> assertEquals(null, manager.sourceCache.readCandidate(42, source))
+                "disable" -> {
+                    assertEquals(false, manager.sourceCache.entryFor(42, source)?.enabled)
+                    assertEquals(wordTtml("old"), manager.sourceCache.readCandidate(42, source)?.ttml)
+                }
+                "cancel" -> assertEquals(wordTtml("old"), manager.sourceCache.readCandidate(42, source)?.ttml)
             }
         }
     }
@@ -197,7 +202,7 @@ class EmbeddedContentManagerTest {
                 appleMusicIds = listOf(601L, 602L),
                 displayName = "Grouped",
                 ttml = ttml("grouped"),
-                source = CustomLyricsSources.AM_LYRICS,
+                source = CustomLyricsSources.MANUAL,
             ),
         )
 
@@ -217,7 +222,7 @@ class EmbeddedContentManagerTest {
     }
 
     @Test
-    fun `online import result is persisted with its source`() {
+    fun `online import result stays in its source cache and out of the manual list`() {
         val manager = EmbeddedContentManager(
             session = EmbeddedConfigurationSession(MemoryStorage()),
             fileIdFactory = sequenceFileIds("lyrics_online"),
@@ -235,7 +240,9 @@ class EmbeddedContentManagerTest {
         assertTrue(result is CustomLyricsSaveResult.Saved)
         val entry = (result as CustomLyricsSaveResult.Saved).entry
         assertEquals(CustomLyricsSources.AMLL, entry.source)
-        assertEquals(ttml("online"), manager.readLyrics(303L))
+        assertTrue(manager.listLyrics().isEmpty())
+        assertEquals(null, manager.readLyrics(303L))
+        assertEquals(ttml("online"), manager.sourceCache.readCandidate(303L, CustomLyricsSources.AMLL)?.ttml)
     }
 
     @Test
@@ -329,6 +336,11 @@ class EmbeddedContentManagerTest {
             }
             if (isFontPublish && failFontPublish) return false
             storedValues.putAll(values)
+            return true
+        }
+
+        override fun removeValues(keys: Set<String>, synchronous: Boolean): Boolean {
+            keys.forEach(storedValues::remove)
             return true
         }
 

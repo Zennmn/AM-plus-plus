@@ -18,5 +18,9 @@ internal class EmbeddedSettingsDraft(
     fun updateCellularDataEntry(enabled: Boolean): Boolean =
         update(settings.copy(forceCellularDataEntryEnabled = enabled))
 
+    fun applySavedChange(change: (ModuleSettings) -> ModuleSettings) {
+        settings = change(settings)
+    }
+
     fun save(): Boolean = persist(settings)
 }

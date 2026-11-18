@@ -11,6 +11,8 @@ data class CustomLyricsIndexState(
     val pointer: CustomLyricsIndexPointer?,
     val manifest: CustomLyricsManifest,
     val canCommit: Boolean = true,
+    /** True only when the published index was read successfully, including an empty index. */
+    val isResolved: Boolean = false,
 )
 
 sealed interface CustomLyricsIndexCommitResult {
@@ -36,20 +38,34 @@ class CustomLyricsIndexRepository(
     private val writeRemoteFile: (String, ByteArray) -> Boolean,
     private val publishPointer: (CustomLyricsIndexPointer) -> Boolean,
     private val deleteRemoteFile: (String) -> Unit,
+    private val readIndexBytes: ((String, Int) -> ByteArray?)? = null,
     private val maxIndexBytes: Int = CustomLyricsManifestPolicy.MAX_INDEX_BYTES,
 ) {
+    private fun readIndex(fileId: String, maxBytes: Int): ByteArray? =
+        readIndexBytes?.invoke(fileId, maxBytes)
+            ?: readBoundedIndexBytes(fileId, maxBytes, openFile)
+
     fun state(preferences: Map<String, *>): CustomLyricsIndexState =
-        Companion.state(preferences, openFile)
+        Companion.stateWithCodec(
+            preferences = preferences,
+            openFile = openFile,
+            readIndexBytes = ::readIndex,
+        )
 
     fun commit(
         state: CustomLyricsIndexState,
         next: CustomLyricsManifest,
         allowRecovery: Boolean = false,
+        maxIndexBytes: Int = this.maxIndexBytes,
+        encode: (CustomLyricsManifest) -> String = CustomLyricsManifestCodec::encode,
+        decode: (ByteArray) -> CustomLyricsManifest? = { bytes ->
+            CustomLyricsManifestCodec.decodeIndexFile(bytes.toString(Charsets.UTF_8))
+        },
     ): CustomLyricsIndexCommitResult {
         if (!state.canCommit && !allowRecovery) {
             return CustomLyricsIndexCommitResult.Failed(ModuleText.LYRICS_INDEX_UNREADABLE.text())
         }
-        val encoded = CustomLyricsManifestCodec.encode(next).toByteArray(Charsets.UTF_8)
+        val encoded = encode(next).toByteArray(Charsets.UTF_8)
         if (encoded.size > maxIndexBytes) {
             return CustomLyricsIndexCommitResult.Failed(ModuleText.LYRICS_INDEX_TOO_LARGE.text())
         }
@@ -86,20 +102,39 @@ class CustomLyricsIndexRepository(
         fun state(
             preferences: Map<String, *>,
             openFile: (String) -> InputStream?,
+        ): CustomLyricsIndexState = stateWithCodec(
+            preferences = preferences,
+            openFile = openFile,
+        )
+
+        /** Extended state decoder used by the source index; keeps [state] trailing-lambda compatible. */
+        fun stateWithCodec(
+            preferences: Map<String, *>,
+            openFile: (String) -> InputStream?,
+            pointerDecoder: (Map<String, *>) -> CustomLyricsIndexPointer? = ModuleSettingsSchema::decodeIndexPointer,
+            pointerPresent: (Map<String, *>) -> Boolean = ModuleSettingsSchema::hasIndexPointerValues,
+            legacyDecoder: (Map<String, *>) -> CustomLyricsManifest =
+                ModuleSettingsSchema::decodeLegacyCustomLyricsManifest,
+            decodeIndex: (ByteArray) -> CustomLyricsManifest? = { bytes ->
+                CustomLyricsManifestCodec.decodeIndexFile(bytes.toString(Charsets.UTF_8))
+            },
+            readIndexBytes: (String, Int) -> ByteArray? = { fileId, maxBytes ->
+                readBoundedIndexBytes(fileId, maxBytes, openFile)
+            },
         ): CustomLyricsIndexState {
-            val pointer = ModuleSettingsSchema.decodeIndexPointer(preferences)
+            val pointer = pointerDecoder(preferences)
             if (pointer != null) {
-                val bytes = readIndexBytes(pointer.fileId, openFile)
+                val bytes = readIndexBytes(pointer.fileId, CustomLyricsManifestPolicy.MAX_INDEX_BYTES)
                 if (
                     bytes != null &&
                     bytes.size.toLong() == pointer.sizeBytes &&
                     CustomLyricsFilePolicy.sha256(bytes)
                         .equals(pointer.sha256, ignoreCase = true)
                 ) {
-                    val decoded = CustomLyricsManifestCodec.decodeIndexFile(
-                        bytes.toString(Charsets.UTF_8),
-                    )
-                    if (decoded != null) return CustomLyricsIndexState(pointer, decoded)
+                    val decoded = decodeIndex(bytes)
+                    if (decoded != null) {
+                        return CustomLyricsIndexState(pointer, decoded, isResolved = true)
+                    }
                 }
                 return CustomLyricsIndexState(
                     pointer = pointer,
@@ -107,7 +142,7 @@ class CustomLyricsIndexRepository(
                     canCommit = false,
                 )
             }
-            if (ModuleSettingsSchema.hasIndexPointerValues(preferences)) {
+            if (pointerPresent(preferences)) {
                 return CustomLyricsIndexState(
                     pointer = null,
                     manifest = CustomLyricsManifest.empty(),
@@ -116,7 +151,8 @@ class CustomLyricsIndexRepository(
             }
             return CustomLyricsIndexState(
                 pointer = pointer,
-                manifest = ModuleSettingsSchema.decodeLegacyCustomLyricsManifest(preferences),
+                manifest = legacyDecoder(preferences),
+                isResolved = true,
             )
         }
 
@@ -124,17 +160,15 @@ class CustomLyricsIndexRepository(
         fun resolve(
             preferences: Map<String, *>,
             openFile: (String) -> InputStream?,
-        ): CustomLyricsManifest = state(preferences, openFile).manifest
+        ): CustomLyricsManifest = state(preferences, openFile = openFile).manifest
 
-        private fun readIndexBytes(
+        private fun readBoundedIndexBytes(
             fileId: String,
+            maxBytes: Int,
             openFile: (String) -> InputStream?,
         ): ByteArray? = runCatching {
             openFile(fileId)?.use { input ->
-                CustomLyricsFilePolicy.readBounded(
-                    input,
-                    CustomLyricsManifestPolicy.MAX_INDEX_BYTES,
-                )
+                CustomLyricsFilePolicy.readBounded(input, maxBytes)
             }
         }.getOrNull()
     }

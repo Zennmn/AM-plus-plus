@@ -27,7 +27,6 @@ import dev.amenhancer.module.CurrentSongDetails
 import dev.amenhancer.module.i18n.ModuleText
 import dev.amenhancer.module.lyrics.CustomLyricsMultiIdDraft
 import dev.amenhancer.module.lyrics.CustomLyricsOnlineImportResult
-import dev.amenhancer.module.lyrics.CustomLyricsOnlineImporter
 import dev.amenhancer.module.model.CustomLyricsSources
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.DropdownArrowEndAction
@@ -199,12 +198,7 @@ internal fun EmbeddedSettingsHost.showLyricsEditor(
             feedback = localizedText(ModuleText.FETCHING_LYRICS)
             host.worker.execute {
                 val result = runCatching {
-                    val importer = host.embeddedOnlineLyricsImporter()
-                    when (sourceToImport) {
-                        EmbeddedOnlineSource.AMLL -> importer.importAmll(appleMusicId)
-                        EmbeddedOnlineSource.AM_LYRICS -> importer.importAmLyrics(appleMusicId)
-                        EmbeddedOnlineSource.LUNABEAT -> importer.importLunabeat(appleMusicId)
-                    }
+                    host.controller.fetchOnlineLyrics(sourceToImport, appleMusicId)
                 }.getOrElse {
                     CustomLyricsOnlineImportResult.Failed(
                         it.message.orEmpty().ifBlank { failureFallback },
@@ -441,9 +435,6 @@ internal fun EmbeddedSettingsHost.showLyricsEditor(
         }
     }
 }
-
-internal fun EmbeddedSettingsHost.embeddedOnlineLyricsImporter(): CustomLyricsOnlineImporter =
-    dev.amenhancer.module.lyrics.createEmbeddedOnlineLyricsImporter(application)
 
 internal fun EmbeddedSettingsHost.embeddedLyricsSourceName(source: String): String = when (source) {
     CustomLyricsSources.AUTO_CACHE -> localizedText(ModuleText.AUTO_CACHE)

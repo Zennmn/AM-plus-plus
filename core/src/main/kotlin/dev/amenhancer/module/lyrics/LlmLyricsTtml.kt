@@ -685,16 +685,24 @@ internal object TtmlScanner {
         target.append(decodeEntities(text.substring(from, to)))
     }
 
-    /** Exclusive end of a comment, CDATA section or processing instruction. */
-    fun literalEnd(text: String, open: Int): Int {
+    /**
+     * Exclusive end of a comment, CDATA section or processing instruction.
+     * [strict] requires a terminator after the opener and returns -1 when it is
+     * missing; the default retains the line scanner's consume-to-end fallback.
+     */
+    fun literalEnd(text: String, open: Int, strict: Boolean = false): Int {
         val terminator = when {
             text.startsWith("<!--", open) -> "-->"
             text.startsWith("<![CDATA[", open) -> "]]>"
             text.startsWith("<?", open) -> "?>"
             else -> return -1
         }
-        val close = text.indexOf(terminator, open)
-        return if (close < 0) text.length else close + terminator.length
+        val close = text.indexOf(terminator, if (strict) open + 2 else open)
+        return when {
+            close < 0 && strict -> -1
+            close < 0 -> text.length
+            else -> close + terminator.length
+        }
     }
 
     /** Index of the `>` closing the tag, ignoring `>` inside attribute values. */
