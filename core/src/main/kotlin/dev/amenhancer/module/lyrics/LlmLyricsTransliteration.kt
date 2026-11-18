@@ -160,8 +160,11 @@ the actual characters, words, names, pronunciation, or mixed-language context in
   verbatim while transliterating the rest; do not mark that whole mixed unit as English.
 - Chinese, Japanese, Korean, Cyrillic, and other languages are all eligible. Choose the language
   from the lyrics themselves, not from the root hint.
-- Use Hepburn-style Japanese for Japanese, Hanyu Pinyin for Mandarin, and a suitable consistent
-  Latin transliteration for other languages. Keep spelling consistent across repeated lines.
+- Use Hepburn-style Japanese for Japanese, Hanyu Pinyin for Mandarin, and Jyutping for Cantonese.
+  For Chinese lyrics, use the song context and credible language hints to distinguish Cantonese
+  from Mandarin. Simplified or traditional characters alone do not identify the sung variety.
+  Use a suitable consistent Latin transliteration for other languages. Keep spelling consistent
+  across repeated lines.
 
 ### OUTPUT
 Return only JSON, with no Markdown or explanation. The lang tag must be an explicit Latin-script
