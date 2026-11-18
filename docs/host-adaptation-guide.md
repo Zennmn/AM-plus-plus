@@ -17,7 +17,7 @@
 
 实际宿主的版本信息由 [TargetBuildLookup.targetBuild](../host-applemusic/src/main/java/dev/amenhancer/module/hook/TargetBuildLookup.kt) 按 `packageName` 查询包信息读取，并以实际 `packageName`、`versionName`、`versionCode` 构造 `TargetBuild`。[AppleMusicHostProfiles](../host-applemusic/src/main/java/dev/amenhancer/host/applemusic/AppleMusicHostProfiles.kt) 只按精确 `versionName`+`versionCode` 选择共享 profile，生产入口另检查 `productionEnabled`。文件名为 `<versionName>-<versionCode>.json`，同一组合只登记一次；`index.json` 还决定旧 HLE 的已审核候选顺序，新增档案保留既有条目的相对顺序。`profile.packageName` 描述原包及内部类、方法、资源命名空间，不是运行时包名白名单。
 
-歌词菜单是独立的精确能力。7.0.0-1614 的菜单接缝已有确认；其他构建须在各自档案中声明并成功解析原生动作容器、弹窗内容与回调，不能由发音、翻译或结果提交能力推定。未声明或解析失败的构建只缺少歌词菜单，原生歌词动作和其他功能继续按各自资格运行。
+歌词菜单按独立契约准入。当前构建须声明并解析原生动作容器、弹窗内容与回调。菜单契约缺失或解析失败时，原生歌词动作及其他功能继续按各自资格运行。
 
 本规则只覆盖 Android 安装包名（application ID）变化；内部类、方法和资源命名空间保持原包，其他改包行为不获得兼容。实际安装包名只用于身份、版本和组件。
 
@@ -81,7 +81,7 @@
 | `startupPagePrewarm` / `artistComposeProfile` | 独立预热、Compose 艺人表面的成员、构造器与语义参数 |
 | `verification` / 匹配策略 | 离线描述符/资源证据、`ambiguityPolicy`、已审核的 `legacyFirstMatchExceptions` |
 
-JSON 保存宿主事实，参数变换、线程、回退和生命周期策略由 Kotlin 实现。歌词菜单使用当前解析器定义的独立精确契约；7.0.0-1614 的接缝已确认，其他构建以各自契约声明和解析结果为准，不能由发音、翻译或结果提交能力推定。共享 profile 只按精确 `versionName`+`versionCode` 选择；`profile.packageName` 描述原包及内部类、方法、资源命名空间，不是运行时包名字段，实际运行时包名由 `TargetBuild` 单独记录。profile schema、各独立契约的版本字段和应用配置 schema 分别维护，以当前解析器及 [ModuleConstants](../core/src/main/kotlin/dev/amenhancer/module/ModuleConstants.kt) 为准；普通混淆适配不附带修改配置格式。
+JSON 保存宿主事实，参数变换、线程、回退和生命周期策略由 Kotlin 实现。共享 profile 只按精确 `versionName`+`versionCode` 选择；`profile.packageName` 描述原包及内部类、方法、资源命名空间，实际运行时包名由 `TargetBuild` 单独记录。profile schema、各独立契约的版本字段和应用配置 schema 分别维护，以当前解析器及 [ModuleConstants](../core/src/main/kotlin/dev/amenhancer/module/ModuleConstants.kt) 为准；普通混淆适配不附带修改配置格式。
 
 ### 3.2 三种接入方式
 
@@ -113,6 +113,8 @@ Java 反编译用于理解流程，原始 owner 与擦除签名以 DEX/smali 为
 类结构、字段顺序、相似描述符或反编译浏览中的近似签名只能提出结构候选，用于缩小核查范围；在缺少语义闭合前不能据此认定目标版本已适配、授予能力或推定运行时兼容。候选转为已确认映射时，须同时核对当前 split 中的原始 owner 与完整擦除签名或字段类型、实际声明及继承/接口关系、调用方与读写语义、Hook 的具体实现，以及页面生命周期中的实际作用；资源与布局还须按上表确认限定符和运行时父链。
 
 适配器基类新增方法造成子类混淆名整体移动时，旧名仍可能存在且签名相同，却已指向其他实现；空实现也无法仅凭方法体归一化或完整签名区分。此时须沿原生调用的同一状态分支和父类声明追踪实际实现，不能按同名或首个候选复用。
+
+编译器可能把旧工具类中的方法拆到多个 owner，也可能把相同实现复制到不同的合成类。逐角色追踪实际调用点，确认合成实例的构造点、参数和分派分支。共享短名在不同构建中的解析应优先使用当前精确 profile 的入口。
 
 复用相邻构建 profile 的 `evidence` 时，各独立区域沿用现有字段，逐个按目标实际包更新 `sourceBuild`、`sourceIdentity`、`memberSource`，并重新核对 `layoutReview`；明确区分上游方案来源与当前宿主证据，旧 `runtimeVerified` 不随复制保留。
 
@@ -291,7 +293,7 @@ TTML 文件有界读取、输入合法性、原生指针存活/ID 检查和来�
 
 **歌词菜单、时间偏移与清除。** 歌词页入口在模块启用时保持可用，不依赖当前歌曲是否已有手动项。原生第一层保留原有“发音”“翻译”动作与可用性，并在其后提供第三项“歌词菜单”；只有点击第三项才打开模块自己的 Miuix 总弹窗，来源选择、时间偏移、第三方缓存占用与清除都放在该弹窗内。不得把管理操作逐项追加到原生第一层，也不得全局 Hook `PopupWindow`、`addView` 或按相似类名猜菜单成员。
 
-菜单接入必须由当前精确 profile 的独立契约声明原生动作容器、当前弹窗内容及显示前准备接缝，并在安装前校验类型、调用语义和生命周期。新增一行时沿用宿主原生行的填充方式和子行宽度规则，保留原有行、弹窗宽高模式、锚点身份和默认定位。可选的 `resources.endIcon` 声明已确认的宿主 drawable，仅设置新增行的末端图标，沿用行自身的图标间距与着色；资源不可用时保留文字入口。7.0.0-1614 的原生行以无父容器方式填充，挂到纵向容器后统一使用默认整行宽度；不要让新增行单独按内容定宽。该构建在原生行加入后、首次显示前构造关闭回调任务，使用 `constructors.menuReadyCallback` 接入，严格核对参数为当前菜单监听器、弹窗尚未显示。其他构建即使有发音/翻译资源，也须逐构建补齐精确接缝。契约缺失或解析失败时只降级歌词菜单，保留原生动作与其他歌词功能。
+菜单接入由当前精确 profile 的独立契约声明原生动作容器、当前弹窗内容及显示前准备接缝，安装前校验类型、调用语义和生命周期。沿原生监听器追踪弹窗创建、原生行加入、偏移计算及首次显示的顺序。使用 `constructors.menuReadyCallback` 时，确认构造发生在原生行加入后、偏移计算和首次显示前，核对合成回调的分派分支及承载当前监听器的参数。新增一行时沿用宿主原生行的填充方式和纵向容器的默认整行宽度，保留原有行、弹窗宽高模式、锚点身份和默认定位。可选的 `resources.endIcon` 声明已确认的宿主 drawable，仅设置新增行的末端图标，沿用行自身的图标间距与着色。资源不可用时保留文字入口。
 
 新增项与前一项之间复用 profile 的可选 `resources.separator` 宿主 drawable，以其固有高度和主题色绘制细线，作为新增行的顶部 foreground 装饰，保留原有 foreground；只有模块项时不增加分隔。分隔不增加子 View、不参与菜单测量、不覆盖或修改原生行背景，资源缺失时仍保留可点击的文字入口。不要向 `WRAP_CONTENT` 菜单加入 `MATCH_PARENT` 的普通 View：它在有界测量下会取满可用宽度，使弹窗横向撑满；菜单宽度应继续由原生 TextView 的文字、图标和内边距决定。
 

@@ -148,9 +148,29 @@ def verify_fragment_contracts(document, classes, failures):
         return primitive.get(name, name.replace('.', '/') if name.startswith('[')
                              else 'L' + name.replace('.', '/') + ';')
     sections = {name: document.get(name) for name in (
-        'fragmentDualPane', 'fragmentLyricsRuntime', 'fragmentKaraokeWidth', 'fragmentTabletVideoHandoff',
-        'lyricPronunciation')}
+        'fragmentDualPane', 'fragmentLyricsRuntime', 'fragmentKaraokeWidth', 'fragmentTabletVideoHandoff')}
     sections['fragmentChrome.members'] = (document.get('fragmentChrome') or {}).get('members')
+    pronunciation = document.get('lyricPronunciation')
+    if pronunciation is not None:
+        sections['lyricPronunciation'] = pronunciation
+        required_methods = {
+            'evaluate', 'match', 'songInfo', 'address', 'songLanguage', 'setTranslation',
+            'pronunciationLanguages', 'vectorSize', 'vectorGet',
+        }
+        methods = pronunciation.get('methods') if isinstance(pronunciation, dict) else None
+        for role in sorted(required_methods - (methods.keys() if isinstance(methods, dict) else set())):
+            failures.append(f'lyricPronunciation.methods.{role}: missing required role')
+    lyrics_menu = document.get('lyricsMenu')
+    if lyrics_menu is not None:
+        sections['lyricsMenu'] = lyrics_menu
+        for group, roles in {
+            'methods': {'evaluate', 'chromeVisibility', 'resume', 'getActivity'},
+            'fields': {'listenerFragment', 'fragmentBinding', 'fragmentPopup', 'menuAnchor'},
+            'constructors': {'menuReadyCallback'},
+        }.items():
+            entries = lyrics_menu.get(group) if isinstance(lyrics_menu, dict) else None
+            for role in sorted(roles - (entries.keys() if isinstance(entries, dict) else set())):
+                failures.append(f'lyricsMenu.{group}.{role}: missing required role')
     settings = document.get('settings') or {}
     presentation = document.get('metadataPresentation')
     if presentation is not None:
@@ -268,9 +288,10 @@ def verify_fragment_contracts(document, classes, failures):
         if not str(main.get('layoutReview', {}).get(role, '')).strip():
             failures.append(f'fragmentDualPane.layoutReview.{role}: missing comparison evidence')
     checks = 0
+    method_only_sections = {'lyricPronunciation', 'settings.members'}
     for section, data in sections.items():
         if (not isinstance(data, dict) or not data.get('methods') or
-                (section != 'settings.members' and not data.get('fields'))):
+                (section not in method_only_sections and not data.get('fields'))):
             failures.append(f'{section}: missing complete member inventory')
             continue
         for group in ('methods', 'fields', 'constructors'):
@@ -292,7 +313,10 @@ def verify_fragment_contracts(document, classes, failures):
                         returns = 'V' if group == 'constructors' else descriptor(contract['returns'])
                         signature = name + '(' + ''.join(map(descriptor, contract['parameters'])) + ')' + returns
                         flags = native.get('method_access', {}).get(signature)
-                        forbidden = 0x40 | 0x1000 | (0 if contract.get('invocationOnly') else 0x400)
+                        # The runtime resolves constructors by parameter types, including R8 callbacks.
+                        forbidden = 0 if group == 'constructors' else (
+                            0x40 | 0x1000 | (0 if contract.get('invocationOnly') else 0x400)
+                        )
                         valid = (flags is not None and not flags & forbidden
                                  and bool(flags & 8) == contract.get('static', False))
                     if not valid:
