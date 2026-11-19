@@ -635,7 +635,7 @@ enum class ModuleText(internal val english: String, internal val chinese: String
     LYRICS_CACHE_SONG_DELETED("All cached copies of this song were deleted", "已删除此歌全部歌词缓存"),
     LYRICS_CACHE_DELETE_FAILED("Cannot delete the cached lyrics", "无法删除歌词缓存"),
     LYRICS_CACHE_EMPTY("No third-party lyrics are cached", "暂无第三方歌词缓存"),
-    LYRICS_CACHE_UNKNOWN_SONG("Unknown song", "未知歌曲"),
+    LYRICS_CACHE_UNKNOWN_SONG("Unknown song · ID %1\$s", "未知歌曲 · ID %1\$s"),
     LYRICS_CACHE_SOURCE_COUNT("%1\$s sources", "%1\$s 个来源"),
     LYRICS_CACHE_DISABLED("Disabled", "已停用"),
     LYRICS_CACHE_SIZE_NOTE(

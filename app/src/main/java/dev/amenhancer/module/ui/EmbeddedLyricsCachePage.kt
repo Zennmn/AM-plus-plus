@@ -387,7 +387,7 @@ internal fun EmbeddedSettingsHost.EmbeddedLyricsCachePage(
                 )
                 else -> visibleGroups.forEachIndexed { index, group ->
                     key(group.appleMusicId) {
-                        val title = group.title ?: localizedText(ModuleText.LYRICS_CACHE_UNKNOWN_SONG)
+                        val title = group.title ?: localizedText(ModuleText.LYRICS_CACHE_UNKNOWN_SONG, group.appleMusicId)
                         val confirmDelete: (String?) -> Unit = { source ->
                             showLyricsCacheDeleteDialog(
                                 activity = activity,
