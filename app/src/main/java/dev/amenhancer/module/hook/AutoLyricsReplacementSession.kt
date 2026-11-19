@@ -300,6 +300,12 @@ internal fun createAutoLyricsRuntime(
         llmCache = llmCache,
     )
     LyricsPlaybackRuntimeRegistry.attach(playback)
+    val songNameSubscription = currentSong.addListener { song ->
+        val details = song?.details ?: return@addListener
+        val artist = details.artist?.takeIf(String::isNotBlank) ?: return@addListener
+        val name = cacheSongName(details.title, artist) ?: return@addListener
+        playback.backfillCacheSongName(details.appleMusicId, name)
+    }
     return AutoLyricsRuntime(
         resolver = resolver,
         cache = cache,
@@ -311,6 +317,7 @@ internal fun createAutoLyricsRuntime(
             refreshExecutor.execute(task)
         },
         closeRefresh = {
+            songNameSubscription.close()
             refreshExecutor.shutdownNow()
             playbackExecutor.shutdownNow()
             executor.shutdownNow()
@@ -326,9 +333,12 @@ internal fun createAutoLyricsRuntime(
             val candidate = resolver.fetchSelected(appleMusicId, source) ?: return@refresh null
             val current = playback.snapshot(appleMusicId)
             if (isCancelled() || !current.isCurrentSong || current.activeSource != source ||
-                (current.preferredSource == LyricsPlaybackSources.AUTOMATIC && !TtmlTimingPolicy.isWord(candidate.ttml)) ||
-                sourceStore.entryFor(appleMusicId, source) != previous ||
-                !sourceStore.writeCandidate(appleMusicId, candidate.withSongTitle(appleMusicId, previous.displayName), epoch)
+                (current.preferredSource == LyricsPlaybackSources.AUTOMATIC && !TtmlTimingPolicy.isWord(candidate.ttml))
+            ) return@refresh null
+            val latest = sourceStore.entryFor(appleMusicId, source) ?: return@refresh null
+            // A display-name backfill does not invalidate a refresh of the same cached lyrics.
+            if (latest.copy(displayName = previous.displayName) != previous ||
+                !sourceStore.writeCandidate(appleMusicId, candidate.withSongTitle(appleMusicId, latest.displayName), epoch)
             ) return@refresh null
             sourceStore.entryFor(appleMusicId, source)?.takeIf { it.sha256 != previous.sha256 }
         },

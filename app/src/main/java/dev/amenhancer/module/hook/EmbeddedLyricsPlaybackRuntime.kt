@@ -610,6 +610,12 @@ internal class EmbeddedLyricsPlaybackRuntime(
     fun llmCacheUsageBytes(): Long = llmCache.usageBytes()
     fun clearLlmCache(): Boolean = llmCache.clear()
 
+    /** The player metadata callback queues an index-only write on the lyrics worker. */
+    fun backfillCacheSongName(appleMusicId: Long, name: String) {
+        val expectedGeneration = store.generation()
+        execute { writeCacheSongNames(mapOf(appleMusicId to name), expectedGeneration) }
+    }
+
     /** Backfills incomplete legacy display names without changing active playback state. */
     fun refreshCacheSongNames(isCancelled: () -> Boolean) {
         if (isCancelled() || synchronized(lock) { closed || clearingCache }) return
@@ -629,6 +635,14 @@ internal class EmbeddedLyricsPlaybackRuntime(
         val names = runCatching { lookupCacheSongNames(appleMusicIds, isCancelled) }
             .getOrDefault(emptyMap())
         if (names.isEmpty() || isCancelled()) return
+        writeCacheSongNames(names, expectedGeneration, isCancelled)
+    }
+
+    private fun writeCacheSongNames(
+        names: Map<Long, String>,
+        expectedGeneration: Long,
+        isCancelled: () -> Boolean = { false },
+    ) {
         synchronized(commitLock) {
             if (!isCancelled() && !synchronized(lock) { closed || clearingCache }) {
                 runCatching { store.updateCacheSongNames(names, expectedGeneration) }

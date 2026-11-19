@@ -151,9 +151,15 @@ internal class EmbeddedLyricsSourceStore(
         }.toMap()
         if (usableNames.isEmpty()) return false
         return session.withCustomLyricsMutation {
-            if (!generationMatches(expectedGeneration) || !prepareSource()) {
-                return@withCustomLyricsMutation false
+            if (!generationMatches(expectedGeneration)) return@withCustomLyricsMutation false
+            val needsUpdate = synchronized(shared.stateLock) {
+                !shared.normalized || shared.sourceManifest.entries.any { entry ->
+                    entry.appleMusicId in usableNames &&
+                        entry.cachedSongDisplayName()?.isCompleteCacheSongName() != true
+                }
             }
+            if (!needsUpdate) return@withCustomLyricsMutation true
+            if (!prepareSource()) return@withCustomLyricsMutation false
             val current = synchronized(shared.stateLock) { shared.sourceManifest }
             var changed = false
             val entries = current.entries.map { entry ->
@@ -726,7 +732,10 @@ internal class EmbeddedLyricsSourceStore(
         if (!session.writable) return@withCustomLyricsMutation
         val key = Key(entry.appleMusicId, entry.source)
         val next = synchronized(shared.stateLock) {
-            if (entry !in shared.sourceManifest.entries) return@withCustomLyricsMutation
+            val latest = shared.sourceManifest.entries.firstOrNull {
+                it.appleMusicId == entry.appleMusicId && it.source == entry.source
+            }
+            if (latest?.copy(displayName = entry.displayName) != entry) return@withCustomLyricsMutation
             linkedMapOf<Key, Long>().apply {
                 putAll(shared.lastUsed)
                 put(key, System.currentTimeMillis())
