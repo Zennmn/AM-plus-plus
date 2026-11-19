@@ -105,6 +105,23 @@
     "layoutCoordinatesLocalToRootMethod": "I",
     "layoutCoordinatesSizeMethod": "m",
     "playerBackgroundClass": "ki0",
-    "playerBackgroundMethod": "g"
+    "playerBackgroundMethod": "g",
+    "popupLayoutClass": "uu4",
+    "popupAnchorViewField": "H",
+    "popupPositionProviderField": "M",
+    "dropdownPositionProviderClass": "sp1",
+    "abstractComposeViewClass": "d0",
+    "abstractComposeViewCheckAddMethod": "b",
+    "dropdownMenuContentClass": "hu7",
+    "dropdownMenuContentMethod": "c",
+    "surfaceModifierMethod": "c",
+    "backgroundElementClass": "e30",
+    "modifierCompanionClass": "cy3",
+    "modifierCompanionField": "i",
+    "motionPlayerViewClass": "ct4",
+    "motionPlayerContentFrameField": "x",
+    "motionPlayerSurfaceViewField": "z",
+    "contextMenuGroupListClass": "ct7",
+    "contextMenuGroupListMethod": "d"
   }
 }

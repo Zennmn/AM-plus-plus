@@ -42,11 +42,13 @@ class ViewBackdrop(
 ) : Backdrop, AutoCloseable, ViewTreeObserver.OnPreDrawListener {
     private val node = RenderNode("AM++ content backdrop")
     private val sourceToWindow = Matrix()
-    private val targetToWindow = Matrix()
-    private val windowToTarget = Matrix()
+    private val sourceToScreen = Matrix()
+    private val targetToScreen = Matrix()
+    private val screenToTarget = Matrix()
     private val previousMatrix = FloatArray(9)
     private val matrixValues = FloatArray(9)
     private val location = IntArray(2)
+    private val screenLocation = IntArray(2)
     private val rootOrigin = FloatArray(2)
     private val gate = BackdropCaptureGate(minCaptureIntervalMs.coerceAtLeast(0L) * 1_000_000L)
     private var generation by mutableIntStateOf(0)
@@ -116,7 +118,7 @@ class ViewBackdrop(
         try {
             check(source.isHardwareAccelerated) { "Hardware accelerated window required" }
             updateSourceMatrix()
-            sourceToWindow.getValues(matrixValues)
+            sourceToScreen.getValues(matrixValues)
             val moved = hasSignificantMatrixChange()
             val forced = !ready || moved || node.width != source.width || node.height != source.height
             if (forced || forceRefreshOnPreDraw || source.isDirty) {
@@ -196,6 +198,17 @@ class ViewBackdrop(
         rootMatrix.mapPoints(rootOrigin)
         source.rootView.getLocationInWindow(location)
         sourceToWindow.postTranslate(location[0] - rootOrigin[0], location[1] - rootOrigin[1])
+        source.rootView.getLocationOnScreen(screenLocation)
+        sourceToScreen.set(sourceToWindow)
+        sourceToScreen.postTranslate(
+            (screenLocation[0] - location[0]).toFloat(),
+            (screenLocation[1] - location[1]).toFloat(),
+        )
+    }
+
+    /** Nudge consumers to re-sample when a separate window (e.g. Popup) repositions on screen. */
+    fun invalidateConsumers() {
+        if (!closed) generation++
     }
 
     override fun DrawScope.drawBackdrop(
@@ -205,20 +218,21 @@ class ViewBackdrop(
     ) {
         @Suppress("UNUSED_VARIABLE") val frame = generation
         if (!ready || closed || coordinates == null || !coordinates.isAttached) return
-        val origin = coordinates.localToWindow(Offset.Zero)
-        val x = coordinates.localToWindow(Offset(1f, 0f)) - origin
-        val y = coordinates.localToWindow(Offset(0f, 1f)) - origin
-        targetToWindow.setValues(floatArrayOf(x.x, y.x, origin.x, x.y, y.y, origin.y, 0f, 0f, 1f))
-        if (!targetToWindow.invert(windowToTarget)) return
-        // localToWindow already includes the consumer's full layer transform. Applying the
+        val origin = coordinates.localToScreen(Offset.Zero)
+        if (!origin.x.isFinite() || !origin.y.isFinite()) return
+        val x = coordinates.localToScreen(Offset(1f, 0f)) - origin
+        val y = coordinates.localToScreen(Offset(0f, 1f)) - origin
+        targetToScreen.setValues(floatArrayOf(x.x, y.x, origin.x, x.y, y.y, origin.y, 0f, 0f, 1f))
+        if (!targetToScreen.invert(screenToTarget)) return
+        // localToScreen already includes the consumer's full layer transform. Applying the
         // LayerBackdrop inverse scale a second time would distort the sampled background.
         withTransform({}) {
             val canvas = drawContext.canvas.nativeCanvas
             check(canvas.isHardwareAccelerated) { "ViewBackdrop cannot render into a software canvas" }
             val save = canvas.save()
             try {
-                canvas.concat(windowToTarget)
-                canvas.concat(sourceToWindow)
+                canvas.concat(screenToTarget)
+                canvas.concat(sourceToScreen)
                 canvas.drawRenderNode(node)
             } finally { canvas.restoreToCount(save) }
         }

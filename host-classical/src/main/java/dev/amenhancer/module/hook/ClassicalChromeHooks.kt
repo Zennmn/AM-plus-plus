@@ -4,6 +4,8 @@ import android.app.Dialog
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.view.SurfaceView
+import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
 import dev.amenhancer.host.classical.ClassicalHostProfile
@@ -18,6 +20,16 @@ import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
+
+internal fun flattenClassicalMenuGroups(groups: List<*>): List<List<Any?>>? {
+    if (groups.size <= 1) return null
+    val flattened = ArrayList<Any?>()
+    for (group in groups) {
+        val items = group as? List<*> ?: return null
+        flattened.addAll(items)
+    }
+    return listOf(flattened)
+}
 
 internal fun resolveClassicalArtworkUrl(rawUrl: String?, sizePx: Int = 200): String? {
     val template = rawUrl?.trim()?.takeIf(String::isNotEmpty) ?: return null
@@ -93,6 +105,7 @@ internal class ClassicalChromeHooks(
     private val chromeGlassActive = AtomicBoolean(false)
     private val activeDialogCount = AtomicInteger(0)
     private val trackedDialogs = Collections.synchronizedMap(WeakHashMap<Dialog, Boolean>())
+    private val trackedDropdownPopups = Collections.synchronizedMap(WeakHashMap<View, Boolean>())
 
     @Volatile
     private var hostExpansionState: Any? = null
@@ -989,6 +1002,186 @@ internal class ClassicalChromeHooks(
                 }
             }
         }, scope)
+
+        // Bridge Compose DropdownMenu popups (uu4) onto the shared backdrop + unified CONTEXT_POPUP_MENU Liquid Glass.
+        val dropdownMenuShape = roundedCornerShapeMethod.invoke(null, 24f)
+        runCatching {
+            val popupLayoutClass = classLoader.loadClass(chrome.getString("popupLayoutClass"))
+            val popupAnchorViewField = popupLayoutClass.getDeclaredField(chrome.getString("popupAnchorViewField"))
+                .apply { isAccessible = true }
+            val popupPositionProviderField = popupLayoutClass.getDeclaredField(chrome.getString("popupPositionProviderField"))
+                .apply { isAccessible = true }
+            val dropdownPositionProviderClass = classLoader.loadClass(chrome.getString("dropdownPositionProviderClass"))
+            val abstractComposeViewClass = classLoader.loadClass(chrome.getString("abstractComposeViewClass"))
+            val checkAddMethod = abstractComposeViewClass.getDeclaredMethod(chrome.getString("abstractComposeViewCheckAddMethod"))
+                .apply { isAccessible = true }
+            val dropdownMenuContentClass = classLoader.loadClass(chrome.getString("dropdownMenuContentClass"))
+            val dropdownMenuContentMethod = dropdownMenuContentClass.declaredMethods.single { method ->
+                method.name == chrome.getString("dropdownMenuContentMethod") &&
+                    method.parameterCount == 10 &&
+                    method.parameterTypes[5] == Long::class.javaPrimitiveType &&
+                    method.parameterTypes[6] == Float::class.javaPrimitiveType
+            }.apply { isAccessible = true }
+            val surfaceModifierMethod = surfaceClass.declaredMethods.single { method ->
+                method.name == chrome.getString("surfaceModifierMethod") &&
+                    method.parameterCount == 4 &&
+                    method.parameterTypes[0] == Float::class.javaPrimitiveType &&
+                    method.parameterTypes[1] == Long::class.javaPrimitiveType
+            }.apply { isAccessible = true }
+            val backgroundElementClass = classLoader.loadClass(chrome.getString("backgroundElementClass"))
+            val modifierCompanion = classLoader.loadClass(chrome.getString("modifierCompanionClass"))
+                .getDeclaredField(chrome.getString("modifierCompanionField"))
+                .apply { isAccessible = true }
+                .get(null)
+
+            ModernXposedRuntime.hookMethod(checkAddMethod, object : ModernMethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (!scope.isActive) return
+                    val view = param.thisObject as? View ?: return
+                    if (trackedDropdownPopups.containsKey(view)) {
+                        param.result = null
+                    }
+                }
+            }, scope)
+
+            ModernXposedRuntime.hookMethod(
+                popupLayoutClass.getDeclaredMethod("onAttachedToWindow"),
+                object : ModernMethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        if (!scope.isActive || !chromeGlassActive.get() || param.throwable != null) return
+                        val popup = param.thisObject as? ViewGroup ?: return
+                        val provider = runCatching { popupPositionProviderField.get(popup) }.getOrNull() ?: return
+                        if (!dropdownPositionProviderClass.isInstance(provider)) return
+                        val hostView = runCatching { popupAnchorViewField.get(popup) as? View }.getOrNull() ?: return
+                        val mainRoot = hostView.rootView?.findViewById<ViewGroup>(android.R.id.content)?.getChildAt(0)
+                            ?: return
+                        if (popup === mainRoot) return
+                        fun attachPopupGlass() {
+                            if (!scope.isActive || !chromeGlassActive.get() ||
+                                !popup.isAttachedToWindow || popup.childCount == 0
+                            ) {
+                                return
+                            }
+                            popup.elevation = 0f
+                            trackedDropdownPopups[popup] = true
+                            dialogGlassObserver?.onSurfaceAttached(
+                                GlassSurfaceAnchor(
+                                    role = GlassSurfaceRole.CONTEXT_POPUP_MENU,
+                                    container = popup,
+                                    backdropSource = mainRoot,
+                                    cornerRadiusDp = 24f,
+                                    minCaptureIntervalMs = 16L,
+                                    forceRefreshOnPreDraw = false,
+                                    insertBehindViaZOrder = true,
+                                ),
+                            )
+                        }
+                        if (popup.childCount > 0) {
+                            attachPopupGlass()
+                        } else {
+                            popup.post { attachPopupGlass() }
+                        }
+                    }
+                },
+                scope,
+            )
+
+            ModernXposedRuntime.hookMethod(
+                popupLayoutClass.getDeclaredMethod("onDetachedFromWindow"),
+                object : ModernMethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        val popup = param.thisObject as? View ?: return
+                        trackedDropdownPopups.remove(popup)
+                    }
+                },
+                scope,
+            )
+
+            ModernXposedRuntime.hookMethod(dropdownMenuContentMethod, object : ModernMethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (!scope.isActive || !chromeGlassActive.get()) return
+                    val modifier = param.args.getOrNull(0)
+                    if (modifier != null && backgroundElementClass.isInstance(modifier) && modifierCompanion != null) {
+                        param.args[0] = modifierCompanion
+                    }
+                    param.args[4] = dropdownMenuShape
+                    param.args[6] = 0f
+                }
+            }, scope)
+
+            ModernXposedRuntime.hookMethod(surfaceModifierMethod, object : ModernMethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (!scope.isActive || !chromeGlassActive.get()) return
+                    if (param.args.getOrNull(3) === dropdownMenuShape) {
+                        param.args[0] = 0f
+                        param.args[1] = 0L
+                    }
+                }
+            }, scope)
+        }.onFailure { error ->
+            ModernXposedRuntime.log("Classical dropdown popup glass hook skipped", error)
+        }
+
+        // Swap Motion Artwork PlayerView (ct4) from SurfaceView to TextureView so ViewBackdrop
+        // captures live frames without punch-through holes, scaling glitches, or SurfaceSyncGroup stalls.
+        runCatching {
+            val motionPlayerViewClass = classLoader.loadClass(chrome.getString("motionPlayerViewClass"))
+            val motionPlayerCtor = motionPlayerViewClass.getDeclaredConstructor(Context::class.java)
+                .apply { isAccessible = true }
+            val contentFrameField = motionPlayerViewClass.getDeclaredField(chrome.getString("motionPlayerContentFrameField"))
+                .apply { isAccessible = true }
+            val surfaceViewField = motionPlayerViewClass.getDeclaredField(chrome.getString("motionPlayerSurfaceViewField"))
+                .apply { isAccessible = true }
+
+            ModernXposedRuntime.hookMethod(motionPlayerCtor, object : ModernMethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    if (!scope.isActive || !chromeGlassActive.get() || param.throwable != null) return
+                    val playerView = param.thisObject as? ViewGroup ?: return
+                    val contentFrame = runCatching { contentFrameField.get(playerView) as? ViewGroup }.getOrNull()
+                        ?: return
+                    val surfaceView = runCatching { surfaceViewField.get(playerView) as? SurfaceView }.getOrNull()
+                        ?: return
+                    val textureView = TextureView(playerView.context).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        )
+                        isClickable = false
+                    }
+                    runCatching {
+                        val index = contentFrame.indexOfChild(surfaceView).coerceAtLeast(0)
+                        contentFrame.removeView(surfaceView)
+                        contentFrame.addView(textureView, index)
+                        surfaceViewField.set(playerView, textureView)
+                    }.onFailure { error ->
+                        ModernXposedRuntime.log("Classical motion artwork TextureView swap failed", error)
+                    }
+                }
+            }, scope)
+        }.onFailure { error ->
+            ModernXposedRuntime.log("Classical motion artwork TextureView hook skipped", error)
+        }
+
+        // Flatten multi-group context menu buttons so ct7.d omits the abrupt 4dp solid group divider bar.
+        runCatching {
+            val groupListClass = classLoader.loadClass(chrome.getString("contextMenuGroupListClass"))
+            val groupListMethod = groupListClass.declaredMethods.single { method ->
+                method.name == chrome.getString("contextMenuGroupListMethod") &&
+                    method.parameterCount == 4 &&
+                    method.parameterTypes[0] == List::class.java &&
+                    method.parameterTypes[3] == Int::class.javaPrimitiveType
+            }.apply { isAccessible = true }
+
+            ModernXposedRuntime.hookMethod(groupListMethod, object : ModernMethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (!scope.isActive || !chromeGlassActive.get()) return
+                    val groups = param.args.getOrNull(0) as? List<*> ?: return
+                    flattenClassicalMenuGroups(groups)?.let { param.args[0] = it }
+                }
+            }, scope)
+        }.onFailure { error ->
+            ModernXposedRuntime.log("Classical context menu group divider suppression skipped", error)
+        }
 
         scope.activate()
         @Suppress("UNUSED_VARIABLE") val unused = routeBaseClass

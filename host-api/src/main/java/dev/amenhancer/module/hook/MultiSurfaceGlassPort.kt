@@ -51,6 +51,7 @@ data class GlassSurfaceAnchor(
     val minCaptureIntervalMs: Long = 16L,
     val sourceRenderer: ((android.graphics.Canvas) -> Boolean)? = null,
     val forceRefreshOnPreDraw: Boolean = false,
+    val insertBehindViaZOrder: Boolean = false,
 )
 
 fun interface MultiSurfaceGlassObserver {

@@ -1,6 +1,7 @@
 package dev.amenhancer.module.hook
 
 import android.graphics.Typeface
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.system.Os
@@ -111,7 +112,11 @@ internal class ClassicalFontTarget(
                 val weight = resolveWeight(resolver, fontResId, weightMapField, weightIntField)
                 val family = synchronized(weightedFamilyCache) {
                     weightedFamilyCache.getOrPut(weight) {
-                        val weighted = Typeface.create(baseTypeface, weight, false)
+                        val weighted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            Typeface.create(baseTypeface, weight, false)
+                        } else {
+                            Typeface.create(baseTypeface, if (weight >= 600) Typeface.BOLD else Typeface.NORMAL)
+                        }
                         val wrapper = wrapperCtor.newInstance(wrapperMode, weighted)
                         loadedFamilyCtor.newInstance(wrapper)
                     }

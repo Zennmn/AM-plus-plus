@@ -73,6 +73,8 @@ object AmMultiSurfaceGlassFactory {
         Collections.synchronizedMap(WeakHashMap<View, CopyOnWriteArrayList<HazeAreaEntry>>())
     private val toolbarHazeStates = Collections.synchronizedMap(WeakHashMap<Any, Boolean>())
     private val floatingButtonDepth = ThreadLocal.withInitial { 0 }
+    private val dropdownShapeStack = ThreadLocal.withInitial { ArrayDeque<Any>() }
+    private val dropdownEnteredStack = ThreadLocal.withInitial { ArrayDeque<Boolean>() }
     private val navBackComposeDepth = ThreadLocal.withInitial { 0 }
     private val overflowComposeDepth = ThreadLocal.withInitial { 0 }
     private val overflowComposeHidden = ThreadLocal.withInitial { false }
@@ -354,6 +356,7 @@ object AmMultiSurfaceGlassFactory {
                     runCatching { controllerField.set(blurView, savedNoOp) }
                 }
                 emitWhenAttached(blurView) {
+                    buildDetachedPopupMenuAnchor(blurView)?.let { return@emitWhenAttached it }
                     if (!isDescendant(blurView, blurTarget)) {
                         GlassSurfaceAnchor(
                             role = GlassSurfaceRole.FLOATING_ACTION_BUTTON,
@@ -445,13 +448,53 @@ object AmMultiSurfaceGlassFactory {
             }, scope)
         }
 
+        val dropdownClass = runCatching { classLoader.loadClass("Ba.D") }.getOrNull()
+        val dropdownShapeField = dropdownClass?.let { cls ->
+            runCatching { cls.getDeclaredField("a").apply { isAccessible = true } }.getOrNull()
+        }
+        val dropdownInvoke = dropdownClass?.declaredMethods?.firstOrNull { method ->
+            method.name == "invoke" && method.parameterCount == 3
+        }?.apply { isAccessible = true }
+        if (dropdownInvoke != null && dropdownShapeField != null) {
+            ModernXposedRuntime.hookMethod(dropdownInvoke, object : ModernMethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    val entered = dropdownEnteredStack.get() ?: ArrayDeque<Boolean>().also {
+                        dropdownEnteredStack.set(it)
+                    }
+                    val shape = if (scope.isActive) {
+                        runCatching { dropdownShapeField.get(param.thisObject) }.getOrNull()
+                    } else null
+                    if (shape != null) {
+                        val stack = dropdownShapeStack.get() ?: ArrayDeque<Any>().also {
+                            dropdownShapeStack.set(it)
+                        }
+                        stack.addLast(shape)
+                        entered.addLast(true)
+                    } else {
+                        entered.addLast(false)
+                    }
+                }
+
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    val entered = dropdownEnteredStack.get()
+                    if (entered != null && !entered.isEmpty() && entered.removeLast()) {
+                        dropdownShapeStack.get()?.takeIf { !it.isEmpty() }?.removeLast()
+                    }
+                }
+            }, scope)
+        }
+
         val borderMethod = classLoader.loadClass("K.E").declaredMethods.firstOrNull { method ->
             method.name == "a" && method.parameterCount == 4 && method.parameterTypes[2] == modifierClass
         }?.apply { isAccessible = true }
         if (borderMethod != null) {
             ModernXposedRuntime.hookMethod(borderMethod, object : ModernMethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (!scope.isActive || (floatingButtonDepth.get() ?: 0) <= 0) return
+                    if (!scope.isActive) return
+                    val inFab = (floatingButtonDepth.get() ?: 0) > 0
+                    val menuShape = dropdownShapeStack.get()?.peekLast()
+                    val inMenu = menuShape != null && param.args.getOrNull(3) === menuShape
+                    if (!inFab && !inMenu) return
                     val modifier = param.args.getOrNull(2) ?: return
                     param.result = modifier
                 }
@@ -464,11 +507,15 @@ object AmMultiSurfaceGlassFactory {
         val bgMethod = classLoader.loadClass("K.w").declaredMethods.firstOrNull { method ->
             method.name == "b" && method.parameterCount == 3 && method.parameterTypes[0] == modifierClass
         }?.apply { isAccessible = true }
-        if (bgMethod != null && circleShape != null) {
+        if (bgMethod != null) {
             ModernXposedRuntime.hookMethod(bgMethod, object : ModernMethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (!scope.isActive || (floatingButtonDepth.get() ?: 0) <= 0) return
-                    if (param.args.getOrNull(2) === circleShape) {
+                    if (!scope.isActive) return
+                    val shapeArg = param.args.getOrNull(2) ?: return
+                    val inFab = (floatingButtonDepth.get() ?: 0) > 0 && circleShape != null && shapeArg === circleShape
+                    val menuShape = dropdownShapeStack.get()?.peekLast()
+                    val inMenu = menuShape != null && shapeArg === menuShape
+                    if (inFab || inMenu) {
                         param.result = param.args.getOrNull(0)
                     }
                 }
@@ -697,6 +744,7 @@ object AmMultiSurfaceGlassFactory {
     }
 
     private fun installHazeSourceHooks(classLoader: ClassLoader) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
         val localHazeState = runCatching {
             classLoader.loadClass("Rb.n").getDeclaredField("b").apply { isAccessible = true }.get(null)
         }.getOrNull()
@@ -851,7 +899,22 @@ object AmMultiSurfaceGlassFactory {
         }
     }
 
+    private fun buildDetachedPopupMenuAnchor(blurView: ViewGroup): GlassSurfaceAnchor? {
+        val activityContent = resolveActivityContent(blurView.context) ?: return null
+        if (blurView.rootView === activityContent.rootView) return null
+        if (blurView === activityContent || isDescendant(blurView, activityContent)) return null
+        return GlassSurfaceAnchor(
+            role = GlassSurfaceRole.CONTEXT_POPUP_MENU,
+            container = blurView,
+            backdropSource = activityContent,
+            cornerRadiusDp = 24f,
+            forceRefreshOnPreDraw = true,
+            minCaptureIntervalMs = 16L,
+        )
+    }
+
     private fun buildFallbackActionButtonAnchor(blurView: ViewGroup): GlassSurfaceAnchor? {
+        buildDetachedPopupMenuAnchor(blurView)?.let { return it }
         if (Build.VERSION.SDK_INT >= 33) {
             val reflector = hazeReflector
             if (reflector != null) {
@@ -1042,8 +1105,9 @@ object AmMultiSurfaceGlassFactory {
                         role = GlassSurfaceRole.CONTEXT_POPUP_MENU,
                         container = popupDecor,
                         backdropSource = backdropRoot,
-                        cornerRadiusDp = 18f,
+                        cornerRadiusDp = 24f,
                         replaceBackgroundView = content,
+                        forceRefreshOnPreDraw = true,
                         minCaptureIntervalMs = 16L,
                     ),
                 )

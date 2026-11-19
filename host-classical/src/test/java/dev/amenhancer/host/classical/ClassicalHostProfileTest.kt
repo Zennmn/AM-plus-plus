@@ -6,6 +6,7 @@ import dev.amenhancer.module.hook.ClassicalMiniPlayerSnapshot
 import dev.amenhancer.module.hook.computeClassicalArtworkAlpha
 import dev.amenhancer.module.hook.computeClassicalBackgroundAlpha
 import dev.amenhancer.module.hook.computeClassicalPlayerExpansion
+import dev.amenhancer.module.hook.flattenClassicalMenuGroups
 import dev.amenhancer.module.hook.mapClassicalPlayerState
 import dev.amenhancer.module.hook.resolveClassicalArtworkUrl
 import dev.amenhancer.module.hook.shouldSuppressCollapsedClassicalLayer
@@ -86,6 +87,23 @@ class ClassicalHostProfileTest {
             "layoutCoordinatesSizeMethod",
             "playerBackgroundClass",
             "playerBackgroundMethod",
+            "popupLayoutClass",
+            "popupAnchorViewField",
+            "popupPositionProviderField",
+            "dropdownPositionProviderClass",
+            "abstractComposeViewClass",
+            "abstractComposeViewCheckAddMethod",
+            "dropdownMenuContentClass",
+            "dropdownMenuContentMethod",
+            "surfaceModifierMethod",
+            "backgroundElementClass",
+            "modifierCompanionClass",
+            "modifierCompanionField",
+            "motionPlayerViewClass",
+            "motionPlayerContentFrameField",
+            "motionPlayerSurfaceViewField",
+            "contextMenuGroupListClass",
+            "contextMenuGroupListMethod",
         ).forEach { key ->
             assertTrue("chrome.$key must exist", chrome.has(key))
             assertTrue("chrome.$key must be non-blank", chrome.getString(key).isNotBlank())
@@ -146,5 +164,22 @@ class ClassicalHostProfileTest {
         assertTrue(computeClassicalArtworkAlpha(0.635f) in 0.45f..0.55f)
         assertEquals(1f, computeClassicalArtworkAlpha(0.72f), 0.0001f)
         assertEquals(1f, computeClassicalArtworkAlpha(1f), 0f)
+    }
+
+    @Test
+    fun `flattens multi-group context menu lists to suppress group dividers`() {
+        assertNull(flattenClassicalMenuGroups(emptyList<Any?>()))
+        assertNull(flattenClassicalMenuGroups(listOf(listOf("add", "favorite"))))
+        assertNull(flattenClassicalMenuGroups(listOf(listOf("add"), "not-a-list")))
+
+        assertEquals(
+            listOf(listOf("add", "favorite", "share", "addToPlaylist", "playNext")),
+            flattenClassicalMenuGroups(
+                listOf(
+                    listOf("add", "favorite", "share"),
+                    listOf("addToPlaylist", "playNext"),
+                ),
+            ),
+        )
     }
 }

@@ -81,7 +81,8 @@ internal object AmMultiSurfaceGlassRuntime : MultiSurfaceGlassObserver {
         val tier = when (anchor.role) {
             GlassSurfaceRole.PLAYER_ACTION_BUTTON,
             GlassSurfaceRole.FLOATING_ACTION_BUTTON,
-            GlassSurfaceRole.FLOATING_SEARCH_BAR -> GlassTier.Hero
+            GlassSurfaceRole.FLOATING_SEARCH_BAR,
+            GlassSurfaceRole.CONTEXT_POPUP_MENU -> GlassTier.Hero
             else -> GlassTier.Chrome
         }
         val tint = when (anchor.role) {
@@ -89,9 +90,11 @@ internal object AmMultiSurfaceGlassRuntime : MultiSurfaceGlassObserver {
             GlassSurfaceRole.FLOATING_ACTION_BUTTON -> Color.Transparent
             else -> Color.Unspecified
         }
-        val bleedDp = if (anchor.role == GlassSurfaceRole.FLOATING_ACTION_BUTTON) 0 else 8
+        val isFab = anchor.role == GlassSurfaceRole.FLOATING_ACTION_BUTTON
+        val isMenu = anchor.role == GlassSurfaceRole.CONTEXT_POPUP_MENU
+        val bleedDp = if (isFab || isMenu) 0 else 8
         val menuHeightThresholdPx = 64f * container.resources.displayMetrics.density
-        val shapeProvider: () -> Shape = if (anchor.role == GlassSurfaceRole.FLOATING_ACTION_BUTTON) {
+        val shapeProvider: () -> Shape = if (isFab) {
             {
                 if (container.height > menuHeightThresholdPx) RoundedCornerShape(20.dp) else CircleShape
             }
@@ -100,8 +103,11 @@ internal object AmMultiSurfaceGlassRuntime : MultiSurfaceGlassObserver {
         }
         val night = (container.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
             android.content.res.Configuration.UI_MODE_NIGHT_YES
-        val isFab = anchor.role == GlassSurfaceRole.FLOATING_ACTION_BUTTON
-        val effectiveBlur = if (isFab) (blurDp * 0.55f).coerceIn(1.5f, 3.5f).dp else blurDp.dp
+        val effectiveBlur = when {
+            isFab -> (blurDp * 0.55f).coerceIn(1.5f, 3.5f).dp
+            isMenu -> (blurDp * 0.65f).coerceIn(2.5f, 6.5f).dp
+            else -> blurDp.dp
+        }
 
         val ctx = runCatching { moduleGlassContext(container.context) }.getOrElse {
             lease.close()
@@ -109,6 +115,7 @@ internal object AmMultiSurfaceGlassRuntime : MultiSurfaceGlassObserver {
         }
         val glassView = GlassHostView(ctx, bleedDp = bleedDp, traceName = "AM++/${anchor.role.name}").apply {
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+            if (anchor.insertBehindViaZOrder) translationZ = -1f
             content {
                 LiquidGlassSurface(
                     backdrop = lease.backdrop,
@@ -118,16 +125,28 @@ internal object AmMultiSurfaceGlassRuntime : MultiSurfaceGlassObserver {
                     panelBlur = effectiveBlur,
                     tint = tint,
                     interactive = false,
-                    refractionScale = if (isFab) 1.45f else 1f,
-                    lensDepthEffect = isFab,
+                    refractionScale = when {
+                        isFab -> 1.45f
+                        isMenu -> 1.25f
+                        else -> 1f
+                    },
+                    lensDepthEffect = isFab || isMenu,
                     lensChromaticAberration = isFab,
-                    highlightAlphaOverride = if (isFab) (if (night) 0.82f else 0.92f) else null,
+                    highlightAlphaOverride = when {
+                        isFab -> if (night) 0.82f else 0.92f
+                        isMenu -> if (night) 0.78f else 0.90f
+                        else -> null
+                    },
                 ) {}
             }
         }
 
         val targetSibling = anchor.replaceBackgroundView?.takeIf { it.parent === container }
-        val insertIndex = targetSibling?.let { container.indexOfChild(it).coerceAtLeast(0) } ?: 0
+        val insertIndex = when {
+            anchor.insertBehindViaZOrder -> container.childCount
+            targetSibling != null -> container.indexOfChild(targetSibling).coerceAtLeast(0)
+            else -> 0
+        }
         val savedState = suppressNativeBackground(anchor)
         val savedExtras = anchor.extraSuppressViews.map { extra ->
             SavedTargetState(extra, background = extra.background, visibility = extra.visibility, alpha = extra.alpha).also {
@@ -148,7 +167,12 @@ internal object AmMultiSurfaceGlassRuntime : MultiSurfaceGlassObserver {
             container !is FrameLayout -> container
             else -> null
         }
-        val syncToTarget: () -> Unit = {
+        val crossWindow = container.rootView !== anchor.backdropSource.rootView
+        val screenLoc = IntArray(2)
+        var lastScreenX = Int.MIN_VALUE
+        var lastScreenY = Int.MIN_VALUE
+        var refreshPosted = false
+        val syncToTarget: (Boolean) -> Unit = { allowLayoutParamsUpdate ->
             if (targetSibling != null) {
                 val targetVis = if (targetSibling.visibility == View.GONE) View.GONE else View.VISIBLE
                 if (glassView.visibility != targetVis) glassView.visibility = targetVis
@@ -161,6 +185,7 @@ internal object AmMultiSurfaceGlassRuntime : MultiSurfaceGlassObserver {
                     targetSibling.translationX,
                     targetSibling.translationY,
                     if (anchor.role == GlassSurfaceRole.CARD_OVERLAY) 1f else targetSibling.alpha,
+                    updateLayoutParams = allowLayoutParamsUpdate,
                 )
             } else if (syncTarget != null) {
                 alignToSibling(
@@ -172,22 +197,38 @@ internal object AmMultiSurfaceGlassRuntime : MultiSurfaceGlassObserver {
                     0f,
                     0f,
                     1f,
+                    updateLayoutParams = false,
                 )
             }
         }
         val syncBounds = if (syncTarget != null) {
-            View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> syncToTarget() }
+            View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> syncToTarget(true) }
         } else null
-        val preDrawListener = if (syncTarget != null) {
+        val preDrawListener = if (targetSibling != null || crossWindow) {
             ViewTreeObserver.OnPreDrawListener {
-                syncToTarget()
+                if (targetSibling != null) syncToTarget(false)
+                if (crossWindow && glassView.isAttachedToWindow) {
+                    glassView.getLocationOnScreen(screenLoc)
+                    if (screenLoc[0] != lastScreenX || screenLoc[1] != lastScreenY) {
+                        val hadPrevious = lastScreenX != Int.MIN_VALUE
+                        lastScreenX = screenLoc[0]
+                        lastScreenY = screenLoc[1]
+                        if (hadPrevious && !refreshPosted) {
+                            refreshPosted = true
+                            glassView.postOnAnimation {
+                                refreshPosted = false
+                                if (glassView.isAttachedToWindow) lease.backdrop.invalidateConsumers()
+                            }
+                        }
+                    }
+                }
                 true
             }
         } else null
 
         val attachListener = object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v: View) = Unit
-            override fun onViewDetachedFromWindow(v: View) = detach(container)
+            override fun onViewDetachedFromWindow(v: View) = detach(container, fromWindowDetach = true)
         }
 
         val attachment = Attachment(
@@ -213,15 +254,18 @@ internal object AmMultiSurfaceGlassRuntime : MultiSurfaceGlassObserver {
                 )
             } else {
                 container.addView(glassView, insertIndex.coerceAtMost(container.childCount), layoutParams)
-                syncToTarget()
+                syncToTarget(true)
                 if (syncTarget != null && syncBounds != null) {
                     syncTarget.addOnLayoutChangeListener(syncBounds)
                 }
-                if (preDrawListener != null) {
-                    container.viewTreeObserver.addOnPreDrawListener(preDrawListener)
-                }
+            }
+            if (preDrawListener != null) {
+                container.viewTreeObserver.addOnPreDrawListener(preDrawListener)
             }
             container.addOnAttachStateChangeListener(attachListener)
+            if (crossWindow) {
+                runCatching { anchor.backdropSource.invalidate() }
+            }
         }.onFailure { error ->
             ModernXposedRuntime.log("Attach multi-surface glass failed for ${anchor.role}", error)
             detach(container)
@@ -237,17 +281,20 @@ internal object AmMultiSurfaceGlassRuntime : MultiSurfaceGlassObserver {
         translationX: Float,
         translationY: Float,
         alpha: Float,
+        updateLayoutParams: Boolean = true,
     ) {
         val w = width.coerceAtLeast(0)
         val h = height.coerceAtLeast(0)
         if (w <= 0 || h <= 0) return
         val right = left + w
         val bottom = top + h
-        val lp = view.layoutParams
-        if (lp != null && (lp.width != w || lp.height != h)) {
-            lp.width = w
-            lp.height = h
-            view.layoutParams = lp
+        if (updateLayoutParams) {
+            val lp = view.layoutParams
+            if (lp != null && (lp.width != w || lp.height != h)) {
+                lp.width = w
+                lp.height = h
+                view.layoutParams = lp
+            }
         }
         if (view.width != w || view.height != h ||
             view.left != left || view.top != top || view.right != right || view.bottom != bottom
@@ -293,7 +340,7 @@ internal object AmMultiSurfaceGlassRuntime : MultiSurfaceGlassObserver {
         }
     }
 
-    private fun detach(container: ViewGroup) {
+    private fun detach(container: ViewGroup, fromWindowDetach: Boolean = false) {
         val attachment = attachments.remove(container) ?: return
         runCatching { attachment.container.removeOnAttachStateChangeListener(attachment.attachListener) }
         attachment.syncListener?.let { listener ->
@@ -304,7 +351,15 @@ internal object AmMultiSurfaceGlassRuntime : MultiSurfaceGlassObserver {
                 attachment.preDrawObserverTarget?.viewTreeObserver?.takeIf { it.isAlive }?.removeOnPreDrawListener(listener)
             }
         }
-        runCatching { (attachment.glassView.parent as? ViewGroup)?.removeView(attachment.glassView) }
+        if (fromWindowDetach) {
+            container.post {
+                if (!container.isAttachedToWindow) {
+                    runCatching { (attachment.glassView.parent as? ViewGroup)?.removeView(attachment.glassView) }
+                }
+            }
+        } else {
+            runCatching { (attachment.glassView.parent as? ViewGroup)?.removeView(attachment.glassView) }
+        }
         attachment.savedExtras.forEach { it.restore() }
         attachment.savedTarget?.restore()
         attachment.lease.close()
