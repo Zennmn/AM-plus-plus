@@ -1,6 +1,7 @@
 package dev.amenhancer.module.ui
 
 import android.app.Activity
+import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.tween
@@ -21,6 +22,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,6 +62,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.DropdownEntry
 import top.yukonga.miuix.kmp.basic.DropdownItem
@@ -151,6 +154,8 @@ internal fun EmbeddedSettingsHost.EmbeddedLlmLyricsPage(
                 },
             )
         }
+
+        LlmLyricsCacheCard(activity, active)
 
         EmbeddedSettingsSection(
             title = localizedText(ModuleText.LLM_LYRICS_API_SETTINGS),
@@ -308,6 +313,62 @@ internal fun EmbeddedSettingsHost.EmbeddedLlmLyricsPage(
                 enabled = currentActive && !testingConnection,
             )
         }
+    }
+}
+
+@Composable
+private fun EmbeddedSettingsHost.LlmLyricsCacheCard(activity: Activity, active: Boolean) {
+    val playback = LyricsPlaybackRuntimeRegistry.controls()
+    val scope = rememberCoroutineScope()
+    var usageBytes by remember(playback) { mutableStateOf<Long?>(null) }
+    var clearing by remember { mutableStateOf(false) }
+    LaunchedEffect(playback, active) {
+        if (active && playback != null) usageBytes = withContext(Dispatchers.IO) { playback.llmCacheUsageBytes() }
+    }
+
+    EmbeddedSettingsGroup {
+        BasicComponent(
+            title = localizedText(ModuleText.LYRICS_LLM_CACHE),
+            summary = when {
+                clearing -> localizedText(ModuleText.LYRICS_CACHE_WORKING)
+                playback == null -> localizedText(ModuleText.LYRICS_CACHE_UNAVAILABLE)
+                else -> usageBytes?.let { localizedText(ModuleText.LYRICS_LLM_CACHE_USAGE, formatLyricsCacheSize(it)) }
+                    ?: localizedText(ModuleText.LYRICS_CACHE_LOADING)
+            },
+            insideMargin = EmbeddedPreferencePadding,
+            endActions = if (playback == null || (usageBytes ?: 0L) <= 0L) null else {
+                {
+                    TextButton(
+                        text = localizedText(ModuleText.LYRICS_CACHE_CLEAR),
+                        enabled = active && !clearing,
+                        onClick = {
+                            showEmbeddedMiuixDialog(activity, title = localizedText(ModuleText.LYRICS_LLM_CACHE_CLEAR)) { dismiss ->
+                                EmbeddedSettingsNotice(localizedText(ModuleText.LYRICS_LLM_CACHE_CLEAR_CONFIRM))
+                                EmbeddedDialogActions(
+                                    dismissText = localizedText(ModuleText.CANCEL),
+                                    onDismiss = dismiss,
+                                    confirmText = localizedText(ModuleText.DELETE),
+                                    onConfirm = {
+                                        dismiss()
+                                        clearing = true
+                                        scope.launch {
+                                            val (cleared, remaining) = withContext(Dispatchers.IO) {
+                                                playback.clearLlmCache() to playback.llmCacheUsageBytes()
+                                            }
+                                            usageBytes = remaining
+                                            clearing = false
+                                            val message = if (cleared) ModuleText.LYRICS_LLM_CACHE_CLEARED
+                                                else ModuleText.LYRICS_LLM_CACHE_CLEAR_FAILED
+                                            Toast.makeText(activity, localizedText(message), Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                )
+                            }
+                        },
+                    )
+                }
+            },
+        )
     }
 }
 

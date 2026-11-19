@@ -11,6 +11,7 @@ data class LlmLyricsRequest(
     val appleMusicId: Long,
     val originalTtml: String,
     val config: LlmLyricsConfig,
+    val cacheGeneration: Long,
     val title: String? = null,
     val artist: String? = null,
     /** Bounded, generation-checked UI progress; never carries server response text. */
@@ -31,6 +32,7 @@ data class LlmLyricsRuntime(
     val onTransliterationPrepared: (LlmLyricsRequest, String) -> Unit = { _, _ -> },
     val discardPending: () -> Unit = {},
     val onStatusChanged: (LlmLyricsStatusSnapshot) -> Unit = {},
+    val cacheGeneration: () -> Long = { 0L },
 )
 
 /**
@@ -201,7 +203,7 @@ class LlmLyricsReplacementSession(
             songTitle = title
             if (!wantTranslation) translationPhase = if (!runtime.translationEnabled()) LlmLyricsPhase.OFF else translationSkipReason
             if (!wantTransliteration) transliterationPhase = LlmLyricsPhase.OFF
-            val request = LlmLyricsRequest(appleMusicId, originalTtml, config!!, title, artist)
+            val request = LlmLyricsRequest(appleMusicId, originalTtml, config!!, runtime.cacheGeneration(), title, artist)
             val stamp = generation
             if (wantTranslation && !translationAttempted) {
                 translationAttempted = true

@@ -30,6 +30,18 @@ class FileLlmLyricsCache(
     private val indexFile = File(directory, INDEX_FILE_NAME)
     private val lock = Any()
     private val capacity = maxEntries.coerceIn(1, MAX_ENTRIES)
+    @Volatile private var generation = 0L
+
+    fun generation(): Long = generation
+
+    fun usageBytes(): Long = synchronized(lock) {
+        directory.listFiles()?.sumOf(File::length) ?: 0L
+    }
+
+    fun clear(): Boolean = synchronized(lock) {
+        generation++
+        directory.deleteRecursively()
+    }
 
     /** Returns one cached result slot for this exact identity, or null. */
     fun read(
@@ -64,10 +76,12 @@ class FileLlmLyricsCache(
         config: LlmLyricsConfig,
         resultTtml: String,
         kind: String = TRANSLATION_KIND,
+        expectedGeneration: Long = generation,
     ): Boolean {
         val identity = identityOf(appleMusicId, originalTtml, config, kind) ?: return false
         if (!isAcceptableTtml(resultTtml)) return false
         return synchronized(lock) {
+            if (expectedGeneration != generation) return@synchronized false
             runCatching {
                 if (!directory.exists() && !directory.mkdirs()) return@runCatching false
                 val file = entryFile(appleMusicId) ?: return@runCatching false

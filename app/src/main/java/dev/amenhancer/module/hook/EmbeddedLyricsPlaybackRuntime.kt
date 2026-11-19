@@ -23,6 +23,7 @@ internal class EmbeddedLyricsPlaybackRuntime(
     private val executor: Executor,
     private val fetch: (Long, String) -> Pair<AutoLyricsCandidate?, LyricFetchFailure?>,
     private val lookupCacheSongNames: (List<Long>, () -> Boolean) -> Map<Long, String>,
+    private val llmCache: FileLlmLyricsCache,
 ) : LyricsPlaybackRuntime {
     private data class Binding(val prepare: (Long, String) -> Any?, val alive: (Any?) -> Boolean,
         val ready: (Long) -> Unit)
@@ -606,6 +607,8 @@ internal class EmbeddedLyricsPlaybackRuntime(
 
     override fun cacheUsageBytes(): Long = store.sizeBytes()
     fun cacheSnapshot(): LyricsCacheSnapshot = store.cacheSnapshot()
+    fun llmCacheUsageBytes(): Long = llmCache.usageBytes()
+    fun clearLlmCache(): Boolean = llmCache.clear()
 
     /** Backfills incomplete legacy display names without changing active playback state. */
     fun refreshCacheSongNames(isCancelled: () -> Boolean) {

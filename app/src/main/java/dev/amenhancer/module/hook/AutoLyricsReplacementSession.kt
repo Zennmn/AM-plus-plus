@@ -234,7 +234,10 @@ internal fun createAutoLyricsRuntime(
         },
         onPrepared = { request, translated ->
             // Persist only a host-accepted result; never use the custom-lyrics publisher.
-            llmCache.write(request.appleMusicId, request.originalTtml, request.config, translated)
+            llmCache.write(
+                request.appleMusicId, request.originalTtml, request.config, translated,
+                expectedGeneration = request.cacheGeneration,
+            )
         },
         translationEnabled = {
             configuration().let { it.customLyricsEnabled && it.automaticLyricsEnabled && it.llmLyricsEnabled }
@@ -268,10 +271,14 @@ internal fun createAutoLyricsRuntime(
             )?.takeUnless { isCancelled() }
         },
         onTransliterationPrepared = { request, ttml ->
-            llmCache.write(request.appleMusicId, request.originalTtml, request.config, ttml, kind = "transliteration")
+            llmCache.write(
+                request.appleMusicId, request.originalTtml, request.config, ttml,
+                kind = "transliteration", expectedGeneration = request.cacheGeneration,
+            )
         },
         discardPending = { llmExecutor.queue.clear() },
         onStatusChanged = { LyricsPlaybackRuntimeRegistry.publishLlmStatus(llmExecutor, it) },
+        cacheGeneration = llmCache::generation,
     )
     val playbackExecutor = ThreadPoolExecutor(
         1, 1, 0L, TimeUnit.MILLISECONDS, ArrayBlockingQueue(8),
@@ -290,6 +297,7 @@ internal fun createAutoLyricsRuntime(
             result?.withSongTitle(id) to failures.get().also { failures.remove() }
         },
         lookupCacheSongNames = ::lookupCacheSongNames,
+        llmCache = llmCache,
     )
     LyricsPlaybackRuntimeRegistry.attach(playback)
     return AutoLyricsRuntime(

@@ -559,6 +559,15 @@ enum class ModuleText(internal val english: String, internal val chinese: String
     LYRICS_OFFSET_APPLY("Done", "完成"),
     LYRICS_OFFSET_SAVING("Saving…", "正在保存…"),
     LYRICS_THIRD_PARTY_CACHE("Third-party lyrics cache", "第三方歌词缓存"),
+    LYRICS_LLM_CACHE("LLM lyrics cache", "LLM 歌词缓存"),
+    LYRICS_LLM_CACHE_USAGE("Used: %1\$s", "占用：%1\$s"),
+    LYRICS_LLM_CACHE_CLEAR("Clear LLM lyrics cache", "清除 LLM 歌词缓存"),
+    LYRICS_LLM_CACHE_CLEAR_CONFIRM(
+        "Clear generated translations and romanizations? Lyrics on screen stay visible. Generating them again may use API quota.",
+        "清除生成的翻译和音译缓存？当前显示的歌词会保留。之后重新生成可能再次消耗 API 额度。",
+    ),
+    LYRICS_LLM_CACHE_CLEARED("LLM lyrics cache cleared", "LLM 歌词缓存已清除"),
+    LYRICS_LLM_CACHE_CLEAR_FAILED("Cannot clear the LLM lyrics cache", "无法清除 LLM 歌词缓存"),
     LYRICS_CACHE_SUMMARY(
         "Used: %1\$s · Manual lyrics and preferences are kept",
         "占用：%1\$s · 保留手动歌词和偏好",
