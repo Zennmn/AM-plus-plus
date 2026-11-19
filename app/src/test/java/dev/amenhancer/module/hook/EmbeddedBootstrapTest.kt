@@ -131,6 +131,32 @@ class EmbeddedBootstrapTest {
         )
     }
 
+    @Test
+    fun `classical 4_1 262 build is supported while neighboring versions are rejected`() {
+        val bootstrap = EmbeddedBootstrap()
+        val reader = reader(mapOf("dual_pane_enabled" to true))
+
+        assertTrue(
+            bootstrap.prepare(
+                ModuleConstants.CLASSICAL_PACKAGE,
+                ModuleConstants.CLASSICAL_PACKAGE,
+                true,
+            ),
+        )
+        assertFalse(
+            bootstrap.bind(
+                TargetBuild(ModuleConstants.CLASSICAL_PACKAGE, "4.1", 263L),
+                reader,
+            ),
+        )
+        assertTrue(
+            bootstrap.bind(
+                TargetBuild(ModuleConstants.CLASSICAL_PACKAGE, "4.1", 262L),
+                reader,
+            ),
+        )
+    }
+
     private fun reader(values: Map<String, Any>): ConfigurationReader =
         object : ConfigurationReader {
             override fun values(): Map<String, *> = values

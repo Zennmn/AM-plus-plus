@@ -34,6 +34,8 @@ internal class EmbeddedBootstrap {
     fun supports(build: TargetBuild): Boolean =
         dev.amenhancer.host.applemusic.AppleMusicHostProfiles.isProductionBuild(
             build.packageName, build.versionName, build.versionCode,
+        ) || dev.amenhancer.host.classical.ClassicalHostProfiles.isProductionBuild(
+            build.packageName, build.versionName, build.versionCode,
         )
 
     private class DeferredConfigurationReader : ConfigurationReader {

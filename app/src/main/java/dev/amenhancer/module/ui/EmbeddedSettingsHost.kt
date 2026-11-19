@@ -486,25 +486,73 @@ internal class EmbeddedSettingsHost private constructor(
             return
         }
 
-        // A RecyclerView cannot accept arbitrary children. Keep a visible,
-        // non-invasive fallback in the host content frame for such layouts.
+        // A RecyclerView cannot accept arbitrary children, and pure-Compose screens (like Classical)
+        // have no View list container: dock a compact opaque pill in the top-right app bar gap.
         val fallbackRoot = when {
             content is FrameLayout -> content
             decor is FrameLayout -> decor
             else -> null
         }
         if (fallbackRoot != null) {
+            val pill = buildCompactSettingsPill(activity)
             val layoutParams = FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply {
-                gravity = Gravity.BOTTOM
-                setMargins(dp(activity, 12), dp(activity, 12), dp(activity, 12), dp(activity, 12))
+                gravity = Gravity.TOP or Gravity.END
+                marginEnd = dp(activity, 16)
+                topMargin = resolveStatusBarTop(fallbackRoot) + dp(activity, 10)
             }
-            runCatching { fallbackRoot.addView(option, layoutParams) }
-                .onSuccess {
-                    settingsOptionReference = WeakReference<View>(option)
+            fallbackRoot.setOnApplyWindowInsetsListener { v, insets ->
+                val top = resolveStatusBarTop(v, insets)
+                (pill.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+                    val desiredTop = top + dp(activity, 10)
+                    if (lp.topMargin != desiredTop) {
+                        lp.topMargin = desiredTop
+                        pill.layoutParams = lp
+                    }
                 }
+                v.onApplyWindowInsets(insets)
+            }
+            runCatching { fallbackRoot.addView(pill, layoutParams) }
+                .onSuccess {
+                    settingsOptionReference = WeakReference<View>(pill)
+                    fallbackRoot.requestApplyInsets()
+                }
+        }
+    }
+
+    private fun buildCompactSettingsPill(activity: Activity): TextView = TextView(activity).apply {
+        tag = SETTINGS_OPTION_TAG
+        text = localizedText(ModuleText.MODULE_SETTINGS)
+        textSize = 13f
+        typeface = android.graphics.Typeface.DEFAULT_BOLD
+        isClickable = true
+        isFocusable = true
+        setPadding(dp(activity, 14), dp(activity, 8), dp(activity, 14), dp(activity, 8))
+        setEmbeddedTextColor(activity) { it.onSurface }
+        bindEmbeddedTheme(activity) { colors ->
+            background = GradientDrawable().apply {
+                cornerRadius = dp(activity, 20).toFloat()
+                setColor(if (colors.isDark) 0xFF242428.toInt() else 0xFFF2F2F7.toInt())
+                setStroke(dp(activity, 1), if (colors.isDark) 0x3DFFFFFF else 0x24000000)
+            }
+        }
+        elevation = dp(activity, 3).toFloat()
+        bindEmbeddedClickFeedback(activity, cornerRadiusDp = 20)
+        contentDescription = localizedText(ModuleText.OPEN_MODULE_SETTINGS)
+        setOnClickListener { showSettingsDialog(activity) }
+    }
+
+    private fun resolveStatusBarTop(
+        view: View,
+        insets: android.view.WindowInsets? = view.rootWindowInsets,
+    ): Int {
+        if (insets == null) return 0
+        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            insets.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.statusBars()).top
+        } else {
+            @Suppress("DEPRECATION") insets.systemWindowInsetTop
         }
     }
 

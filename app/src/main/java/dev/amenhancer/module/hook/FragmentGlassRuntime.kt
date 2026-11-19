@@ -27,8 +27,10 @@ internal object FragmentGlassRuntime {
 
     fun discover(view: View, config: TargetConfigClient) {
         if (Build.VERSION.SDK_INT < 33 || !config.settings().phoneLiquidGlassEnabled) return
+        AmMultiSurfaceGlassRuntime.configure(config)
         val activity = activity(view.context) ?: return
         val build = targetBuild(activity)
+        AppleMusicHostFactory.installMultiSurfaceGlassHooks(activity.applicationContext, activity.classLoader, build, AmMultiSurfaceGlassRuntime)
         if (!FragmentChromeFactory.supports(build) || installation != null || failedInstall) return
         try {
             installation = FragmentChromeFactory.install(activity.classLoader, build, object : FragmentPlayerSurfaceObserver {

@@ -244,6 +244,42 @@ class LlmLyricsClient(
         return result.takeUnless { isCancelled() }
     }
 
+    /**
+     * Translates short prose entries (listening guides, editorial notes) into Simplified Chinese,
+     * preserving classical music terminology and returning null on failure or cancellation.
+     */
+    fun translateProse(
+        config: LlmLyricsConfig,
+        entries: Map<String, String>,
+        contextTitle: String? = null,
+        onFailure: (String, Int?) -> Unit = { _, _ -> },
+        isCancelled: () -> Boolean = { false },
+    ): Map<String, String>? {
+        if (entries.isEmpty()) return emptyMap()
+        val endpoint = config.endpoint ?: return null
+        val model = config.normalizedModel
+        if (model.isEmpty()) return null
+        if (isCancelled() || !isWithinProseBounds(entries)) return null
+        val body = runCatching {
+            encodeRequest(
+                config,
+                JSONArray()
+                    .put(JSONObject().put("role", "system").put("content", PROSE_SYSTEM_PROMPT))
+                    .put(JSONObject().put("role", "user").put("content", prosePrompt(entries, contextTitle))),
+            )
+        }.getOrNull() ?: return null
+        val response = post(endpoint, config, body, isCancelled, onFailure) ?: return null
+        if (isCancelled()) return null
+        val content = messageContent(response) ?: run {
+            onFailure("invalid_response", null)
+            return null
+        }
+        return parseProseTranslation(content, entries.keys) ?: run {
+            onFailure("invalid_response", null)
+            null
+        }
+    }
+
     /** Only fixed reason codes/statuses may cross into the settings UI. */
     data class ConnectionResult(val failureReason: String? = null, val httpStatus: Int? = null) {
         val isSuccess: Boolean get() = failureReason == null
@@ -562,6 +598,42 @@ $input"""
         }
     }
 
+    private fun isWithinProseBounds(entries: Map<String, String>): Boolean {
+        if (entries.size > MAX_LINES) return false
+        var totalChars = 0
+        return entries.all { (id, text) ->
+            if (id.isBlank() || text.isBlank() || text.length > MAX_LINE_CHARS) return@all false
+            totalChars += text.length
+            totalChars <= MAX_TOTAL_CHARS
+        }
+    }
+
+    private fun prosePrompt(entries: Map<String, String>, contextTitle: String?): String {
+        val array = JSONArray()
+        entries.forEach { (id, text) ->
+            array.put(JSONObject().put("id", id).put("text", text))
+        }
+        val titleHint = contextTitle?.takeIf(String::isNotBlank)?.let { "Work/Track: $it\n" }.orEmpty()
+        return """请将下列古典音乐导聆/曲目介绍翻译为准确、流畅、优雅的简体中文。
+${titleHint}要求：
+- 保留作品编号与调性信息（如 Op.、BWV、K.、Hob.、大调/小调）和乐章术语的准确译名；专有人名按中文古典乐通行译法或保留常见形式。
+- 只返回一个 JSON 对象，不要包含 Markdown 代码块或额外解释，逐字复制每个 id。
+- 输出格式：{"entries":[{"id":"...","translation":"..."}]}
+原文：
+${JSONObject().put("entries", array)}"""
+    }
+
+    private fun parseProseTranslation(content: String, expected: Set<String>): Map<String, String>? {
+        val cleaned = TRAILING_JSON_FENCE
+            .replace(LEADING_JSON_FENCE.replace(content.trim(), ""), "")
+            .trim()
+        val parsed = runCatching { JSONObject(cleaned) }.getOrNull() ?: return null
+        val rows = parsed.optJSONArray("entries") ?: parsed.optJSONArray("lines") ?: return null
+        return parseById(rows, expected) { _, row ->
+            (row.opt("translation") as? String)?.takeIf(String::isNotBlank)
+        }
+    }
+
     companion object {
         /** Fixed target for the ported prompt and the translation cache. */
         const val TARGET_LANGUAGE = "zh-Hans"
@@ -591,6 +663,8 @@ $input"""
             "Translate song lyrics. Return only the requested JSON and copy every vocal ID exactly."
         private const val TRANSLITERATION_SYSTEM_PROMPT =
             "Transliterate song lyrics. Return only the requested JSON and copy every vocal ID exactly."
+        private const val PROSE_SYSTEM_PROMPT =
+            "Translate classical music notes and listening guides into Simplified Chinese. Return only the requested JSON and copy every ID exactly."
         private val LEADING_JSON_FENCE = Regex("^```(?:json)?\\s*", RegexOption.IGNORE_CASE)
         private val TRAILING_JSON_FENCE = Regex("\\s*```$", RegexOption.IGNORE_CASE)
     }

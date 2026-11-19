@@ -41,9 +41,9 @@ class HookEntry : XposedModule() {
     override fun onModuleLoaded(param: ModuleLoadedParam) {
         ModernXposedRuntime.attach(this)
         val moduleInfo = runCatching { getModuleApplicationInfo() }.getOrNull()
-        dev.amenhancer.host.applemusic.AppleMusicHostProfiles.initializeModulePaths(
-            listOfNotNull(moduleInfo?.sourceDir, moduleInfo?.publicSourceDir) + moduleInfo?.splitSourceDirs.orEmpty(),
-        )
+        val modulePaths = listOfNotNull(moduleInfo?.sourceDir, moduleInfo?.publicSourceDir) + moduleInfo?.splitSourceDirs.orEmpty()
+        dev.amenhancer.host.applemusic.AppleMusicHostProfiles.initializeModulePaths(modulePaths)
+        dev.amenhancer.host.classical.ClassicalHostProfiles.initializeModulePaths(modulePaths)
         processName = param.processName
         log(
             Log.INFO,
@@ -132,11 +132,19 @@ class HookEntry : XposedModule() {
                                 application = application,
                                 configuredDpi = config.settings().appleMusicDpiOverrideDpi,
                             )
-                            runCatching { FeatureInstallation.registerResources(config) }
-                                .getOrElse { error ->
-                                    resourcePreparationFailed.set(true)
-                                    throw error
+                            val isClassical = dev.amenhancer.host.classical.ClassicalHostProfiles.isProductionBuild(
+                                build.packageName, build.versionName, build.versionCode,
+                            )
+                            runCatching {
+                                if (isClassical) {
+                                    ClassicalFeatureInstallation.registerResources(config, application, targetClassLoader)
+                                } else {
+                                    FeatureInstallation.registerResources(config)
                                 }
+                            }.getOrElse { error ->
+                                resourcePreparationFailed.set(true)
+                                throw error
+                            }
                             // Publish only after resources are fully registered.
                             // If a callback throws, the current process stays
                             // fail-open and a fresh process can retry cleanly.
@@ -165,33 +173,52 @@ class HookEntry : XposedModule() {
                             session,
                             currentSong = { currentSong.current()?.details },
                         )
+                        val build = targetBuild(application)
+                        val isClassical = dev.amenhancer.host.classical.ClassicalHostProfiles.isProductionBuild(
+                            build.packageName, build.versionName, build.versionCode,
+                        )
                         runCatching {
-                            FeatureInstallation.installEmbedded(
-                                config,
-                                application,
-                                targetClassLoader,
-                                currentSong,
-                                settingsController,
-                            )
+                            if (isClassical) {
+                                ClassicalFeatureInstallation.installEmbedded(config, application, targetClassLoader)
+                            } else {
+                                FeatureInstallation.installEmbedded(
+                                    config,
+                                    application,
+                                    targetClassLoader,
+                                    currentSong,
+                                    settingsController,
+                                )
+                            }
                         }.onFailure { error ->
                             ModernXposedRuntime.log("embedded feature installation failed open", error)
                         }
-                        val playerActivityClass = runCatching {
-                            targetClassLoader.loadClass(EmbeddedSettingsHost.PLAYER_ACTIVITY_NAME)
-                        }.getOrNull()
-                        val host = EmbeddedSettingsHost.install(
-                            application,
-                            settingsController,
-                            activityMatcher = AppleMusicHostFactory.settingsActivityMatcher(application, playerActivityClass),
-                            nativeBridgeFactory = { onOpen -> AppleMusicHostFactory.settingsViewBridge(application, onOpen) },
-                        )
-                        settingsHost = host
-                        AppleMusicHostFactory.installSettingsEntry(application, targetClassLoader, host)
-                        runCatching {
-                            val plugins = dev.amenhancer.plugin.runtime.PluginManager(application, targetClassLoader)
-                            host.plugins = plugins
-                            plugins.start()
-                        }.onFailure { ModernXposedRuntime.log("plugin runtime unavailable", it) }
+                        if (isClassical) {
+                            val host = EmbeddedSettingsHost.install(
+                                application,
+                                settingsController,
+                                activityMatcher = ClassicalHostFactory.settingsActivityMatcher(application),
+                                nativeBridgeFactory = { ClassicalHostFactory.settingsViewBridge() },
+                            )
+                            settingsHost = host
+                            ClassicalHostFactory.installSettingsEntry(application, targetClassLoader, host)
+                        } else {
+                            val playerActivityClass = runCatching {
+                                targetClassLoader.loadClass(EmbeddedSettingsHost.PLAYER_ACTIVITY_NAME)
+                            }.getOrNull()
+                            val host = EmbeddedSettingsHost.install(
+                                application,
+                                settingsController,
+                                activityMatcher = AppleMusicHostFactory.settingsActivityMatcher(application, playerActivityClass),
+                                nativeBridgeFactory = { onOpen -> AppleMusicHostFactory.settingsViewBridge(application, onOpen) },
+                            )
+                            settingsHost = host
+                            AppleMusicHostFactory.installSettingsEntry(application, targetClassLoader, host)
+                            runCatching {
+                                val plugins = dev.amenhancer.plugin.runtime.PluginManager(application, targetClassLoader)
+                                host.plugins = plugins
+                                plugins.start()
+                            }.onFailure { ModernXposedRuntime.log("plugin runtime unavailable", it) }
+                        }
                     }.onFailure { error ->
                         ModernXposedRuntime.log("embedded initialization failed open: $error")
                     }

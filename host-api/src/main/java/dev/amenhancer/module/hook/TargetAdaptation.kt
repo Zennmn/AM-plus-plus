@@ -50,6 +50,9 @@ data class TargetAdaptation(
     val lyricsParser: LyricsParserTarget = LyricsParserTarget {
         TargetCapabilityInstall.Unsupported("Native lyric parser repair has no exact host contract")
     },
+    val classicalGuideTranslation: ClassicalGuideTranslationTarget = ClassicalGuideTranslationTarget {
+        TargetCapabilityInstall.Unsupported("Classical listening guide translation is not available for this host")
+    },
 ) {
 }
 
@@ -106,6 +109,10 @@ fun interface PlayerRecoveryTarget {
 }
 
 fun interface StartupPagePrewarmTarget {
+    fun install(): TargetCapabilityInstall
+}
+
+fun interface ClassicalGuideTranslationTarget {
     fun install(): TargetCapabilityInstall
 }
 

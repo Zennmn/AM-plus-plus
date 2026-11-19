@@ -3,6 +3,7 @@ package dev.amenhancer.module
 object ModuleConstants {
     const val MODULE_PACKAGE = "dev.amenhancer.module"
     const val TARGET_PACKAGE = "com.apple.android.music"
+    const val CLASSICAL_PACKAGE = "com.apple.android.music.classical"
     const val REMOTE_PREFERENCES_GROUP = "settings"
     const val CONFIG_SCHEMA_VERSION = 21
 
@@ -23,4 +24,5 @@ object ModuleConstants {
     const val FEATURE_CELLULAR_DATA_ENTRY = "cellular_data_entry"
     const val FEATURE_PLAYER_RECOVERY = "player_recovery"
     const val FEATURE_STARTUP_PAGE_PREWARM = "startup_page_prewarm"
+    const val FEATURE_CLASSICAL_GUIDE_TRANSLATION = "classical_guide_translation"
 }
