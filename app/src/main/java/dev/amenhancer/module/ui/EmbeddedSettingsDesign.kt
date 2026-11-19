@@ -20,6 +20,7 @@ internal enum class EmbeddedSettingsPage : NavKey {
     MAIN,
     CUSTOM_LYRICS,
     AUTOMATIC_LYRICS,
+    CACHED_LYRICS,
     LYRICS_EFFECTS,
     INTERFACE,
     TITLE_REGION,

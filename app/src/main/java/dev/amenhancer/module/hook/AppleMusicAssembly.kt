@@ -17,6 +17,7 @@ internal fun assembleAppleMusicTarget(
         application,
         content = settingsController.content,
         lunabeatCatalogCache = settingsController.lunabeatCatalogCache,
+        currentSong = currentSong,
         configuration = config::settings,
     )
     return AppleMusicHostFactory.appleMusic(config, application, classLoader, lyricsTypefaceSession, currentSong, automatic,
