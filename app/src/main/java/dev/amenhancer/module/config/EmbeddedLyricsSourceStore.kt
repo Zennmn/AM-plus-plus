@@ -9,8 +9,54 @@ import dev.amenhancer.module.model.CustomLyricsEntry
 import dev.amenhancer.module.model.CustomLyricsManifest
 import dev.amenhancer.module.model.CustomLyricsSources
 import java.io.File
+import java.util.Locale
 import org.json.JSONArray
 import org.json.JSONObject
+
+internal data class LyricsCacheEntry(
+    val entry: CustomLyricsEntry,
+    val lastUsedAtMs: Long,
+)
+
+internal data class LyricsCacheSnapshot(
+    val entries: List<LyricsCacheEntry>,
+    val usageBytes: Long,
+    val indexAvailable: Boolean,
+)
+
+/** Returns the stored song name only when it is not a source, ID, or blank placeholder. */
+internal fun CustomLyricsEntry.cachedSongDisplayName(): String? =
+    cacheSongDisplayName(displayName, source, appleMusicId)
+
+private val CACHE_SONG_NAME_PLACEHOLDERS = setOf(
+    "auto cache",
+    "auto-cache",
+    "amll",
+    "amll-ttml-db",
+    "am-lyrics",
+    "am-lyrics custom lyrics",
+    "am-lyrics 自定义歌词",
+    "lunabeat",
+    "lunabeat-ttml-hub",
+    "lunabeat custom lyrics",
+    "lunabeat 自定义歌词",
+)
+
+private fun cacheSongDisplayName(name: String, source: String, appleMusicId: Long): String? {
+    val trimmed = name.trim()
+    val id = appleMusicId.toString()
+    if (trimmed.isEmpty() || trimmed == id) return null
+    val normalized = trimmed.lowercase(Locale.ROOT)
+    if (trimmed.equals(source, ignoreCase = true) || normalized in CACHE_SONG_NAME_PLACEHOLDERS) return null
+    if (normalized == "auto-cached lyrics · $id" || normalized == "自动缓存歌词 · $id") return null
+    return trimmed
+}
+
+internal fun String.isCompleteCacheSongName(): Boolean {
+    val normalized = trim()
+    val separator = normalized.indexOf(" - ")
+    return separator > 0 && normalized.substring(separator + 3).isNotBlank()
+}
 
 /**
  * Third-party source cache plus a metadata snapshot of the manual index.
@@ -66,6 +112,72 @@ internal class EmbeddedLyricsSourceStore(
 
     fun entries(): List<CustomLyricsEntry> = synchronized(shared.stateLock) { shared.sourceManifest.entries }
 
+    /** Read-only management snapshot. It neither migrates legacy rows nor touches the persisted LRU. */
+    fun cacheSnapshot(): LyricsCacheSnapshot = session.withCustomLyricsMutation {
+        val normalized = synchronized(shared.stateLock) { shared.normalized }
+        val sourceState = if (normalized) {
+            null
+        } else {
+            runCatching { readSourceState() }.getOrNull()
+        }
+        val resolvedSourceState = sourceState?.takeIf { it.isResolved }
+        val manifest = resolvedSourceState?.manifest
+            ?: synchronized(shared.stateLock) { shared.sourceManifest }
+        val lastUsed = synchronized(shared.stateLock) { shared.lastUsed.toMap() }
+        val entries = manifest.entries.map { entry ->
+            LyricsCacheEntry(
+                entry = entry,
+                lastUsedAtMs = lastUsed[Key(entry.appleMusicId, entry.source)] ?: 0L,
+            )
+        }
+        // A resolved empty index is available too, including immediately after a full clear.
+        val indexAvailable = normalized || resolvedSourceState != null
+        LyricsCacheSnapshot(
+            entries = entries,
+            usageBytes = usageBytesLocked(),
+            indexAvailable = indexAvailable,
+        )
+    }
+
+    /** Backfills display names only. Bodies, preferences, LRU order and cache generation stay untouched. */
+    fun updateCacheSongNames(names: Map<Long, String>, expectedGeneration: Long): Boolean {
+        if (!session.writable || names.isEmpty()) return false
+        val usableNames = names.mapNotNull { (appleMusicId, name) ->
+            appleMusicId.takeIf { it > 0L }?.let { id ->
+                name.trim()
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { id to it }
+            }
+        }.toMap()
+        if (usableNames.isEmpty()) return false
+        return session.withCustomLyricsMutation {
+            if (!generationMatches(expectedGeneration) || !prepareSource()) {
+                return@withCustomLyricsMutation false
+            }
+            val current = synchronized(shared.stateLock) { shared.sourceManifest }
+            var changed = false
+            val entries = current.entries.map { entry ->
+                val proposed = usableNames[entry.appleMusicId] ?: return@map entry
+                val currentName = entry.cachedSongDisplayName()
+                if (currentName?.isCompleteCacheSongName() == true) return@map entry
+                val sanitized = cacheSongDisplayName(
+                    CustomLyricsManifestPolicy.sanitizeDisplayName(proposed),
+                    entry.source,
+                    entry.appleMusicId,
+                ) ?: return@map entry
+                if (sanitized == entry.displayName) return@map entry
+                changed = true
+                entry.copy(displayName = sanitized)
+            }
+            if (!changed) return@withCustomLyricsMutation true
+            val manifest = CustomLyricsManifest(entries)
+            if (!commitSourceManifest(manifest)) return@withCustomLyricsMutation false
+            synchronized(shared.stateLock) { shared.sourceManifest = manifest }
+            notifyListeners()
+            true
+        }
+    }
+
     fun entryFor(appleMusicId: Long, source: String): CustomLyricsEntry? =
         synchronized(shared.stateLock) {
             shared.sourceManifest.entries.firstOrNull {
@@ -94,6 +206,66 @@ internal class EmbeddedLyricsSourceStore(
             synchronized(shared.stateLock) {
                 shared.sourceManifest = CustomLyricsManifest(next)
             }
+            notifyListeners()
+            true
+        }
+    }
+
+    /**
+     * Deletes one provider slot, or every provider slot for [appleMusicId] when [source] is null.
+     * The source and manual indexes must already be readable. The manifest is published once,
+     * then only bodies without any remaining source or manual reference are reclaimed.
+     */
+    fun deleteCachedLyrics(appleMusicId: Long, source: String? = null): Boolean {
+        if (!session.writable || appleMusicId <= 0L) return false
+        val requestedSource = if (source == null) {
+            null
+        } else {
+            CustomLyricsManifestPolicy.canonicalSource(source).takeIf(
+                CustomLyricsManifestPolicy::isThirdPartySource,
+            ) ?: return false
+        }
+        return session.withCustomLyricsMutation {
+            // Finish the existing legacy migration first; a partial migration must not be deleted.
+            if (!prepareSource()) return@withCustomLyricsMutation false
+            if (!synchronized(shared.stateLock) { shared.normalized }) {
+                return@withCustomLyricsMutation false
+            }
+            val manualState = runCatching { session.readManualIndex() }.getOrNull()
+                ?.takeIf { it.isResolved } ?: return@withCustomLyricsMutation false
+            val before = synchronized(shared.stateLock) {
+                SourceSnapshot(
+                    manifest = shared.sourceManifest,
+                    lastUsed = shared.lastUsed.toMap(),
+                )
+            }
+            val removed = before.manifest.entries.filter { entry ->
+                entry.appleMusicId == appleMusicId &&
+                    (requestedSource == null || entry.source == requestedSource)
+            }
+            if (removed.isEmpty()) return@withCustomLyricsMutation false
+            val removedKeys = removed.mapTo(mutableSetOf()) { entry ->
+                Key(entry.appleMusicId, entry.source)
+            }
+            val nextManifest = CustomLyricsManifest(
+                before.manifest.entries.filterNot { entry ->
+                    Key(entry.appleMusicId, entry.source) in removedKeys
+                },
+            )
+            if (!commitSourceManifest(nextManifest)) return@withCustomLyricsMutation false
+            val lastUsed = before.lastUsed.toMutableMap().apply {
+                removedKeys.forEach { key -> remove(key) }
+            }
+            synchronized(shared.stateLock) {
+                shared.manualManifest = manualState.manifest
+                shared.sourceManifest = nextManifest
+                shared.lastUsed.clear()
+                shared.lastUsed.putAll(lastUsed)
+                // One mutation invalidates every request that started before this deletion.
+                shared.generation++
+            }
+            persistLastUsed(lastUsed)
+            retireUnreferenced(removed.map(CustomLyricsEntry::fileId), nextManifest)
             notifyListeners()
             true
         }
@@ -307,7 +479,9 @@ internal class EmbeddedLyricsSourceStore(
      * candidates and the Lunabeat catalog. Uses metadata only; it never reads
      * TTML bodies.
      */
-    fun sizeBytes(): Long = session.withCustomLyricsMutation {
+    fun sizeBytes(): Long = session.withCustomLyricsMutation { usageBytesLocked() }
+
+    private fun usageBytesLocked(): Long {
         val diskIds = session.sourceFileIds() + listOfNotNull(
             session.decodeSourceIndexPointer(session.values())?.fileId,
         )
@@ -323,7 +497,7 @@ internal class EmbeddedLyricsSourceStore(
                 }.map(CustomLyricsEntry::fileId).toSet())
             }
         }
-        referenced.sumOf(::fileBytesOnDisk) + session.sourceCacheRootFiles().sumOf {
+        return referenced.sumOf(::fileBytesOnDisk) + session.sourceCacheRootFiles().sumOf {
             if (isSourceCacheFile(it.name) && it.name !in referenced && !isManualFile(it.name)) it.length()
             else 0L
         } + listOfNotNull(session.sourceCacheLunabeatCatalog(), session.legacyLunabeatCatalog())

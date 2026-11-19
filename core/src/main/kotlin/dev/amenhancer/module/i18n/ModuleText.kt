@@ -570,6 +570,69 @@ enum class ModuleText(internal val english: String, internal val chinese: String
     LYRICS_CACHE_CLEAR_FAILED("Cannot clear the third-party lyrics cache", "无法清除第三方歌词缓存"),
     LYRICS_CACHE_UNAVAILABLE("Lyrics cache is unavailable", "歌词缓存不可用"),
     LYRICS_CACHE_SIZE_UNAVAILABLE("Cannot read cache usage", "无法读取缓存占用"),
+    LYRICS_CACHE_MANAGEMENT("Lyrics cache management", "歌词缓存管理"),
+    LYRICS_CACHE_MANAGEMENT_SUMMARY(
+        "Review and remove downloaded third-party lyrics",
+        "查看并清理已下载的第三方歌词",
+    ),
+    LYRICS_CACHE_OVERVIEW(
+        "%1\$s songs · %2\$s cached copies · %3\$s used",
+        "%1\$s 首 · %2\$s 份缓存 · 占用 %3\$s",
+    ),
+    LYRICS_CACHE_INDEX_UNAVAILABLE(
+        "The cache index is unavailable. Existing disk usage can still be cleared.",
+        "缓存索引不可用，仍可清除现有磁盘占用",
+    ),
+    LYRICS_CACHE_ALL_SOURCES("All sources", "全部来源"),
+    LYRICS_CACHE_FILTER_SOURCE("Filter by source", "按来源筛选"),
+    LYRICS_CACHE_SORT("Sort songs", "歌曲排序"),
+    LYRICS_CACHE_SORT_RECENT("Recently used", "最近使用"),
+    LYRICS_CACHE_SORT_SIZE("Largest first", "从大到小"),
+    LYRICS_CACHE_SEARCH("Search songs or artists", "搜索歌名或歌手"),
+    LYRICS_CACHE_SEARCH_SUMMARY(
+        "Search by song name, artist, or Apple Music ID.",
+        "支持按歌名、歌手或 Apple Music ID 搜索。",
+    ),
+    LYRICS_CACHE_LOADING("Loading lyrics cache…", "正在读取歌词缓存…"),
+    LYRICS_CACHE_DELETE_SOURCE("Delete this cached copy", "删除此份缓存"),
+    LYRICS_CACHE_DELETE_SONG("Delete all cached copies of this song", "删除此歌全部缓存"),
+    LYRICS_CACHE_DELETE_ALL("Clear all third-party lyrics cache", "清除全部第三方歌词缓存"),
+    LYRICS_CACHE_DELETE_ALL_SUMMARY(
+        "Keeps manual TTML, source preferences, timing offsets, and LLM cache.",
+        "保留手动 TTML、来源偏好、时间偏移和 LLM 缓存",
+    ),
+    LYRICS_CACHE_DELETE_SOURCE_CONFIRM(
+        "Delete the cache from %1\$s for “%2\$s”?",
+        "删除“%2\$s”的 %1\$s 缓存？",
+    ),
+    LYRICS_CACHE_DELETE_SONG_CONFIRM(
+        "Delete all %1\$s cached sources of “%2\$s”?",
+        "删除“%2\$s”的全部 %1\$s 个来源缓存？",
+    ),
+    LYRICS_CACHE_CLEAR_CONFIRM(
+        "Clear the cached lyrics of %1\$s songs (%2\$s cached copies, %3\$s)? Manual lyrics and preferences stay.",
+        "清除 %1\$s 首歌曲的歌词缓存（%2\$s 份缓存，%3\$s）？手动歌词和偏好会保留。",
+    ),
+    LYRICS_CACHE_CLEAR_CONFIRM_UNAVAILABLE(
+        "Clear %1\$s of third-party lyrics cache? The song count is unavailable. Manual lyrics and preferences stay.",
+        "清除 %1\$s 第三方歌词缓存？歌曲数量暂不可用，手动歌词和偏好会保留。",
+    ),
+    LYRICS_CACHE_REDOWNLOAD_NOTICE(
+        "Cleared lyrics may be downloaded again when their source remains enabled.",
+        "清除后，若对应来源仍启用，下次播放可能重新下载歌词。",
+    ),
+    LYRICS_CACHE_WORKING("Updating lyrics cache…", "正在更新歌词缓存…"),
+    LYRICS_CACHE_DELETED("Cached lyrics deleted", "已删除歌词缓存"),
+    LYRICS_CACHE_SONG_DELETED("All cached copies of this song were deleted", "已删除此歌全部歌词缓存"),
+    LYRICS_CACHE_DELETE_FAILED("Cannot delete the cached lyrics", "无法删除歌词缓存"),
+    LYRICS_CACHE_EMPTY("No third-party lyrics are cached", "暂无第三方歌词缓存"),
+    LYRICS_CACHE_UNKNOWN_SONG("Unknown song", "未知歌曲"),
+    LYRICS_CACHE_SOURCE_COUNT("%1\$s sources", "%1\$s 个来源"),
+    LYRICS_CACHE_DISABLED("Disabled", "已停用"),
+    LYRICS_CACHE_SIZE_NOTE(
+        "Total usage is measured by unique file and includes cache indexes.",
+        "总占用按唯一文件计算，并包含缓存索引",
+    ),
 
     // LLM lyrics live status.
     LLM_STATUS_TITLE("LLM lyrics", "LLM 歌词"),
