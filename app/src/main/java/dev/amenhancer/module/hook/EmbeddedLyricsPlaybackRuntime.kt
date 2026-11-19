@@ -3,6 +3,9 @@ package dev.amenhancer.module.hook
 import android.os.Handler
 import android.os.Looper
 import dev.amenhancer.module.config.EmbeddedContentManager
+import dev.amenhancer.module.config.LyricsCacheSnapshot
+import dev.amenhancer.module.config.cachedSongDisplayName
+import dev.amenhancer.module.config.isCompleteCacheSongName
 import dev.amenhancer.module.i18n.ModuleText
 import dev.amenhancer.module.lyrics.*
 import dev.amenhancer.module.lyrics.source.LyricFetchFailure
@@ -19,6 +22,7 @@ internal class EmbeddedLyricsPlaybackRuntime(
     private val settings: () -> ModuleSettings,
     private val executor: Executor,
     private val fetch: (Long, String) -> Pair<AutoLyricsCandidate?, LyricFetchFailure?>,
+    private val lookupCacheSongNames: (List<Long>, () -> Boolean) -> Map<Long, String>,
 ) : LyricsPlaybackRuntime {
     private data class Binding(val prepare: (Long, String) -> Any?, val alive: (Any?) -> Boolean,
         val ready: (Long) -> Unit)
@@ -601,6 +605,63 @@ internal class EmbeddedLyricsPlaybackRuntime(
     }
 
     override fun cacheUsageBytes(): Long = store.sizeBytes()
+    fun cacheSnapshot(): LyricsCacheSnapshot = store.cacheSnapshot()
+
+    /** Backfills incomplete legacy display names without changing active playback state. */
+    fun refreshCacheSongNames(isCancelled: () -> Boolean) {
+        if (isCancelled() || synchronized(lock) { closed || clearingCache }) return
+        val expectedGeneration = store.generation()
+        val snapshot = runCatching { store.cacheSnapshot() }.getOrNull() ?: return
+        if (!snapshot.indexAvailable) return
+        val appleMusicIds = snapshot.entries.asSequence()
+            .map { it.entry }
+            .filter { entry ->
+                entry.cachedSongDisplayName()?.isCompleteCacheSongName() != true
+            }
+            .map { it.appleMusicId }
+            .filter { it > 0L }
+            .distinct()
+            .toList()
+        if (appleMusicIds.isEmpty() || isCancelled()) return
+        val names = runCatching { lookupCacheSongNames(appleMusicIds, isCancelled) }
+            .getOrDefault(emptyMap())
+        if (names.isEmpty() || isCancelled()) return
+        synchronized(commitLock) {
+            if (!isCancelled() && !synchronized(lock) { closed || clearingCache }) {
+                runCatching { store.updateCacheSongNames(names, expectedGeneration) }
+            }
+        }
+    }
+
+    fun deleteCachedLyrics(appleMusicId: Long, source: String? = null): Boolean {
+        synchronized(lock) {
+            if (clearingCache || closed) return false
+            clearingCache = true
+        }
+        fun matches(storedSource: String): Boolean = if (source == null) {
+            storedSource in REMOTE_SOURCES || storedSource == CustomLyricsSources.AUTO_CACHE
+        } else {
+            storedSource == source
+        }
+        var deleted = false
+        return try {
+            deleted = synchronized(commitLock) { store.deleteCachedLyrics(appleMusicId, source) }
+            deleted
+        } finally {
+            synchronized(lock) {
+                if (deleted && songId == appleMusicId) {
+                    prepared.keys.removeAll(::matches)
+                    // The active document remains usable for this visit after its cache file is gone.
+                    selected?.takeIf { matches(it.source) }?.let { choice ->
+                        prepared[choice.source] = PreparedChoice(choice, null)
+                    }
+                }
+                clearingCache = false
+            }
+            if (deleted) notifyChanged(wake = true)
+        }
+    }
+
     override fun clearCache(): Boolean {
         synchronized(lock) {
             if (clearingCache || closed) return false

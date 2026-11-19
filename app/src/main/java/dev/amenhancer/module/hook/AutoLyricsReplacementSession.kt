@@ -8,6 +8,8 @@ import dev.amenhancer.module.lyrics.source.AmllTtmlClient
 import dev.amenhancer.module.lyrics.source.AmLyricsClient
 import android.app.Application
 import dev.amenhancer.module.config.EmbeddedContentManager
+import dev.amenhancer.module.config.cachedSongDisplayName
+import dev.amenhancer.module.config.isCompleteCacheSongName
 import dev.amenhancer.module.lyrics.TtmlInputPolicy
 import dev.amenhancer.module.lyrics.LyricsPlaybackSources
 import dev.amenhancer.module.model.CustomLyricsSources
@@ -29,6 +31,7 @@ internal fun createAutoLyricsRuntime(
     application: Application,
     content: EmbeddedContentManager,
     lunabeatCatalogCache: LunabeatCatalogCache,
+    currentSong: CurrentSongIdentityCache,
     configuration: () -> ModuleSettings,
 ): AutoLyricsRuntime {
     val sourceStore = content.sourceCache
@@ -58,11 +61,92 @@ internal fun createAutoLyricsRuntime(
         amLyrics = amLyrics,
         lunabeat = lunabeat,
     )
+
+    fun cacheSongName(title: String?, artist: String?): String? {
+        val songTitle = title?.trim()?.takeIf(String::isNotEmpty) ?: return null
+        return listOfNotNull(songTitle, artist?.trim()?.takeIf(String::isNotEmpty)).joinToString(" - ")
+    }
+
+    fun AutoLyricsCandidate.withSongTitle(appleMusicId: Long, existingName: String? = null): AutoLyricsCandidate {
+        fun usableName(name: String?): String? =
+            name?.trim()?.takeIf { it.isNotEmpty() && it != source }
+
+        val ownName = usableName(displayName)
+        val previousName = usableName(existingName)
+            ?: sourceStore.entryFor(appleMusicId, source)?.cachedSongDisplayName()
+        val details = currentSong.current()?.details?.takeIf { it.appleMusicId == appleMusicId }
+        val currentName = cacheSongName(details?.title, details?.artist)
+        val resolvedName = when {
+            ownName?.isCompleteCacheSongName() == true -> ownName
+            previousName?.isCompleteCacheSongName() == true -> previousName
+            currentName != null -> currentName
+            ownName != null -> ownName
+            else -> previousName
+        }
+        return if (resolvedName == null) this else copy(displayName = resolvedName)
+    }
+
+    fun lookupCacheSongNames(
+        appleMusicIds: List<Long>,
+        isCancelled: () -> Boolean,
+    ): Map<Long, String> {
+        failures.remove()
+        return try {
+            val requested = appleMusicIds.asSequence()
+                .filter { it > 0L }
+                .toCollection(linkedSetOf())
+            if (requested.isEmpty() || isCancelled()) return emptyMap()
+
+            val names = linkedMapOf<Long, String>()
+            currentSong.current()?.details?.let { details ->
+                if (details.appleMusicId in requested) {
+                    cacheSongName(details.title, details.artist)
+                        ?.takeIf(String::isCompleteCacheSongName)
+                        ?.let { names[details.appleMusicId] = it }
+                }
+            }
+
+            var remaining = requested - names.keys
+            if (remaining.isNotEmpty() && !isCancelled()) {
+                val index = runCatching { AmLyricsClient(indexTransport).fetchIndex() }.getOrNull()
+                if (index != null) {
+                    for (entry in index.entries) {
+                        if (isCancelled()) return names
+                        for (appleMusicId in entry.allAppleMusicIds) {
+                            if (appleMusicId in remaining &&
+                                entry.displayName.isCompleteCacheSongName()
+                            ) {
+                                names.putIfAbsent(appleMusicId, entry.displayName)
+                            }
+                        }
+                    }
+                }
+                remaining = requested - names.keys
+            }
+
+            if (remaining.isNotEmpty() && !isCancelled()) {
+                val catalog = runCatching { lunabeat.loadCatalog() }.getOrNull()
+                if (catalog != null) {
+                    for (song in catalog.songs) {
+                        if (isCancelled()) return names
+                        for (appleMusicId in song.appleMusicIds) {
+                            if (appleMusicId in remaining && song.displayName.isCompleteCacheSongName()) {
+                                names.putIfAbsent(appleMusicId, song.displayName)
+                            }
+                        }
+                    }
+                }
+            }
+            names
+        } finally {
+            failures.remove()
+        }
+    }
     val cache = object : AutoLyricsCache {
         override fun readCandidate(appleMusicId: Long, source: String): AutoLyricsCandidate? =
             sourceStore.readCandidate(appleMusicId, source)
         override fun writeCandidateIfCurrent(appleMusicId: Long, candidate: AutoLyricsCandidate, generation: Long): Boolean =
-            sourceStore.writeCandidate(appleMusicId, candidate, generation)
+            sourceStore.writeCandidate(appleMusicId, candidate.withSongTitle(appleMusicId), generation)
         override fun generation(): Long = sourceStore.generation()
     }
     val executor = ThreadPoolExecutor(
@@ -203,8 +287,9 @@ internal fun createAutoLyricsRuntime(
             val result = resolver.fetchSelected(id, source) {
                 failures.set(dev.amenhancer.module.lyrics.source.LyricFetchFailure.INVALID)
             }
-            result to failures.get().also { failures.remove() }
+            result?.withSongTitle(id) to failures.get().also { failures.remove() }
         },
+        lookupCacheSongNames = ::lookupCacheSongNames,
     )
     LyricsPlaybackRuntimeRegistry.attach(playback)
     return AutoLyricsRuntime(
@@ -235,7 +320,7 @@ internal fun createAutoLyricsRuntime(
             if (isCancelled() || !current.isCurrentSong || current.activeSource != source ||
                 (current.preferredSource == LyricsPlaybackSources.AUTOMATIC && !TtmlTimingPolicy.isWord(candidate.ttml)) ||
                 sourceStore.entryFor(appleMusicId, source) != previous ||
-                !sourceStore.writeCandidate(appleMusicId, candidate, epoch)
+                !sourceStore.writeCandidate(appleMusicId, candidate.withSongTitle(appleMusicId, previous.displayName), epoch)
             ) return@refresh null
             sourceStore.entryFor(appleMusicId, source)?.takeIf { it.sha256 != previous.sha256 }
         },

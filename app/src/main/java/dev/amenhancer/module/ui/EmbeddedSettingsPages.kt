@@ -254,6 +254,8 @@ internal fun EmbeddedSettingsHost.showSettingsDialog(activity: Activity) {
                                             EmbeddedCustomLyricsPage(activity, current, refresh, ::update, ::open)
                                         EmbeddedSettingsPage.AUTOMATIC_LYRICS ->
                                             EmbeddedAutomaticLyricsPage(activity, current, ::applySavedChange)
+                                        EmbeddedSettingsPage.CACHED_LYRICS ->
+                                            EmbeddedLyricsCachePage(activity, active = active)
                                         EmbeddedSettingsPage.LLM_LYRICS ->
                                             EmbeddedLlmLyricsPage(activity, current, ::update, active = active)
                                         EmbeddedSettingsPage.PLUGINS ->
@@ -478,7 +480,10 @@ private val EmbeddedSettingsNavigationPages = listOf(
 
 private val EmbeddedSettingsPage.navigationCategory: EmbeddedSettingsPage
     get() = when (this) {
-        EmbeddedSettingsPage.MAIN, EmbeddedSettingsPage.AUTOMATIC_LYRICS, EmbeddedSettingsPage.LLM_LYRICS ->
+        EmbeddedSettingsPage.MAIN,
+        EmbeddedSettingsPage.AUTOMATIC_LYRICS,
+        EmbeddedSettingsPage.CACHED_LYRICS,
+        EmbeddedSettingsPage.LLM_LYRICS ->
             EmbeddedSettingsPage.CUSTOM_LYRICS
         EmbeddedSettingsPage.BOTTOM_BAR_ANIMATION -> EmbeddedSettingsPage.INTERFACE
         else -> this
@@ -499,6 +504,7 @@ private val EmbeddedSettingsPage.title: ModuleText
         EmbeddedSettingsPage.MAIN -> ModuleText.MODULE_SETTINGS
         EmbeddedSettingsPage.CUSTOM_LYRICS -> ModuleText.CATEGORY_LYRICS_MANAGEMENT
         EmbeddedSettingsPage.AUTOMATIC_LYRICS -> ModuleText.AUTO_LYRICS
+        EmbeddedSettingsPage.CACHED_LYRICS -> ModuleText.LYRICS_CACHE_MANAGEMENT
         EmbeddedSettingsPage.LYRICS_EFFECTS -> ModuleText.CATEGORY_LYRICS_EFFECTS
         EmbeddedSettingsPage.INTERFACE -> ModuleText.CATEGORY_INTERFACE
         EmbeddedSettingsPage.TITLE_REGION -> ModuleText.CATEGORY_TITLE_REGION
@@ -746,6 +752,11 @@ private fun EmbeddedSettingsHost.showEmbeddedPageDetails(activity: Activity, pag
         EmbeddedSettingsPage.AUTOMATIC_LYRICS -> listOf(
             ModuleText.AUTO_LYRICS_ENABLED to ModuleText.AUTO_LYRICS_SUMMARY,
             ModuleText.AUTO_LYRICS_SOURCE_ORDER to ModuleText.AUTO_LYRICS_SOURCE_ORDER_ALL,
+        )
+        EmbeddedSettingsPage.CACHED_LYRICS -> listOf(
+            ModuleText.LYRICS_CACHE_MANAGEMENT to ModuleText.LYRICS_CACHE_MANAGEMENT_SUMMARY,
+            ModuleText.LYRICS_CACHE_SEARCH to ModuleText.LYRICS_CACHE_SEARCH_SUMMARY,
+            ModuleText.LYRICS_CACHE_DELETE_ALL to ModuleText.LYRICS_CACHE_DELETE_ALL_SUMMARY,
         )
         EmbeddedSettingsPage.LYRICS_EFFECTS -> listOf(
             ModuleText.BIDIRECTIONAL_LYRIC_BLUR to ModuleText.BIDIRECTIONAL_LYRIC_BLUR_SUMMARY,
