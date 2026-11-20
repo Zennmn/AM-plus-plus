@@ -51,6 +51,14 @@ object AppleMusicHostFactory {
             LayoutInflationRegistry.register(name, observer)
         }
     }
+    fun registerMultiSurfaceGlassResources(observer: MultiSurfaceGlassObserver) =
+        AmMultiSurfaceGlassFactory.registerResources(observer)
+    fun installMultiSurfaceGlassHooks(
+        context: android.content.Context,
+        classLoader: ClassLoader,
+        build: TargetBuild,
+        observer: MultiSurfaceGlassObserver,
+    ): HostSubscription = AmMultiSurfaceGlassFactory.installRuntimeHooks(context.applicationContext, classLoader, build, observer)
 
     private fun installLyricPronunciationPairAlignment(
         profile: AppleMusicHostProfile,

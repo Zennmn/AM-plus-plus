@@ -25,7 +25,9 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.unit.Density
 import com.kyant.backdrop.Backdrop
+import dev.amenhancer.backdrop.BackdropCaptureGate
 import dev.amenhancer.backdrop.traceBackdrop
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 
 /** AM++ Android View bridge. The source must NOT contain any consumer of this backdrop. */
@@ -35,20 +37,31 @@ class ViewBackdrop(
     private val onFailure: (Throwable) -> Unit,
     /** Return false without drawing when a compatible host recording is unavailable. */
     private val sourceRenderer: ((android.graphics.Canvas) -> Boolean)? = null,
+    private val minCaptureIntervalMs: Long = 0L,
+    private val forceRefreshOnPreDraw: Boolean = false,
 ) : Backdrop, AutoCloseable, ViewTreeObserver.OnPreDrawListener {
     private val node = RenderNode("AM++ content backdrop")
     private val sourceToWindow = Matrix()
-    private val targetToWindow = Matrix()
-    private val windowToTarget = Matrix()
+    private val sourceToScreen = Matrix()
+    private val targetToScreen = Matrix()
+    private val screenToTarget = Matrix()
     private val previousMatrix = FloatArray(9)
     private val matrixValues = FloatArray(9)
     private val location = IntArray(2)
+    private val screenLocation = IntArray(2)
     private val rootOrigin = FloatArray(2)
+    private val gate = BackdropCaptureGate(minCaptureIntervalMs.coerceAtLeast(0L) * 1_000_000L)
     private var generation by mutableIntStateOf(0)
     private var observer: ViewTreeObserver? = null
     private var recording = false
     private var closed = false
-    private var captureEnabled = true
+    private var deferredCaptureScheduled = false
+    private val deferredCapture = Runnable {
+        deferredCaptureScheduled = false
+        if (!closed && gate.isCaptureAllowed && source.isAttachedToWindow) {
+            source.postInvalidateOnAnimation()
+        }
+    }
     var ready: Boolean = false
         private set
     var recordings: Long = 0
@@ -64,23 +77,62 @@ class ViewBackdrop(
 
     /** Suspend source recording while no backdrop consumer is visible. */
     fun setCaptureEnabled(enabled: Boolean): Boolean {
-        if (closed || captureEnabled == enabled) return false
-        captureEnabled = enabled
-        if (enabled) {
+        if (closed) return false
+        val resumed = gate.setExplicitEnabled(enabled)
+        if (!gate.isCaptureAllowed) cancelDeferredCapture()
+        if (resumed) {
             ready = false
+            gate.reset()
             source.postInvalidateOnAnimation()
         }
-        return enabled // The caller can defer this draw until the fresh capture.
+        return resumed // The caller can defer this draw until the fresh capture.
+    }
+
+    /** Register one visible surface sharing this backdrop; close when hidden or detached. */
+    fun acquireConsumer(): AutoCloseable {
+        val resumed = gate.acquireConsumer()
+        if (resumed && !closed) {
+            ready = false
+            gate.reset()
+            source.postInvalidateOnAnimation()
+        }
+        val released = AtomicBoolean(false)
+        return AutoCloseable {
+            if (released.compareAndSet(false, true) && gate.releaseConsumer()) {
+                cancelDeferredCapture()
+            }
+        }
+    }
+
+    private fun cancelDeferredCapture() {
+        if (deferredCaptureScheduled) {
+            source.removeCallbacks(deferredCapture)
+            deferredCaptureScheduled = false
+        }
     }
 
     override fun onPreDraw(): Boolean {
-        if (closed || !captureEnabled || recording || !source.isAttachedToWindow || source.width == 0 || source.height == 0) return true
+        if (closed || !gate.isCaptureAllowed || recording || !source.isAttachedToWindow ||
+            source.windowVisibility != View.VISIBLE || source.width == 0 || source.height == 0
+        ) return true
         try {
             check(source.isHardwareAccelerated) { "Hardware accelerated window required" }
             updateSourceMatrix()
-            sourceToWindow.getValues(matrixValues)
+            sourceToScreen.getValues(matrixValues)
             val moved = hasSignificantMatrixChange()
-            if (!ready || source.isDirty || moved || node.width != source.width || node.height != source.height) {
+            val forced = !ready || moved || node.width != source.width || node.height != source.height
+            if (forced || forceRefreshOnPreDraw || source.isDirty) {
+                val nowNanos = System.nanoTime()
+                val remainingNanos = gate.remainingThrottleNanos(nowNanos, ready, forced)
+                if (remainingNanos > 0L) {
+                    if (!deferredCaptureScheduled) {
+                        deferredCaptureScheduled = true
+                        val delayMs = ((remainingNanos + 999_999L) / 1_000_000L).coerceAtLeast(1L)
+                        source.postOnAnimationDelayed(deferredCapture, delayMs)
+                    }
+                    return true
+                }
+                cancelDeferredCapture()
                 recording = true
                 node.setPosition(0, 0, source.width, source.height)
                 traceBackdrop("AM++/source/record") {
@@ -92,6 +144,7 @@ class ViewBackdrop(
                 }
                 matrixValues.copyInto(previousMatrix)
                 ready = true
+                gate.markRecorded(nowNanos)
                 recordings++
                 generation++
             }
@@ -145,6 +198,17 @@ class ViewBackdrop(
         rootMatrix.mapPoints(rootOrigin)
         source.rootView.getLocationInWindow(location)
         sourceToWindow.postTranslate(location[0] - rootOrigin[0], location[1] - rootOrigin[1])
+        source.rootView.getLocationOnScreen(screenLocation)
+        sourceToScreen.set(sourceToWindow)
+        sourceToScreen.postTranslate(
+            (screenLocation[0] - location[0]).toFloat(),
+            (screenLocation[1] - location[1]).toFloat(),
+        )
+    }
+
+    /** Nudge consumers to re-sample when a separate window (e.g. Popup) repositions on screen. */
+    fun invalidateConsumers() {
+        if (!closed) generation++
     }
 
     override fun DrawScope.drawBackdrop(
@@ -154,20 +218,21 @@ class ViewBackdrop(
     ) {
         @Suppress("UNUSED_VARIABLE") val frame = generation
         if (!ready || closed || coordinates == null || !coordinates.isAttached) return
-        val origin = coordinates.localToWindow(Offset.Zero)
-        val x = coordinates.localToWindow(Offset(1f, 0f)) - origin
-        val y = coordinates.localToWindow(Offset(0f, 1f)) - origin
-        targetToWindow.setValues(floatArrayOf(x.x, y.x, origin.x, x.y, y.y, origin.y, 0f, 0f, 1f))
-        if (!targetToWindow.invert(windowToTarget)) return
-        // localToWindow already includes the consumer's full layer transform. Applying the
+        val origin = coordinates.localToScreen(Offset.Zero)
+        if (!origin.x.isFinite() || !origin.y.isFinite()) return
+        val x = coordinates.localToScreen(Offset(1f, 0f)) - origin
+        val y = coordinates.localToScreen(Offset(0f, 1f)) - origin
+        targetToScreen.setValues(floatArrayOf(x.x, y.x, origin.x, x.y, y.y, origin.y, 0f, 0f, 1f))
+        if (!targetToScreen.invert(screenToTarget)) return
+        // localToScreen already includes the consumer's full layer transform. Applying the
         // LayerBackdrop inverse scale a second time would distort the sampled background.
         withTransform({}) {
             val canvas = drawContext.canvas.nativeCanvas
             check(canvas.isHardwareAccelerated) { "ViewBackdrop cannot render into a software canvas" }
             val save = canvas.save()
             try {
-                canvas.concat(windowToTarget)
-                canvas.concat(sourceToWindow)
+                canvas.concat(screenToTarget)
+                canvas.concat(sourceToScreen)
                 canvas.drawRenderNode(node)
             } finally { canvas.restoreToCount(save) }
         }
@@ -176,6 +241,7 @@ class ViewBackdrop(
     override fun close() {
         if (closed) return
         closed = true
+        cancelDeferredCapture()
         observer?.takeIf { it.isAlive }?.removeOnPreDrawListener(this)
         observer = null
         node.discardDisplayList()

@@ -138,6 +138,7 @@ internal class GlassBarCollapseController(
             Trace.setCounter("AM++/collapse/progress", (progress * 10000f).toLong())
             Trace.setCounter("AM++/collapse/running", if (isRunning) 1L else 0L)
         }
+        ScrollCollapseBridge.update(if (closed) 0f else progress)
         if (!closed) activity.window.decorView.postInvalidateOnAnimation()
     }
 
@@ -166,6 +167,7 @@ internal class GlassBarCollapseController(
     override fun close() {
         if (closed) return
         closed = true
+        ScrollCollapseBridge.update(0f)
         observer?.takeIf { it.isAlive }?.removeOnScrollChangedListener(scrollListener)
         observer = null
         input.clear()
