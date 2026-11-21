@@ -114,6 +114,8 @@ Java 反编译用于理解流程，原始 owner 与擦除签名以 DEX/smali 为
 
 适配器基类新增方法造成子类混淆名整体移动时，旧名仍可能存在且签名相同，却已指向其他实现；空实现也无法仅凭方法体归一化或完整签名区分。此时须沿原生调用的同一状态分支和父类声明追踪实际实现，不能按同名或首个候选复用。
 
+布局 XML 与资源值一致时可以沿用资源映射，生成 binding 仍须独立核对。以当前 DEX 的 inflate、赋值和读取链确认视图字段、类型与所属实例，并将简写字段与完整契约同步。
+
 编译器可能把旧工具类中的方法拆到多个 owner，也可能把相同实现复制到不同的合成类。逐角色追踪实际调用点，确认合成实例的构造点、参数和分派分支。共享短名在不同构建中的解析应优先使用当前精确 profile 的入口。
 
 复用相邻构建 profile 的 `evidence` 时，各独立区域沿用现有字段，逐个按目标实际包更新 `sourceBuild`、`sourceIdentity`、`memberSource`，并重新核对 `layoutReview`；明确区分上游方案来源与当前宿主证据，旧 `runtimeVerified` 不随复制保留。
@@ -791,6 +793,8 @@ GenericProfileViewModel 发布不可变Success状态，复用 `AppleArtistSurfac
 `ARTIST_SURFACE_CLASSES` 的 compose_profile_view_model / compose_profile_success_state 与 `artistComposeProfile` 任一声明即尝试独立 hle.artist-compose-profile 组；声明不全或成员缺失降级，完全未声明不安装。缓存只在全部声明解析成功后完成。
 
 `ArtistComposeProfileContract` 在注册前解析setUiState、header/shelves builder、entityType/entityTitle/entityViews、viewEntities、Success字段与构造器，并校验实例/static、返回/字段及赋值关系。Success可赋给setUiState参数，不猜直接父类；v1保留id、title、header、shelves、entity、long revision顺序，六字段须不同且与builder/构造参数一致。views按声明值类型调用其数组getter，不猜getData回退；artistType与topSongsView语义参数同样来自当前包。角色完整性以REQUIRED和适用离线清单为准，每构建getter证据独立记录，不借其他包结果。
+
+shelf 内部结构变化时，检查原生 builder 的输出如何进入 Success 及实际列表。只要原生 builder 仍完整构造条目且 Success 接收同一语义的列表，继续调用原生 builder 并将结果交给宿主。
 
 `ArtistComposeProfileSessions` 弱持有owner/Success/艺人歌曲及pending。新Success、loading/error、非艺人或缺ID/属性关闭旧会话和排队任务；帧队列执行前确认会话和安装组仍活动，关闭只清本组，已出队旧任务也须失活。alias到达/恢复原名按当前entity重建title/header/shelves，保留原生ID/revision；top-songs关联在enrich前，地区判断仍来自歌曲。
 
