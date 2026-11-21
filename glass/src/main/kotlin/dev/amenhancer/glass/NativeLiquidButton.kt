@@ -7,8 +7,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -51,12 +53,20 @@ fun NativeLiquidButton(
     /** Expanded material bounds for a size-animating host; native content keeps its own size. */
     minLayerSize: IntSize = IntSize.Zero,
     capsuleShape: Shape = Capsule(),
+    /** Opt-in: receives the material foreground, or null before a sample and while expanded. */
+    onForegroundColor: ((Color?) -> Unit)? = null,
     transformContent: (Float, Float, Float, Float) -> Unit,
 ) {
     val containerColor = if (isSystemInDarkTheme()) Color(0xFF121212).copy(alpha = 0.4f)
         else Color(0xFFFAFAFA).copy(alpha = 0.4f)
     val scope = rememberCoroutineScope()
     val highlight = remember(scope) { InteractiveHighlight(scope) }
+    // Mini text reverts with the capsule; re-enabling the sampler re-applies the same choice.
+    val sampling = onForegroundColor != null && expansion == 0f
+    val contrast = rememberGlassTextContrast(enabled = sampling)
+    val latestForegroundSink = rememberUpdatedState(onForegroundColor)
+    val sampledForeground = contrast?.foreground
+    LaunchedEffect(sampling, sampledForeground) { latestForegroundSink.value?.invoke(sampledForeground) }
     val material = if (minLayerSize != IntSize.Zero) {
         val radiusPx = with(LocalDensity.current) { panelBlur.toPx() }
         remember(radiusPx) { VibrantBlur(radiusPx) }
@@ -88,6 +98,7 @@ fun NativeLiquidButton(
                 lens(refraction, refraction)
             },
             onDrawSurface = { drawRect(containerColor) },
+            onSampleMaterial = if (sampling) contrast?.sampleMaterial else null,
             layerBlock = {
                 val width = size.width
                 val height = size.height

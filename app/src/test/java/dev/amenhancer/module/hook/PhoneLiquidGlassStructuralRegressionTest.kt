@@ -445,17 +445,21 @@ class PhoneLiquidGlassStructuralRegressionTest {
     }
 
     @Test
-    fun `tints only a copy of the compact glyph`() {
+    fun `tints the compact glyph without changing the host drawable tint`() {
         val navigation = projectFile("glass/src/main/kotlin/dev/amenhancer/glass/GlassNavigation.kt")
+        val iconRenderer = navigation.substringAfter("private fun NavigationIcon(", "")
         // `GlassTab.icon` is the very drawable the expanded tab row paints. Tinting it in place
         // recoloured that tab for the rest of the session — it stayed accent-red after expanding
         // and followed the tab through every later selection, because a Drawable's tint belongs
         // to the drawable rather than to this composition.
-        assertTrue(navigation.contains("constantState?.newDrawable(resources)?.mutate()"))
-        assertTrue(navigation.contains("copy?.setTint(tint.toArgb())"))
-        // Without a constant state there is nothing safe to tint, so the glyph stays untinted
-        // rather than recolouring the shared drawable.
-        assertTrue(navigation.contains("copy ?: source"))
+        assertTrue(navigation.contains("NavigationIcon(glyph?.icon, if (searchLeft) foreground else accent)"))
+        val drawableCopy = iconRenderer.substringAfter("newDrawable(resources)?.mutate()?.apply {", "")
+            .substringBefore('}')
+        assertTrue(drawableCopy.contains("setTint(tint.toArgb())"))
+        // Without a constant state, the draw layer owns the tint.
+        assertTrue(iconRenderer.contains("PorterDuffColorFilter(tint.toArgb(), PorterDuff.Mode.SRC_IN)"))
+        assertTrue(iconRenderer.contains("canvas.saveLayer(0f, 0f, size.width, size.height, tintLayer)"))
+        assertFalse(iconRenderer.contains(Regex("(?:source|icon)\\??\\.setTint")))
     }
 
     @Test
@@ -464,10 +468,7 @@ class PhoneLiquidGlassStructuralRegressionTest {
         // The collapsed search button IS the selection when search is the active tab, so it has
         // to be tinted exactly like the capsule's compact face. Leaving it uncoloured made the
         // collapsed row look like nothing was selected while the expanded row had clearly shown red.
-        assertTrue(navigation.contains("if (!selected) source"))
-        assertTrue(navigation.contains("copy?.setTint(accent.toArgb())"))
-        // Same copy-not-mutate rule as the compact glyph, and for the same reason.
-        assertTrue(navigation.contains("remember(tab.icon, selected, accent)"))
+        assertTrue(navigation.contains("NavigationIcon(tab.icon, if (selected) accent else contrast?.foreground)"))
     }
 
     @Test

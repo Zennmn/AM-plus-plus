@@ -76,6 +76,7 @@ internal open class PhoneGlassSession(
     final override var miniRoot: FrameLayout? = null
         private set
     private var miniContent: View? = null
+    private var miniForeground: GlassMiniForeground? = null
     final override var playerBehavior: Any? = null
         private set
     private var observer: ViewTreeObserver? = null
@@ -94,6 +95,8 @@ internal open class PhoneGlassSession(
     private val input = NativeButtonInput()
     private var slide = 0f
     private var returningToMini = false
+    private var foregroundActive = true
+    private var miniForegroundEnabled by mutableStateOf(false)
     protected val isCollapsed: Boolean get() = slide <= 0.001f
     protected val glassMenuReady: Boolean get() = tabs.size > 1 && tabs.any { it.id == selectedId }
     private var glassExpansion by androidx.compose.runtime.mutableFloatStateOf(0f)
@@ -326,6 +329,7 @@ internal open class PhoneGlassSession(
         val content = root?.findViewById<View>(resourceId(ChromeResource.MINI_PLAYER_CONTENT))
         if (root != null && (root !== miniRoot || content !== miniContent)) {
             miniGlass?.let { (it.parent as? ViewGroup)?.removeView(it) }
+            miniForeground?.reset()
             miniRoot?.let { states.remove(it)?.restore(it) }
             miniContent?.let {
                 transformOwners.remove(it)?.values?.forEach(AutoCloseable::close)
@@ -336,18 +340,23 @@ internal open class PhoneGlassSession(
             overflowClips.retainOnly((overflowAncestors(navFrame) + overflowAncestors(root)).asIterable())
             miniRoot = root
             miniContent = content
+            miniForeground = GlassMiniForeground(content)
             val bg = backdrop ?: return
             val glass = GlassHostView(moduleContext(), traceName = "AM++/mini").also { miniGlass = it }
             glass.alpha = 0f
             glass.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
             glass.content {
                 HostConfiguration {
+                    val miniForegroundSink: ((Color?) -> Unit)? = if (miniForegroundEnabled) {
+                        { color -> if (miniForegroundEnabled && miniGlass === glass) miniForeground?.apply(color) }
+                    } else null
                     val reserveBackdrop by remember { derivedStateOf { barCollapse.isRunning } }
                     NativeLiquidButton(bg, input, glassExpansion, panelBlur = navBlurDp.dp,
                         autoClip = geometry.sideBySide || (barCollapse.hasPresentation && glassExpansion == 0f),
                         miniHeightDp = geometry.miniHeightDp,
                         minLayerSize = if (reserveBackdrop && glassExpansion == 0f) miniBackdropSize else IntSize.Zero,
-                        capsuleShape = GlassCollapseShapes.capsule(barCollapse.hasPresentation)) { sx, sy, x, y ->
+                        capsuleShape = GlassCollapseShapes.capsule(barCollapse.hasPresentation),
+                        onForegroundColor = miniForegroundSink) { sx, sy, x, y ->
                         miniContent?.let { v -> writeOwnedTransform(v, "scaleX", sx); writeOwnedTransform(v, "scaleY", sy); writeOwnedTransform(v, "translationX", x); writeOwnedTransform(v, "translationY", y) }
                     }
                 }
@@ -777,6 +786,7 @@ internal open class PhoneGlassSession(
         glassExpansion = materialProgress
         val miniAlpha = if (!miniVisible && progress == 0f) 0f else 1f - blend(0.35f, 0.6f)
         val hideTransparentMiniGlass = miniAlpha <= 0f
+        updateMiniForeground(foregroundActive && isCollapsed && miniVisible && backdrop?.ready == true)
         var revivedMiniGlass = false
         miniGlass?.let { glass ->
             if (!hideTransparentMiniGlass) {
@@ -942,6 +952,7 @@ internal open class PhoneGlassSession(
     }
 
     override fun foreground(active: Boolean) {
+        foregroundActive = active
         if (active) {
             glassSettings = config.settings()
             nextSettingsCheck = android.os.SystemClock.uptimeMillis() + 500L
@@ -950,10 +961,19 @@ internal open class PhoneGlassSession(
             scanNeeded = true
         }
         if (!active) {
+            updateMiniForeground(false)
             captureWait.timedOut(0L, false)
             barCollapse.resetInput()
         }
         navGlass?.foreground(active); navScrim?.foreground(active); miniGlass?.foreground(active)
+    }
+
+    private fun updateMiniForeground(enabled: Boolean) {
+        if (miniForegroundEnabled != enabled) {
+            miniForegroundEnabled = enabled
+            if (!enabled) miniForeground?.reset()
+        }
+        if (enabled) miniForeground?.refresh()
     }
 
     protected open fun findPlayerBehavior(): Any? = hostBinding.playerBehavior(false)
@@ -968,6 +988,7 @@ internal open class PhoneGlassSession(
     override fun close() {
         if (closed) return
         closed = true
+        updateMiniForeground(false)
         activated = false
         playerSheet = null
         attachHandler.removeCallbacks(retryAttach)
@@ -979,6 +1000,7 @@ internal open class PhoneGlassSession(
         composeScenes = emptyList()
         backdrop?.close()
         listOfNotNull(navGlass, navScrim, miniGlass).forEach { (it.parent as? ViewGroup)?.removeView(it) }
+        miniForeground = null
         states.forEach { (view, state) -> state.restore(view) }
         states.clear()
         overflowClips.close()

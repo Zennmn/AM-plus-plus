@@ -6,6 +6,8 @@ android {
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     testOptions {
         unitTests.all {
+            // Robolectric resolves its Android SDK separately from Gradle.
+            it.systemProperty("robolectric.dependency.repo.url", "https://repo.maven.apache.org/maven2")
             it.jvmArgs(
                 "--add-opens=java.base/java.lang=ALL-UNNAMED",
                 "--add-opens=java.base/java.util=ALL-UNNAMED",

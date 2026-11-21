@@ -114,6 +114,8 @@ Java 反编译用于理解流程，原始 owner 与擦除签名以 DEX/smali 为
 
 适配器基类新增方法造成子类混淆名整体移动时，旧名仍可能存在且签名相同，却已指向其他实现；空实现也无法仅凭方法体归一化或完整签名区分。此时须沿原生调用的同一状态分支和父类声明追踪实际实现，不能按同名或首个候选复用。
 
+布局 XML 与资源值一致时可以沿用资源映射，生成 binding 仍须独立核对。以当前 DEX 的 inflate、赋值和读取链确认视图字段、类型与所属实例，并将简写字段与完整契约同步。
+
 编译器可能把旧工具类中的方法拆到多个 owner，也可能把相同实现复制到不同的合成类。逐角色追踪实际调用点，确认合成实例的构造点、参数和分派分支。共享短名在不同构建中的解析应优先使用当前精确 profile 的入口。
 
 复用相邻构建 profile 的 `evidence` 时，各独立区域沿用现有字段，逐个按目标实际包更新 `sourceBuild`、`sourceIdentity`、`memberSource`，并重新核对 `layoutReview`；明确区分上游方案来源与当前宿主证据，旧 `runtimeVerified` 不随复制保留。
@@ -614,6 +616,8 @@ Fragment 手机/平板共用 `FragmentMiniStartup`，在 `FragmentSurfaceBinding
 
 原生内容、材质采样和模块岛按视图会话管理。关闭/失败/视图替换恢复仍拥有的透明度、裁剪、尺寸和原生触摸，旧回调不能影响新树。旧 Activity 保留自己的导航/mini 组合与视频语义。
 
+导航标签、普通图标和 mini 文字、播放控件分别按所在玻璃材质的明暗选黑白。取样复用已渲染的背景和底色，在前景绘制前以小尺寸限频读回；无有效样本时使用主题或原生颜色。导航沿用选中强调色，独立搜索按钮按自身材质取色。mini 只在原生内容根内绑定实际存在的歌名、艺人名和播放控制视图，核对手机和平板的布局资源及图标着色入口，留意完整播放器与歌词面板的同名资源。接管期间记录宿主颜色，保留控件状态；离开可见 mini 或释放会话时恢复仍由模块拥有的颜色。
+
 宿主已维护兼容的内容 RenderNode 时，可在 `fragmentChrome.members.fields.contentBackdropNode` 声明完整 owner/name/type，经既有解析器预解析；未声明保持 View 采样。宿主绑定通过 Canvas 语义端口提供录制，核对直接父类型、唯一内容子树、原点/矩阵/alpha/Z、尺寸、父滚动/padding及 display-list 就绪。宿主本轮正常绘制在 RenderThread 使用引用前更新同一节点；窗口背景、源脏状态与代次仍由 `ViewBackdrop` 处理。首帧未就绪或层级/几何不匹配时返回未绘制并回退 `source.draw`；模块只释放自己的记录，不丢弃宿主节点，也不在材质库发现私有字段。
 
 预绘制中的裁剪和留白更新必须先比较当前值，只在实际变化时调用 setter。不要假设原生控件对同值写入没有副作用：适配原生列表时须追踪其 `setClipToPadding` 等覆写，确认首次布局后是否仍无条件 `requestLayout`。每帧重复写入会形成“预绘制 → 请求布局 → 全局布局通知 → 下帧预绘制”的循环，连带触发层级扫描、背景录制和材质绘制；纯 Compose 场景未进入该分支不能证明原生列表路径正常。保持原值捕获、离开目标/关闭时的恢复，以及宿主真实改值后重新接管的语义；不能用降低动画帧率或冻结背景掩盖布局循环。
@@ -791,6 +795,8 @@ GenericProfileViewModel 发布不可变Success状态，复用 `AppleArtistSurfac
 `ARTIST_SURFACE_CLASSES` 的 compose_profile_view_model / compose_profile_success_state 与 `artistComposeProfile` 任一声明即尝试独立 hle.artist-compose-profile 组；声明不全或成员缺失降级，完全未声明不安装。缓存只在全部声明解析成功后完成。
 
 `ArtistComposeProfileContract` 在注册前解析setUiState、header/shelves builder、entityType/entityTitle/entityViews、viewEntities、Success字段与构造器，并校验实例/static、返回/字段及赋值关系。Success可赋给setUiState参数，不猜直接父类；v1保留id、title、header、shelves、entity、long revision顺序，六字段须不同且与builder/构造参数一致。views按声明值类型调用其数组getter，不猜getData回退；artistType与topSongsView语义参数同样来自当前包。角色完整性以REQUIRED和适用离线清单为准，每构建getter证据独立记录，不借其他包结果。
+
+shelf 内部结构变化时，检查原生 builder 的输出如何进入 Success 及实际列表。只要原生 builder 仍完整构造条目且 Success 接收同一语义的列表，继续调用原生 builder 并将结果交给宿主。
 
 `ArtistComposeProfileSessions` 弱持有owner/Success/艺人歌曲及pending。新Success、loading/error、非艺人或缺ID/属性关闭旧会话和排队任务；帧队列执行前确认会话和安装组仍活动，关闭只清本组，已出队旧任务也须失活。alias到达/恢复原名按当前entity重建title/header/shelves，保留原生ID/revision；top-songs关联在enrich前，地区判断仍来自歌曲。
 
