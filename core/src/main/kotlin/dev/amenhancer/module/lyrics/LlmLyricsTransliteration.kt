@@ -209,7 +209,11 @@ $input"""
                 val groupReadings = groups.optJSONArray(groupIndex) ?: return null
                 val groupEnglish = english.optJSONArray(groupIndex) ?: return null
                 if (groupReadings.length() != group.units.size) return null
-                val flags = parseEnglishIndexes(groupEnglish, group.units.size) ?: return null
+                val suppliedFlags = parseEnglishIndexes(groupEnglish, group.units.size) ?: return null
+                // A model may mark a correctly romanized non-Latin source unit as English.
+                val flags = suppliedFlags.filter { index ->
+                    group.units[index].source.none(::isNonLatinLetter)
+                }
                 val values = ArrayList<String>(group.units.size)
                 group.units.forEachIndexed { unitIndex, unit ->
                     val reading = groupReadings.opt(unitIndex) as? String ?: return null
