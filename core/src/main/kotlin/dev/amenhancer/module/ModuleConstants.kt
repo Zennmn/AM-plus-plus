@@ -1,6 +1,7 @@
 package dev.amenhancer.module
 
 object ModuleConstants {
+    const val FEATURE_WECHAT_MOMENTS = "wechat_moments"
     const val MODULE_PACKAGE = "dev.amenhancer.module"
     const val TARGET_PACKAGE = "com.apple.android.music"
     const val REMOTE_PREFERENCES_GROUP = "settings"
