@@ -34,4 +34,6 @@ The opted-in LiquidBottomTabs path derives shared geometry snapshots and reads c
 
 The reused hidden label is drawn by a Canvas child measured and placed at the cached layout's real size and baselines. Only the redundant BasicText child is skipped; a cache miss measures and places that BasicText instead. Do not replace the source label with an empty placement block or rely on a draw modifier whose inner coordinator was never placed.
 
+`DrawBackdropModifier` exposes an optional sampler for adaptive glass foregrounds. It replays the prepared effect layer and surface tint before content. AM++ reads back a small, rate-limited sample for each participating panel, reusing the existing backdrop recording.
+
 Phone scroll-collapse surfaces use cached Circular capsule outlines from `dev.amenhancer.glass.GlassCollapseShapes`, including tab clipping and press feedback. This is a runtime collapse policy, not a diagnostic build switch. Circular outlines differ from the original Continuous/Generic curve; appearance and performance still require manual acceptance for each new host. `LiquidBottomTab` and `NativeLiquidButton` accept a shape with the original Capsule default. Other hosts and the full-player shape keep their original behavior. Preserve these local integrations when syncing upstream; no renderer, lens shader or dependency binary is replaced.

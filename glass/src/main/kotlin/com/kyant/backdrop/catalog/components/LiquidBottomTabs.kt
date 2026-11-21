@@ -10,6 +10,7 @@
  * read continuous geometry during layout/drawing, reserve expanded effect-layer bounds,
  * avoid redundant offscreen clipping, suspend the unused refraction source layout, and
  * accept an optional refraction row that can reuse the visible labels' text layouts.
+ * The panel can expose its recorded material for adaptive tab foregrounds.
  * See backdrop/UPSTREAM.md and THIRD_PARTY_NOTICES.md.
  */
 
@@ -55,6 +56,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerId
@@ -124,6 +126,8 @@ fun LiquidBottomTabs(
     expandReboundScale: Float = 1f,
     /** Only collapse-capable hosts reuse fixed material effects and suspend the hidden source. */
     optimizeCollapseRendering: Boolean = false,
+    onSampleMaterial: (DrawScope.(DrawScope.() -> Unit) -> Unit)? = null,
+    sampleCompactForeground: Boolean = false,
     /** AM++: optional equivalent content for the semantically hidden refraction source only. */
     refractionContent: (@Composable RowScope.() -> Unit)? = null,
     content: @Composable RowScope.() -> Unit
@@ -377,11 +381,15 @@ fun LiquidBottomTabs(
             interactiveHighlight.releasePress()
         }
 
+        val expandedVisible = gates.expandedVisible
+        val sampleMaterial = onSampleMaterial.takeIf { expandedVisible || (sampleCompactForeground && gates.compactVisible) }
         val panelMaterial = if (optimizeCollapseRendering) {
-            remember(backdrop, panelBlur, containerColor, dampedDragAnimation, material, panelLayerSize) {
-                glassPanelMaterial(backdrop, panelBlur, containerColor, dampedDragAnimation, material, panelLayerSize)
+            remember(backdrop, panelBlur, containerColor, dampedDragAnimation, material, panelLayerSize, sampleMaterial) {
+                glassPanelMaterial(backdrop, panelBlur, containerColor, dampedDragAnimation, material,
+                    panelLayerSize, sampleMaterial)
             }
-        } else glassPanelMaterial(backdrop, panelBlur, containerColor, dampedDragAnimation, null)
+        } else glassPanelMaterial(backdrop, panelBlur, containerColor, dampedDragAnimation, null,
+            onSampleMaterial = sampleMaterial)
         val refractionMaterial = if (optimizeCollapseRendering) {
             remember(backdrop, panelBlur, containerColor, dampedDragAnimation, material, refractionLayerSize) {
                 glassRefractionMaterial(backdrop, panelBlur, containerColor, dampedDragAnimation, material, refractionLayerSize)
@@ -389,7 +397,6 @@ fun LiquidBottomTabs(
         } else glassRefractionMaterial(backdrop, panelBlur, containerColor, dampedDragAnimation, null)
         // Keep the source nodes/layers alive, but do not measure or place their subtree when
         // the selection droplet has no need for it. Expanding places it again before drawing.
-        val expandedVisible = gates.expandedVisible
         val expandedLayout = if (optimizeCollapseRendering) Modifier.layout { measurable, constraints ->
             if (expandedVisible) {
                 val child = measurable.measure(constraints)
@@ -541,6 +548,7 @@ private fun glassPanelMaterial(
     backdrop: Backdrop, panelBlur: androidx.compose.ui.unit.Dp, containerColor: Color,
     dampedDragAnimation: DampedDragAnimation, material: VibrantBlur?,
     minLayerSize: IntSize = IntSize.Zero,
+    onSampleMaterial: (DrawScope.(DrawScope.() -> Unit) -> Unit)? = null,
 ): Modifier = Modifier.drawBackdrop(
     backdrop = backdrop,
     minLayerSize = material?.paddedSize(minLayerSize) ?: minLayerSize,
@@ -559,7 +567,8 @@ private fun glassPanelMaterial(
         scaleX = scale
         scaleY = scale
     },
-    onDrawSurface = { drawRect(containerColor) }
+    onDrawSurface = { drawRect(containerColor) },
+    onSampleMaterial = onSampleMaterial,
 )
 
 private fun glassRefractionMaterial(

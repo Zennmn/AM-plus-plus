@@ -4,6 +4,7 @@
  * 65ab177e90e5c1d8c62e70cf7755841982da65f6, Apache License 2.0.
  * Changed by AM++: optional clip compositing, minimum layer size and CPU trace markers.
  * Existing callers keep offscreen clipping and layers sized to their current bounds.
+ * An opt-in material sample replays the prepared backdrop and surface before content.
  * See backdrop/UPSTREAM.md and THIRD_PARTY_NOTICES.md.
  */
 
@@ -87,6 +88,7 @@ fun Modifier.drawPlainBackdrop(
                 onDrawBehind = onDrawBehind,
                 onDrawBackdrop = onDrawBackdrop,
                 onDrawSurface = onDrawSurface,
+                onSampleMaterial = null,
                 onDrawFront = onDrawFront
             )
         )
@@ -108,6 +110,7 @@ fun Modifier.drawBackdrop(
     onDrawBehind: (DrawScope.() -> Unit)? = null,
     onDrawBackdrop: DrawScope.(drawBackdrop: DrawScope.() -> Unit) -> Unit = DefaultOnDrawBackdrop,
     onDrawSurface: (DrawScope.() -> Unit)? = null,
+    onSampleMaterial: (DrawScope.(DrawScope.() -> Unit) -> Unit)? = null,
     onDrawFront: (DrawScope.() -> Unit)? = null
 ): Modifier {
     val shapeProvider = ShapeProvider(shape)
@@ -161,6 +164,7 @@ fun Modifier.drawBackdrop(
                 onDrawBehind = onDrawBehind,
                 onDrawBackdrop = onDrawBackdrop,
                 onDrawSurface = onDrawSurface,
+                onSampleMaterial = onSampleMaterial,
                 onDrawFront = onDrawFront
             )
         )
@@ -177,6 +181,7 @@ private class DrawBackdropElement(
     val onDrawBehind: (DrawScope.() -> Unit)?,
     val onDrawBackdrop: DrawScope.(drawBackdrop: DrawScope.() -> Unit) -> Unit,
     val onDrawSurface: (DrawScope.() -> Unit)?,
+    val onSampleMaterial: (DrawScope.(DrawScope.() -> Unit) -> Unit)?,
     val onDrawFront: (DrawScope.() -> Unit)?
 ) : ModifierNodeElement<DrawBackdropNode>() {
 
@@ -192,6 +197,7 @@ private class DrawBackdropElement(
             onDrawBehind = onDrawBehind,
             onDrawBackdrop = onDrawBackdrop,
             onDrawSurface = onDrawSurface,
+            onSampleMaterial = onSampleMaterial,
             onDrawFront = onDrawFront
         )
     }
@@ -210,6 +216,7 @@ private class DrawBackdropElement(
         node.onDrawBehind = onDrawBehind
         node.onDrawBackdrop = onDrawBackdrop
         node.onDrawSurface = onDrawSurface
+        node.onSampleMaterial = onSampleMaterial
         node.onDrawFront = onDrawFront
         node.invalidateDrawCache()
     }
@@ -226,6 +233,7 @@ private class DrawBackdropElement(
         properties["onDrawBehind"] = onDrawBehind
         properties["onDrawBackdrop"] = onDrawBackdrop
         properties["onDrawSurface"] = onDrawSurface
+        properties["onSampleMaterial"] = onSampleMaterial
         properties["onDrawFront"] = onDrawFront
     }
 
@@ -243,6 +251,7 @@ private class DrawBackdropElement(
         if (onDrawBehind != other.onDrawBehind) return false
         if (onDrawBackdrop != other.onDrawBackdrop) return false
         if (onDrawSurface != other.onDrawSurface) return false
+        if (onSampleMaterial != other.onSampleMaterial) return false
         if (onDrawFront != other.onDrawFront) return false
 
         return true
@@ -259,6 +268,7 @@ private class DrawBackdropElement(
         result = 31 * result + (onDrawBehind?.hashCode() ?: 0)
         result = 31 * result + onDrawBackdrop.hashCode()
         result = 31 * result + (onDrawSurface?.hashCode() ?: 0)
+        result = 31 * result + (onSampleMaterial?.hashCode() ?: 0)
         result = 31 * result + (onDrawFront?.hashCode() ?: 0)
         return result
     }
@@ -275,6 +285,7 @@ private class DrawBackdropNode(
     var onDrawBehind: (DrawScope.() -> Unit)?,
     var onDrawBackdrop: DrawScope.(drawBackdrop: DrawScope.() -> Unit) -> Unit,
     var onDrawSurface: (DrawScope.() -> Unit)?,
+    var onSampleMaterial: (DrawScope.(DrawScope.() -> Unit) -> Unit)?,
     var onDrawFront: (DrawScope.() -> Unit)?
 ) : LayoutModifierNode, DrawModifierNode, GlobalPositionAwareModifierNode, ObserverModifierNode, Modifier.Node() {
 
@@ -344,14 +355,23 @@ private class DrawBackdropNode(
             layer.topLeft =
                 if (padding != 0f) IntOffset(-padding.toInt(), -padding.toInt())
                 else IntOffset.Zero
-            if (minLayerSize != IntSize.Zero) {
-                // A larger backing must not expose pixels beyond the original padded bounds.
-                val inset = padding.toInt().toFloat()
-                clipRect(-inset, -inset, size.width.toInt() + inset, size.height.toInt() + inset) {
-                    drawLayer(layer)
-                }
-            } else drawLayer(layer)
+            paintBackdropLayer(layer)
         }
+    }
+
+    private fun DrawScope.paintBackdropLayer(layer: GraphicsLayer) {
+        if (minLayerSize != IntSize.Zero) {
+            // A larger backing must not expose pixels beyond the original padded bounds.
+            val inset = padding.toInt().toFloat()
+            clipRect(-inset, -inset, size.width.toInt() + inset, size.height.toInt() + inset) {
+                drawLayer(layer)
+            }
+        } else drawLayer(layer)
+    }
+
+    private val replayMaterial: DrawScope.() -> Unit = {
+        graphicsLayer?.let { paintBackdropLayer(it) }
+        onDrawSurface?.invoke(this)
     }
 
     override fun MeasureScope.measure(
@@ -372,6 +392,7 @@ private class DrawBackdropNode(
         onDrawBehind?.invoke(this)
         drawBackdropLayer()
         onDrawSurface?.invoke(this)
+        onSampleMaterial?.invoke(this, replayMaterial)
         drawContent()
         onDrawFront?.invoke(this)
 
