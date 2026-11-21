@@ -2,12 +2,23 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <permission android:name="dev.amenhancer.module.permission.SHARE_MOMENTS_LINK" android:protectionLevel="signature" />
+    <uses-permission android:name="dev.amenhancer.module.permission.SHARE_MOMENTS_LINK" />
+    <queries>
+        <package android:name="com.netease.cloudmusic" />
+    </queries>
     <application
         android:allowBackup="false"
         android:description="@string/xposed_description"
         android:icon="@drawable/ic_module"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.AppleMusicEnhancer" />
+        android:theme="@style/Theme.AppleMusicEnhancer">
+        <activity
+            android:name=".share.MomentsShareActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:label="@string/moments_share_label" />
+    </application>
 
 </manifest>

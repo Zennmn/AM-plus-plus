@@ -22,6 +22,9 @@ data class TargetAdaptation(
     val customLyrics: CustomLyricsTarget = CustomLyricsTarget {
         TargetCapabilityInstall.Degraded("Custom lyrics target was not configured")
     },
+    val wechatMoments: WechatMomentsTarget = WechatMomentsTarget {
+        TargetCapabilityInstall.Unsupported("WeChat Moments sharing is unavailable")
+    },
     val currentSongIdentity: CurrentSongIdentityTarget = CurrentSongIdentityTarget {
         TargetCapabilityInstall.Degraded("Current song identity target was not configured")
     },
@@ -129,4 +132,8 @@ sealed interface TargetCapabilityInstall {
             require(message.isNotBlank()) { "Target capability diagnostic must not be blank" }
         }
     }
+}
+
+fun interface WechatMomentsTarget {
+    fun install(): TargetCapabilityInstall
 }

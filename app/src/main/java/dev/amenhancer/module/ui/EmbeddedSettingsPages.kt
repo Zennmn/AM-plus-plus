@@ -624,6 +624,12 @@ private fun EmbeddedSettingsHost.EmbeddedSettingsCategory(
         }
         EmbeddedSettingsPage.INTERFACE -> {
             EmbeddedSettingsGroup {
+                Setting(ModuleText.WECHAT_MOMENTS, ModuleText.WECHAT_MOMENTS_SUMMARY,
+                    settings.wechatMomentsShareEnabled, EmbeddedSvgIcon.Document,
+                ) { value -> onEdit { it.copy(wechatMomentsShareEnabled = value) } }
+                Setting(ModuleText.SHARE_CHINA_STOREFRONT, ModuleText.SHARE_CHINA_STOREFRONT_SUMMARY,
+                    settings.shareLinksUseChinaStorefront, EmbeddedSvgIcon.Document,
+                ) { value -> onEdit { it.copy(shareLinksUseChinaStorefront = value) } }
                 Setting(ModuleText.TABLET_DUAL_PANE, ModuleText.TABLET_DUAL_PANE_SUMMARY,
                     settings.dualPaneEnabled, EmbeddedSvgIcon.TabletDualPane) { value -> onEdit { it.copy(dualPaneEnabled = value) } }
                 if (settings.dualPaneEnabled) Setting(
@@ -765,6 +771,8 @@ private fun EmbeddedSettingsHost.showEmbeddedPageDetails(activity: Activity, pag
             ModuleText.LYRICS_FONT to ModuleText.LYRICS_FONT_IMPORT_SUMMARY,
         )
         EmbeddedSettingsPage.INTERFACE -> listOf(
+            ModuleText.WECHAT_MOMENTS to ModuleText.WECHAT_MOMENTS_SUMMARY,
+            ModuleText.SHARE_CHINA_STOREFRONT to ModuleText.SHARE_CHINA_STOREFRONT_SUMMARY,
             ModuleText.TABLET_DUAL_PANE to ModuleText.TABLET_DUAL_PANE_SUMMARY,
             ModuleText.TABLET_DUAL_PANE_HIDE_STATUS_BAR to ModuleText.TABLET_DUAL_PANE_HIDE_STATUS_BAR_SUMMARY,
             ModuleText.LIQUID_GLASS_NAVIGATION to ModuleText.LIQUID_GLASS_NAVIGATION_SUMMARY,

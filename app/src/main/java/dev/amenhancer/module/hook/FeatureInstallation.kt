@@ -248,6 +248,7 @@ private fun productionFeatureInstallationModule(
                 registerResources = lyricsTypefaceSession::registerResources,
             ),
             FeatureInstallationPlan(feature = CurrentSongIdentityFeature()),
+            FeatureInstallationPlan(feature = WechatMomentsFeature()),
             FeatureInstallationPlan(feature = TitleCorrectionFeature()),
             FeatureInstallationPlan(feature = LyricsParserFeature()),
             FeatureInstallationPlan(feature = CustomLyricsFeature()),

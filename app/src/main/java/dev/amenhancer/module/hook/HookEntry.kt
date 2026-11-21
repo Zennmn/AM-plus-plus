@@ -57,6 +57,13 @@ class HookEntry : XposedModule() {
             ModernXposedRuntime.log("framework API $apiVersion is below the embedded API 102 minimum")
             return
         }
+        if (param.packageName == dev.amenhancer.module.MomentsLinkContract.INTERMEDIARY_PACKAGE) {
+            if (param.isFirstPackage && processName == param.packageName) {
+                ModernXposedRuntime.attach(this)
+                dev.amenhancer.host.netease.NetEaseShareBridge.install()
+            }
+            return
+        }
         if (!bootstrap.prepare(
                 packageName = param.packageName,
                 processName = processName,
