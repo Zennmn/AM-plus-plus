@@ -57,8 +57,8 @@ fun NativeLiquidButton(
     onForegroundColor: ((Color?) -> Unit)? = null,
     transformContent: (Float, Float, Float, Float) -> Unit,
 ) {
-    val containerColor = if (isSystemInDarkTheme()) Color(0xFF121212).copy(alpha = 0.4f)
-        else Color(0xFFFAFAFA).copy(alpha = 0.4f)
+    val containerColor = if (isSystemInDarkTheme()) Color(0xFF121212).copy(alpha = 0.2f)
+        else Color(0xFFFAFAFA).copy(alpha = 0.2f)
     val scope = rememberCoroutineScope()
     val highlight = remember(scope) { InteractiveHighlight(scope) }
     // Mini text reverts with the capsule; re-enabling the sampler re-applies the same choice.

@@ -78,6 +78,7 @@ internal class FragmentTabletGlassSession(
     private var miniContent: View? = null
     private var miniForeground: GlassMiniForeground? = null
     private var miniForegroundEnabled by mutableStateOf(false)
+    private var adaptiveForeground by mutableStateOf(config.settings().glassAdaptiveForegroundEnabled)
     private var configuration by mutableStateOf(Configuration(root.resources.configuration))
     private var blurDp = -1
     private var bottomGapDp = dev.amenhancer.module.model.EnhancementDefaults.GLASS_BOTTOM_DP
@@ -123,6 +124,7 @@ internal class FragmentTabletGlassSession(
             if (now >= nextMenuCheck) {
                 nextMenuCheck = now + 500
                 val settings = config.settings()
+                adaptiveForeground = settings.glassAdaptiveForegroundEnabled
                 bottomGapDp = dev.amenhancer.module.model.ModuleSettings.normalizePhoneLiquidGlassBottomGapDp(
                     settings.phoneLiquidGlassBottomGapDp)
                 if (blurDp >= 0 && blurDp != settings.phoneLiquidGlassPanelBlurDp) refreshSettings()
@@ -163,7 +165,7 @@ internal class FragmentTabletGlassSession(
             val transition = FragmentPlayerSurfaceMotion.tabletFrame(slide)
             val miniOpacity = if (miniWasVisible) transition.alpha else 0f
             val miniVisible = miniOpacity > .001f
-            updateMiniForeground(active && replacing && slide <= .001f && miniVisible && backdrop?.ready == true)
+            updateMiniForeground(adaptiveForeground && active && replacing && slide <= .001f && miniVisible && backdrop?.ready == true)
             if (min.glass.visibility != if (miniVisible) View.VISIBLE else View.GONE) {
                 min.glass.visibility = if (miniVisible) View.VISIBLE else View.GONE
             }
@@ -267,7 +269,8 @@ internal class FragmentTabletGlassSession(
                             GlassNavigation(tabs, selectedId, accent, foreground, bg, ::selectTab,
                                 panelHeight = panelHeight, panelBlur = blurDp.dp,
                                 style = GlassNavigationStyle.TabletLabels, drawerIcon = drawerIcon,
-                                drawerDescription = ModuleText.OPEN_SIDEBAR.text(), onDrawer = { safely { this@FragmentTabletGlassSession.surface.navigation.openDrawer() } })
+                                drawerDescription = ModuleText.OPEN_SIDEBAR.text(), onDrawer = { safely { this@FragmentTabletGlassSession.surface.navigation.openDrawer() } },
+                                adaptiveForeground = adaptiveForeground)
                         }
                     } else {
                         val miniForegroundSink: ((Color?) -> Unit)? = if (miniForegroundEnabled) {

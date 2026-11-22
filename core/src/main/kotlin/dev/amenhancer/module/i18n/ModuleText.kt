@@ -173,6 +173,8 @@ enum class ModuleText(internal val english: String, internal val chinese: String
     TABLET_BOTTOM_BAR_FIX_SUMMARY("Enable if the bottom bar is displayed incorrectly", "如果底栏显示异常开启该选项"),
     LIQUID_GLASS_NAVIGATION("Liquid Glass bottom bar", "液态玻璃底栏"),
     LIQUID_GLASS_NAVIGATION_SUMMARY("Glass bottom bar and mini player on phones and landscape dual-pane tablets · Restart to apply", "为手机与开启平板双栏播放器的平板横屏的底栏和迷你播放器启用液态玻璃效果，需重开应用"),
+    GLASS_ADAPTIVE_FOREGROUND("Auto-invert glass text and icons", "自动反色"),
+    GLASS_ADAPTIVE_FOREGROUND_SUMMARY("Adjust text and icon colors to the glass background", "底栏与迷你播放器的文字和图标随背景明暗换色"),
     BOTTOM_BAR_HEIGHT("Bottom bar height", "底栏高度"),
     BOTTOM_BAR_HEIGHT_SUMMARY("Distance from the bottom of the screen", "底栏距屏幕底部的距离"),
     BOTTOM_BAR_BLUR("Bottom bar background blur", "底栏背景模糊强度"),

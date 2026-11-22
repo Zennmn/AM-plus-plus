@@ -112,6 +112,8 @@ fun GlassNavigation(
      */
     collapseReboundScale: Float = 1f,
     expandReboundScale: Float = 1f,
+    /** Adaptive black/white foreground; false keeps the host's static foreground colors. */
+    adaptiveForeground: Boolean = true,
 ) {
     // The reference drag animation normalizes by tabsCount - 1. Keep a one-tab host native.
     if (tabs.size < 2) return
@@ -137,9 +139,9 @@ fun GlassNavigation(
     val expandedInteractive by remember {
         derivedStateOf { GlassBarCollapsePolicy.expandedInteractive(liveProgress.value()) }
     }
-    val contrast = rememberGlassTextContrast()
-    val adaptiveForeground = contrast?.foreground
-    val labelColor = adaptiveForeground ?: foreground
+    val contrast = rememberGlassTextContrast(enabled = adaptiveForeground)
+    val sampledForeground = contrast?.foreground
+    val labelColor = sampledForeground ?: foreground
     val neutralCompactGlyph = searchTab?.id == selectedId
     // The visible and refraction rows share only the latest layout for each current tab.
     // Keep BasicText in the visible row so its semantics and font invalidation stay native.
@@ -165,7 +167,7 @@ fun GlassNavigation(
                             },
                         ) {
                             if (style == GlassNavigationStyle.Stacked || tab.icon != null) {
-                                val tint = if (!refraction && tab.id != selectedId) adaptiveForeground else null
+                                val tint = if (!refraction && tab.id != selectedId) sampledForeground else null
                                 NavigationIcon(tab.icon, tint)
                             }
                             if (style == GlassNavigationStyle.Stacked || tab.icon == null) {
@@ -196,7 +198,7 @@ fun GlassNavigation(
                         Box(Modifier.width(panelHeight - 8.dp).fillMaxHeight()
                             .semantics { contentDescription = drawerDescription }
                             .clickable(onClick = open), contentAlignment = Alignment.Center) {
-                            NavigationIcon(drawerIcon, adaptiveForeground)
+                            NavigationIcon(drawerIcon, sampledForeground)
                         }
                     } },
                     collapseProgress = progress,
@@ -231,6 +233,7 @@ fun GlassNavigation(
                         onSelect = { request(searchTab) },
                         collapseReboundScale = collapseReboundScale,
                         expandReboundScale = expandReboundScale,
+                        adaptiveForeground = adaptiveForeground,
                     )
                 }
             }
@@ -319,6 +322,7 @@ private fun BoxScope.DetachedSearchControl(
     /** User-set rebound amplitudes, shared with the capsule. See [GlassNavigation]. */
     collapseReboundScale: Float = 1f,
     expandReboundScale: Float = 1f,
+    adaptiveForeground: Boolean = true,
 ) {
     val density = LocalDensity.current
     val liveProgress = rememberUpdatedState(collapseProgress)
@@ -336,10 +340,10 @@ private fun BoxScope.DetachedSearchControl(
     }
     val radiusPx = with(density) { panelBlur.toPx() }
     val material = remember(radiusPx) { VibrantBlur(radiusPx) }
-    val containerColor = if (isSystemInDarkTheme()) Color(0xFF121212).copy(alpha = 0.4f)
-        else Color(0xFFFAFAFA).copy(alpha = 0.4f)
+    val containerColor = if (isSystemInDarkTheme()) Color(0xFF121212).copy(alpha = 0.2f)
+        else Color(0xFFFAFAFA).copy(alpha = 0.2f)
     val selected = tab.id == selectedId
-    val contrast = rememberGlassTextContrast(enabled = !selected && tab.icon != null)
+    val contrast = rememberGlassTextContrast(enabled = adaptiveForeground && !selected && tab.icon != null)
     BoxWithConstraints(
         Modifier.align(Alignment.BottomEnd).fillMaxWidth().height(rowHeight),
         contentAlignment = Alignment.CenterEnd,

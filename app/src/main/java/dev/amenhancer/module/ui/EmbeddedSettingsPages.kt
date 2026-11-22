@@ -651,6 +651,10 @@ private fun EmbeddedSettingsHost.EmbeddedSettingsCategory(
                 }
             }
             if (settings.phoneLiquidGlassEnabled) EmbeddedSettingsGroup {
+                Setting(ModuleText.GLASS_ADAPTIVE_FOREGROUND, ModuleText.GLASS_ADAPTIVE_FOREGROUND_SUMMARY,
+                    settings.glassAdaptiveForegroundEnabled, EmbeddedSvgIcon.Glass) { value ->
+                    onEdit { it.copy(glassAdaptiveForegroundEnabled = value) }
+                }
                 EmbeddedSettingRange(
                     title = localizedText(ModuleText.BOTTOM_BAR_HEIGHT),
                     value = settings.phoneLiquidGlassBottomGapDp,

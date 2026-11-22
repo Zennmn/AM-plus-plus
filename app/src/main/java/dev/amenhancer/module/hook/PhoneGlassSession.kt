@@ -134,6 +134,7 @@ internal open class PhoneGlassSession(
     private var hierarchyDirty = false
     protected var glassSettings = config.settings()
         private set
+    private var adaptiveForeground by mutableStateOf(glassSettings.glassAdaptiveForegroundEnabled)
     private val barCollapse = GlassBarCollapseController(activity, hostBinding,
         inputActive = { activated && !closed && isCollapsed }, failure = ::scheduleFailure)
     private val collapseSupported: Boolean get() = !geometry.sideBySide && hostBinding.supportsScrollCollapse
@@ -314,7 +315,8 @@ internal open class PhoneGlassSession(
                 collapseProgress = if (barCollapse.hasPresentation) ::collapseProgress else null,
                 onExpandRequest = barCollapse::expand,
                 collapseReboundScale = barCollapse.appearance.collapseReboundScale,
-                expandReboundScale = barCollapse.appearance.expandReboundScale) } }
+                expandReboundScale = barCollapse.appearance.expandReboundScale,
+                adaptiveForeground = adaptiveForeground) } }
             val navSlot = capsuleMarginsPx(frame.width, mini = false)
             frame.addView(glass, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(GlassPolicy.NAV_HEIGHT_DP), Gravity.TOP).apply {
                 leftMargin = navSlot[0]; rightMargin = navSlot[1]
@@ -473,6 +475,7 @@ internal open class PhoneGlassSession(
             if (now >= nextSettingsCheck) {
                 nextSettingsCheck = now + 500
                 glassSettings = config.settings()
+                adaptiveForeground = glassSettings.glassAdaptiveForegroundEnabled
                 if (!sessionEligible()) {
                     activity.window.decorView.post { close() }
                     return true
@@ -786,7 +789,7 @@ internal open class PhoneGlassSession(
         glassExpansion = materialProgress
         val miniAlpha = if (!miniVisible && progress == 0f) 0f else 1f - blend(0.35f, 0.6f)
         val hideTransparentMiniGlass = miniAlpha <= 0f
-        updateMiniForeground(foregroundActive && isCollapsed && miniVisible && backdrop?.ready == true)
+        updateMiniForeground(adaptiveForeground && foregroundActive && isCollapsed && miniVisible && backdrop?.ready == true)
         var revivedMiniGlass = false
         miniGlass?.let { glass ->
             if (!hideTransparentMiniGlass) {
@@ -955,6 +958,7 @@ internal open class PhoneGlassSession(
         foregroundActive = active
         if (active) {
             glassSettings = config.settings()
+            adaptiveForeground = glassSettings.glassAdaptiveForegroundEnabled
             nextSettingsCheck = android.os.SystemClock.uptimeMillis() + 500L
             contentInset = null
             hierarchyDirty = true

@@ -10,6 +10,8 @@ data class ModuleSettings(
     /** Legacy storage key; Editorial Video suppression now follows dualPaneEnabled. */
     val disableEditorialVideoOnTablet: Boolean = true,
     val phoneLiquidGlassEnabled: Boolean = false,
+    /** Chooses black or white glass foregrounds from the sampled material. */
+    val glassAdaptiveForegroundEnabled: Boolean = true,
     /** Distance in dp between the bottom-bar capsule and the screen bottom; glass-gated. */
     val phoneLiquidGlassBottomGapDp: Int = EnhancementDefaults.GLASS_BOTTOM_DP,
     /** Backdrop blur radius in dp shared by the nav panel and the mini-player. */

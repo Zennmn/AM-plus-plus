@@ -29,6 +29,10 @@ object ModuleSettingsSchema {
             KEY_PHONE_LIQUID_GLASS,
             default = false,
         ),
+        glassAdaptiveForegroundEnabled = values.boolean(
+            KEY_GLASS_ADAPTIVE_FOREGROUND,
+            default = true,
+        ),
         phoneLiquidGlassBottomGapDp = values.number(KEY_PHONE_LIQUID_GLASS_BOTTOM_GAP_DP)
             ?.coerceIn(
                 ModuleSettings.MIN_PHONE_LIQUID_GLASS_BOTTOM_GAP_DP,
@@ -138,6 +142,7 @@ object ModuleSettingsSchema {
             KEY_DUAL_PANE_HIDE_STATUS_BAR to settings.dualPaneHideStatusBarEnabled,
             KEY_DISABLE_EDITORIAL_VIDEO_ON_TABLET to settings.disableEditorialVideoOnTablet,
             KEY_PHONE_LIQUID_GLASS to settings.phoneLiquidGlassEnabled,
+            KEY_GLASS_ADAPTIVE_FOREGROUND to settings.glassAdaptiveForegroundEnabled,
             KEY_PHONE_LIQUID_GLASS_BOTTOM_GAP_DP to
                 ModuleSettings.normalizePhoneLiquidGlassBottomGapDp(
                     settings.phoneLiquidGlassBottomGapDp,
@@ -396,6 +401,7 @@ object ModuleSettingsSchema {
         KEY_DUAL_PANE_HIDE_STATUS_BAR,
         KEY_DISABLE_EDITORIAL_VIDEO_ON_TABLET,
         KEY_PHONE_LIQUID_GLASS,
+        KEY_GLASS_ADAPTIVE_FOREGROUND,
         KEY_PHONE_LIQUID_GLASS_BOTTOM_GAP_DP,
         KEY_PHONE_LIQUID_GLASS_PANEL_BLUR_DP,
         KEY_PHONE_LIQUID_GLASS_COLLAPSE,
@@ -450,6 +456,7 @@ object ModuleSettingsSchema {
     private const val KEY_DISABLE_EDITORIAL_VIDEO_ON_TABLET =
         "disable_editorial_video_on_tablet"
     private const val KEY_PHONE_LIQUID_GLASS = "phone_liquid_glass_enabled"
+    private const val KEY_GLASS_ADAPTIVE_FOREGROUND = "glass_adaptive_foreground_enabled"
     private const val KEY_PHONE_LIQUID_GLASS_BOTTOM_GAP_DP = "phone_liquid_glass_bottom_gap_dp"
     private const val KEY_PHONE_LIQUID_GLASS_PANEL_BLUR_DP = "phone_liquid_glass_panel_blur_dp"
     private const val KEY_PHONE_LIQUID_GLASS_COLLAPSE = "phone_liquid_glass_collapse_enabled"
