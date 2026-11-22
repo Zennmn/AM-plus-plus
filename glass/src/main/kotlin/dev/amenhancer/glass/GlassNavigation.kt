@@ -167,8 +167,8 @@ fun GlassNavigation(
                             },
                         ) {
                             if (style == GlassNavigationStyle.Stacked || tab.icon != null) {
-                                val tint = if (!refraction && tab.id != selectedId) sampledForeground else null
-                                NavigationIcon(tab.icon, tint)
+                                // The moving lens supplies the accent over the adaptive row.
+                                NavigationIcon(tab.icon, if (refraction) null else sampledForeground)
                             }
                             if (style == GlassNavigationStyle.Stacked || tab.icon == null) {
                                 val textStyle = TextStyle(color = labelColor,
