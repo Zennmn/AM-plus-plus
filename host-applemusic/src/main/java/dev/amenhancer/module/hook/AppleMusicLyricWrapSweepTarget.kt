@@ -72,6 +72,7 @@ internal class AppleMusicLyricWrapSweepTarget(
     private val layoutObservers = WeakIdentityMap<ViewGroup, View.OnLayoutChangeListener>()
     private val maskOwners = WeakIdentityMap<Any, MaskOwner>()
     private val handoffs = WeakIdentityMap<Any, Handoff>()
+    private val boundPositions = WeakIdentityMap<Any, Int>()
     private var registration: HookRegistrationScope? = null
     private var lastFailure: String? = null
 
@@ -139,13 +140,11 @@ internal class AppleMusicLyricWrapSweepTarget(
                             contract.listenerRtl.getBoolean(listener) != sweep.recipe.rtl) return@guarded
                         val colors = contract.listenerColors.get(listener) as? IntArray ?: return@guarded
                         val feather = contract.listenerFeather.getFloat(listener)
-                        val word = sweep.recipe.word.get() ?: return@guarded
-                        val browser = sweep.recipe.browser.get() ?: return@guarded
-                        val position = contract.position(browser) ?: return@guarded
-                        val timed = lyricWrapWordProgress(contract.wordBegin.getInt(word), contract.wordDuration.getInt(word), position)
-                            ?: return@guarded
-                        // Only the new sweep created after a backward seek may reduce the visible progress.
-                        val progress = if (animator.animatedFraction >= 1f) 1f else maxOf(sweep.lastProgress, timed)
+                        if (sweep.recipe.word.get() == null || sweep.recipe.browser.get() == null) return@guarded
+                        // The native animator advances the part of the word that remains after attachment.
+                        val fraction = animator.animatedFraction
+                        val progress = if (fraction >= 1f) 1f else maxOf(sweep.lastProgress,
+                            sweep.initialProgress + (1f - sweep.initialProgress) * fraction)
                         if (renderGeometry(contract, sweep.recipe, progress, colors, feather)) {
                             sweep.lastProgress = progress
                             sweep.colors = colors
@@ -229,11 +228,36 @@ internal class AppleMusicLyricWrapSweepTarget(
                         guarded {
                             val holder = param.args.firstOrNull() ?: return@guarded
                             if (!contract.holderBinding.declaringClass.isInstance(holder)) return@guarded
+                            val previousPosition = boundPositions[holder]
+                            boundPositions.remove(holder)
                             val binding = contract.holderBinding.get(holder) ?: return@guarded
                             val root = contract.bindingRoot.get(binding) as? View ?: return@guarded
+                            // A refresh can start native fill synchronously on the same masks.
+                            val sameRow = method == contract.bind && previousPosition != null &&
+                                previousPosition == param.args.getOrNull(1)
+                            if (sameRow) guarded { handOffActiveSweeps(contract, param.thisObject, holder, root) }
                             retire { it.recipe.belongsTo(root) }
                             forgetFrames { it.recipe.belongsTo(root) }
-                            forgetHandoffs { it.belongsTo(root) }
+                            forgetHandoffs { recipe ->
+                                recipe.belongsTo(root) &&
+                                    (!sameRow || !belongsToBinding(contract, param.thisObject, holder, recipe))
+                            }
+                        }
+                    }
+
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        if (method != contract.bind) return
+                        guarded {
+                            val holder = param.args.firstOrNull() ?: return@guarded
+                            if (!contract.holderBinding.declaringClass.isInstance(holder)) return@guarded
+                            val position = (param.args.getOrNull(1) as? Int)?.takeIf { it >= 0 && param.throwable == null }
+                            if (position != null) boundPositions[holder] = position
+                            val binding = contract.holderBinding.get(holder) ?: return@guarded
+                            val root = contract.bindingRoot.get(binding) as? View ?: return@guarded
+                            forgetHandoffs { recipe ->
+                                recipe.belongsTo(root) &&
+                                    (position == null || !belongsToBinding(contract, param.thisObject, holder, recipe))
+                            }
                         }
                     }
                 })
@@ -293,6 +317,7 @@ internal class AppleMusicLyricWrapSweepTarget(
                 layoutObservers.clear()
                 maskOwners.clear()
                 handoffs.clear()
+                boundPositions.clear()
             }
             scope.activate()
             registration = scope
@@ -421,14 +446,38 @@ internal class AppleMusicLyricWrapSweepTarget(
                 maskOwners[mask] = MaskOwner(flex, recipe.bottom)
         }
         if (!geometry.render(contract, progress, colors, feather)) return false
-        if (progress >= 1f && isSweepPalette(colors, recipe.rtl)) masks.forEachIndexed { index, mask ->
+        if (progress >= 1f) rememberHandoffs(contract, recipe, geometry, masks, colors) { index ->
             val end = geometry.plan.fragments[index].end
-            val completed = floatArrayOf(0f, end, end, 1f)
-            val previous = handoffs[mask]?.takeIf { it.recipe.rtl == recipe.rtl && it.geometry.valid(contract) }
-            val positions = previous?.let { lyricWrapHandoffPositions(completed, it.positions, recipe.rtl) } ?: completed
-            handoffs[mask] = Handoff(recipe, geometry, positions)
+            floatArrayOf(0f, end, end, 1f)
         }
         return true
+    }
+
+    private fun handOffActiveSweeps(contract: LyricWrapSweepContract, adapter: Any?, holder: Any, root: View) {
+        sweeps.keys().forEach { animator ->
+            val sweep = sweeps[animator] ?: return@forEach
+            if (sweep.retired || !sweep.ownsMasks || sweep.lastProgress >= 1f) return@forEach
+            val recipe = sweep.recipe
+            if (!recipe.belongsTo(root) || !belongsToBinding(contract, adapter, holder, recipe)) return@forEach
+            val geometry = recipe.geometry?.takeIf { it.valid(contract) } ?: return@forEach
+            val colors = sweep.colors ?: return@forEach
+            val masks = geometry.maskIdentities() ?: return@forEach
+            rememberHandoffs(contract, recipe, geometry, masks, colors) { index ->
+                val edge = geometry.plan.edge(index, sweep.lastProgress, sweep.feather)
+                lyricWrapGradientPositions(geometry.plan.fragments[index], edge, sweep.feather)
+            }
+        }
+    }
+
+    private inline fun rememberHandoffs(contract: LyricWrapSweepContract, recipe: Recipe,
+        geometry: LyricWrapSweepGeometry, masks: List<Any>, colors: IntArray, stopsAt: (Int) -> FloatArray) {
+        if (!isSweepPalette(colors, recipe.rtl)) return
+        masks.forEachIndexed { index, mask ->
+            val stops = stopsAt(index)
+            val previous = handoffs[mask]?.takeIf { it.recipe.rtl == recipe.rtl && it.geometry.valid(contract) }
+            val positions = previous?.let { lyricWrapHandoffPositions(stops, it.positions, recipe.rtl) } ?: stops
+            handoffs[mask] = Handoff(recipe, geometry, positions)
+        }
     }
 
     private fun restoreFrames(contract: LyricWrapSweepContract, view: ViewGroup) {
@@ -463,6 +512,13 @@ internal class AppleMusicLyricWrapSweepTarget(
     private fun forgetHandoffs(predicate: (Recipe) -> Boolean) {
         handoffs.keys().forEach { mask ->
             handoffs[mask]?.let { if (predicate(it.recipe)) handoffs.remove(mask) }
+        }
+    }
+
+    private fun belongsToBinding(contract: LyricWrapSweepContract, adapter: Any?, holder: Any, recipe: Recipe): Boolean {
+        val word = recipe.word.get() ?: return false
+        return adapter != null && recipe.adapter.get() === adapter && contract.wordMaps.any { field ->
+            (field.get(holder) as? Map<*, *>)?.values?.any { it === word } == true
         }
     }
 
