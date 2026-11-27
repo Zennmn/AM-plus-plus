@@ -245,6 +245,25 @@ def verify_fragment_contracts(document, classes, failures):
                 for role in sorted(roles - entries.keys()):
                     failures.append(f'lyricBackgroundHighlight.{group}.{role}: missing required role')
             sections['lyricBackgroundHighlight'] = background
+            entry = background.get('duetEntry')
+            if entry is not None:
+                key = 'lyricBackgroundHighlight.duetEntry'
+                if not isinstance(entry, dict) or entry.get('contractVersion') != 1:
+                    failures.append(f'{key}: missing versioned contract')
+                else:
+                    required = {
+                        'methods': {'lineEvent', 'lineAgent'},
+                        'fields': {'eventFragment', 'fragmentAdapter'},
+                        'constructors': {'request'},
+                    }
+                    for group, roles in required.items():
+                        entries = entry.get(group, {})
+                        if not isinstance(entries, dict):
+                            failures.append(f'{key}.{group}: invalid inventory')
+                            continue
+                        for role in sorted(roles - entries.keys()):
+                            failures.append(f'{key}.{group}.{role}: missing required role')
+                    sections[key] = entry
     # Optional navigation startup prewarm. A declared capability needs its exact contract.
     prewarm = document.get('startupPagePrewarm')
     capability = (document.get('capabilities') or {}).get('startupPagePrewarm') is True

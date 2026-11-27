@@ -178,6 +178,9 @@ internal class AppleMusicLyricBackgroundHighlightTarget(
                     }
                 }
             })
+            val entryFailure = names.optJSONObject("duetEntry")?.let { entry ->
+                runCatching { installDuetEntry(native, entry, scope) }.exceptionOrNull()
+            }
             scope.onClose {
                 handler.removeCallbacks(tick)
                 tickPosted = false
@@ -186,13 +189,36 @@ internal class AppleMusicLyricBackgroundHighlightTarget(
             }
             registration = scope
             scope.activate()
-            TargetCapabilityInstall.Active("Background vocal highlighting: post-filter parents, word state and native focus; ${profile.id}")
+            if (entryFailure != null) {
+                ModernXposedRuntime.log("Duet entry unavailable; background highlighting stays active", entryFailure)
+                TargetCapabilityInstall.Degraded("Duet entry unavailable: ${entryFailure.message}; ${profile.id}")
+            } else TargetCapabilityInstall.Active("Native lyric highlighting; ${profile.id}")
         } catch (error: Throwable) {
             scope.close()
             contract = null
             ModernXposedRuntime.log("Background vocal native highlighting unavailable", error)
             TargetCapabilityInstall.Degraded("Background vocal highlighting unavailable: ${error.message ?: error.javaClass.simpleName}")
         }
+    }
+
+    private fun installDuetEntry(native: BackgroundHighlightContract, names: JSONObject, scope: HookRegistrationScope) {
+        val entry = DuetEntryContract(native, loader, names)
+        val diagnostics = LyricBlurDiagnostics(profile.id)
+        check(checkNotNull(ModernXposedRuntime.activeModule()).deoptimize(entry.lineEvent)) {
+            "Native line event must call the request constructor without inlining"
+        }
+        check(ModernXposedRuntime.hookMethod(entry.request, object : ModernMethodHook() {
+            private var failed = false
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                if (failed || Looper.myLooper() != Looper.getMainLooper()) return
+                // The original completion listener and ItemAnimator still own when this request is submitted.
+                runCatching { entry.prepare(param, diagnostics) }.onFailure { error ->
+                    failed = true
+                    ModernXposedRuntime.log("Duet entry failed open", error)
+                    runCatching { onFailure("Duet entry: ${error.cause?.message ?: error.message}") }
+                }
+            }
+        }, scope))
     }
 
     private fun prepareCommit(param: ModernMethodHook.MethodHookParam) {
@@ -264,13 +290,7 @@ internal class AppleMusicLyricBackgroundHighlightTarget(
         if (session.windows.containsKey(lineId)) return session.windows[lineId]
         val native = contract ?: return null
         val reader = session.reader.get() ?: return null
-        val count = (native.lineCount.invoke(reader) as Number).toInt()
-        check(count in 0..MAX_LYRIC_LINES) { "Lyric reader exceeds its read bound" }
-        fun lineAt(index: Int): Any? = native.lineAt.invoke(reader, index)?.let { native.lineGet.invoke(it) }
-        val direct = if (lineId in 0 until count) lineAt(lineId) else null
-        val line = direct?.takeIf { native.lineId.invoke(it) == lineId }
-            ?: (0 until count).asSequence().mapNotNull(::lineAt).firstOrNull { native.lineId.invoke(it) == lineId }
-            ?: return null
+        val line = native.line(reader, lineId) ?: return null
         val begin = (native.timingBegin.invoke(line) as Number).toLong()
         var end = -1L
         listOf(native.backgroundWords, native.pronunciationBackgroundWords).forEach { method ->
@@ -370,7 +390,6 @@ internal class AppleMusicLyricBackgroundHighlightTarget(
         const val COMMIT_CALL = "AM++.backgroundVocalCommit"
         const val TICK_MILLIS = 50L
         const val MAX_BACKGROUND_WORDS = 4096L
-        const val MAX_LYRIC_LINES = 4096
     }
 }
 
@@ -391,10 +410,10 @@ private class BackgroundHighlightContract(profile: AppleMusicHostProfile, loader
     private val payloadKind = members.method("payloadKind")
     val document = members.method("document")
     val detach = members.method("detach")
-    val lineAt = members.method("lineAt")
-    val lineCount = members.method("lineCount")
-    val lineGet = members.method("lineGet")
-    val lineId = members.method("lineId")
+    private val lineAt = members.method("lineAt")
+    private val lineCount = members.method("lineCount")
+    private val lineGet = members.method("lineGet")
+    private val lineId = members.method("lineId")
     val backgroundWords = members.method("backgroundWords")
     val pronunciationBackgroundWords = members.method("pronunciationBackgroundWords")
     val vectorSize = members.method("vectorSize")
@@ -448,6 +467,16 @@ private class BackgroundHighlightContract(profile: AppleMusicHostProfile, loader
         check(listOf(focusStart, focusEnd).all { it.declaringClass == callbackFragment.type && it.type == Int::class.javaPrimitiveType })
         check(mediaBrowser.declaringClass.isAssignableFrom(callbackFragment.type) && destroyView.declaringClass == callbackFragment.type)
         check(mediaPosition.declaringClass.isAssignableFrom(mediaBrowser.returnType) && seek.declaringClass == mediaPosition.declaringClass)
+    }
+
+    fun line(reader: Any, id: Int, allowLookup: Boolean = true): Any? {
+        val count = (lineCount.invoke(reader) as Number).toInt()
+        check(count in 0..4096) { "Lyric reader exceeds its read bound" }
+        fun at(index: Int): Any? = lineAt.invoke(reader, index)?.let { lineGet.invoke(it) }
+        val direct = if (id in 0 until count) at(id) else null
+        direct?.takeIf { lineId.invoke(it) == id }?.let { return it }
+        if (!allowLookup) return null
+        return (0 until count).asSequence().mapNotNull(::at).firstOrNull { lineId.invoke(it) == id }
     }
 
     @Suppress("UNCHECKED_CAST") fun current(adapter: Any): Set<Int> = currentLines.get(adapter) as Set<Int>
@@ -532,5 +561,61 @@ private class BackgroundHighlightContract(profile: AppleMusicHostProfile, loader
         fun pair(name: String, value: Any) = Pair(kind(name), value)
         return arrayOf(pair("PLAYBACK_POSITION", position), pair("WORD_HIGHLIGHT_IDS", copyIds(wordHighlightIds.get(adapter))),
             pair("BG_WORD_HIGHLIGHT_IDS", copyIds(backgroundHighlightIds.get(adapter))))
+    }
+}
+
+/** Only combines the first native layout request for two close, independently timed voices. */
+private class DuetEntryContract(private val native: BackgroundHighlightContract, loader: ClassLoader, names: JSONObject) {
+    private val members = FragmentProfileMembers(loader, names, "lyricBackgroundHighlight.duetEntry", FragmentMemberRequirements(
+        methods = setOf("lineEvent", "lineAgent"),
+        fields = setOf("eventFragment", "fragmentAdapter"),
+        constructors = setOf("request"),
+    ))
+    val lineEvent = members.method("lineEvent")
+    val request = members.constructor("request")
+    private val lineAgent = members.method("lineAgent")
+    private val fragment = members.field("eventFragment")
+    private val adapter = members.field("fragmentAdapter")
+
+    init {
+        check(names.getInt("contractVersion") == 1)
+        check(request.parameterTypes.contentEquals(arrayOf(lineEvent.declaringClass, ArrayList::class.java,
+            Long::class.javaObjectType, Long::class.javaObjectType)))
+        check(fragment.declaringClass == lineEvent.declaringClass && fragment.type == adapter.declaringClass &&
+            adapter.type.isAssignableFrom(native.commit.declaringClass))
+        check(lineAgent.declaringClass == native.timingBegin.declaringClass && lineAgent.returnType == String::class.java)
+    }
+
+    fun prepare(param: ModernMethodHook.MethodHookParam, diagnostics: LyricBlurDiagnostics) {
+        val id = (param.args[1] as List<*>).singleOrNull() as? Int ?: return
+        if (id < 0) return
+        val wordAdapter = adapter.get(fragment.get(param.args[0])) ?: return
+        if (!native.commit.declaringClass.isInstance(wordAdapter)) return
+        val active = native.current(wordAdapter)
+        if (id in active) return
+        val reader = native.reader.get(wordAdapter) ?: return
+        val first = native.line(reader, id, allowLookup = false) ?: return
+        val firstAgent = lineAgent.invoke(first) as? String ?: return
+        if (firstAgent.isBlank()) return
+        val begin = (native.timingBegin.invoke(first) as Number).toLong()
+        if (begin < 0L) return
+        val end = (native.timingEnd.invoke(first) as Number).toLong()
+        val position = native.position(wordAdapter) ?: return
+        val otherId = listOf(id - 1, id + 1).filter { candidate ->
+            if (candidate < 0 || candidate in active) return@filter false
+            val other = native.line(reader, candidate, allowLookup = false) ?: return@filter false
+            val otherBegin = (native.timingBegin.invoke(other) as Number).toLong()
+            if (otherBegin - begin !in 0L..MAX_START_GAP_MS || otherBegin >= end || position >= otherBegin) return@filter false
+            val otherAgent = lineAgent.invoke(other) as? String ?: return@filter false
+            otherAgent.isNotBlank() && otherAgent != firstAgent &&
+                (native.timingEnd.invoke(other) as Number).toLong() > otherBegin
+        }.singleOrNull() ?: return
+        // Prepares the incoming row only. Each voice still consumes its own native word events.
+        param.args[1] = arrayListOf(minOf(id, otherId), maxOf(id, otherId))
+        diagnostics.event("duet-entry") { "media=$position line=$id paired=$otherId" }
+    }
+
+    private companion object {
+        const val MAX_START_GAP_MS = 50L
     }
 }
