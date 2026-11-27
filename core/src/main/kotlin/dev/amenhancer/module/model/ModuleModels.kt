@@ -56,6 +56,8 @@ data class ModuleSettings(
      * before springing back, in dp. 0 disables the dip. Read live.
      */
     val phoneLiquidGlassMiniSinkBounceDp: Int = EnhancementDefaults.GLASS_MINI_SINK_BOUNCE_DP,
+    val shareLinksUseChinaStorefront: Boolean = false,
+    val wechatMomentsShareEnabled: Boolean = false,
     val futureBlurEnabled: Boolean = true,
     /** Enables the native rush-gradient adaptation for CJK karaoke lyrics. */
     val cjkKaraokeAnimationEnabled: Boolean = true,

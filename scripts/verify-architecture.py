@@ -5,9 +5,10 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {
-    'app': {'core','host-api','hook-runtime','host-applemusic','glass','plugin-api','plugin-runtime'},
+    'app': {'core','host-api','hook-runtime','host-applemusic','host-netease','glass','plugin-api','plugin-runtime'},
     'plugin-api': set(), 'plugin-runtime': {'plugin-api','hook-runtime'},
     'core': set(), 'host-api': {'core'}, 'hook-runtime': {'core'},
+    'host-netease': {'core','hook-runtime'},
     'host-applemusic': {'core','host-api','hook-runtime'}, 'glass': {'core','backdrop'}, 'backdrop': set(),
 }
 

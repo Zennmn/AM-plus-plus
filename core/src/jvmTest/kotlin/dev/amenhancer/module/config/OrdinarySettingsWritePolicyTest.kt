@@ -115,6 +115,8 @@ class OrdinarySettingsWritePolicyTest {
                 "phone_liquid_glass_expand_rebound_percent" to 100,
                 "phone_liquid_glass_mini_rebound_percent" to 100,
                 "phone_liquid_glass_mini_sink_bounce_dp" to 4,
+                "share_links_use_china_storefront" to false,
+                "wechat_moments_share_enabled" to false,
                 "future_blur_enabled" to false,
                 "cjk_karaoke_animation_enabled" to true,
                 "lyrics_pronunciation_enabled" to true,

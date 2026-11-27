@@ -85,6 +85,7 @@ dependencies {
     implementation(project(":host-api"))
     implementation(project(":hook-runtime"))
     implementation(project(":host-applemusic"))
+    implementation(project(":host-netease"))
     implementation(project(":glass"))
     compileOnly("io.github.libxposed:api:102.0.0")
     compileOnly("io.github.libxposed:service:102.0.0")
@@ -100,6 +101,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.17")
     // org.json is part of the Android runtime but not of the local JVM; the
     // test-only copy keeps the NetEase response parsing unit-testable.
     testImplementation("org.json:json:20240303")

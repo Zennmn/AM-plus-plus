@@ -186,6 +186,11 @@ object AppleMusicHostFactory {
             ),
             customLyrics = customLyrics,
             lyricsParser = LyricsParserTarget { lyricRepairs },
+            wechatMoments = AppleMusicMomentsShareTarget(
+                enabled = { config.settings().wechatMomentsShareEnabled },
+                currentSong = { currentSong.current()?.details },
+                chinaStorefront = { config.settings().shareLinksUseChinaStorefront },
+            ),
             currentSongIdentity = AppleMusicCurrentSongIdentityTarget(
                 resolver,
                 currentSong,

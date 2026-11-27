@@ -71,6 +71,8 @@ object ModuleSettingsSchema {
                 ModuleSettings.MIN_PHONE_LIQUID_GLASS_MINI_SINK_BOUNCE_DP,
                 ModuleSettings.MAX_PHONE_LIQUID_GLASS_MINI_SINK_BOUNCE_DP,
             ) ?: EnhancementDefaults.GLASS_MINI_SINK_BOUNCE_DP,
+        shareLinksUseChinaStorefront = values.boolean(KEY_SHARE_CHINA_STOREFRONT, default = false),
+        wechatMomentsShareEnabled = values.boolean(KEY_WECHAT_MOMENTS, default = false),
         futureBlurEnabled = values.boolean(KEY_FUTURE_BLUR, default = true),
         cjkKaraokeAnimationEnabled = values.boolean(
             KEY_CJK_KARAOKE_ANIMATION_ENABLED,
@@ -169,6 +171,8 @@ object ModuleSettingsSchema {
                 ModuleSettings.normalizePhoneLiquidGlassMiniSinkBounceDp(
                     settings.phoneLiquidGlassMiniSinkBounceDp,
                 ),
+            KEY_SHARE_CHINA_STOREFRONT to settings.shareLinksUseChinaStorefront,
+            KEY_WECHAT_MOMENTS to settings.wechatMomentsShareEnabled,
             KEY_FUTURE_BLUR to settings.futureBlurEnabled,
             KEY_CJK_KARAOKE_ANIMATION_ENABLED to settings.cjkKaraokeAnimationEnabled,
             KEY_LYRICS_PRONUNCIATION_ENABLED to settings.lyricsPronunciationEnabled,
@@ -469,6 +473,8 @@ object ModuleSettingsSchema {
         "phone_liquid_glass_mini_rebound_percent"
     private const val KEY_PHONE_LIQUID_GLASS_MINI_SINK_BOUNCE_DP =
         "phone_liquid_glass_mini_sink_bounce_dp"
+    private const val KEY_SHARE_CHINA_STOREFRONT = "share_links_use_china_storefront"
+    private const val KEY_WECHAT_MOMENTS = "wechat_moments_share_enabled"
     private const val KEY_FUTURE_BLUR = "future_blur_enabled"
     private const val KEY_STARTUP_PAGE_PREWARM = "startup_page_prewarm_enabled"
     private const val KEY_CJK_KARAOKE_ANIMATION_ENABLED = "cjk_karaoke_animation_enabled"
