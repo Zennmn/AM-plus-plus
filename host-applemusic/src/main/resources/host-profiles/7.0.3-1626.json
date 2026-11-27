@@ -2715,7 +2715,7 @@
     }
   },
   "knownDegradations": [],
-  "profileRevision": 1,
+  "profileRevision": 2,
   "chrome": {
     "resources": {
       "NAVIGATION_HOST_GROUP": {
@@ -6227,6 +6227,52 @@
         "owner": "com.apple.android.music.player.A",
         "name": "x",
         "type": "android.util.SparseArray"
+      }
+    },
+    "duetEntry": {
+      "contractVersion": 1,
+      "methods": {
+        "lineEvent": {
+          "owner": "com.apple.android.music.player.fragment.PlayerLyricsViewFragment$f",
+          "name": "invoke",
+          "parameters": [
+            "java.lang.Object",
+            "java.lang.Object",
+            "java.lang.Object"
+          ],
+          "returns": "java.lang.Object",
+          "static": false
+        },
+        "lineAgent": {
+          "owner": "com.apple.android.music.ttml.javanative.model.LyricsTiming",
+          "name": "getAgent",
+          "parameters": [],
+          "returns": "java.lang.String",
+          "static": false
+        }
+      },
+      "fields": {
+        "eventFragment": {
+          "owner": "com.apple.android.music.player.fragment.PlayerLyricsViewFragment$f",
+          "name": "a",
+          "type": "com.apple.android.music.player.fragment.PlayerLyricsViewFragment"
+        },
+        "fragmentAdapter": {
+          "owner": "com.apple.android.music.player.fragment.PlayerLyricsViewFragment",
+          "name": "n0",
+          "type": "com.apple.android.music.player.i1"
+        }
+      },
+      "constructors": {
+        "request": {
+          "owner": "com.apple.android.music.player.fragment.I",
+          "parameters": [
+            "com.apple.android.music.player.fragment.PlayerLyricsViewFragment$f",
+            "java.util.ArrayList",
+            "java.lang.Long",
+            "java.lang.Long"
+          ]
+        }
       }
     },
     "evidence": {
